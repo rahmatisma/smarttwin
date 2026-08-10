@@ -1,0 +1,4 @@
+# Base SUMO + TraCI — sudah diverifikasi jalan Minggu 1 (network Kiaracondong).
+eclipse-sumo
+traci
+sumolib
