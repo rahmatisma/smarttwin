@@ -1,0 +1,7 @@
+# Starting point buat modul CV — Melpi silakan sesuaikan/tambahin.
+# ultralytics udah include YOLOv8 + ByteTrack + dependency (torch, opencv, dll)
+ultralytics
+
+# Kalau butuh torch versi CUDA spesifik (GPU NVIDIA), install itu duluan
+# SEBELUM ultralytics, sesuai panduan resmi PyTorch (pytorch.org/get-started) —
+# ultralytics bakal pakai versi torch yang udah keinstall, gak override otomatis.

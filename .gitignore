@@ -14,5 +14,8 @@ build/
 simulation/outputs/*
 !simulation/outputs/.gitkeep
 
+# Folder hasil osmWebWizard (nama = timestamp), jangan ke-track otomatis
+simulation/20*-*-*-*/
+
 # env
 .env
