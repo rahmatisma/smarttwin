@@ -11,10 +11,10 @@ import type {
 } from "@/types/traffic";
 
 export const mockApproachStates: ApproachState[] = [
-  { approach: "north", volume: 342, queueLengthM: 48, densityVehPerKm: 62, avgSpeedKmh: 18 },
-  { approach: "south", volume: 298, queueLengthM: 35, densityVehPerKm: 51, avgSpeedKmh: 22 },
-  { approach: "east", volume: 189, queueLengthM: 22, densityVehPerKm: 34, avgSpeedKmh: 27 },
-  { approach: "west", volume: 227, queueLengthM: 29, densityVehPerKm: 41, avgSpeedKmh: 24 },
+  { approach: "north", volume: 59, queueLengthM: 42, densityVehPerKm: 93.8, avgSpeedKmh: 52.9 },
+  { approach: "south", volume: 62, queueLengthM: 28, densityVehPerKm: 128.9, avgSpeedKmh: 49.8 },
+  { approach: "east", volume: 90, queueLengthM: 42, densityVehPerKm: 158.0, avgSpeedKmh: 15.9 },
+  { approach: "west", volume: 59, queueLengthM: 35, densityVehPerKm: 130.6, avgSpeedKmh: 16.5 },
 ];
 
 export const mockVehicleClassCounts: VehicleClassCount[] = [

@@ -7,7 +7,9 @@ const SIGNAL_COLOR = {
 } as const;
 
 function queueDotCount(volume: number) {
-  return Math.min(Math.max(Math.round(volume / 45), 1), 7);
+  // Divisor 15, bukan 45 — disesuaikan ke skala volume asli hasil snapshot
+  // (puluhan kendaraan per 5 menit), bukan lagi skala dummy lama (ratusan).
+  return Math.min(Math.max(Math.round(volume / 15), 1), 7);
 }
 
 function SignalHead({

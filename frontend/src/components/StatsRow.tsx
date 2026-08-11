@@ -2,12 +2,16 @@ import { Car, Gauge, Milestone, PieChart, CloudSun } from "lucide-react";
 import type { ApproachState } from "@/types/traffic";
 import DonutRing from "./DonutRing";
 
+// Threshold ini kasar (di-eyeball dari range density hasil snapshot SUMO
+// nyata — sudah dibagi jumlah lajur per approach — bukan dari perhitungan
+// PKJI 2023) — cukup buat demo, tapi ganti dengan klasifikasi Level of
+// Service resmi begitu validasi PKJI (Minggu 4) selesai.
 function congestionFromDensity(avgDensity: number): {
   label: string;
   color: "red" | "amber" | "green";
 } {
-  if (avgDensity >= 55) return { label: "Tinggi", color: "red" };
-  if (avgDensity >= 35) return { label: "Sedang", color: "amber" };
+  if (avgDensity >= 130) return { label: "Tinggi", color: "red" };
+  if (avgDensity >= 90) return { label: "Sedang", color: "amber" };
   return { label: "Rendah", color: "green" };
 }
 
@@ -64,7 +68,7 @@ export default function StatsRow({
     approaches.reduce((sum, a) => sum + a.densityVehPerKm, 0) / approaches.length;
   const congestion = congestionFromDensity(avgDensity);
   const c = colorClasses[congestion.color];
-  const congestionPct = Math.min(Math.round((avgDensity / 70) * 100), 100);
+  const congestionPct = Math.min(Math.round((avgDensity / 180) * 100), 100);
 
   return (
     <div className="grid grid-cols-2 gap-3 px-6 py-4 md:grid-cols-3 xl:grid-cols-6">
