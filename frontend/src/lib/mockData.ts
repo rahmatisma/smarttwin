@@ -33,7 +33,7 @@ export const mockSignalStatus: SignalStatus = {
 };
 
 export const mockRecommendation: SignalRecommendation = {
-  intersectionId: "simpang4-kiaracondong",
+  intersectionId: "simpang4-pingit",
   generatedAt: new Date().toISOString(),
   engine: "rule-based",
   chosenScenario: {
@@ -62,8 +62,12 @@ export const mockForecast: ForecastPoint[] = [
 ];
 
 export const mockIntersection = {
-  name: "Simpang Kiaracondong (Samsat)",
-  coords: "-6.945539, 107.641951",
+  name: "Simpang Pingit, Yogyakarta",
+  // TODO(Rahmat): ganti dengan koordinat presisi hasil "Position" search
+  // di osmWebWizard.py — ini masih koordinat umum Kota Yogyakarta, bukan
+  // titik simpang yang sebenarnya (sama seperti Kiaracondong dulu, sumber
+  // paling akurat itu langsung dari wizard, bukan pencarian manual).
+  coords: "-7.782800, 110.360830",
 };
 
 // Dua nilai ini murni tampilan (bukan bagian data-contract.md) — occupancy

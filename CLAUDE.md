@@ -36,14 +36,21 @@ Run from the `simulation/` directory (paths in the scripts are relative):
 
 ```powershell
 python test_traci.py          # smoke test against SUMO's bundled cross.net.xml
-python run_intersection.py    # same checks against network/simpang4.net.xml.gz
+python run_intersection.py    # same checks against network/simpang4_pingit.net.xml.gz
 ```
 
 Both connect via `traci.start(["sumo", ...])` (headless). Use `"sumo-gui"` instead to watch a run.
 
+## Menjalankan simulasi
+
+Lihat simulation/README.md untuk tutorial lengkap. Catatan penting: SUMO_HOME
+saja tidak cukup — PATH juga harus menyertakan $SUMO_HOME/bin (tempat
+sumo.exe, netconvert.exe berada), atau traci.start()/subprocess call ke
+binary SUMO gagal dengan WinError 2 meski SUMO_HOME sudah benar.
+
 ## SUMO scenario directories
 
-`osmWebWizard.py` exports each scenario into a timestamped directory (`simulation/2026-08-10-23-25-25/`). **These are gitignored** via `simulation/20*-*-*-*/` and treated as scratch — the only artifact promoted out of them is the network itself, `simulation/network/simpang4.net.xml.gz`, which is what `run_intersection.py` loads.
+`osmWebWizard.py` exports each scenario into a timestamped directory (`simulation/2026-08-10-23-25-25/`). **These are gitignored** via `simulation/20*-*-*-*/` and treated as scratch — the only artifact promoted out of them is the network itself, `simulation/network/simpang4_pingit.net.xml.gz`, which is what `run_intersection.py` loads.
 
 So when working with a wizard export:
 
