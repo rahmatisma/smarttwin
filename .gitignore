@@ -3,6 +3,7 @@ __pycache__/
 *.pyc
 .venv/
 venv/
+cv/venv/
 
 # Node
 node_modules/
@@ -19,13 +20,3 @@ simulation/20*-*-*-*/
 
 # env
 .env
-
-# Forecasting datasets
-forecasting/data/*
-forecasting/models/*
-forecasting/outputs/*
-
-# Keep directory structure
-!forecasting/data/.gitkeep
-!forecasting/models/.gitkeep
-!forecasting/outputs/.gitkeep
