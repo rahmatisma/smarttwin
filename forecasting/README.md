@@ -606,6 +606,10 @@ Contoh:
     forecast_horizon
     predicted_vehicle_count
     predicted_average_speed
+    Predicted vehicle count	
+    Predicted density	
+    Predicted queue	
+    Predicted speed	
 
 
 Contoh:
