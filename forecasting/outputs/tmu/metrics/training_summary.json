@@ -1,0 +1,26 @@
+{
+    "status": "completed",
+    "model": "TrafficLSTM",
+    "framework": "PyTorch",
+    "device": "cpu",
+    "input_features": 20,
+    "targets": [
+        "vehicle_count",
+        "speed_value",
+        "density_proxy",
+        "queue_proxy"
+    ],
+    "sequence_length": 16,
+    "forecast_horizon": 1,
+    "dataset_rows": 2972,
+    "training_sequences": 2069,
+    "validation_sequences": 443,
+    "test_sequences": 444,
+    "epochs_trained": 42,
+    "best_validation_loss": 0.2139743821817381,
+    "training_time_seconds": 114.22502207756042,
+    "model_file": "D:\\LOMBA\\kmipn\\smarttwin\\forecasting\\models\\lstm_model.pt",
+    "scaler_X_file": "D:\\LOMBA\\kmipn\\smarttwin\\forecasting\\models\\scaler_X.pkl",
+    "scaler_y_file": "D:\\LOMBA\\kmipn\\smarttwin\\forecasting\\models\\scaler_y.pkl",
+    "config_file": "D:\\LOMBA\\kmipn\\smarttwin\\forecasting\\models\\model_config.json"
+}

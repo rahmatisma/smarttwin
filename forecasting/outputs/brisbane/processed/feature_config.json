@@ -1,0 +1,34 @@
+{
+    "input_features": [
+        "vehicle_count",
+        "reconstituted_flow",
+        "density_proxy",
+        "queue_proxy",
+        "cycle_time",
+        "link_plan",
+        "vehicle_count_change",
+        "density_change",
+        "vehicle_count_rolling_mean_15m",
+        "vehicle_count_rolling_std_15m",
+        "density_rolling_mean_15m",
+        "hour_sin",
+        "hour_cos",
+        "day_sin",
+        "day_cos",
+        "is_weekend"
+    ],
+    "target_features": [
+        "vehicle_count",
+        "density_proxy",
+        "queue_proxy"
+    ],
+    "sequence_length": 16,
+    "forecast_horizons": [
+        1
+    ],
+    "train_ratio": 0.7,
+    "val_ratio": 0.15,
+    "test_ratio": 0.15,
+    "selected_tsc": 977,
+    "note": "Speed is not included because the Brisbane dataset does not provide direct speed measurements."
+}

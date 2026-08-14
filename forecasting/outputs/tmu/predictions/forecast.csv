@@ -1,0 +1,2 @@
+timestamp,forecast_horizon,predicted_vehicle_count,predicted_average_speed,predicted_density,predicted_queue
+2026-04-01 00:14:00,15min,167,91.98,0.1581,40.08

@@ -1,0 +1,39 @@
+{
+    "model": "TrafficLSTM",
+    "framework": "PyTorch",
+    "device": "cpu",
+    "forecast_horizon": {
+        "timesteps": 1,
+        "minutes": 15
+    },
+    "sequence_length": 16,
+    "test_samples": 444,
+    "targets": [
+        "vehicle_count",
+        "speed_value",
+        "density_proxy",
+        "queue_proxy"
+    ],
+    "metrics": {
+        "vehicle_count": {
+            "MAE": 27.867691040039062,
+            "RMSE": 38.91683779126813,
+            "MAPE_percent": 25.61322627494953
+        },
+        "speed_value": {
+            "MAE": 2.04292893409729,
+            "RMSE": 3.1743830644655695,
+            "MAPE_percent": 2.091796347332168
+        },
+        "density_proxy": {
+            "MAE": 0.025338297709822655,
+            "RMSE": 0.03563290889896734,
+            "MAPE_percent": 25.375095570838003
+        },
+        "queue_proxy": {
+            "MAE": 22.66422462463379,
+            "RMSE": 54.307112344258144,
+            "MAPE_percent": 1008321136.3493638
+        }
+    }
+}

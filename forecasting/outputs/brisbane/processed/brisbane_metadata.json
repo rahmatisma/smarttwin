@@ -1,0 +1,33 @@
+{
+    "dataset": "Brisbane City Council Traffic Management \u2014 Intersection volume",
+    "selected_tsc": 977,
+    "original_rows": 66,
+    "processed_rows": 5,
+    "start_time": "2026-08-13 15:44:00+00:00",
+    "end_time": "2026-08-13 15:48:00+00:00",
+    "targets": [
+        "vehicle_count",
+        "density_proxy",
+        "queue_proxy"
+    ],
+    "input_features": [
+        "vehicle_count",
+        "reconstituted_flow",
+        "density_proxy",
+        "queue_proxy",
+        "cycle_time",
+        "link_plan",
+        "vehicle_count_change",
+        "density_change",
+        "vehicle_count_rolling_mean_15m",
+        "vehicle_count_rolling_std_15m",
+        "density_rolling_mean_15m",
+        "hour_sin",
+        "hour_cos",
+        "day_sin",
+        "day_cos",
+        "is_weekend"
+    ],
+    "sequence_length": 16,
+    "forecast_horizon": 1
+}
