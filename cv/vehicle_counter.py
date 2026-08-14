@@ -3,7 +3,8 @@ SMARTTWIN
 Real-Time Multi-Camera Vehicle Detection & Counting
 
 Input:
-    4 video files (.mp4)
+    4 video (.mp4) — 4 LENGAN dari SATU simpang (Simpang Pingit),
+    bukan 4 persimpangan berbeda. Lihat CAMERAS di bagian 2.
 
 Pipeline:
     Video
@@ -29,16 +30,22 @@ Pipeline:
 CSV output:
     timestamp
     intersection_id
+    approach
     lane_id
     vehicle_count
     car_count
     motorcycle_count
     bus_count
     truck_count
-    queue_length
-    density
+    queue_length_veh
+    queue_length_m_est
+    density_index
 
 NOTE:
+- intersection_id konstan (INTERSECTION_ID) karena seluruh kamera
+  memantau simpang yang sama. Yang membedakan baris adalah approach.
+- approach = north/south/east/west, mengikuti Approach di
+  docs/data-contract.md. lane_id adalah lajur DI DALAM satu lengan.
 - vehicle_count = car + motorcycle + bus + truck crossing the counting line
   during the current one-second interval.
 - person and bicycle are still detected and tracked, but deliberately NOT
@@ -46,11 +53,21 @@ NOTE:
   motorcycle/car/bus/truck. Person detection is kept because it is what
   lets person_is_rider() suppress motorcycle riders from being counted
   twice — dropping it would break motorcycle counts.
-- queue_length is an estimated number of currently tracked vehicles that
-  are moving very little and are inside the queue area.
-- density is a normalized density estimate:
-      number of currently detected vehicles / road-area fraction
-  It is NOT vehicles/km unless the camera is calibrated with real-world area.
+- queue_length_veh = JUMLAH KENDARAAN yang hampir tidak bergerak di area
+  antrean. Ini angka mentah hasil pengamatan, bukan panjang.
+- queue_length_m_est = turunan queue dalam METER, dihitung per jenis
+  kendaraan lewat QUEUE_SPACE_M (motor 2 m, mobil 5 m, bus/truk 10 m).
+  Angka-angka itu ESTIMASI KESEPAKATAN TIM, bukan kutipan PKJI 2023 —
+  lihat catatan lengkap di bagian 9. Namanya berakhiran _est justru
+  supaya tidak pernah tertukar dengan hasil pengukuran.
+  Dihitung dari kendaraan yang BERSTATUS ANTRE saja (penghitung
+  queue_* per kelas), populasi yang sama persis dengan
+  queue_length_veh — bukan dari *_count yang berisi seluruh kendaraan
+  terdeteksi. Jadi kedua kolom queue itu selalu sepadan.
+- density_index = indeks kepadatan ternormalisasi:
+      jumlah kendaraan terdeteksi / fraksi luas jalan
+  BUKAN veh/km. Butuh kalibrasi kamera terhadap ukuran dunia nyata
+  sebelum boleh disebut density fisik.
 - lane_id is currently assigned from the centroid's horizontal position:
       lane_1 = left third
       lane_2 = middle third
@@ -70,21 +87,49 @@ from ultralytics import YOLO
 
 
 # ============================================================
+# 0. BASE PATH
+# ============================================================
+#
+# Semua path di bawah relatif terhadap folder cv/ ini, supaya
+# modulnya jalan di laptop siapa pun tanpa perlu diedit dulu.
+# ============================================================
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+
+# ============================================================
 # 1. PATH MODEL
 # ============================================================
+#
+# Bobot tidak ikut di repo (cv/models/ di-gitignore). Ambil dengan
+# salah satu cara di cv/requirements.txt.
+# ============================================================
 
-MODEL_PATH = r"D:\smarttwin\cv\models\yolo26s.pt"
+MODEL_PATH = os.path.join(BASE_DIR, "models", "yolo26s.pt")
 
 
 # ============================================================
-# 2. VIDEO INPUT
+# 2. VIDEO INPUT — 4 LENGAN DARI SATU SIMPANG
 # ============================================================
+#
+# Key = approach sesuai docs/data-contract.md:
+#     Approach = Literal["north", "south", "east", "west"]
+#
+# Ini BUKAN 4 persimpangan berbeda. Keempatnya adalah 4 lengan
+# dari SATU simpang (Simpang Pingit), masing-masing punya kamera
+# sendiri. Karena itu intersection_id-nya satu dan sama untuk
+# seluruh baris CSV; yang membedakan baris adalah approach.
+# ============================================================
+
+INTERSECTION_ID = "simpang4-pingit"
+
+VIDEO_DIR = os.path.join(BASE_DIR, "videos")
 
 CAMERAS = {
-    "Simpang 1": r"D:\smarttwin\cv\videos\simpang1.mp4",
-    "Simpang 2": r"D:\smarttwin\cv\videos\simpang2.mp4",
-    "Simpang 3": r"D:\smarttwin\cv\videos\simpang3.mp4",
-    "Simpang 4": r"D:\smarttwin\cv\videos\simpang4.mp4",
+    "north": os.path.join(VIDEO_DIR, "pingit_north.mp4"),
+    "south": os.path.join(VIDEO_DIR, "pingit_south.mp4"),
+    "east": os.path.join(VIDEO_DIR, "pingit_east.mp4"),
+    "west": os.path.join(VIDEO_DIR, "pingit_west.mp4"),
 }
 
 
@@ -99,7 +144,7 @@ CONFIDENCE = 0.35
 # 4. OUTPUT CSV
 # ============================================================
 
-OUTPUT_DIR = r"D:\smarttwin\cv\output"
+OUTPUT_DIR = os.path.join(BASE_DIR, "output")
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 CSV_PATH = os.path.join(
@@ -144,11 +189,13 @@ TRACK_CLASSES = list(YOLO_CLASSES.keys())
 # berarti garis horizontal pada 65% tinggi video.
 # ============================================================
 
+# BELUM DIKALIBRASI: keempat lengan masih memakai nilai default yang
+# sama. Sesuaikan per lengan begitu footage Simpang Pingit tersedia.
 COUNTING_LINES = {
-    "Simpang 1": (0.10, 0.65, 0.90, 0.65),
-    "Simpang 2": (0.10, 0.65, 0.90, 0.65),
-    "Simpang 3": (0.10, 0.65, 0.90, 0.65),
-    "Simpang 4": (0.10, 0.65, 0.90, 0.65),
+    "north": (0.10, 0.65, 0.90, 0.65),
+    "south": (0.10, 0.65, 0.90, 0.65),
+    "east": (0.10, 0.65, 0.90, 0.65),
+    "west": (0.10, 0.65, 0.90, 0.65),
 }
 
 
@@ -166,23 +213,25 @@ COUNTING_LINES = {
 # pada video masing-masing kamera.
 # ============================================================
 
+# BELUM DIKALIBRASI: masih pembagian sepertiga default di keempat
+# lengan. Sesuaikan dengan posisi lajur asli tiap kamera Pingit.
 LANE_REGIONS = {
-    "Simpang 1": [
+    "north": [
         ("lane_1", 0.00, 0.33),
         ("lane_2", 0.33, 0.66),
         ("lane_3", 0.66, 1.00),
     ],
-    "Simpang 2": [
+    "south": [
         ("lane_1", 0.00, 0.33),
         ("lane_2", 0.33, 0.66),
         ("lane_3", 0.66, 1.00),
     ],
-    "Simpang 3": [
+    "east": [
         ("lane_1", 0.00, 0.33),
         ("lane_2", 0.33, 0.66),
         ("lane_3", 0.66, 1.00),
     ],
-    "Simpang 4": [
+    "west": [
         ("lane_1", 0.00, 0.33),
         ("lane_2", 0.33, 0.66),
         ("lane_3", 0.66, 1.00),
@@ -208,10 +257,10 @@ LANE_REGIONS = {
 # Untuk hasil terbaik pada CCTV masing-masing simpang, isi
 # PEDESTRIAN_ZONES dengan area trotoar/zebra crossing.
 PEDESTRIAN_ZONES = {
-    "Simpang 1": [],
-    "Simpang 2": [],
-    "Simpang 3": [],
-    "Simpang 4": [],
+    "north": [],
+    "south": [],
+    "east": [],
+    "west": [],
 }
 
 # Jarak maksimum person ke bounding box motorcycle agar dianggap
@@ -330,6 +379,38 @@ STOPPED_PIXEL_THRESHOLD = 3.0
 MIN_STOPPED_FRAMES = 5
 
 
+# ------------------------------------------------------------
+# Panjang ruang antrean per jenis kendaraan (meter)
+# ------------------------------------------------------------
+#
+# Dipakai untuk menurunkan queue_length_m_est dari hitungan
+# kendaraan. Tiap angka mewakili panjang badan kendaraan DITAMBAH
+# jarak antar-kendaraan saat mengantre — jadi bukan panjang
+# kendaraan saja.
+#
+# PENTING — dari mana angkanya:
+# 2 / 5 / 10 meter ini ESTIMASI KESEPAKATAN TIM, BUKAN kutipan
+# dari tabel resmi PKJI 2023. Jangan dipresentasikan sebagai
+# angka standar.
+#
+# Kenapa dibedakan per jenis: motor, mobil, dan kendaraan besar
+# menempati ruang antrean yang jauh berbeda, jadi satu angka flat
+# untuk semua jenis akan bias — terlalu panjang di lengan yang
+# didominasi motor, terlalu pendek di lengan yang banyak truk.
+#
+# TINDAK LANJUT kalau sempat: cek ulang terhadap tabel SMP
+# (Satuan Mobil Penumpang) di PKJI 2023 untuk memperkuat
+# validasi. Kalau angkanya diganti, perbarui juga catatan ini.
+# ------------------------------------------------------------
+
+QUEUE_SPACE_M = {
+    "motorcycle": 2,
+    "car": 5,
+    "bus": 10,
+    "truck": 10,
+}
+
+
 # ============================================================
 # 9. HELPER
 # ============================================================
@@ -373,6 +454,25 @@ def get_lane_id(camera_name, cx, frame_width):
     return "unknown"
 
 
+# Satu sumber kebenaran untuk header CSV, dipakai initialize_csv()
+# maupun penulisan baris — supaya urutan kolom tidak bisa lagi
+# menyimpang antara keduanya.
+CSV_HEADER = [
+    "timestamp",
+    "intersection_id",
+    "approach",
+    "lane_id",
+    "vehicle_count",
+    "car_count",
+    "motorcycle_count",
+    "bus_count",
+    "truck_count",
+    "queue_length_veh",
+    "queue_length_m_est",
+    "density_index",
+]
+
+
 def initialize_csv():
     """
     Membuat header CSV jika file belum ada.
@@ -386,18 +486,7 @@ def initialize_csv():
         ) as file:
             writer = csv.writer(file)
 
-            writer.writerow([
-                "timestamp",
-                "intersection_id",
-                "lane_id",
-                "vehicle_count",
-                "car_count",
-                "motorcycle_count",
-                "bus_count",
-                "truck_count",
-                "queue_length",
-                "density",
-            ])
+            writer.writerow(CSV_HEADER)
 
 
 # ============================================================
@@ -499,18 +588,7 @@ class PerSecondCounter:
             writer = csv.writer(file)
 
             if not file_exists:
-                writer.writerow([
-                    "timestamp",
-                    "intersection_id",
-                    "lane_id",
-                    "vehicle_count",
-                    "car_count",
-                    "motorcycle_count",
-                    "bus_count",
-                    "truck_count",
-                    "queue_length",
-                    "density",
-                ])
+                writer.writerow(CSV_HEADER)
 
             # Jika belum ada lane yang terdeteksi,
             # tetap tulis lane_1.
@@ -526,23 +604,52 @@ class PerSecondCounter:
                     {}
                 )
 
+                car = lane.get("car_count", 0)
+                motorcycle = lane.get("motorcycle_count", 0)
+                bus = lane.get("bus_count", 0)
+                truck = lane.get("truck_count", 0)
+
+                # Estimasi panjang antrean dalam meter.
+                #
+                # Sumbernya queue_* — kendaraan yang benar-benar
+                # berstatus antre — BUKAN *_count di atas yang berisi
+                # semua kendaraan terdeteksi termasuk yang melaju.
+                # Dengan begitu queue_length_m_est dan
+                # queue_length_veh menghitung populasi yang sama.
+                #
+                # Angka meternya dari QUEUE_SPACE_M; lihat catatan
+                # di bagian 9 soal asal-usul angka tersebut.
+                queue_length_m_est = sum(
+                    lane.get(f"queue_{kelas}", 0) * meter
+                    for kelas, meter in QUEUE_SPACE_M.items()
+                )
+
                 writer.writerow([
                     timestamp,
+
+                    # Satu simpang, sama untuk semua lengan & lane
+                    INTERSECTION_ID,
+
+                    # Lengan asal kamera: north / south / east / west
                     self.camera_name,
+
                     lane_id,
 
                     # Volume kendaraan per detik
                     lane.get("vehicle_count", 0),
 
-                    lane.get("car_count", 0),
-                    lane.get("motorcycle_count", 0),
-                    lane.get("bus_count", 0),
-                    lane.get("truck_count", 0),
+                    car,
+                    motorcycle,
+                    bus,
+                    truck,
 
-                    # Kondisi antrean saat ini
+                    # Antrean sebagai JUMLAH KENDARAAN (mentah)
                     lane.get("queue_length", 0),
 
-                    # Density normalized
+                    # Turunan dalam meter — estimasi, bukan ukuran
+                    queue_length_m_est,
+
+                    # Indeks kepadatan ternormalisasi, BUKAN veh/km
                     round(
                         lane.get("density", 0.0),
                         6
@@ -752,7 +859,21 @@ class CameraProcessor:
                     "motorcycle_count": 0,
                     "bus_count": 0,
                     "truck_count": 0,
+
+                    # Total kendaraan berstatus antre di lane ini.
                     "queue_length": 0,
+
+                    # Pecahan per kelas dari queue_length di atas.
+                    # HARUS berasal dari populasi yang sama persis
+                    # (is_queue_vehicle), supaya queue_length_m_est
+                    # konsisten dengan queue_length_veh. Jangan
+                    # menurunkannya dari *_count di atas — itu semua
+                    # kendaraan terdeteksi, termasuk yang melaju.
+                    "queue_car": 0,
+                    "queue_motorcycle": 0,
+                    "queue_bus": 0,
+                    "queue_truck": 0,
+
                     "density": 0.0,
                     "current_objects": 0,
                     "area_fraction": 0.0,
@@ -997,6 +1118,14 @@ class CameraProcessor:
 
                         lane_current[lane_id][
                             "queue_length"
+                        ] += 1
+
+                        # Pecah per kelas dari populasi yang SAMA.
+                        # Aman pakai key dinamis karena
+                        # is_queue_vehicle sudah menjamin
+                        # object_type ada di VEHICLE_CLASSES.
+                        lane_current[lane_id][
+                            f"queue_{object_type}"
                         ] += 1
 
 
@@ -1575,12 +1704,7 @@ def main():
         # Ambil frame masing-masing kamera
         # ----------------------------------------------------
 
-        for camera_name in [
-            "Simpang 1",
-            "Simpang 2",
-            "Simpang 3",
-            "Simpang 4"
-        ]:
+        for camera_name in CAMERAS:
 
             processor = processors.get(
                 camera_name

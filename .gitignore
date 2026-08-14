@@ -12,8 +12,13 @@ pip-cache/
 
 # CCTV videos
 cv/videos/
-cv/output/*.csv
 cv/models/
+
+# Output CV di-ignore secara umum (regenerated tiap run), KECUALI
+# dataset hasil run Melpi 14 Agustus 2026 yang disimpan sebagai
+# baseline/bukti untuk laporan teknis.
+cv/output/*.csv
+!cv/output/smarttwin_traffic_data_melpi_20260814.csv
 
 # Dataset
 data/*.csv
