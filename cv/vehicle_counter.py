@@ -12,7 +12,7 @@ Pipeline:
       ↓
     ByteTrack
       ↓
-    Vehicle / Person / Bicycle Tracking
+    Vehicle Tracking (person/bicycle dilacak hanya untuk logika rider)
       ↓
     Centroid
       ↓
@@ -31,8 +31,6 @@ CSV output:
     intersection_id
     lane_id
     vehicle_count
-    person_count
-    bicycle_count
     car_count
     motorcycle_count
     bus_count
@@ -43,7 +41,11 @@ CSV output:
 NOTE:
 - vehicle_count = car + motorcycle + bus + truck crossing the counting line
   during the current one-second interval.
-- person_count and bicycle_count are also crossing counts per second.
+- person and bicycle are still detected and tracked, but deliberately NOT
+  written to the CSV: docs/data-contract.md limits VehicleClass to
+  motorcycle/car/bus/truck. Person detection is kept because it is what
+  lets person_is_rider() suppress motorcycle riders from being counted
+  twice — dropping it would break motorcycle counts.
 - queue_length is an estimated number of currently tracked vehicles that
   are moving very little and are inside the queue area.
 - density is a normalized density estimate:
@@ -389,8 +391,6 @@ def initialize_csv():
                 "intersection_id",
                 "lane_id",
                 "vehicle_count",
-                "person_count",
-                "bicycle_count",
                 "car_count",
                 "motorcycle_count",
                 "bus_count",
@@ -477,10 +477,6 @@ class PerSecondCounter:
             + truck_count
         )
 
-        person_count = self.counts["person"]
-        bicycle_count = self.counts["bicycle"]
-
-
         # ----------------------------------------------------
         # Satu baris per lane
         # ----------------------------------------------------
@@ -508,8 +504,6 @@ class PerSecondCounter:
                     "intersection_id",
                     "lane_id",
                     "vehicle_count",
-                    "person_count",
-                    "bicycle_count",
                     "car_count",
                     "motorcycle_count",
                     "bus_count",
@@ -540,9 +534,6 @@ class PerSecondCounter:
                     # Volume kendaraan per detik
                     lane.get("vehicle_count", 0),
 
-                    lane.get("person_count", 0),
-                    lane.get("bicycle_count", 0),
-
                     lane.get("car_count", 0),
                     lane.get("motorcycle_count", 0),
                     lane.get("bus_count", 0),
@@ -563,8 +554,6 @@ class PerSecondCounter:
             f"[{timestamp}] "
             f"{self.camera_name} | "
             f"vehicle={vehicle_count}/detik | "
-            f"person={person_count}/detik | "
-            f"bicycle={bicycle_count}/detik | "
             f"queue={queue_length} | "
             f"density={density:.6f}"
         )
@@ -759,8 +748,6 @@ class CameraProcessor:
             lane_current = defaultdict(
                 lambda: {
                     "vehicle_count": 0,
-                    "person_count": 0,
-                    "bicycle_count": 0,
                     "car_count": 0,
                     "motorcycle_count": 0,
                     "bus_count": 0,
@@ -861,7 +848,7 @@ class CameraProcessor:
                     #
                     # Jika person dekat dengan motorcycle, ubah
                     # klasifikasinya menjadi motorcycle agar:
-                    # - tidak masuk person_count
+                    # - tidak dihitung sebagai pejalan kaki
                     # - masuk vehicle_count
                     # - masuk motorcycle_count
                     # - dapat dihitung sebagai queue kendaraan
@@ -915,16 +902,22 @@ class CameraProcessor:
                     ] += 1
 
 
-                    lane_current[lane_id][
-                        f"{object_type}_count"
-                    ] += 1
-
-
                     # ----------------------------------------
                     # Kendaraan
                     # ----------------------------------------
+                    #
+                    # Hitungan per kelas hanya untuk kelas kendaraan.
+                    # person/bicycle sengaja tidak punya kolom sendiri
+                    # (lihat catatan CSV output di header file), jadi
+                    # key f"{object_type}_count" untuk keduanya memang
+                    # tidak ada di lane_current.
+                    # ----------------------------------------
 
                     if object_type in VEHICLE_CLASSES.values():
+
+                        lane_current[lane_id][
+                            f"{object_type}_count"
+                        ] += 1
 
                         lane_current[lane_id][
                             "vehicle_count"
