@@ -27,7 +27,22 @@ class TrafficState(BaseModel):
     window_end: datetime
     approaches: list[ApproachState]
 
-# 3) Output Traffic Forecast (Yuli, LSTM — aktif kalau lolos checkpoint Minggu 3)
+# 3) Output Traffic Forecast (Yuli, LSTM — TIDAK AKTIF)
+#
+# Pengerjaan dihentikan 15 Agustus 2026 supaya fokus ke scope 16 hari.
+# Tiga eksperimen dengan status berbeda (detail: forecasting/README.md):
+#   - PeMS04  : dilatih & dievaluasi, paling lengkap — R2 0,879 (flow 0,933)
+#   - TMU     : dilatih & dievaluasi — MAPE speed 2,09%, vehicle_count 25,6%
+#   - Brisbane: cuma diproses, tidak pernah masuk training (data 5 baris,
+#               sedangkan sequence_length = 16)
+#
+# Modelnya bekerja; yang jadi masalah transferabilitas — TMU & PeMS04 itu
+# sensor ruas jalan di luar negeri, bukan simpang bersinyal Indonesia.
+# Jangan tulis "modelnya gagal", angkanya ada di forecasting/outputs/.
+#
+# Model ini SENGAJA dipertahankan di kontrak sebagai bentuk interface, tapi
+# tidak ada produsennya sekarang. Konsumen pakai fallback: volume flat dari
+# TrafficState terakhir.
 class ForecastPoint(BaseModel):
     approach: Approach
     horizon_minutes: int
@@ -46,7 +61,7 @@ class ScenarioResult(BaseModel):
     avg_queue_length_m: float
     throughput_veh: int
 
-# 5) Output Decision Engine (rule-based dulu, PPO nanti)
+# 5) Output Decision Engine (rule-based; PPO di luar scope, belum dikerjakan)
 class SignalRecommendation(BaseModel):
     intersection_id: str
     generated_at: datetime

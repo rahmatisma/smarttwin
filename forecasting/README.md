@@ -1,3 +1,97 @@
+> ## STATUS: PENGERJAAN DIHENTIKAN — 15 Agustus 2026
+>
+> Modul ini **tidak dilanjutkan ke integrasi pipeline utama SmartTwin**, karena
+> kompresi timeline jadi 16 hari (lihat `docs/roadmap.md`). Kode, data, dan
+> seluruh hasil evaluasinya tetap disimpan sebagai bahan laporan teknis.
+>
+> ### Tiga eksperimen, tiga status berbeda
+>
+> Jangan menyamaratakan ketiganya — statusnya betul-betul berbeda.
+>
+> | Dataset | Status | Hasil |
+> |---|---|---|
+> | **PeMS04** | Dilatih & dievaluasi — **paling lengkap** | R² 0,879 overall; flow 0,933 |
+> | **TMU** | Dilatih & dievaluasi | MAPE speed 2,09%; MAPE vehicle_count 25,6% |
+> | **Brisbane** | Hanya diproses — **tidak pernah masuk training** | Tidak ada metrik |
+>
+> **PeMS04 — hasil paling lengkap dari ketiganya.** Sensor 1–10, feature flow /
+> occupancy / speed, sequence 15, horizon 1 langkah, 2.535 sampel test, best
+> epoch 28. Artefak lengkap: `best_model.pth`, `evaluation_summary.json`,
+> `sensor_metrics.csv`, plus plot actual-vs-predicted per feature.
+>
+> | | MAE | RMSE | MAPE | R² |
+> |---|---|---|---|---|
+> | Overall | 0,1975 | 0,3666 | 142,6% | **0,8786** |
+> | flow | 0,1744 | 0,2625 | 105,2% | **0,9332** |
+> | occupancy | 0,1827 | 0,3738 | 135,0% | 0,8695 |
+> | speed | 0,2354 | 0,4412 | 187,6% | 0,8392 |
+>
+> Per sensor R² berkisar 0,587 (sensor 7) sampai 0,956 (sensor 6); 8 dari 10
+> sensor di atas 0,89. Sumber: `outputs/pems04/evaluation/`.
+>
+> **TMU — baseline, horizon 15 menit.** Sequence 16, 20 input feature, 2.069
+> sequence training / 443 validasi / 444 test, 42 epoch, best val loss 0,214.
+>
+> | Target | MAE | RMSE | MAPE |
+> |---|---|---|---|
+> | vehicle_count | 27,87 | 38,92 | 25,6% |
+> | speed_value | 2,04 | 3,17 | **2,09%** |
+> | density_proxy | 0,0253 | 0,0356 | 25,4% |
+> | queue_proxy | 22,66 | 54,31 | *(rusak — lihat bawah)* |
+>
+> R² tidak dihitung di skrip TMU. Sumber: `outputs/tmu/metrics/metrics.json`.
+>
+> **Brisbane — berhenti sebelum training, karena datanya tidak cukup.**
+> `outputs/brisbane/` hanya berisi `processed/` dan `test/`; tidak ada
+> `metrics/`, tidak ada model. Alasannya terbaca langsung di
+> `brisbane_metadata.json`: dari 66 baris mentah hanya **5 baris** lolos
+> preprocessing, rentang 15:44–15:48 UTC (5 menit), sementara arsitekturnya
+> butuh `sequence_length = 16` hanya untuk membentuk **satu** sequence. Jadi
+> statusnya **bukan** "dievaluasi lalu hasilnya jelek" — training memang tidak
+> mungkin dijalankan. Collector real-time-nya berfungsi; yang kurang adalah
+> durasi pengumpulan data.
+>
+> ### Kenapa dihentikan
+>
+> Bukan karena modelnya gagal. R² 0,879 di PeMS04 dan MAPE 2,09% untuk prediksi
+> speed di TMU menunjukkan pipeline LSTM-nya bekerja.
+>
+> Yang jadi masalah adalah **transferabilitas ke lokasi target**. TMU adalah
+> sensor jalan raya di Inggris (A174, Teesside) dan PeMS04 adalah sensor jalan
+> tol California — keduanya ruas jalan menerus, bukan simpang bersinyal, dan
+> bukan perilaku lalu lintas Indonesia. Brisbane satu-satunya yang benar-benar
+> data simpang, dan justru itu yang datanya tidak cukup. Tidak tersedia data
+> historis volume Simpang Pingit untuk menggantikannya dalam sisa waktu
+> pengerjaan (deadline 31 Agustus 2026).
+>
+> **Temuan yang dilaporkan:** model forecasting yang akurat pada dataset sensor
+> jalan raya luar negeri tidak otomatis dapat dipakai untuk simpang bersinyal
+> target, dan hambatan utamanya adalah ketersediaan data lokasi — bukan
+> arsitektur model. Ini hasil penelitian yang bisa dipertanggungjawabkan, bukan
+> kegagalan yang perlu disembunyikan.
+>
+> ### Catatan kehati-hatian saat mengutip angka di atas
+>
+> 1. **MAE/RMSE PeMS04 dalam satuan ter-scale**, bukan kendaraan/jam. Jangan
+>    dikutip sebagai angka fisik. R² aman karena tidak tergantung skala.
+> 2. **MAPE tidak dapat dipercaya di sini.** `queue_proxy` TMU menghasilkan MAPE
+>    1.008.321.136% dan MAPE PeMS04 semuanya di atas 100% — keduanya artefak
+>    pembagian ketika nilai aktual mendekati nol. Untuk laporan dan presentasi,
+>    pakai MAE / RMSE / R².
+> 3. `training_summary.json` TMU menyimpan path absolut mesin penulis
+>    (`D:\LOMBA\...`); abaikan, itu bukan lokasi di repo ini.
+>
+> ### Aturan
+>
+> **Jangan hapus atau refactor isi `forecasting/scripts/` dan
+> `forecasting/outputs/`** — itu bukti eksperimen untuk laporan.
+>
+> Isi dokumen di bawah mendeskripsikan rencana integrasi penuh sampai ke PPO.
+> Rencana itu **sudah tidak berlaku**; dokumen sengaja dipertahankan agar jejak
+> desainnya utuh. Status yang berlaku adalah catatan ini.
+
+---
+
 # SmartTwin — Traffic Forecasting
 
 Modul forecasting untuk project **SmartTwin**.
