@@ -8,6 +8,7 @@ cv/venv/
 # CCTV videos
 cv/videos/
 cv/output/*.csv
+
 forecasting/.venv/
 
 # Dataset
