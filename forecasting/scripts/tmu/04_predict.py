@@ -7,10 +7,10 @@ Input:
     outputs/processed/tmu_processed.csv
 
 Model:
-    models/lstm_model.pt
-    models/scaler_X.pkl
-    models/scaler_y.pkl
-    models/model_config.json
+    models/tmu/lstm_model.pt
+    models/tmu/scaler_X.pkl
+    models/tmu/scaler_y.pkl
+    models/tmu/model_config.json
 
 Output:
     outputs/predictions/forecast.csv
@@ -48,7 +48,7 @@ DATA_FILE = (
     / "tmu_processed.csv"
 )
 
-MODEL_DIR = BASE_DIR / "models"
+MODEL_DIR = BASE_DIR / "models" / "tmu" 
 
 MODEL_FILE = (
     MODEL_DIR

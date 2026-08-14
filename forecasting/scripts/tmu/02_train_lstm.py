@@ -15,10 +15,10 @@ TARGET:
     4. queue_proxy
 
 OUTPUT:
-    models/lstm_model.pt
-    models/scaler_X.pkl
-    models/scaler_y.pkl
-    models/model_config.json
+    models/tmu/lstm_model.pt
+    models/tmu/scaler_X.pkl
+    models/tmu/scaler_y.pkl
+    models/tmu/model_config.json
 
     outputs/metrics/training_history.csv
     outputs/metrics/training_summary.json
@@ -52,7 +52,7 @@ INPUT_FILE = (
     / "tmu_processed.csv"
 )
 
-MODEL_DIR = BASE_DIR / "models"
+MODEL_DIR = BASE_DIR / "models" / "tmu"
 METRICS_DIR = BASE_DIR / "outputs" / "metrics"
 
 MODEL_DIR.mkdir(parents=True, exist_ok=True)

@@ -930,7 +930,7 @@ def main():
     )
 
     print(
-        "       python scripts/02_train_lstm.py"
+        "       python scripts/tmu/02_train_lstm.py"
     )
 
 
