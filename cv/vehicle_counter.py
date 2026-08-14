@@ -189,7 +189,130 @@ LANE_REGIONS = {
 
 
 # ============================================================
-# 8. QUEUE PARAMETERS
+# 8. PEDESTRIAN / RIDER FILTER
+# ============================================================
+
+# Person hanya dihitung sebagai pedestrian jika centroid-nya
+# berada di area pedestrian.
+#
+# Format:
+#   (x1_ratio, y1_ratio, x2_ratio, y2_ratio)
+#
+# DEFAULT:
+# seluruh frame dianggap area pedestrian, KECUALI person yang
+# berada di area kendaraan akan difilter menggunakan hubungan
+# spasial dengan bounding box kendaraan.
+#
+# Untuk hasil terbaik pada CCTV masing-masing simpang, isi
+# PEDESTRIAN_ZONES dengan area trotoar/zebra crossing.
+PEDESTRIAN_ZONES = {
+    "Simpang 1": [],
+    "Simpang 2": [],
+    "Simpang 3": [],
+    "Simpang 4": [],
+}
+
+# Jarak maksimum person ke bounding box motorcycle agar dianggap
+# sebagai pengendara motor. Nilai dalam rasio terhadap tinggi frame.
+RIDER_DISTANCE_RATIO = 0.12
+
+# Person yang berada di bagian bawah/atas bounding box motorcycle
+# dengan jarak dekat akan dianggap rider, bukan pedestrian.
+RIDER_VERTICAL_OVERLAP_RATIO = 0.35
+
+
+def point_in_zone(cx, cy, width, height, zone):
+    """
+    Mengecek apakah titik centroid berada di pedestrian zone.
+    """
+    x1_ratio, y1_ratio, x2_ratio, y2_ratio = zone
+
+    x1 = width * x1_ratio
+    y1 = height * y1_ratio
+    x2 = width * x2_ratio
+    y2 = height * y2_ratio
+
+    return x1 <= cx <= x2 and y1 <= cy <= y2
+
+
+def is_in_pedestrian_zone(camera_name, cx, cy, width, height):
+    """
+    Jika PEDESTRIAN_ZONES belum dikonfigurasi, return True.
+    Dengan begitu sistem tetap mempertahankan deteksi person,
+    tetapi rider filter tetap bekerja.
+    """
+    zones = PEDESTRIAN_ZONES.get(camera_name, [])
+
+    if not zones:
+        return True
+
+    return any(
+        point_in_zone(cx, cy, width, height, zone)
+        for zone in zones
+    )
+
+
+def person_is_rider(
+    person_box,
+    motorcycle_boxes,
+    width,
+    height
+):
+    """
+    Menentukan apakah deteksi person kemungkinan merupakan
+    pengendara motorcycle.
+
+    Logika:
+    1. Cari motorcycle yang dekat dengan person.
+    2. Cek overlap horizontal.
+    3. Cek jarak vertikal person terhadap motorcycle.
+    """
+    px1, py1, px2, py2 = person_box
+
+    person_cx = (px1 + px2) / 2
+    person_cy = (py1 + py2) / 2
+
+    max_distance = height * RIDER_DISTANCE_RATIO
+
+    for mx1, my1, mx2, my2 in motorcycle_boxes:
+        motorcycle_cx = (mx1 + mx2) / 2
+
+        # Overlap horizontal antara person dan motorcycle.
+        horizontal_overlap = (
+            min(px2, mx2) - max(px1, mx1)
+        )
+
+        person_width = max(px2 - px1, 1)
+        motorcycle_width = max(mx2 - mx1, 1)
+
+        overlap_ratio = horizontal_overlap / min(
+            person_width,
+            motorcycle_width
+        )
+
+        if overlap_ratio < RIDER_VERTICAL_OVERLAP_RATIO:
+            # Jika tidak overlap cukup baik, cek kedekatan centroid.
+            if abs(person_cx - motorcycle_cx) > (
+                max(person_width, motorcycle_width) * 0.75
+            ):
+                continue
+
+        # Motorcycle biasanya berada di bawah person.
+        vertical_distance = my1 - py2
+
+        # Person sedikit masuk/menempel dengan bbox motorcycle.
+        if (
+            vertical_distance <= max_distance
+            and py2 >= my1 - max_distance
+            and person_cy <= my2 + max_distance
+        ):
+            return True
+
+    return False
+
+
+# ============================================================
+# 9. QUEUE PARAMETERS
 # ============================================================
 
 # Kendaraan dianggap berada di area antrean jika berada di
@@ -681,6 +804,16 @@ class CameraProcessor:
 
 
                 # ============================================
+                # Siapkan daftar bounding box motorcycle
+                # ============================================
+
+                motorcycle_boxes = [
+                    box
+                    for cls_id, box in zip(classes, coordinates)
+                    if cls_id == 3
+                ]
+
+                # ============================================
                 # Setiap objek
                 # ============================================
 
@@ -719,6 +852,43 @@ class CameraProcessor:
 
                     if object_type == "unknown":
                         continue
+
+                    # ------------------------------------------------
+                    # FILTER RIDER
+                    # ------------------------------------------------
+                    # YOLO dapat mendeteksi pengendara sebagai person
+                    # walaupun motorcycle juga terdeteksi.
+                    #
+                    # Jika person dekat dengan motorcycle, ubah
+                    # klasifikasinya menjadi motorcycle agar:
+                    # - tidak masuk person_count
+                    # - masuk vehicle_count
+                    # - masuk motorcycle_count
+                    # - dapat dihitung sebagai queue kendaraan
+                    #
+                    # Person yang tidak berhubungan dengan motorcycle
+                    # tetap diproses sebagai person/pedestrian.
+                    if object_type == "person":
+                        is_rider = person_is_rider(
+                            person_box=(x1, y1, x2, y2),
+                            motorcycle_boxes=motorcycle_boxes,
+                            width=width,
+                            height=height
+                        )
+
+                        if is_rider:
+                            object_type = "motorcycle"
+                        elif not is_in_pedestrian_zone(
+                            self.camera_name,
+                            cx,
+                            cy,
+                            width,
+                            height
+                        ):
+                            # Person di luar pedestrian zone dan tidak
+                            # terhubung dengan motorcycle tidak dihitung
+                            # sebagai pedestrian.
+                            continue
 
 
                     # ----------------------------------------
