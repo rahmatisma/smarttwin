@@ -1,12 +1,20 @@
 # Python
 __pycache__/
 *.pyc
-.venv/
+.vHEADenv/
 venv/
 cv/venv/
 
 # CCTV videos
 cv/videos/
+cv/output/*.csv
+forecasting/.venv/
+
+# Dataset
+data/*.csv
+data/*.zip
+data/*.parquet
+>>>>>>> b4b605bb9cdd8ec56a5153eafe3c0d6ee9a25baa
 
 # Node
 node_modules/
@@ -23,3 +31,26 @@ simulation/20*-*-*-*/
 
 # env
 .env
+<<<<<<< HEAD
+=======
+
+# Python cache
+__pycache__/
+*.pyc
+*.py[cod]
+
+# Forecasting datasets
+forecasting/data/*
+forecasting/models/*
+forecasting/outputs/*
+
+# Keep directory structure
+!forecasting/data/.gitkeep
+!forecasting/models/.gitkeep
+!forecasting/outputs/.gitkeep
+
+# Dataset
+data/*.csv
+data/*.zip
+data/*.parquet
+>>>>>>> b4b605bb9cdd8ec56a5153eafe3c0d6ee9a25baa
