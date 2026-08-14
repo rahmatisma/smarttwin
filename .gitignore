@@ -3,6 +3,12 @@ __pycache__/
 *.pyc
 .venv/
 venv/
+forecasting/.venv/
+
+# Dataset
+data/*.csv
+data/*.zip
+data/*.parquet
 
 # Node
 node_modules/
@@ -20,6 +26,11 @@ simulation/20*-*-*-*/
 # env
 .env
 
+# Python cache
+__pycache__/
+*.pyc
+*.py[cod]
+
 # Forecasting datasets
 forecasting/data/*
 forecasting/models/*
@@ -29,3 +40,8 @@ forecasting/outputs/*
 !forecasting/data/.gitkeep
 !forecasting/models/.gitkeep
 !forecasting/outputs/.gitkeep
+
+# Dataset
+data/*.csv
+data/*.zip
+data/*.parquet

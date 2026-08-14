@@ -1,18 +1,33 @@
 """
 07_evaluate_brisbane.py
 
-Evaluate Brisbane LSTM on chronological test set.
+Evaluate trained Brisbane Traffic LSTM
+on the chronological test set.
+
+Input:
+    outputs/brisbane/processed/brisbane_processed.csv
+
+Model:
+    models/brisbane_lstm_model.pt
+    models/brisbane_scaler_X.pkl
+    models/brisbane_scaler_y.pkl
+    models/brisbane_model_config.json
 
 Outputs:
-
     outputs/brisbane/metrics/metrics.json
     outputs/brisbane/metrics/test_predictions.csv
 
     outputs/brisbane/plots/
-        vehicle_count_forecast.png
-        density_proxy_forecast.png
-        queue_proxy_forecast.png
+        brisbane_vehicle_count_forecast.png
+        brisbane_density_proxy_forecast.png
+        brisbane_queue_proxy_forecast.png
+
+Metrics:
+    MAE
+    RMSE
+    MAPE
 """
+
 
 from pathlib import Path
 import json
@@ -20,6 +35,7 @@ import json
 import joblib
 import numpy as np
 import pandas as pd
+
 import torch
 import torch.nn as nn
 
@@ -45,38 +61,26 @@ DATA_FILE = (
     / "brisbane_processed.csv"
 )
 
-CONFIG_FILE = (
-    BASE_DIR
-    / "outputs"
-    / "brisbane"
-    / "processed"
-    / "feature_config.json"
-)
-
-MODEL_DIR = (
-    BASE_DIR
-    / "models"
-    / "brisbane"
-)
+MODEL_DIR = BASE_DIR / "models"
 
 MODEL_FILE = (
     MODEL_DIR
-    / "lstm_model.pt"
+    / "brisbane_lstm_model.pt"
 )
 
 SCALER_X_FILE = (
     MODEL_DIR
-    / "scaler_X.pkl"
+    / "brisbane_scaler_X.pkl"
 )
 
 SCALER_Y_FILE = (
     MODEL_DIR
-    / "scaler_y.pkl"
+    / "brisbane_scaler_y.pkl"
 )
 
-MODEL_CONFIG_FILE = (
+CONFIG_FILE = (
     MODEL_DIR
-    / "model_config.json"
+    / "brisbane_model_config.json"
 )
 
 OUTPUT_DIR = (
@@ -105,12 +109,12 @@ PLOT_DIR.mkdir(
     exist_ok=True
 )
 
-METRICS_FILE = (
+OUTPUT_METRICS = (
     METRICS_DIR
     / "metrics.json"
 )
 
-PREDICTIONS_FILE = (
+OUTPUT_PREDICTIONS = (
     METRICS_DIR
     / "test_predictions.csv"
 )
@@ -134,13 +138,8 @@ class TrafficLSTM(nn.Module):
 
         super().__init__()
 
-        self.horizon_count = (
-            horizon_count
-        )
-
-        self.output_size = (
-            output_size
-        )
+        self.horizon_count = horizon_count
+        self.output_size = output_size
 
         self.lstm = nn.LSTM(
             input_size=input_size,
@@ -160,22 +159,17 @@ class TrafficLSTM(nn.Module):
 
         self.fc = nn.Linear(
             hidden_size,
-            output_size
-            * horizon_count
+            output_size * horizon_count
         )
 
     def forward(self, x):
 
         output, _ = self.lstm(x)
 
-        last_output = (
-            output[:, -1, :]
-        )
+        last_output = output[:, -1, :]
 
-        last_output = (
-            self.dropout(
-                last_output
-            )
+        last_output = self.dropout(
+            last_output
         )
 
         prediction = self.fc(
@@ -198,21 +192,12 @@ def calculate_mape(
     predicted
 ):
 
-    actual = np.asarray(
-        actual
-    )
+    actual = np.asarray(actual)
+    predicted = np.asarray(predicted)
 
-    predicted = np.asarray(
-        predicted
-    )
-
-    mask = (
-        np.abs(actual)
-        > 1e-8
-    )
+    mask = np.abs(actual) > 1e-8
 
     if not np.any(mask):
-
         return np.nan
 
     return (
@@ -220,11 +205,9 @@ def calculate_mape(
             np.abs(
                 (
                     actual[mask]
-                    -
-                    predicted[mask]
+                    - predicted[mask]
                 )
-                /
-                actual[mask]
+                / actual[mask]
             )
         )
         * 100
@@ -232,68 +215,78 @@ def calculate_mape(
 
 
 # ============================================================
-# SEQUENCES
+# CREATE SEQUENCES
 # ============================================================
 
 def create_sequences(
-    X,
-    y,
-    timestamps,
+    df,
+    scaler_X,
+    scaler_y,
+    input_features,
+    target_features,
     sequence_length,
-    horizon
+    horizons
 ):
 
-    X_sequences = []
+    X_raw = df[
+        input_features
+    ].values
 
-    y_sequences = []
+    y_raw = df[
+        target_features
+    ].values
 
-    target_timestamps = []
-
-    max_index = (
-        len(X)
-        - sequence_length
-        - horizon
-        + 1
+    X_scaled = scaler_X.transform(
+        X_raw
     )
 
+    y_scaled = scaler_y.transform(
+        y_raw
+    )
+
+    X_sequences = []
+    y_sequences = []
+    timestamps = []
+
+    max_horizon = max(horizons)
+
     for i in range(
-        max_index
+        sequence_length,
+        len(df) - max_horizon + 1
     ):
 
         X_sequences.append(
-            X[
-                i:
-                i + sequence_length
+            X_scaled[
+                i - sequence_length:i
             ]
         )
 
-        target_index = (
-            i
-            + sequence_length
-            + horizon
-            - 1
-        )
+        targets = []
+
+        for horizon in horizons:
+
+            target_index = (
+                i + horizon - 1
+            )
+
+            targets.append(
+                y_scaled[
+                    target_index
+                ]
+            )
 
         y_sequences.append(
-            y[target_index]
+            targets
         )
 
-        target_timestamps.append(
-            timestamps[
-                target_index
-            ]
+        timestamps.append(
+            df.iloc[i]["timestamp"]
         )
 
     return (
-        np.asarray(
-            X_sequences,
-            dtype=np.float32
-        ),
-        np.asarray(
-            y_sequences,
-            dtype=np.float32
-        ),
-        target_timestamps
+        np.array(X_sequences),
+        np.array(y_sequences),
+        timestamps
     )
 
 
@@ -308,7 +301,36 @@ def main():
     print("=" * 70)
 
     # --------------------------------------------------------
-    # CONFIG
+    # FILE CHECK
+    # --------------------------------------------------------
+
+    required_files = [
+        DATA_FILE,
+        MODEL_FILE,
+        SCALER_X_FILE,
+        SCALER_Y_FILE,
+        CONFIG_FILE
+    ]
+
+    print()
+    print("=" * 70)
+    print("FILE CHECK")
+    print("=" * 70)
+
+    for file in required_files:
+
+        if not file.exists():
+
+            raise FileNotFoundError(
+                f"File tidak ditemukan:\n{file}"
+            )
+
+        print(
+            f"[OK] {file.name}"
+        )
+
+    # --------------------------------------------------------
+    # LOAD CONFIG
     # --------------------------------------------------------
 
     with open(
@@ -319,73 +341,218 @@ def main():
 
         config = json.load(file)
 
-    input_features = (
-        config["input_features"]
+    input_features = config[
+        "input_features"
+    ]
+
+    target_features = config[
+        "target_features"
+    ]
+
+    sequence_length = config[
+        "sequence_length"
+    ]
+
+    horizons = config[
+        "forecast_horizons"
+    ]
+
+    train_ratio = config.get(
+        "train_ratio",
+        0.70
     )
 
-    target_features = (
-        config["target_features"]
-    )
-
-    sequence_length = (
-        config["sequence_length"]
-    )
-
-    horizon = (
-        config["forecast_horizons"][0]
-    )
-
-    train_ratio = (
-        config["train_ratio"]
-    )
-
-    val_ratio = (
-        config["val_ratio"]
-    )
-
-    # --------------------------------------------------------
-    # DATA
-    # --------------------------------------------------------
-
-    df = pd.read_csv(
-        DATA_FILE,
-        parse_dates=["timestamp"]
-    )
-
-    df = (
-        df
-        .sort_values("timestamp")
-        .reset_index(drop=True)
+    val_ratio = config.get(
+        "val_ratio",
+        0.15
     )
 
     print()
+    print("=" * 70)
+    print("MODEL CONFIGURATION")
+    print("=" * 70)
+
     print(
-        f"[INFO] Rows: "
-        f"{len(df):,}"
+        f"[INFO] Input features : "
+        f"{len(input_features)}"
+    )
+
+    for i, feature in enumerate(
+        input_features,
+        start=1
+    ):
+
+        print(
+            f"       {i:02d}. {feature}"
+        )
+
+    print()
+    print(
+        f"[INFO] Targets        : "
+        f"{len(target_features)}"
+    )
+
+    for i, target in enumerate(
+        target_features,
+        start=1
+    ):
+
+        print(
+            f"       {i}. {target}"
+        )
+
+    print()
+    print(
+        f"[INFO] Sequence length : "
+        f"{sequence_length}"
+    )
+
+    print(
+        f"[INFO] Forecast horizon: "
+        f"{horizons}"
     )
 
     # --------------------------------------------------------
-    # ARRAYS
+    # LOAD DATA
     # --------------------------------------------------------
 
-    X_raw = (
-        df[input_features]
-        .values
+    print()
+    print("=" * 70)
+    print("DATA LOADING")
+    print("=" * 70)
+
+    print(
+        f"[INFO] Loading dataset:\n"
+        f"       {DATA_FILE}"
     )
 
-    y_raw = (
-        df[target_features]
-        .values
+    df = pd.read_csv(
+        DATA_FILE
     )
 
-    timestamps = (
-        df["timestamp"]
-        .tolist()
+    if "timestamp" not in df.columns:
+
+        raise ValueError(
+            "Kolom 'timestamp' tidak ditemukan."
+        )
+
+    df["timestamp"] = pd.to_datetime(
+        df["timestamp"],
+        errors="coerce"
+    )
+
+    df = df.dropna(
+        subset=["timestamp"]
+    )
+
+    df = df.sort_values(
+        "timestamp"
+    ).reset_index(
+        drop=True
+    )
+
+    print(
+        f"[INFO] Rows: {len(df)}"
+    )
+
+    print(
+        f"[INFO] Time range:"
+    )
+
+    print(
+        f"       {df['timestamp'].min()}"
+    )
+
+    print(
+        f"       {df['timestamp'].max()}"
     )
 
     # --------------------------------------------------------
-    # SCALERS
+    # VALIDATE FEATURES
     # --------------------------------------------------------
+
+    required_columns = (
+        input_features
+        + target_features
+    )
+
+    missing_columns = [
+        column
+        for column in required_columns
+        if column not in df.columns
+    ]
+
+    if missing_columns:
+
+        raise ValueError(
+            "Kolom berikut tidak ditemukan:\n"
+            + "\n".join(missing_columns)
+        )
+
+    numeric_columns = list(
+        dict.fromkeys(
+            required_columns
+        )
+    )
+
+    for column in numeric_columns:
+
+        df[column] = pd.to_numeric(
+            df[column],
+            errors="coerce"
+        )
+
+    missing_before = (
+        df[numeric_columns]
+        .isna()
+        .sum()
+        .sum()
+    )
+
+    print(
+        f"[INFO] Missing numeric values: "
+        f"{missing_before}"
+    )
+
+    df[numeric_columns] = (
+        df[numeric_columns]
+        .replace(
+            [np.inf, -np.inf],
+            np.nan
+        )
+        .interpolate(
+            method="linear"
+        )
+        .ffill()
+        .bfill()
+    )
+
+    missing_after = (
+        df[numeric_columns]
+        .isna()
+        .sum()
+        .sum()
+    )
+
+    print(
+        f"[INFO] Missing after cleaning: "
+        f"{missing_after}"
+    )
+
+    if missing_after > 0:
+
+        raise ValueError(
+            "Masih terdapat missing value."
+        )
+
+    # --------------------------------------------------------
+    # LOAD SCALERS
+    # --------------------------------------------------------
+
+    print()
+    print("=" * 70)
+    print("SCALER LOADING")
+    print("=" * 70)
 
     scaler_X = joblib.load(
         SCALER_X_FILE
@@ -395,45 +562,57 @@ def main():
         SCALER_Y_FILE
     )
 
-    X_scaled = (
-        scaler_X.transform(
-            X_raw
-        )
+    print(
+        "[OK] X scaler loaded."
     )
 
-    y_scaled = (
-        scaler_y.transform(
-            y_raw
-        )
+    print(
+        "[OK] Y scaler loaded."
     )
 
     # --------------------------------------------------------
-    # CREATE ALL SEQUENCES
+    # CREATE SEQUENCES
     # --------------------------------------------------------
+
+    print()
+    print("=" * 70)
+    print("CREATING TEST SEQUENCES")
+    print("=" * 70)
 
     (
         X,
         y,
-        sequence_timestamps
+        timestamps
     ) = create_sequences(
-        X_scaled,
-        y_scaled,
-        timestamps,
+        df,
+        scaler_X,
+        scaler_y,
+        input_features,
+        target_features,
         sequence_length,
-        horizon
+        horizons
     )
 
-    print()
+    if len(X) == 0:
+
+        raise ValueError(
+            "Tidak ada sequence yang terbentuk. "
+            "Jumlah data terlalu sedikit."
+        )
+
     print(
-        f"[INFO] Total sequences: "
-        f"{len(X):,}"
+        f"[INFO] X shape: {X.shape}"
     )
 
-    # --------------------------------------------------------
-    # SPLIT
-    # --------------------------------------------------------
+    print(
+        f"[INFO] y shape: {y.shape}"
+    )
 
     total_samples = len(X)
+
+    # --------------------------------------------------------
+    # CHRONOLOGICAL SPLIT
+    # --------------------------------------------------------
 
     train_end = int(
         total_samples
@@ -456,17 +635,35 @@ def main():
         val_end:
     ]
 
-    test_timestamps = (
-        sequence_timestamps[
-            val_end:
-        ]
-    )
+    test_timestamps = timestamps[
+        val_end:
+    ]
 
     print()
     print(
-        "[INFO] Test samples: "
-        f"{len(X_test):,}"
+        "[INFO] Dataset split:"
     )
+
+    print(
+        f"       Train      : "
+        f"{train_end}"
+    )
+
+    print(
+        f"       Validation : "
+        f"{val_end - train_end}"
+    )
+
+    print(
+        f"       Test       : "
+        f"{len(X_test)}"
+    )
+
+    if len(X_test) == 0:
+
+        raise ValueError(
+            "Test set kosong."
+        )
 
     # --------------------------------------------------------
     # DEVICE
@@ -478,54 +675,73 @@ def main():
         else "cpu"
     )
 
+    print()
+    print(
+        f"[INFO] Device: {device}"
+    )
+
     # --------------------------------------------------------
-    # MODEL CONFIG
+    # MODEL
     # --------------------------------------------------------
 
-    with open(
-        MODEL_CONFIG_FILE,
-        "r",
-        encoding="utf-8"
-    ) as file:
-
-        model_config = json.load(
-            file
-        )
+    print()
+    print("=" * 70)
+    print("MODEL LOADING")
+    print("=" * 70)
 
     model = TrafficLSTM(
         input_size=len(
             input_features
         ),
-        hidden_size=model_config[
+        hidden_size=config[
             "hidden_size"
         ],
-        num_layers=model_config[
+        num_layers=config[
             "num_layers"
         ],
         output_size=len(
             target_features
         ),
-        horizon_count=1,
-        dropout=model_config[
-            "dropout"
-        ]
-    )
-
-    model.load_state_dict(
-        torch.load(
-            MODEL_FILE,
-            map_location=device,
-            weights_only=True
+        horizon_count=len(
+            horizons
+        ),
+        dropout=config.get(
+            "dropout",
+            0.0
         )
     )
 
-    model.to(device)
+    state_dict = torch.load(
+        MODEL_FILE,
+        map_location=device,
+        weights_only=True
+    )
 
+    model.load_state_dict(
+        state_dict
+    )
+
+    model.to(device)
     model.eval()
+
+    print(
+        f"[OK] Model loaded:\n"
+        f"     {MODEL_FILE}"
+    )
+
+    print(
+        f"[INFO] Parameters: "
+        f"{sum(p.numel() for p in model.parameters()):,}"
+    )
 
     # --------------------------------------------------------
     # PREDICTION
     # --------------------------------------------------------
+
+    print()
+    print("=" * 70)
+    print("PREDICTION")
+    print("=" * 70)
 
     X_tensor = torch.tensor(
         X_test,
@@ -540,132 +756,168 @@ def main():
             )
             .cpu()
             .numpy()
-            .squeeze(1)
         )
 
-    # --------------------------------------------------------
-    # INVERSE SCALE
-    # --------------------------------------------------------
-
-    predictions = (
-        scaler_y.inverse_transform(
-            predictions_scaled
-        )
+    print(
+        f"[INFO] Prediction shape: "
+        f"{predictions_scaled.shape}"
     )
 
-    actual = (
-        scaler_y.inverse_transform(
-            y_test
-        )
+    # --------------------------------------------------------
+    # INVERSE TRANSFORM
+    # --------------------------------------------------------
+
+    predictions = np.zeros_like(
+        predictions_scaled
     )
+
+    actual = np.zeros_like(
+        y_test
+    )
+
+    for h in range(
+        len(horizons)
+    ):
+
+        predictions[:, h, :] = (
+            scaler_y.inverse_transform(
+                predictions_scaled[
+                    :, h, :
+                ]
+            )
+        )
+
+        actual[:, h, :] = (
+            scaler_y.inverse_transform(
+                y_test[
+                    :, h, :
+                ]
+            )
+        )
 
     # --------------------------------------------------------
     # METRICS
     # --------------------------------------------------------
 
-    metrics = {}
-
     print()
     print("=" * 70)
-    print("EVALUATION RESULTS")
+    print("CALCULATING METRICS")
     print("=" * 70)
 
-    for index, target in enumerate(
-        target_features
+    metrics = {}
+
+    for h_index, horizon in enumerate(
+        horizons
     ):
 
-        y_true = (
-            actual[:, index]
+        horizon_name = (
+            f"{horizon * 15}min"
         )
 
-        y_pred = (
-            predictions[:, index]
-        )
+        metrics[
+            horizon_name
+        ] = {}
 
-        mae = mean_absolute_error(
-            y_true,
-            y_pred
-        )
+        for target_index, target in enumerate(
+            target_features
+        ):
 
-        rmse = np.sqrt(
-            mean_squared_error(
+            y_true = actual[
+                :,
+                h_index,
+                target_index
+            ]
+
+            y_pred = predictions[
+                :,
+                h_index,
+                target_index
+            ]
+
+            mae = mean_absolute_error(
                 y_true,
                 y_pred
             )
-        )
 
-        mape = calculate_mape(
-            y_true,
-            y_pred
-        )
-
-        metrics[target] = {
-
-            "MAE": float(mae),
-
-            "RMSE": float(rmse),
-
-            "MAPE_percent": (
-                float(mape)
-                if not np.isnan(mape)
-                else None
-            )
-        }
-
-        print()
-        print(target)
-
-        print(
-            f"    MAE  : {mae:.4f}"
-        )
-
-        print(
-            f"    RMSE : {rmse:.4f}"
-        )
-
-        if np.isnan(mape):
-
-            print(
-                "    MAPE : N/A"
+            rmse = np.sqrt(
+                mean_squared_error(
+                    y_true,
+                    y_pred
+                )
             )
 
-        else:
-
-            print(
-                f"    MAPE : {mape:.2f}%"
+            mape = calculate_mape(
+                y_true,
+                y_pred
             )
+
+            metrics[
+                horizon_name
+            ][target] = {
+                "MAE": float(mae),
+                "RMSE": float(rmse),
+                "MAPE_percent": (
+                    float(mape)
+                    if not np.isnan(mape)
+                    else None
+                )
+            }
 
     # --------------------------------------------------------
     # SAVE PREDICTIONS
     # --------------------------------------------------------
 
-    prediction_data = {
+    prediction_rows = []
 
-        "timestamp": test_timestamps
-    }
-
-    for index, target in enumerate(
-        target_features
+    for sample_index in range(
+        len(test_timestamps)
     ):
 
-        prediction_data[
-            f"actual_{target}"
-        ] = actual[
-            :, index
-        ]
+        for h_index, horizon in enumerate(
+            horizons
+        ):
 
-        prediction_data[
-            f"predicted_{target}"
-        ] = predictions[
-            :, index
-        ]
+            row = {
+                "timestamp": (
+                    test_timestamps[
+                        sample_index
+                    ]
+                ),
+                "forecast_horizon": (
+                    f"{horizon * 15}min"
+                )
+            }
 
-    predictions_df = pd.DataFrame(
-        prediction_data
+            for target_index, target in enumerate(
+                target_features
+            ):
+
+                row[
+                    f"actual_{target}"
+                ] = actual[
+                    sample_index,
+                    h_index,
+                    target_index
+                ]
+
+                row[
+                    f"predicted_{target}"
+                ] = predictions[
+                    sample_index,
+                    h_index,
+                    target_index
+                ]
+
+            prediction_rows.append(
+                row
+            )
+
+    prediction_df = pd.DataFrame(
+        prediction_rows
     )
 
-    predictions_df.to_csv(
-        PREDICTIONS_FILE,
+    prediction_df.to_csv(
+        OUTPUT_PREDICTIONS,
         index=False
     )
 
@@ -673,88 +925,121 @@ def main():
     # SAVE METRICS
     # --------------------------------------------------------
 
-    evaluation_summary = {
-
+    metrics_output = {
         "model": "TrafficLSTM",
-
-        "dataset": "Brisbane",
-
+        "dataset": "Brisbane Traffic Data",
         "device": str(device),
-
-        "forecast_horizon_minutes": (
-            horizon
-        ),
-
-        "sequence_length": (
-            sequence_length
-        ),
-
-        "test_samples": (
-            len(X_test)
-        ),
-
+        "sequence_length": sequence_length,
+        "forecast_horizons": horizons,
+        "test_samples": len(X_test),
         "targets": target_features,
-
-        "metrics": metrics,
+        "metrics": metrics
     }
 
     with open(
-        METRICS_FILE,
+        OUTPUT_METRICS,
         "w",
         encoding="utf-8"
     ) as file:
 
         json.dump(
-            evaluation_summary,
+            metrics_output,
             file,
             indent=4
         )
+
+    # --------------------------------------------------------
+    # PRINT RESULTS
+    # --------------------------------------------------------
+
+    print()
+    print("=" * 70)
+    print("EVALUATION RESULTS")
+    print("=" * 70)
+
+    print(
+        f"[INFO] Test samples: "
+        f"{len(X_test)}"
+    )
+
+    for horizon, values in metrics.items():
+
+        print()
+        print(
+            f"{horizon}"
+        )
+
+        for target, score in values.items():
+
+            mape_text = (
+                f"{score['MAPE_percent']:.2f}%"
+                if score["MAPE_percent"] is not None
+                else "N/A"
+            )
+
+            print(
+                f"  {target:20s} "
+                f"MAE={score['MAE']:.4f} | "
+                f"RMSE={score['RMSE']:.4f} | "
+                f"MAPE={mape_text}"
+            )
+
+    print()
+    print(
+        f"[SAVED] Predictions:\n"
+        f"        {OUTPUT_PREDICTIONS}"
+    )
 
     # --------------------------------------------------------
     # PLOTS
     # --------------------------------------------------------
 
     print()
-    print(
-        "=" * 70
-    )
+    print("=" * 70)
     print("CREATING PLOTS")
-    print(
-        "=" * 70
-    )
+    print("=" * 70)
 
-    for index, target in enumerate(
+    # Plot hanya horizon pertama
+    horizon_index = 0
+
+    for target_index, target in enumerate(
         target_features
     ):
+
+        actual_values = actual[
+            :,
+            horizon_index,
+            target_index
+        ]
+
+        predicted_values = predictions[
+            :,
+            horizon_index,
+            target_index
+        ]
+
+        limit = min(
+            500,
+            len(actual_values)
+        )
 
         plt.figure(
             figsize=(14, 6)
         )
 
-        limit = min(
-            500,
-            len(actual)
-        )
-
         plt.plot(
-            actual[
-                :limit,
-                index
-            ],
+            actual_values[:limit],
             label="Actual"
         )
 
         plt.plot(
-            predictions[
-                :limit,
-                index
-            ],
+            predicted_values[:limit],
             label="Predicted"
         )
 
         plt.title(
-            f"{target} - "
-            f"Brisbane 15 Minute Forecast"
+            f"Brisbane {target} - "
+            f"{horizons[horizon_index] * 15} Minute Forecast"
         )
 
         plt.xlabel(
@@ -771,7 +1056,7 @@ def main():
 
         output_plot = (
             PLOT_DIR
-            / f"{target}_forecast.png"
+            / f"brisbane_{target}_forecast.png"
         )
 
         plt.savefig(
@@ -787,24 +1072,13 @@ def main():
 
     print()
     print(
-        f"[SAVED] Metrics:"
-    )
-
-    print(
-        f"        {METRICS_FILE}"
-    )
-
-    print(
-        f"[SAVED] Predictions:"
-    )
-
-    print(
-        f"        {PREDICTIONS_FILE}"
+        f"[SAVED] Metrics:\n"
+        f"        {OUTPUT_METRICS}"
     )
 
     print()
     print("=" * 70)
-    print("EVALUATION COMPLETED")
+    print("BRISBANE EVALUATION COMPLETED")
     print("=" * 70)
 
 

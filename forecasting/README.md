@@ -163,30 +163,79 @@ Jangan memasukkan dataset ini ke pipeline utama sebelum:
 
 Struktur modul forecasting:
 
-    forecasting/
+forecasting/
+│
+├── .venv/
+│
+├── data/
+│   ├── .gitkeep
+│   ├── TMU.csv
+│   └── Brisbane.csv                  ← DATASET BARU
+│
+├── models/
+│   ├── .gitkeep
+│   │
+│   ├── lstm_model.pt                 ← MODEL TMU
+│   ├── model_config.json
+│   ├── scaler_X.pkl
+│   ├── scaler_y.pkl
+│   │
+│   └── brisbane/                     ← MODEL BRISBANE
+│       ├── lstm_model.pt
+│       ├── model_config.json
+│       ├── scaler_X.pkl
+│       └── scaler_y.pkl
+│
+├── outputs/
+│   │
+│   ├── metrics/                      ← HASIL TMU
+│   │   ├── metrics.json
+│   │   ├── test_predictions.csv
+│   │   ├── training_history.csv
+│   │   └── training_summary.json
+│   │
+│   ├── plots/                        ← HASIL TMU
+│   │   ├── density_proxy_forecast.png
+│   │   ├── queue_proxy_forecast.png
+│   │   ├── speed_value_forecast.png
+│   │   └── vehicle_count_forecast.png
+│   │
+│   ├── predictions/
+│   │   └── forecast.csv
+│   │
+│   ├── processed/                    ← HASIL TMU
+│   │   ├── feature_config.json
+│   │   ├── tmu_metadata.json
+│   │   └── tmu_processed.csv
+│   │
+│   └── brisbane/                     ← SEMUA HASIL BRISBANE
+│       ├── processed/
+│       │   └── brisbane_processed.csv
+│       │
+│       ├── metrics/
+│       │   ├── metrics.json
+│       │   ├── test_predictions.csv
+│       │   ├── training_history.csv
+│       │   └── training_summary.json
+│       │
+│       ├── plots/
+│       │   ├── vehicle_count_forecast.png
+│       │   ├── density_proxy_forecast.png
+│       │   └── queue_proxy_forecast.png
+│       │
+│       └── predictions/
+│           └── forecast.csv
+│
+└── scripts/
+    ├── 01_preprocess.py
+    ├── 02_train_lstm.py
+    ├── 03_evaluate.py
+    ├── 04_predict.py
     │
-    ├── data/
-    │   └── TMU.csv
-    │
-    ├── models/
-    │   ├── lstm_model.keras
-    │   ├── scaler_X.pkl
-    │   ├── scaler_y.pkl
-    │   └── model_config.json
-    │
-    ├── outputs/
-    │   ├── plots/
-    │   ├── metrics/
-    │   └── predictions/
-    │
-    ├── scripts/
-    │   ├── 01_prepare_tmu.py
-    │   ├── 02_train_lstm.py
-    │   ├── 03_evaluate.py
-    │   └── 04_predict.py
-    │
-    ├── requirements.txt
-    └── README.md
+    ├── 05_preprocess_brisbane.py
+    ├── 06_train_brisbane.py
+    ├── 07_evaluate_brisbane.py
+    └── 08_predict_brisbane.py
 
 
 ---
