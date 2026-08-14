@@ -52,13 +52,39 @@ export const mockRecommendation: SignalRecommendation = {
   expectedImprovementPct: 23,
 };
 
+// Forecast dipecah per lengan sesuai docs/data-contract.md (ForecastPoint
+// punya field approach). ForecastChart menjumlahkannya kembali per horizon
+// supaya grafiknya tetap satu garis total.
 export const mockForecast: ForecastPoint[] = [
-  { minute: 0, predictedVolume: 980 },
-  { minute: 3, predictedVolume: 1040 },
-  { minute: 6, predictedVolume: 1210 },
-  { minute: 9, predictedVolume: 1150 },
-  { minute: 12, predictedVolume: 1280 },
-  { minute: 15, predictedVolume: 1190 },
+  { approach: "north", horizonMinutes: 0, predictedVolume: 214 },
+  { approach: "south", horizonMinutes: 0, predictedVolume: 225 },
+  { approach: "east", horizonMinutes: 0, predictedVolume: 327 },
+  { approach: "west", horizonMinutes: 0, predictedVolume: 214 },
+
+  { approach: "north", horizonMinutes: 3, predictedVolume: 227 },
+  { approach: "south", horizonMinutes: 3, predictedVolume: 239 },
+  { approach: "east", horizonMinutes: 3, predictedVolume: 347 },
+  { approach: "west", horizonMinutes: 3, predictedVolume: 227 },
+
+  { approach: "north", horizonMinutes: 6, predictedVolume: 264 },
+  { approach: "south", horizonMinutes: 6, predictedVolume: 278 },
+  { approach: "east", horizonMinutes: 6, predictedVolume: 404 },
+  { approach: "west", horizonMinutes: 6, predictedVolume: 264 },
+
+  { approach: "north", horizonMinutes: 9, predictedVolume: 251 },
+  { approach: "south", horizonMinutes: 9, predictedVolume: 264 },
+  { approach: "east", horizonMinutes: 9, predictedVolume: 384 },
+  { approach: "west", horizonMinutes: 9, predictedVolume: 251 },
+
+  { approach: "north", horizonMinutes: 12, predictedVolume: 280 },
+  { approach: "south", horizonMinutes: 12, predictedVolume: 294 },
+  { approach: "east", horizonMinutes: 12, predictedVolume: 426 },
+  { approach: "west", horizonMinutes: 12, predictedVolume: 280 },
+
+  { approach: "north", horizonMinutes: 15, predictedVolume: 260 },
+  { approach: "south", horizonMinutes: 15, predictedVolume: 273 },
+  { approach: "east", horizonMinutes: 15, predictedVolume: 397 },
+  { approach: "west", horizonMinutes: 15, predictedVolume: 260 },
 ];
 
 export const mockIntersection = {
