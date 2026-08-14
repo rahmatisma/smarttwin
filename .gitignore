@@ -4,13 +4,12 @@ __pycache__/
 .vHEADenv/
 venv/
 cv/venv/
+forecasting/.venv/
 
 # CCTV videos
 cv/videos/
 cv/output/*.csv
 cv/models/
-
-forecasting/.venv/
 
 # Dataset
 data/*.csv
