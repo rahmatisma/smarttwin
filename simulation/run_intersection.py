@@ -6,7 +6,7 @@ sys.path.append(os.path.join(os.environ["SUMO_HOME"], "tools"))
 
 import traci
 
-net_path = "network/simpang4_pingit.net.xml.gz"
+net_path = "network/simpang4.net.xml.gz"
 traci.start(["sumo", "-n", net_path, "--no-warnings"])
 
 tls_id = traci.trafficlight.getIDList()[0]
