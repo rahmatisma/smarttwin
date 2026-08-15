@@ -41,9 +41,7 @@ __pycache__/
 *.py[cod]
 
 # Forecasting datasets
-forecasting/data/*
 forecasting/models/*
-forecasting/outputs/*
 
 # Keep directory structure
 !forecasting/data/.gitkeep
