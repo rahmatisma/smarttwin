@@ -125,11 +125,33 @@ INTERSECTION_ID = "simpang4-pingit"
 
 VIDEO_DIR = os.path.join(BASE_DIR, "videos")
 
+# PEMETAAN KAMERA → ARAH MATA ANGIN
+# ---------------------------------
+# Dikonfirmasi dari screenshot CCTV asli + peta lokasi
+# (15 Agustus 2026). JANGAN ditebak dari nomor kameranya:
+#
+#   CCTV "SIMPANG PINGIT 1" — Jl. Tentara Pelajar     → south
+#   CCTV "SIMPANG PINGIT 2" — Jl. Magelang            → north
+#   CCTV "SIMPANG PINGIT 3" — Jl. Kyai Mojo           → west
+#   CCTV "SIMPANG PINGIT 4" — Jl. Pangeran Diponegoro → east
+#
+# Nomor kamera dan arah mata angin TIDAK berurutan — Pingit 1
+# itu lengan selatan, Pingit 2 lengan utara. Versi sebelumnya
+# tertukar persis di dua lengan ini.
+#
+# Rekaman yang sudah ada baru Pingit 1 dan Pingit 2; lengan
+# east/west menyusul begitu videonya tersedia.
+
 CAMERAS = {
-    "north": os.path.join(VIDEO_DIR, "pingit_north.mp4"),
-    "south": os.path.join(VIDEO_DIR, "pingit_south.mp4"),
-    "east": os.path.join(VIDEO_DIR, "pingit_east.mp4"),
-    "west": os.path.join(VIDEO_DIR, "pingit_west.mp4"),
+    # Pingit 2 (Jl. Magelang) — lengan utara
+    "north": os.path.join(VIDEO_DIR, "CCTV 2.mp4"),
+
+    # Pingit 1 (Jl. Tentara Pelajar) — lengan selatan
+    "south": os.path.join(VIDEO_DIR, "CCTV 1.mp4"),
+
+    # Belum ada rekamannya:
+    # "east": Pingit 4 (Jl. Pangeran Diponegoro)
+    # "west": Pingit 3 (Jl. Kyai Mojo)
 }
 
 
@@ -191,6 +213,13 @@ TRACK_CLASSES = list(YOLO_CLASSES.keys())
 
 # BELUM DIKALIBRASI: keempat lengan masih memakai nilai default yang
 # sama. Sesuaikan per lengan begitu footage Simpang Pingit tersedia.
+#
+# Nilainya ruang-gambar (posisi di dalam frame), bukan arah mata
+# angin. Jadi kalibrasinya mengikuti VIDEO yang dipetakan ke key
+# itu di CAMERAS, bukan kompasnya. Kalau pemetaan kamera→key
+# berubah lagi, geometri di sini harus ikut pindah bersama
+# videonya. Sekarang aman ditukar-tukar karena keempatnya masih
+# nilai default yang identik.
 COUNTING_LINES = {
     "north": (0.10, 0.65, 0.90, 0.65),
     "south": (0.10, 0.65, 0.90, 0.65),
@@ -215,6 +244,8 @@ COUNTING_LINES = {
 
 # BELUM DIKALIBRASI: masih pembagian sepertiga default di keempat
 # lengan. Sesuaikan dengan posisi lajur asli tiap kamera Pingit.
+# Sama seperti COUNTING_LINES: ini posisi di dalam frame, jadi
+# ikut videonya — bukan arah mata anginnya.
 LANE_REGIONS = {
     "north": [
         ("lane_1", 0.00, 0.33),
@@ -1669,26 +1700,39 @@ def main():
     # Window
     # --------------------------------------------------------
 
-    WINDOW_WIDTH = 640
-    WINDOW_HEIGHT = 360
+    # Ukuran placeholder waktu video sebuah lengan belum ada.
+    # Frame asli TIDAK dikecilkan ke ukuran ini — lihat catatan
+    # di bawah.
+    PLACEHOLDER_WIDTH = 640
+    PLACEHOLDER_HEIGHT = 360
 
+    # --------------------------------------------------------
+    # Satu jendela per kamera, bukan grid 2x2
+    # --------------------------------------------------------
+    #
+    # Versi lama menggabungkan semua kamera jadi satu gambar 2x2,
+    # dan tiap frame dikecilkan dulu ke 640x360 sebelum digabung.
+    # Pengecilan itu destruktif: resolusinya hilang di situ, jadi
+    # memperbesar jendela cuma bikin gambar makin buram, bukan
+    # makin jelas — padahal jendela ini dipakai buat memverifikasi
+    # bounding box secara visual.
+    #
+    # Sekarang tiap kamera punya jendelanya sendiri dan ditampilkan
+    # pada resolusi asli video. Jendelanya WINDOW_NORMAL, jadi bisa
+    # di-resize/maximize satu-satu sesuai kebutuhan.
+    #
+    # Jumlah jendela mengikuti CAMERAS. Mau 2 lengan atau 4, tidak
+    # ada yang perlu diubah di bagian ini.
+    # --------------------------------------------------------
 
-    cv2.namedWindow(
+    def window_title(camera_name):
+        return f"SMARTTWIN - {camera_name.upper()}"
 
-        "SMARTTWIN - 4 CCTV",
-
-        cv2.WINDOW_NORMAL
-    )
-
-
-    cv2.resizeWindow(
-
-        "SMARTTWIN - 4 CCTV",
-
-        WINDOW_WIDTH * 2,
-
-        WINDOW_HEIGHT * 2
-    )
+    for camera_name in CAMERAS:
+        cv2.namedWindow(
+            window_title(camera_name),
+            cv2.WINDOW_NORMAL
+        )
 
 
     # ========================================================
@@ -1697,11 +1741,8 @@ def main():
 
     while True:
 
-        frames = []
-
-
         # ----------------------------------------------------
-        # Ambil frame masing-masing kamera
+        # Tampilkan tiap kamera di jendelanya sendiri
         # ----------------------------------------------------
 
         for camera_name in CAMERAS:
@@ -1713,17 +1754,17 @@ def main():
 
             if processor is None:
 
-                blank = (
+                frame = (
                     cv2.UMat(
-                        WINDOW_HEIGHT,
-                        WINDOW_WIDTH,
+                        PLACEHOLDER_HEIGHT,
+                        PLACEHOLDER_WIDTH,
                         cv2.CV_8UC3
                     ).get()
                 )
 
                 cv2.putText(
 
-                    blank,
+                    frame,
 
                     f"{camera_name} - NO VIDEO",
 
@@ -1738,102 +1779,35 @@ def main():
                     2
                 )
 
-                frames.append(
-                    blank
-                )
+            else:
 
-                continue
+                with processor.lock:
 
+                    if processor.frame is not None:
 
-            with processor.lock:
+                        # Resolusi asli, TANPA cv2.resize —
+                        # ini yang bikin bounding box kebaca jelas.
+                        frame = (
+                            processor.frame.copy()
+                        )
 
-                if processor.frame is not None:
+                    else:
 
-                    frame = (
-                        processor.frame.copy()
-                    )
-
-                else:
-
-                    frame = (
-                        cv2.UMat(
-                            WINDOW_HEIGHT,
-                            WINDOW_WIDTH,
-                            cv2.CV_8UC3
-                        ).get()
-                    )
+                        frame = (
+                            cv2.UMat(
+                                PLACEHOLDER_HEIGHT,
+                                PLACEHOLDER_WIDTH,
+                                cv2.CV_8UC3
+                            ).get()
+                        )
 
 
-            frame = cv2.resize(
+            cv2.imshow(
 
-                frame,
+                window_title(camera_name),
 
-                (
-                    WINDOW_WIDTH,
-                    WINDOW_HEIGHT
-                )
-            )
-
-
-            frames.append(
                 frame
             )
-
-
-        # ----------------------------------------------------
-        # Pastikan 4 frame
-        # ----------------------------------------------------
-
-        while len(frames) < 4:
-
-            frames.append(
-
-                cv2.UMat(
-
-                    WINDOW_HEIGHT,
-
-                    WINDOW_WIDTH,
-
-                    cv2.CV_8UC3
-
-                ).get()
-            )
-
-
-        # ----------------------------------------------------
-        # GRID 2 x 2
-        # ----------------------------------------------------
-
-        top = cv2.hconcat(
-            [
-                frames[0],
-                frames[1]
-            ]
-        )
-
-
-        bottom = cv2.hconcat(
-            [
-                frames[2],
-                frames[3]
-            ]
-        )
-
-
-        dashboard = cv2.vconcat(
-            [
-                top,
-                bottom
-            ]
-        )
-
-
-        cv2.imshow(
-
-            "SMARTTWIN - 4 CCTV",
-
-            dashboard
-        )
 
 
         # ----------------------------------------------------
