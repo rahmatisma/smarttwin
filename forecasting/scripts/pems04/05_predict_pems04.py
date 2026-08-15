@@ -20,6 +20,7 @@ PROCESSED_DIR = (
     BASE_DIR
     / "outputs"
     / "pems04"
+    / "sensor_1_20"
     / "processed"
 )
 
@@ -27,6 +28,7 @@ OUTPUT_DIR = (
     BASE_DIR
     / "outputs"
     / "pems04"
+    / "sensor_1_20"
 )
 
 PREDICTION_DIR = (
@@ -53,7 +55,7 @@ HIDDEN_SIZE = 64
 NUM_LAYERS = 2
 DROPOUT = 0.2
 
-NUM_SENSORS = 10
+NUM_SENSORS = 20
 NUM_FEATURES = 3
 
 FEATURE_NAMES = [
@@ -63,7 +65,7 @@ FEATURE_NAMES = [
 ]
 
 SENSOR_START = 1
-SENSOR_END = 10
+SENSOR_END = 20
 
 BATCH_SIZE = 64
 
@@ -203,7 +205,7 @@ def load_preprocess_config():
 
     config_path = (
         PROCESSED_DIR
-        / "pems04_config.json"
+        / "pems04_20_config.json"
     )
 
     if not config_path.exists():
@@ -401,7 +403,7 @@ def load_last_sequence():
     # Ambil sequence terakhir
     #
     # Shape:
-    # (15, 10, 3)
+    # (15, 20, 3)
     # --------------------------------------------------------
 
     last_sequence = X_test[-1]
@@ -460,11 +462,11 @@ def generate_prediction(
     # --------------------------------------------------------
     # Convert:
     #
-    # (15, 10, 3)
+    # (15, 20, 3)
     #
     # menjadi:
     #
-    # (1, 15, 10, 3)
+    # (1, 15, 20, 3)
     # --------------------------------------------------------
 
     input_tensor = torch.from_numpy(
@@ -542,21 +544,53 @@ def inverse_transform_prediction(
 
     original_shape = prediction.shape
 
+    print(
+        f"[INFO] Prediction shape sebelum scaling : "
+        f"{original_shape}"
+    )
+
+    print(
+        f"[INFO] Scaler feature count              : "
+        f"{len(scaler.scale_)}"
+    )
+
     # --------------------------------------------------------
-    # StandardScaler bekerja pada:
-    #
-    # (samples, features)
-    #
     # Prediction:
     #
-    # (10, 3)
+    # (20, 3)
     #
+    # Karena scaler dibuat dari:
+    #
+    # 20 sensors × 3 features = 60 features
+    #
+    # maka harus diubah menjadi:
+    #
+    # (1, 60)
     # --------------------------------------------------------
 
     prediction_2d = prediction.reshape(
-        -1,
-        NUM_FEATURES
+        1,
+        NUM_SENSORS * NUM_FEATURES
     )
+
+    print(
+        f"[INFO] Prediction shape untuk scaler   : "
+        f"{prediction_2d.shape}"
+    )
+
+    expected_features = (
+        NUM_SENSORS * NUM_FEATURES
+    )
+
+    if len(scaler.scale_) != expected_features:
+
+        raise ValueError(
+            "Jumlah feature scaler tidak sesuai.\n"
+            f"Expected : {expected_features}\n"
+            f"Got      : {len(scaler.scale_)}\n\n"
+            "Pastikan scaler dibuat dari preprocessing "
+            f"PEMS04 sensor {SENSOR_START}-{SENSOR_END}."
+        )
 
     try:
 
@@ -570,16 +604,26 @@ def inverse_transform_prediction(
 
         raise ValueError(
             "Gagal melakukan inverse scaling.\n"
-            "Pastikan scaler_X.pkl dibuat dari "
-            "3 feature PEMS04 "
-            "(flow, occupancy, speed).\n\n"
+            f"Prediction shape : {prediction_2d.shape}\n"
+            f"Scaler features  : {len(scaler.scale_)}\n\n"
             f"Original error: {error}"
         )
+
+    # --------------------------------------------------------
+    # Kembalikan ke:
+    #
+    # (20, 3)
+    # --------------------------------------------------------
 
     prediction_original = (
         prediction_original.reshape(
             original_shape
         )
+    )
+
+    print(
+        f"[INFO] Prediction shape setelah scaling : "
+        f"{prediction_original.shape}"
     )
 
     print(
