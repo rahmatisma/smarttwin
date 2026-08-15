@@ -1,21 +1,37 @@
 # Python
 __pycache__/
 *.pyc
-.vHEADenv/
+*.py[cod]
+.venv/
 venv/
 cv/venv/
 forecasting/.venv/
 
+# pip cache — jangan pernah di-commit, ini cache lokal
+pip-cache/
+
 # CCTV videos
 cv/videos/
-cv/output/*.csv
 cv/models/
+
+# Output CV di-ignore secara umum (regenerated tiap run), KECUALI
+# dataset hasil run Melpi 14 Agustus 2026 yang disimpan sebagai
+# baseline/bukti untuk laporan teknis.
+cv/output/*.csv
+!cv/output/smarttwin_traffic_data_melpi_20260814.csv
 
 # Dataset
 data/*.csv
 data/*.zip
 data/*.parquet
->>>>>>> b4b605bb9cdd8ec56a5153eafe3c0d6ee9a25baa
+
+# Forecasting datasets, model, hasil training
+forecasting/data/*
+forecasting/models/*
+forecasting/outputs/*
+!forecasting/data/.gitkeep
+!forecasting/models/.gitkeep
+!forecasting/outputs/.gitkeep
 
 # Node
 node_modules/
@@ -32,24 +48,3 @@ simulation/20*-*-*-*/
 
 # env
 .env
-<<<<<<< HEAD
-=======
-
-# Python cache
-__pycache__/
-*.pyc
-*.py[cod]
-
-# Forecasting datasets
-forecasting/models/*
-
-# Keep directory structure
-!forecasting/data/.gitkeep
-!forecasting/models/.gitkeep
-!forecasting/outputs/.gitkeep
-
-# Dataset
-data/*.csv
-data/*.zip
-data/*.parquet
->>>>>>> b4b605bb9cdd8ec56a5153eafe3c0d6ee9a25baa

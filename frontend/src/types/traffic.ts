@@ -49,7 +49,8 @@ export interface SignalRecommendation {
 }
 
 export interface ForecastPoint {
-  minute: number; // menit ke depan, mis. 0, 3, 6, 9...
+  approach: Approach;
+  horizonMinutes: number; // menit ke depan, mis. 0, 3, 6, 9...
   predictedVolume: number;
 }
 

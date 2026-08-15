@@ -1,7 +1,26 @@
-# Starting point buat modul CV — Melpi silakan sesuaikan/tambahin.
-# ultralytics udah include YOLOv8 + ByteTrack + dependency (torch, opencv, dll)
-ultralytics
+# Modul CV — YOLO26 + ByteTrack (lihat vehicle_counter.py).
+# ultralytics sudah include ByteTrack + dependency (torch, opencv, dll).
+#
+# WAJIB >=8.4.0. Bobot yolo26*.pt cuma ada di rilis aset ultralytics v8.4.0;
+# versi lama menunjuk ke rilis v8.3.0 yang TIDAK punya yolo26s.pt, jadi
+# auto-download-nya gagal 404 dan modelnya kelihatan seperti "hilang".
+ultralytics>=8.4.0
+
+# WAJIB juga. lap dipakai ByteTrack buat data association, tapi statusnya
+# dependency OPSIONAL di ultralytics — jadi TIDAK ikut terpasang oleh
+# "pip install ultralytics". Tanpa ini, model.track() baru gagal/AutoUpdate
+# saat runtime (nyangkut lama kalau koneksi lambat, gagal total kalau offline).
+lap>=0.5.12
 
 # Kalau butuh torch versi CUDA spesifik (GPU NVIDIA), install itu duluan
 # SEBELUM ultralytics, sesuai panduan resmi PyTorch (pytorch.org/get-started) —
 # ultralytics bakal pakai versi torch yang udah keinstall, gak override otomatis.
+
+# Catatan bobot model:
+# yolo26s.pt (20,4 MB) TIDAK ikut di repo — cv/models/ di-gitignore.
+# Ambil sekali per laptop, salah satu cara:
+#   1. biarkan ultralytics auto-download, atau
+#   2. unduh manual kalau koneksi lambat:
+#      https://github.com/ultralytics/assets/releases/download/v8.4.0/yolo26s.pt
+#      lalu taruh di cv/models/yolo26s.pt
+#      sha256 646f8bc3fe0a656803d95c294f7852321748cb29d13466a1af8862e2db384a1b
