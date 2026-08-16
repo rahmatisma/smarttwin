@@ -14,11 +14,27 @@ pip-cache/
 cv/videos/
 cv/models/
 
-# Output CV di-ignore secara umum (regenerated tiap run), KECUALI
-# dataset hasil run Melpi 14 Agustus 2026 yang disimpan sebagai
-# baseline/bukti untuk laporan teknis.
+# Output CV di-ignore secara umum (regenerated tiap run). Dua jenis
+# berkas dikecualikan secara sadar:
+#   1. dataset hasil run Melpi 14 Agustus 2026 — baseline/bukti laporan.
+#   2. sync_report.* — metadata produksi: offset & durasi potong tiap
+#      kamera, satu-satunya catatan bagaimana CCTV_*_sync.mp4 dibuat.
+# CSV dan JSON diperlakukan sama supaya sync_report tidak lagi terbelah
+# (dulu .csv kena `cv/output/*.csv` sementara .json lolos tanpa aturan).
 cv/output/*.csv
+cv/output/*.json
 !cv/output/smarttwin_traffic_data_melpi_20260814.csv
+!cv/output/sync_report.csv
+!cv/output/sync_report.json
+
+# Peta jam per video — dibuat ulang tiap `sync_videos.py --dry-run`
+cv/output/clockmap/
+
+# Arsip investigasi sinkronisasi: disimpan di disk sebagai barang bukti,
+# tapi bukan jalur produksi dan terlalu besar untuk riwayat git.
+# README-nya ikut supaya isinya tetap terdokumentasi di repo.
+cv/_arsip/*
+!cv/_arsip/README.md
 
 # Dataset
 data/*.csv
