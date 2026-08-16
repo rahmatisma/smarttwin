@@ -20,7 +20,7 @@ BASE_DIR = Path(__file__).resolve().parents[2]
 PROCESSED_DIR = (
     BASE_DIR
     / "outputs"
-    / "pems04"
+    / "pems04_20"
     / "processed"
 )
 
@@ -28,6 +28,7 @@ OUTPUT_DIR = (
     BASE_DIR
     / "outputs"
     / "pems04"
+    / "sensor_1_20"
 )
 
 PLOT_DIR = OUTPUT_DIR / "plots"
@@ -794,8 +795,8 @@ def save_training_summary(
 
         "sensors": {
             "start": 1,
-            "end": 10,
-            "count": 10
+            "end": 20,
+            "count": 20   
         },
 
         "features": [
@@ -989,11 +990,11 @@ def main():
     print("=" * 70)
 
     print(
-        "[INFO] Sensors : 1-10"
+        "[INFO] Sensors : 1-20"
     )
 
     print(
-        "[INFO] Number of sensors : 10"
+        "[INFO] Number of sensors : 20"
     )
 
     print(
@@ -1065,11 +1066,11 @@ def main():
             f"got {sequence_length}."
         )
 
-    if num_sensors != 10:
+    if num_sensors != 20:
 
         raise ValueError(
             f"Jumlah sensor tidak sesuai. "
-            f"Expected 10, got {num_sensors}."
+            f"Expected 20, got {num_sensors}."
         )
 
     if num_features != 3:

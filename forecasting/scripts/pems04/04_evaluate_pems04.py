@@ -21,6 +21,7 @@ PROCESSED_DIR = (
     BASE_DIR
     / "outputs"
     / "pems04"
+    / "sensor_1_20"
     / "processed"
 )
 
@@ -28,6 +29,7 @@ OUTPUT_DIR = (
     BASE_DIR
     / "outputs"
     / "pems04"
+    / "sensor_1_20"
 )
 
 EVALUATION_DIR = (
@@ -64,7 +66,7 @@ DROPOUT = 0.2
 
 BATCH_SIZE = 64
 
-NUM_SENSORS = 10
+NUM_SENSORS = 20
 NUM_FEATURES = 3
 
 FEATURE_NAMES = [
@@ -74,7 +76,7 @@ FEATURE_NAMES = [
 ]
 
 SENSOR_START = 1
-SENSOR_END = 10
+SENSOR_END = 20
 
 RANDOM_SEED = 42
 

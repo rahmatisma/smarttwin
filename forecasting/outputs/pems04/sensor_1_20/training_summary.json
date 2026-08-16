@@ -1,0 +1,44 @@
+{
+    "dataset": "PEMS04",
+    "device": "cpu",
+    "sensors": {
+        "start": 1,
+        "end": 20,
+        "count": 20
+    },
+    "features": [
+        "flow",
+        "occupancy",
+        "speed"
+    ],
+    "num_features": 3,
+    "sequence_length": 15,
+    "forecast_horizon": 1,
+    "model": {
+        "type": "LSTM",
+        "hidden_size": 64,
+        "num_layers": 2,
+        "dropout": 0.2
+    },
+    "training": {
+        "learning_rate": 0.001,
+        "batch_size": 64,
+        "max_epochs": 100,
+        "early_stopping_patience": 10,
+        "epochs_trained": 47
+    },
+    "samples": {
+        "train": 11879,
+        "validation": 2533,
+        "test": 2535
+    },
+    "best_epoch": 37,
+    "best_validation_loss": 0.1737186384063392,
+    "final_train_loss": 0.1264227147126541,
+    "final_validation_loss": 0.17919755869122583,
+    "training_time_seconds": 148.07909655570984,
+    "model_parameters": 69436,
+    "best_model_file": "best_model.pth",
+    "training_history_file": "training_history.csv",
+    "training_plot_file": "plots/training_loss.png"
+}
