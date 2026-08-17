@@ -576,15 +576,29 @@ COUNTING_LINES = {
     # pernah menyentuhnya: 67 dari 67 crossing pada uji 60 detik
     # bergerak turun (menuju stop line). Dibiarkan apa adanya.
     #
-    # BELUM DIPERIKSA — kontradiksi yang masih menggantung:
-    # uji_estimasi_east.py melaporkan south cuma 1 crossing dalam
-    # 3x40 detik (0,5/menit), padahal verifikasi di atas memberi
-    # 67/67. Dugaan: artefak harness uji, bukan regresi logika
-    # south — harness itu memproses hanya setiap frame ke-2
-    # (LANGKAH=2) pada imgsz=960, jadi jejak terpecah dan sebagian
-    # besar perpotongan jatuh di antara frame yang disampel.
-    # Cara mengecek: jalankan ulang jendela yang sama dengan
-    # LANGKAH=1 dan imgsz penuh.
+    # KONTRADIKSI 0,5/MENIT — SUDAH TERJAWAB 17 Agustus 2026.
+    #
+    # uji_estimasi_east.py pernah melaporkan south cuma 1 crossing
+    # dalam 3x40 detik (0,5/menit), padahal verifikasi di atas
+    # memberi 67/67. Dugaan lamanya: artefak harness, karena uji itu
+    # memproses hanya setiap frame ke-2 (LANGKAH=2) pada imgsz=960
+    # sehingga jejak terpecah.
+    #
+    # DUGAAN ITU TERBANTAH. Jendela yang sama dijalankan ulang
+    # SETIAP frame, imgsz penuh, langsung lewat CameraProcessor —
+    # dan angkanya tetap rendah: 1 crossing, dari 28.336 deteksi
+    # tapi cuma 319 track dan 8 pergantian sisi garis.
+    #
+    # Penyebab sebenarnya: jendela waktunya. 16:30:12-16:31:12
+    # kebetulan menit lalu lintas BERHENTI — tandanya khas, yaitu
+    # ~89 deteksi per track (kendaraan diam berlama-lama di frame)
+    # dan queue tinggi. Diperpanjang ke 180 detik, south memberi
+    # 104 crossing = 34,7/menit, sejajar dengan west 35, east 41,
+    # north 52 pada 60 detik yang sama. Garis south SEHAT.
+    #
+    # PELAJARAN: jangan pernah memvalidasi laju crossing dari satu
+    # jendela 60 detik. Satu siklus lampu merah bisa membuat lengan
+    # yang sehat terbaca nol. Pakai minimal 180 detik.
     "south": (0.10, 0.65, 0.90, 0.65),
 
     # Pingit 3 / CCTV 3 — DIGANTI 16 Agustus 2026.

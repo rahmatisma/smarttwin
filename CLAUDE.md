@@ -4,7 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-SmartTwin — a digital twin for traffic-signal optimization at a 4-way intersection (KMIPN 2026). `simulation/`, `cv/`, `frontend/`, `forecasting/`, and `docs/` have content; **`backend/` is still empty** (no FastAPI/PostgreSQL yet), and `docker/` holds only a README.
+SmartTwin — a digital twin for traffic-signal optimization at a 4-way intersection (KMIPN 2026). `simulation/`, `cv/`, `frontend/`, `forecasting/`, and `docs/` have content; `docker/` holds only a README.
+
+`backend/` was empty until 17 August 2026 and now holds **22 Python files** — `app/main.py`, `app/api/routes/` (health, traffic, signal, forecast, recommendation), `app/schemas/`, `app/services/`, `app/core/config.py`, plus `tests/test_api.py`, `requirements.txt`, and `.env.example`. **Not yet verified** whether those endpoints serve real `TrafficState` data or are still stubs, and whether the PostgreSQL schema exists — check before relying on them.
 
 `docs/roadmap.md` is the current plan of record — a 16-day compressed schedule (15–31 August 2026). Read it before assuming what is in or out of scope.
 
