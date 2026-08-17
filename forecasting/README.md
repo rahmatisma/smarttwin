@@ -1,671 +1,290 @@
-> ## STATUS: PENGERJAAN DIHENTIKAN — 15 Agustus 2026
->
-> Modul ini **tidak dilanjutkan ke integrasi pipeline utama SmartTwin**, karena
-> kompresi timeline jadi 16 hari (lihat `docs/roadmap.md`). Kode, data, dan
-> seluruh hasil evaluasinya tetap disimpan sebagai bahan laporan teknis.
->
-> ### Tiga eksperimen, tiga status berbeda
->
-> Jangan menyamaratakan ketiganya — statusnya betul-betul berbeda.
->
-> | Dataset | Status | Hasil |
-> |---|---|---|
-> | **PeMS04** | Dilatih & dievaluasi — **paling lengkap** | R² 0,879 overall; flow 0,933 |
-> | **TMU** | Dilatih & dievaluasi | MAPE speed 2,09%; MAPE vehicle_count 25,6% |
-> | **Brisbane** | Hanya diproses — **tidak pernah masuk training** | Tidak ada metrik |
->
-> **PeMS04 — hasil paling lengkap dari ketiganya.** Sensor 1–10, feature flow /
-> occupancy / speed, sequence 15, horizon 1 langkah, 2.535 sampel test, best
-> epoch 28. Artefak lengkap: `best_model.pth`, `evaluation_summary.json`,
-> `sensor_metrics.csv`, plus plot actual-vs-predicted per feature.
->
-> | | MAE | RMSE | MAPE | R² |
-> |---|---|---|---|---|
-> | Overall | 0,1975 | 0,3666 | 142,6% | **0,8786** |
-> | flow | 0,1744 | 0,2625 | 105,2% | **0,9332** |
-> | occupancy | 0,1827 | 0,3738 | 135,0% | 0,8695 |
-> | speed | 0,2354 | 0,4412 | 187,6% | 0,8392 |
->
-> Per sensor R² berkisar 0,587 (sensor 7) sampai 0,956 (sensor 6); 8 dari 10
-> sensor di atas 0,89. Sumber: `outputs/pems04/evaluation/`.
->
-> **TMU — baseline, horizon 15 menit.** Sequence 16, 20 input feature, 2.069
-> sequence training / 443 validasi / 444 test, 42 epoch, best val loss 0,214.
->
-> | Target | MAE | RMSE | MAPE |
-> |---|---|---|---|
-> | vehicle_count | 27,87 | 38,92 | 25,6% |
-> | speed_value | 2,04 | 3,17 | **2,09%** |
-> | density_proxy | 0,0253 | 0,0356 | 25,4% |
-> | queue_proxy | 22,66 | 54,31 | *(rusak — lihat bawah)* |
->
-> R² tidak dihitung di skrip TMU. Sumber: `outputs/tmu/metrics/metrics.json`.
->
-> **Brisbane — berhenti sebelum training, karena datanya tidak cukup.**
-> `outputs/brisbane/` hanya berisi `processed/` dan `test/`; tidak ada
-> `metrics/`, tidak ada model. Alasannya terbaca langsung di
-> `brisbane_metadata.json`: dari 66 baris mentah hanya **5 baris** lolos
-> preprocessing, rentang 15:44–15:48 UTC (5 menit), sementara arsitekturnya
-> butuh `sequence_length = 16` hanya untuk membentuk **satu** sequence. Jadi
-> statusnya **bukan** "dievaluasi lalu hasilnya jelek" — training memang tidak
-> mungkin dijalankan. Collector real-time-nya berfungsi; yang kurang adalah
-> durasi pengumpulan data.
->
-> ### Kenapa dihentikan
->
-> Bukan karena modelnya gagal. R² 0,879 di PeMS04 dan MAPE 2,09% untuk prediksi
-> speed di TMU menunjukkan pipeline LSTM-nya bekerja.
->
-> Yang jadi masalah adalah **transferabilitas ke lokasi target**. TMU adalah
-> sensor jalan raya di Inggris (A174, Teesside) dan PeMS04 adalah sensor jalan
-> tol California — keduanya ruas jalan menerus, bukan simpang bersinyal, dan
-> bukan perilaku lalu lintas Indonesia. Brisbane satu-satunya yang benar-benar
-> data simpang, dan justru itu yang datanya tidak cukup. Tidak tersedia data
-> historis volume Simpang Pingit untuk menggantikannya dalam sisa waktu
-> pengerjaan (deadline 31 Agustus 2026).
->
-> **Temuan yang dilaporkan:** model forecasting yang akurat pada dataset sensor
-> jalan raya luar negeri tidak otomatis dapat dipakai untuk simpang bersinyal
-> target, dan hambatan utamanya adalah ketersediaan data lokasi — bukan
-> arsitektur model. Ini hasil penelitian yang bisa dipertanggungjawabkan, bukan
-> kegagalan yang perlu disembunyikan.
->
-> ### Catatan kehati-hatian saat mengutip angka di atas
->
-> 1. **MAE/RMSE PeMS04 dalam satuan ter-scale**, bukan kendaraan/jam. Jangan
->    dikutip sebagai angka fisik. R² aman karena tidak tergantung skala.
-> 2. **MAPE tidak dapat dipercaya di sini.** `queue_proxy` TMU menghasilkan MAPE
->    1.008.321.136% dan MAPE PeMS04 semuanya di atas 100% — keduanya artefak
->    pembagian ketika nilai aktual mendekati nol. Untuk laporan dan presentasi,
->    pakai MAE / RMSE / R².
-> 3. `training_summary.json` TMU menyimpan path absolut mesin penulis
->    (`D:\LOMBA\...`); abaikan, itu bukan lokasi di repo ini.
->
-> ### Aturan
->
-> **Jangan hapus atau refactor isi `forecasting/scripts/` dan
-> `forecasting/outputs/`** — itu bukti eksperimen untuk laporan.
->
-> Isi dokumen di bawah mendeskripsikan rencana integrasi penuh sampai ke PPO.
-> Rencana itu **sudah tidak berlaku**; dokumen sengaja dipertahankan agar jejak
-> desainnya utuh. Status yang berlaku adalah catatan ini.
+# SmartTwin Forecasting
+
+Modul forecasting pada SmartTwin digunakan untuk memprediksi kondisi lalu lintas berdasarkan data time-series historis.
+
+Model utama yang digunakan adalah **Long Short-Term Memory (LSTM)** karena data lalu lintas memiliki ketergantungan temporal, sehingga kondisi pada timestep sebelumnya dapat digunakan untuk memprediksi kondisi pada timestep berikutnya.
+
+Repository forecasting ini menggunakan beberapa dataset dengan **tujuan eksperimen yang berbeda**. Dataset tidak digabung secara langsung menjadi satu dataset karena masing-masing memiliki struktur, sensor, interval waktu, unit, dan karakteristik lalu lintas yang berbeda. Pendekatan ini dipertahankan agar setiap eksperimen dapat dievaluasi secara independen.
 
 ---
 
-# SmartTwin — Traffic Forecasting
+# 1. Struktur Forecasting
 
-Modul forecasting untuk project **SmartTwin**.
-
-Modul ini bertujuan membangun model **Long Short-Term Memory (LSTM)** untuk memprediksi kondisi lalu lintas berdasarkan data time-series.
-
-Hasil forecasting nantinya digunakan sebagai salah satu input untuk:
+Secara umum pipeline forecasting terdiri dari:
 
 ```text
-Traffic Forecast
-      ↓
-Scenario Generator
-      ↓
-SUMO
-      ↓
-Performance Analysis
-      ↓
-PPO
-      ↓
-Signal Timing Recommendation
+Dataset
+   ↓
+Inspection
+   ↓
+Preprocessing
+   ↓
+Chronological Split
+   ↓
+Scaling
+   ↓
+Sequence Generation
+   ↓
+LSTM Training
+   ↓
+Validation
+   ↓
+Best Model
+   ↓
+Test Evaluation
+   ↓
+Prediction
 ```
 
-Prinsip utama modul:
+Pipeline tersebut diterapkan secara terpisah untuk masing-masing dataset.
+
+Struktur utama:
 
 ```text
-DATA → PREDICTION → SIMULATION → DECISION
+forecasting/
+│
+├── data/
+│   ├── TMU/
+│   ├── PEMS04/
+│   ├── Brisbane/
+│   └── YOLO/
+│
+├── scripts/
+│   ├── tmu/
+│   ├── pems04/
+│   ├── brisbane/
+│   └── yolo/
+│
+├── outputs/
+│   ├── tmu/
+│   ├── pems04/
+│   ├── brisbane/
+│   └── yolo/
+│
+└── README.md
 ```
 
-LSTM bukan pengambil keputusan lampu lalu lintas.
+Setiap dataset mempunyai folder output sendiri sehingga model, scaler, metric, prediction, dan hasil eksperimen tidak tercampur.
+
+---
+
+# 2. Dataset yang Digunakan
+
+Saat ini terdapat empat dataset yang digunakan atau dikaji dalam pengembangan forecasting:
+
+| Dataset        | Status                | Tujuan                                                 |
+| -------------- | --------------------- | ------------------------------------------------------ |
+| TMU            | Training + Evaluation | Baseline forecasting                                   |
+| PEMS04         | Training + Evaluation | Eksperimen multi-sensor                                |
+| Brisbane       | Belum training        | Eksperimen data intersection                           |
+| YOLO SmartTwin | Training + Evaluation | Forecasting berdasarkan traffic state aktual SmartTwin |
+
+Penting:
 
 ```text
-LSTM = Forecasting
-PPO  = Decision Making
-SUMO = Traffic Simulation
-YOLO = Traffic State Extraction
+TMU
+PEMS04
+Brisbane
+YOLO
+```
+
+tidak digabung menjadi satu dataset training.
+
+Masing-masing dataset diproses menggunakan pipeline sendiri.
+
+---
+
+# 3. Dataset TMU
+
+## 3.1 Tujuan
+
+TMU digunakan sebagai **baseline forecasting**.
+
+Tujuan eksperimen TMU adalah memastikan bahwa pipeline forecasting berbasis LSTM dapat mempelajari pola time-series lalu lintas sebelum digunakan pada eksperimen dengan struktur data yang lebih kompleks.
+
+Dataset TMU merupakan data traffic sensor dengan interval waktu yang relatif lebih panjang dibandingkan dataset YOLO SmartTwin.
+
+---
+
+## 3.2 Karakteristik
+
+Eksperimen TMU menggunakan beberapa variabel lalu lintas seperti:
+
+```text
+vehicle_count
+speed_value
+density_proxy
+queue_proxy
+```
+
+Sequence digunakan untuk mempelajari hubungan temporal antar timestep.
+
+Konfigurasi eksperimen TMU menggunakan:
+
+```text
+Sequence length : 16
+Forecast horizon: 1 timestep
 ```
 
 ---
 
-# 1. Tujuan Modul
+## 3.3 Status
 
-Tujuan modul forecasting bukan hanya mendapatkan nilai error sekecil mungkin.
-
-Model harus:
-
-1. mempelajari hubungan temporal lalu lintas;
-2. mampu memprediksi kondisi lalu lintas beberapa timestep ke depan;
-3. menghasilkan traffic forecast yang masuk akal;
-4. dapat diterjemahkan menjadi traffic state;
-5. dapat digunakan untuk scenario generation;
-6. dapat digunakan sebagai input simulasi SUMO;
-7. pada tahap akhir dapat dikombinasikan dengan traffic state dari YOLO.
-
-Pipeline target:
+TMU telah melewati:
 
 ```text
-YOLO / Traffic Dataset
-        ↓
-Traffic State
-        ↓
-      LSTM
-        ↓
-Traffic Forecast
-        ↓
-Scenario Generator
-        ↓
-      SUMO
-        ↓
-Performance Analysis
-        ↓
-       PPO
-        ↓
-Signal Timing Recommendation
+[x] Data inspection
+[x] Preprocessing
+[x] Sequence generation
+[x] Training
+[x] Validation
+[x] Test evaluation
+[x] Prediction
 ```
+
+Eksperimen TMU menghasilkan baseline untuk dibandingkan dengan dataset lainnya.
+
+Salah satu hasil evaluasi menunjukkan prediksi `speed_value` memperoleh MAPE sekitar 2,09%.
+
+Namun, MAPE pada feature yang memiliki nilai aktual mendekati nol harus diinterpretasikan dengan hati-hati karena dapat menghasilkan nilai yang sangat besar.
 
 ---
 
-# 2. Status Pengembangan
+# 4. Dataset PEMS04
 
-## Dataset dan Pipeline
+## 4.1 Tujuan
 
-* [x] Repository SmartTwin tersedia
-* [x] Folder forecasting ditentukan
-* [x] Dataset TMU dipelajari
-* [x] Dataset PEMS04 dipelajari
-* [x] Dataset Brisbane traffic intersection dipelajari
-* [x] PEMS04 preprocessing
-* [x] PEMS04 sequence generation
-* [x] PEMS04 LSTM training
-* [x] PEMS04 evaluation
-* [x] PEMS04 prediction
-* [x] Brisbane real-time collector
-* [x] Brisbane data disimpan ke MariaDB
-* [ ] Brisbane dataset preprocessing
-* [ ] Brisbane LSTM training
-* [ ] Brisbane evaluation
-* [ ] Brisbane prediction
-* [ ] Eksperimen PEMS04 sensor 1–20
-* [ ] Perbandingan PEMS04 sensor 1–10 vs 1–20
-* [ ] Eksperimen tambahan sensor jika diperlukan
+PEMS04 digunakan untuk eksperimen **multi-sensor traffic forecasting**.
 
-## Integrasi SmartTwin
+Dataset ini digunakan untuk melihat kemampuan LSTM dalam mempelajari kondisi lalu lintas dari banyak sensor secara bersamaan.
 
-* [ ] Feature mapping antar dataset
-* [ ] Penyesuaian forecast dengan traffic state YOLO
-* [ ] Integrasi Traffic State Builder
-* [ ] Integrasi scenario generator
-* [ ] Integrasi SUMO
-* [ ] Integrasi forecast dengan demand/scenario simulation
-* [ ] Integrasi PPO
-* [ ] Signal timing recommendation
+Berbeda dengan TMU yang lebih sederhana, PEMS04 memiliki banyak sensor dan beberapa feature lalu lintas.
 
 ---
 
-# 3. Dataset yang Digunakan
+## 4.2 Struktur Data
 
-Forecasting SmartTwin menggunakan **tiga jenis dataset** dengan tujuan yang berbeda.
+Eksperimen PEMS04 menggunakan feature:
 
 ```text
-                 SMARTTWIN FORECASTING
-                         │
-          ┌──────────────┼──────────────┐
-          ↓              ↓              ↓
-         TMU           PEMS04        Brisbane
-      Baseline       Multi-sensor    Intersection
-          │              │              │
-          ↓              ↓              ↓
-       Single/       307 sensors      Traffic
-       aggregated     × 3 feature     controller
-       traffic                          data
-          │              │              │
-          └──────────────┼──────────────┘
-                         ↓
-                    LSTM Forecast
+flow
+occupancy
+speed
 ```
 
-Ketiga dataset **tidak langsung digabung menjadi satu dataset**.
-
-Masing-masing digunakan untuk menjawab pertanyaan eksperimen yang berbeda.
-
----
-
-# 4. Dataset 1 — TMU
-
-## Fungsi
-
-TMU digunakan sebagai **baseline awal** untuk memastikan pipeline forecasting bekerja dengan baik pada data time-series lalu lintas.
-
-Dataset:
+Dengan konfigurasi eksperimen yang digunakan pada pipeline:
 
 ```text
-TMU Site 9329/1 on A174 eastbound
-between A19 and A1044
+Jumlah sensor : 20
+Feature/sensor: 3
 ```
 
-Interval data:
+Sehingga:
 
 ```text
-15 menit
-```
-
-Kolom penting antara lain:
-
-```text
-Local Date
-Local Time
-Day Type ID
-Total Carriageway Flow
-Total Flow vehicles less than 5.2m
-Total Flow vehicles 5.21m - 6.6m
-Total Flow vehicles 6.61m - 11.6m
-Total Flow vehicles above 11.6m
-Speed Value
-Quality Index
-Network Link Id
-NTIS Model Version
-```
-
-### Karakteristik TMU
-
-TMU memiliki karakteristik:
-
-* data time-series;
-* interval 15 menit;
-* flow lalu lintas;
-* speed;
-* klasifikasi kendaraan berdasarkan ukuran;
-* lebih sederhana dibandingkan data sensor intersection.
-
-TMU cocok untuk menjawab:
-
-> Apakah pola temporal lalu lintas dapat dipelajari oleh LSTM?
-
-TMU **bukan representasi final traffic state SmartTwin**.
-
----
-
-# 5. Dataset 2 — PEMS04
-
-PEMS04 digunakan sebagai dataset **multi-sensor traffic forecasting**.
-
-Dataset memiliki struktur:
-
-```text
-(time, sensor, feature)
-```
-
-Hasil inspeksi dataset:
-
-```text
-Shape:
-(16992, 307, 3)
-```
-
-Artinya:
-
-```text
-16992 timestep
-307 sensor
-3 feature
-```
-
-Feature:
-
-```text
-1. Flow
-2. Occupancy
-3. Speed
-```
-
-Dengan demikian dataset menyediakan traffic information dari banyak sensor sekaligus.
-
----
-
-# 6. Mengapa PEMS04 Digunakan
-
-PEMS04 digunakan karena lebih sesuai untuk eksperimen forecasting berbasis banyak sensor.
-
-Berbeda dengan TMU yang lebih sederhana, PEMS04 memungkinkan eksperimen:
-
-```text
-Jumlah sensor
-      ↓
-10 sensor
-      ↓
-20 sensor
-      ↓
-30 sensor
-      ↓
-...
-```
-
-Tujuan eksperimen:
-
-> Apakah penambahan informasi dari lebih banyak sensor meningkatkan kemampuan LSTM dalam memprediksi kondisi lalu lintas?
-
-Karena itu PEMS04 digunakan untuk **eksperimen multi-sensor**.
-
----
-
-# 7. Konfigurasi PEMS04 Saat Ini
-
-Eksperimen pertama menggunakan:
-
-```text
-Sensor       : 1–10
-Jumlah sensor: 10
-
-Feature:
-- Flow
-- Occupancy
-- Speed
-
-Jumlah feature:
-3
-```
-
-Input LSTM:
-
-```text
-10 sensor × 3 feature
-= 30 nilai per timestep
+20 × 3 = 60 feature/timestep
 ```
 
 Sequence:
 
 ```text
-15 timestep
-```
-
-Forecast horizon:
-
-```text
-1 timestep
-```
-
-Data memiliki struktur:
-
-```text
-X:
-(samples, 15, 10, 3)
-
-y:
-(samples, 10, 3)
+Sequence length : 15
+Forecast horizon: 1
 ```
 
 ---
 
-# 8. Mengapa Occupancy dan Speed Tetap Digunakan
+## 4.3 Model
 
-Walaupun pada sistem final YOLO juga diharapkan menghasilkan informasi seperti speed dan occupancy, kedua feature tersebut tetap digunakan dalam model.
-
-Alasannya:
-
-1. memungkinkan model memanfaatkan hubungan antar-variabel;
-2. memberikan informasi tambahan selain flow;
-3. memungkinkan evaluasi performa model terhadap beberapa traffic indicator;
-4. model tidak perlu dilatih ulang jika nantinya speed atau occupancy diperlukan dalam forecasting;
-5. memungkinkan perbandingan kontribusi masing-masing feature.
-
-Dengan demikian input utama PEMS04:
+Arsitektur LSTM:
 
 ```text
-Flow
-Occupancy
-Speed
+Input
+  ↓
+LSTM Layer 1
+  ↓
+LSTM Layer 2
+  ↓
+Dropout
+  ↓
+Linear Output
 ```
-
-Bukan hanya:
-
-```text
-Flow
-```
-
----
-
-# 9. Sequence Length PEMS04
-
-Konfigurasi saat ini:
-
-```text
-sequence_length = 15
-```
-
-Artinya model melihat:
-
-```text
-15 timestep sebelumnya
-```
-
-sebelum menghasilkan prediksi timestep berikutnya.
-
-Jika interval dataset adalah 5 menit, maka:
-
-```text
-15 × 5 menit
-= 75 menit history
-```
-
-Catatan:
-
-**Makna waktu sebenarnya bergantung pada interval asli dataset.**
-
-Karena itu sequence length tidak boleh diterjemahkan menjadi durasi tertentu tanpa mengetahui interval dataset.
-
-Yang kita samakan untuk eksperimen adalah:
-
-```text
-15 timestep
-```
-
-bukan selalu:
-
-```text
-15 menit
-```
-
----
-
-# 10. Eksperimen Sensor PEMS04
-
-Eksperimen pertama:
-
-```text
-Sensor 1–10
-```
-
-Setelah baseline selesai, eksperimen berikutnya:
-
-```text
-Sensor 1–20
-```
-
-Model 1–20 **dilatih ulang dari awal**.
-
-Bukan:
-
-```text
-Model 1–10
-      ↓
-tambahkan sensor 11–20
-```
-
-Tetapi:
-
-```text
-PEMS04
-   ↓
-ambil sensor 1–20
-   ↓
-preprocessing baru
-   ↓
-training model baru
-```
-
-Perubahan input:
-
-```text
-10 sensor × 3 feature = 30 input
-```
-
-menjadi:
-
-```text
-20 sensor × 3 feature = 60 input
-```
-
-Tujuan:
-
-```text
-Bandingkan
-
-Sensor 1–10
-      VS
-Sensor 1–20
-```
-
-berdasarkan:
-
-```text
-MAE
-RMSE
-MAPE
-R²
-```
-
-Jika performa meningkat, penambahan sensor memberikan manfaat.
-
-Jika performa tidak meningkat, maka lebih banyak sensor tidak otomatis berarti model lebih baik.
-
----
-
-# 11. Mengapa Tidak Langsung Menggunakan Semua 307 Sensor
-
-PEMS04 memiliki:
-
-```text
-307 sensor
-```
-
-Namun tidak langsung digunakan seluruhnya.
-
-Alasannya:
-
-### 1. Kompleksitas model meningkat
-
-Semakin banyak sensor:
-
-```text
-input dimension ↑
-parameter ↑
-memory usage ↑
-training complexity ↑
-```
-
-### 2. Tidak semua sensor harus memberikan informasi tambahan
-
-Sensor yang terlalu banyak dapat membawa informasi yang:
-
-* redundant;
-* sangat berkorelasi;
-* kurang relevan terhadap target;
-* bahkan dapat menambah noise.
-
-### 3. Eksperimen harus dapat dijelaskan
-
-Lebih mudah menjelaskan:
-
-```text
-10 sensor → 20 sensor → 30 sensor
-```
-
-daripada langsung:
-
-```text
-307 sensor
-```
-
-tanpa mengetahui apakah penambahan tersebut benar-benar memberikan manfaat.
-
-### 4. Sesuai kebutuhan SmartTwin
-
-SmartTwin pada akhirnya tidak harus menggunakan seluruh sensor publik.
-
-Tujuan penelitian adalah menemukan konfigurasi yang cukup informatif tetapi tetap efisien.
-
----
-
-# 12. Dataset 3 — Brisbane Traffic Intersection
-
-Dataset Brisbane digunakan untuk mendekatkan forecasting terhadap kondisi **traffic intersection**.
-
-Dataset:
-
-```text
-traffic-data-at-intersection
-```
-
-Data berasal dari traffic controller/intersection.
-
-Salah satu intersection yang digunakan:
-
-```text
-TSC = 470
-```
-
-Data memiliki informasi terkait:
-
-```text
-lane
-ds1
-ds2
-ds3
-ds4
-ct
-link_plan
-```
-
-Data tersebut kemudian diproses menjadi traffic observation.
-
----
-
-# 13. Brisbane Real-Time Collector
-
-Data Brisbane dikumpulkan secara berkala menggunakan collector Python.
 
 Konfigurasi:
 
 ```text
-TSC:
-470
-
-Interval:
-60 detik
-
-Database:
-MariaDB
-
-Database name:
-smarttwin_traffic
-
-Table:
-brisbane_traffic
+Hidden size : 64
+LSTM layers : 2
+Dropout     : 0.2
 ```
 
-Collector berjalan sebagai proses 24/7 pada server.
+Arsitektur ini dipertahankan sebagai salah satu konfigurasi dasar LSTM dalam eksperimen forecasting SmartTwin.
 
-Data disimpan ke:
+---
+
+## 4.4 Status
+
+PEMS04 telah melewati:
 
 ```text
-brisbane_traffic
+[x] Data inspection
+[x] Preprocessing
+[x] Chronological split
+[x] Scaling
+[x] Sequence generation
+[x] Training
+[x] Validation
+[x] Test evaluation
+[x] Prediction
 ```
 
-dengan feature seperti:
+Eksperimen PEMS04 menunjukkan bahwa LSTM dapat mempelajari hubungan temporal antar sensor.
+
+Hasil eksperimen sebelumnya menghasilkan R² sekitar:
+
+```text
+R² = 0.8786
+```
+
+untuk evaluasi keseluruhan eksperimen PEMS04.
+
+Namun metric MAE/RMSE yang dihitung pada data ter-scaled tidak boleh langsung dianggap sebagai satuan fisik seperti kendaraan/jam.
+
+---
+
+# 5. Dataset Brisbane
+
+## 5.1 Tujuan
+
+Brisbane awalnya digunakan untuk mencari dataset yang lebih dekat dengan karakteristik **traffic intersection**.
+
+Hal ini penting karena target SmartTwin adalah persimpangan bersinyal, bukan hanya ruas jalan atau jalan tol.
+
+Pipeline Brisbane menggunakan sumber data traffic controller/API dan collector real-time.
+
+Arsitektur pengumpulan datanya:
+
+```text
+Brisbane API
+      ↓
+Python Collector
+      ↓
+MariaDB
+      ↓
+Historical Traffic Dataset
+      ↓
+Preprocessing
+      ↓
+LSTM
+```
+
+---
+
+## 5.2 Feature
+
+Data Brisbane memiliki feature yang berbeda dari PEMS04 dan TMU.
+
+Beberapa feature yang digunakan dalam eksperimen awal antara lain:
 
 ```text
 recorded
@@ -679,1526 +298,812 @@ cycle_time
 link_plan
 ```
 
----
-
-# 14. Catatan Penting tentang Brisbane
-
-Brisbane tidak boleh dianggap memiliki physical traffic density hanya karena terdapat nilai:
-
-```text
-density_proxy
-```
-
-Feature tersebut merupakan **proxy**, bukan physical density aktual.
-
-Demikian pula:
-
-```text
-queue_proxy
-```
-
-merupakan hasil pendekatan dari data yang tersedia.
-
-Dokumentasi harus selalu mempertahankan istilah:
-
-```text
-density_proxy
-queue_proxy
-```
-
-dan tidak mengklaimnya sebagai pengukuran fisik jika data pendukung tidak tersedia.
+`density_proxy` dan `queue_proxy` harus tetap disebut sebagai **proxy**, bukan pengukuran fisik langsung, apabila data pendukung untuk menghitung physical density atau queue sebenarnya tidak tersedia.
 
 ---
 
-# 15. Mengapa Brisbane Dikumpulkan Secara Real-Time
+## 5.3 Mengapa Brisbane Belum Dilatih?
 
-PEMS04 dan TMU merupakan dataset historis.
+Brisbane **tidak gagal pada tahap model**.
 
-Brisbane memberikan kesempatan untuk mendapatkan data yang terus bertambah.
+Training memang belum dapat dilakukan karena data historis yang tersedia belum mencukupi.
+
+Pada eksperimen sebelumnya:
+
+```text
+Raw rows        : 66
+Rows lolos      : 5
+Rentang waktu   : sekitar 5 menit
+Sequence length : 16
+```
+
+Dengan sequence length 16, data yang tersedia bahkan belum mampu membentuk satu sequence training yang valid.
+
+Artinya:
+
+```text
+Brisbane
+   ↓
+Data belum cukup
+   ↓
+Preprocessing terbatas
+   ↓
+Tidak ada training
+   ↓
+Tidak ada model Brisbane
+```
+
+Jadi Brisbane **tidak boleh dilaporkan sebagai model yang performanya buruk**.
+
+Status yang benar:
+
+```text
+Brisbane = dataset intersection yang dikaji,
+tetapi belum digunakan untuk training karena historical data belum mencukupi.
+```
+
+Collector real-time tetap berguna karena dapat terus mengumpulkan data sehingga dataset historis dapat bertambah.
+
+---
+
+# 6. Dataset YOLO SmartTwin
+
+## 6.1 Tujuan
+
+Dataset YOLO merupakan dataset yang berbeda dari tiga dataset sebelumnya.
+
+Dataset ini berasal dari **traffic detection SmartTwin menggunakan YOLO**, sehingga feature yang digunakan merepresentasikan kondisi lalu lintas yang dihasilkan oleh sistem SmartTwin sendiri.
+
+Dataset ini menjadi sangat penting karena tidak lagi hanya menggunakan dataset publik sebagai representasi traffic.
 
 Pipeline:
 
 ```text
-Brisbane API
-     ↓
-Python Collector
-     ↓
-MariaDB
-     ↓
-Historical Traffic Dataset
-     ↓
+CCTV
+ ↓
+YOLO
+ ↓
+Traffic Detection
+ ↓
+Traffic Aggregation
+ ↓
+YOLO Traffic Dataset
+ ↓
 Preprocessing
-     ↓
+ ↓
 LSTM
-```
-
-Dengan collector berjalan di server:
-
-```text
-Laptop tidak perlu menyala 24/7.
-```
-
-Data dapat terus dikumpulkan selama server aktif.
-
-Hal ini juga memungkinkan:
-
-* mencari data tambahan;
-* mengumpulkan data beberapa hari/minggu;
-* melakukan analisis temporal;
-* membangun dataset intersection sendiri;
-* melakukan training setelah data mencukupi.
-
----
-
-# 16. Perbedaan Ketiga Dataset
-
-| Dataset  | Fungsi                  | Karakteristik                                   |
-| -------- | ----------------------- | ----------------------------------------------- |
-| TMU      | Baseline                | Time-series sederhana, interval 15 menit        |
-| PEMS04   | Multi-sensor experiment | 307 sensor, Flow + Occupancy + Speed            |
-| Brisbane | Intersection-oriented   | Traffic controller/intersection, data real-time |
-
-Ketiga dataset **tidak harus memiliki feature yang sama**.
-
-Yang penting adalah fungsi eksperimennya jelas.
-
----
-
-# 17. Jangan Menggabungkan Ketiga Dataset Secara Langsung
-
-Dataset:
-
-```text
-TMU
-PEMS04
-Brisbane
-```
-
-tidak langsung digabung.
-
-Perbedaan yang harus diperiksa:
-
-```text
-timestamp
-interval
-unit
-geographic meaning
-sensor meaning
-vehicle classification
-measurement method
-traffic definition
-```
-
-Contoh:
-
-```text
-TMU
-Flow + Speed
-```
-
-tidak otomatis sama secara semantik dengan:
-
-```text
-Brisbane
-vehicle_count + reconstituted_flow
-```
-
-Begitu juga:
-
-```text
-PEMS04 occupancy
-```
-
-tidak boleh dianggap identik dengan:
-
-```text
-YOLO occupancy
-```
-
-tanpa definisi dan mapping yang jelas.
-
----
-
-# 18. Target Forecasting
-
-Target disesuaikan dengan dataset.
-
-## TMU
-
-Target baseline:
-
-```text
-Future vehicle flow
-Future average speed
-```
-
-Horizon:
-
-```text
-t + 15 menit
-t + 30 menit
-t + 45 menit
-```
-
-Karena TMU memiliki interval 15 menit.
-
----
-
-## PEMS04
-
-Eksperimen saat ini:
-
-```text
-Input:
-Flow
-Occupancy
-Speed
-
-Target:
-Flow
-Occupancy
-Speed
-
-Horizon:
-1 timestep
-```
-
-Model memprediksi kondisi traffic untuk timestep berikutnya pada sensor yang digunakan.
-
----
-
-## Brisbane
-
-Target akan ditentukan setelah preprocessing dan analisis data selesai.
-
-Kandidat target:
-
-```text
-vehicle_count
-reconstituted_flow
-density_proxy
-queue_proxy
-speed-related feature
-```
-
-Target akhir tidak boleh dipilih sebelum struktur dan distribusi data Brisbane diperiksa.
-
----
-
-# 19. Data Split
-
-Untuk seluruh eksperimen time-series:
-
-```text
-Chronological split
-```
-
-Bukan random split.
-
-Konfigurasi umum:
-
-```text
-70% → Training
-15% → Validation
-15% → Testing
-```
-
-Urutan:
-
-```text
-PAST --------------------------------------> FUTURE
-
-|------------- TRAIN -------------|
-                                |---- VALIDATION ----|
-                                                   |------ TEST ------|
-```
-
-Tujuan:
-
-menghindari informasi masa depan masuk ke training.
-
----
-
-# 20. Data Leakage
-
-Scaler hanya boleh di-fit menggunakan training data.
-
-Benar:
-
-```text
-TRAIN
-  ↓
-fit scaler
-
-VALIDATION
-  ↓
-transform
-
-TEST
-  ↓
-transform
-```
-
-Salah:
-
-```text
-TRAIN + VALIDATION + TEST
-          ↓
-      fit scaler
-```
-
-Data masa depan tidak boleh digunakan untuk membentuk input prediksi masa lalu.
-
----
-
-# 21. Model LSTM
-
-Model baseline menggunakan LSTM berbasis PyTorch.
-
-Konfigurasi PEMS04 saat ini:
-
-```text
-Hidden size : 64
-LSTM layers : 2
-Dropout     : 0.2
-
-Learning rate : 0.001
-Batch size    : 64
-
-Maximum epochs       : 100
-Early stopping       : 10 epochs
-```
-
-Struktur:
-
-```text
-Input
-  ↓
-Flatten sensor × feature
-  ↓
-LSTM
-  ↓
-LSTM
-  ↓
-Dropout
-  ↓
-Output Layer
-  ↓
-Forecast
-```
-
-Untuk PEMS04 sensor 1–10:
-
-```text
-10 × 3 = 30
-```
-
-input per timestep.
-
-Untuk sensor 1–20:
-
-```text
-20 × 3 = 60
-```
-
-input per timestep.
-
----
-
-# 22. Early Stopping
-
-Training menggunakan early stopping.
-
-Tujuan:
-
-menghentikan training ketika validation loss tidak lagi membaik.
-
-Contoh:
-
-```text
-Patience = 10
-```
-
-Model terbaik ditentukan berdasarkan:
-
-```text
-Validation Loss terendah
-```
-
-Model tersebut disimpan sebagai:
-
-```text
-best_model.pth
-```
-
-Model terbaik **tidak boleh ditimpa oleh model eksperimen lain** tanpa identifikasi yang jelas.
-
----
-
-# 23. Hasil Training PEMS04 Saat Ini
-
-Eksperimen pertama:
-
-```text
-Dataset     : PEMS04
-Sensor      : 1–10
-Feature     : Flow + Occupancy + Speed
-Sequence    : 15 timestep
-Horizon     : 1 timestep
-```
-
-Hasil training:
-
-```text
-Best epoch:
-28
-
-Best validation loss:
-0.111231
-```
-
-Model:
-
-```text
-59,806 parameters
-```
-
-Model telah berhasil disimpan dan dapat digunakan untuk evaluation dan prediction.
-
----
-
-# 24. Evaluasi PEMS04 Saat Ini
-
-Hasil test:
-
-```text
-MAE  : 0.197478
-MSE  : 0.134427
-RMSE : 0.366643
-R²   : 0.878620
-```
-
-Per-feature:
-
-```text
-Feature       MAE       RMSE       R²
-
-Flow          0.174370  0.262502   0.933240
-Occupancy     0.182695  0.373828   0.869451
-Speed         0.235368  0.441166   0.839173
-```
-
-Catatan:
-
-MAPE menghasilkan nilai tinggi:
-
-```text
-142.5780%
-```
-
-MAPE perlu ditafsirkan dengan hati-hati karena nilai aktual yang mendekati nol dapat membuat MAPE menjadi sangat besar.
-
-Karena itu evaluasi tidak boleh hanya menggunakan MAPE.
-
-Metric utama yang perlu diperhatikan:
-
-```text
-MAE
-RMSE
-R²
-```
-
----
-
-# 25. Evaluasi Per Sensor
-
-Evaluasi juga dilakukan per sensor.
-
-Hal ini penting karena performa model tidak selalu sama pada setiap sensor.
-
-Contoh hasil:
-
-```text
-Sensor 1  → R² 0.935
-Sensor 6  → R² 0.956
-Sensor 7  → R² 0.587
-Sensor 10 → R² 0.930
-```
-
-Sensor 7 menunjukkan performa yang jauh lebih rendah dibandingkan beberapa sensor lain.
-
-Hal tersebut menjadi bahan analisis sebelum langsung mengubah arsitektur model.
-
----
-
-# 26. Prediction
-
-Prediction pipeline menggunakan:
-
-```text
-best_model.pth
-```
-
-dan menghasilkan:
-
-```text
-prediction.npz
-prediction.csv
-prediction_summary.json
-```
-
-Prediction summary menyimpan informasi:
-
-```text
-dataset
-sequence_length
-forecast_horizon
-sensor configuration
-features
-model architecture
-inference time
-prediction files
-```
-
-Output prediction nantinya harus dapat diterjemahkan menjadi:
-
-```text
+ ↓
 Traffic Forecast
 ```
 
-yang digunakan oleh tahap berikutnya.
+Dengan demikian forecasting dapat menggunakan traffic state yang berasal dari sistem SmartTwin.
 
 ---
 
-# 27. Feature Traffic State SmartTwin
+# 7. Struktur Dataset YOLO
 
-Traffic state final yang diharapkan dari YOLO dapat memiliki struktur seperti:
+Dataset YOLO yang digunakan memiliki:
 
 ```text
-timestamp
-intersection_id
-lane_id
+Intersection:
+simpang4-pingit
+```
 
+Terdapat:
+
+```text
+4 approaches
+12 lane sensors
+```
+
+Approach:
+
+```text
+north
+east
+south
+west
+```
+
+Setiap approach memiliki lane:
+
+```text
+lane_1
+lane_2
+lane_3
+```
+
+Sehingga:
+
+```text
+4 approach × 3 lane
+= 12 lane sensors
+```
+
+---
+
+# 8. Feature Dataset YOLO
+
+Berbeda dengan eksperimen PEMS04, jumlah feature pada dataset YOLO **tidak dipaksakan menjadi 3 feature**.
+
+Semua feature yang tersedia dan relevan dari hasil YOLO digunakan.
+
+Terdapat **8 feature per sensor**:
+
+```text
 vehicle_count
 car_count
 motorcycle_count
 bus_count
 truck_count
-
-average_speed
-queue_length
-density
-occupancy
+queue_length_veh
+queue_length_m_est
+density_index
 ```
 
-LSTM tidak harus langsung menggunakan seluruh feature tersebut.
-
-Feature yang digunakan harus berdasarkan:
+Sehingga:
 
 ```text
-ketersediaan data
-kualitas data
-konsistensi definisi
-kebutuhan forecasting
+12 sensor × 8 feature
+= 96 feature/timestep
 ```
 
----
+Dengan demikian input LSTM:
 
-# 28. Hubungan PEMS04 dengan YOLO
+```text
+96 feature/timestep
+```
+
+dan output:
+
+```text
+96 feature/timestep
+```
+
+Ini berbeda dengan PEMS04.
 
 PEMS04:
 
 ```text
-Flow
-Occupancy
-Speed
+20 sensor × 3 feature
+= 60 feature
 ```
 
-YOLO nantinya dapat menghasilkan:
+YOLO:
 
 ```text
-Vehicle Count
-Vehicle Class
-Speed
-Queue
-Density
-Occupancy
+12 sensor × 8 feature
+= 96 feature
 ```
 
-Keduanya memiliki konsep traffic yang beririsan, tetapi **tidak otomatis memiliki definisi yang sama**.
-
-Sebelum integrasi harus dilakukan:
-
-```text
-Feature Mapping
-       ↓
-Unit Mapping
-       ↓
-Temporal Alignment
-       ↓
-Semantic Validation
-```
-
-Baru kemudian model dapat disesuaikan dengan traffic state YOLO.
+Perbedaan jumlah feature tersebut memang disengaja karena mengikuti struktur asli masing-masing dataset.
 
 ---
 
-# 29. Hubungan Brisbane dengan YOLO
+# 9. Karakteristik Waktu Dataset YOLO
 
-Brisbane lebih dekat dengan konsep:
+Dataset YOLO yang digunakan memiliki rentang:
 
 ```text
-Intersection Traffic
+Start:
+2026-08-15 16:30:12
+
+End:
+2026-08-15 17:19:16
 ```
 
-dibandingkan TMU.
-
-Karena itu Brisbane dapat digunakan untuk menjembatani:
+Durasi:
 
 ```text
-Public Traffic Dataset
-        ↓
-Intersection Dataset
-        ↓
-YOLO Traffic State
+49 menit 04 detik
 ```
 
-Namun data Brisbane tetap harus dipetakan terlebih dahulu.
-
-Contoh:
+Dataset memiliki:
 
 ```text
-Brisbane vehicle_count
-        ↓
-?
-YOLO vehicle_count
+Original timestamps : 2,616
+Expected 1-second   : 2,945
+Missing slots       : 329
 ```
 
-Kesamaan nama tidak otomatis berarti kesamaan definisi.
+Karena data berasal dari proses traffic detection, timestamp tidak seluruhnya membentuk grid waktu 1 detik yang sempurna.
 
----
-
-# 30. Hubungan Forecasting dengan SUMO
-
-Forecast LSTM digunakan untuk membantu membentuk kondisi traffic masa depan.
-
-Konsep:
+Pipeline preprocessing kemudian membentuk timeline lengkap dengan:
 
 ```text
-Current Traffic State
-        +
-Future Traffic Forecast
-        ↓
-Scenario Generator
-        ↓
-SUMO
+2,945 timestep
 ```
 
-Scenario generator dapat menggunakan forecast untuk membentuk skenario:
+dan menghasilkan complete lane table dengan:
 
 ```text
-Normal traffic
-High traffic
-Low traffic
-Increasing traffic
-Congested traffic
-```
-
-Skenario tersebut kemudian diuji di SUMO.
-
-SUMO dapat menghasilkan:
-
-```text
-waiting time
-queue length
-delay
-throughput
-emission
+12 sensor × 2,945 timestep
 ```
 
 ---
 
-# 31. Hubungan Forecasting dengan PPO
+# 10. Feature Statistics YOLO
 
-LSTM tidak menentukan lampu lalu lintas.
+Hasil preprocessing:
 
-PPO menerima:
+| Feature            | Min |       Max |     Mean |
+| ------------------ | --: | --------: | -------: |
+| vehicle_count      |   0 |        15 | 3.089842 |
+| car_count          |   0 |         7 | 1.284465 |
+| motorcycle_count   |   0 |        12 | 1.616016 |
+| bus_count          |   0 |         2 | 0.058376 |
+| truck_count        |   0 |         3 | 0.130985 |
+| queue_length_veh   |   0 |         5 | 0.073288 |
+| queue_length_m_est |   0 |        15 | 0.173599 |
+| density_index      |   0 | 45.454544 | 9.267092 |
 
-```text
-Current Traffic State
-        +
-Forecast Traffic State
-        +
-Simulation State
-```
-
-kemudian menentukan:
-
-```text
-Signal Timing Action
-```
-
-Contoh action:
+Tidak ditemukan:
 
 ```text
-green duration
-phase selection
-phase extension
-phase switching
-```
-
-Konsep:
-
-```text
-Traffic State
-     +
-LSTM Forecast
-     ↓
-    PPO
-     ↓
-Signal Action
-     ↓
-   SUMO
-     ↓
-Performance
-     ↓
-Reward
-     ↓
-   PPO
+NaN
+Inf
+negative feature values
+duplicate sensor records
 ```
 
 ---
 
-# 32. Struktur Folder Saat Ini
+# 11. YOLO Preprocessing
 
-Struktur yang digunakan untuk eksperimen PEMS04:
+Dataset YOLO menggunakan chronological split:
 
 ```text
-forecasting/
-│
-├── data/
-│   ├── TMU.csv
-│   ├── Brisbane.csv
-│   └── PEMS04.npz
-│
-├── scripts/
-│   └── pems04/
-│       ├── 01_inspect_pems04.py
-│       ├── 02_preprocess_pems04.py
-│       ├── 03_train_pems04.py
-│       ├── 04_evaluate_pems04.py
-│       └── 05_predict_pems04.py
-│
-├── outputs/
-│   └── pems04/
-│       ├── processed/
-│       │   ├── X_train.npy
-│       │   ├── y_train.npy
-│       │   ├── X_val.npy
-│       │   ├── y_val.npy
-│       │   ├── X_test.npy
-│       │   ├── y_test.npy
-│       │   ├── scaler_X.pkl
-│       │   └── pems04_config.json
-│       │
-│       ├── best_model.pth
-│       ├── training_history.csv
-│       ├── training_summary.json
-│       │
-│       ├── plots/
-│       │   └── training_loss.png
-│       │
-│       └── evaluation/
-│           ├── test_predictions.npz
-│           ├── overall_metrics.json
-│           ├── feature_metrics.csv
-│           ├── sensor_metrics.csv
-│           ├── evaluation_summary.json
-│           └── plots/
-│
-└── ...
+Train      : 70%
+Validation : 15%
+Test       : 15%
+```
+
+Dari:
+
+```text
+2,945 timestep
+```
+
+dihasilkan:
+
+```text
+Train : 2,061 timestep
+Val   :   442 timestep
+Test  :   442 timestep
+```
+
+Scaler hanya di-fit menggunakan training data.
+
+Sequence:
+
+```text
+Sequence length : 15 timestep
+Forecast horizon: 1 timestep
+```
+
+Hasil sequence:
+
+```text
+X_train : (2046, 15, 96)
+y_train : (2046, 96)
+
+X_val   : (427, 15, 96)
+y_val   : (427, 96)
+
+X_test  : (427, 15, 96)
+y_test  : (427, 96)
 ```
 
 ---
 
-# 33. Eksperimen PEMS04 Selanjutnya
+# 12. YOLO LSTM Model
 
-Eksperimen berikutnya adalah:
+Arsitektur YOLO forecasting menggunakan konfigurasi LSTM yang konsisten dengan eksperimen LSTM sebelumnya.
+
+```text
+Input
+  ↓
+LSTM Layer 1
+  ↓
+LSTM Layer 2
+  ↓
+Dropout
+  ↓
+Linear Layer
+  ↓
+96 outputs
+```
+
+Konfigurasi:
+
+```text
+Input size   : 96
+Hidden size  : 64
+LSTM layers  : 2
+Dropout      : 0.2
+Output size  : 96
+```
+
+Jumlah parameter:
+
+```text
+80,992
+```
+
+---
+
+# 13. YOLO Training Result
+
+Training menggunakan:
+
+```text
+Batch size       : 64
+Learning rate    : 0.001
+Maximum epochs   : 100
+Early stopping   : 15 epochs
+Loss             : MSELoss
+Weight decay     : 1e-5
+```
+
+Training berhenti pada:
+
+```text
+Epoch : 32
+```
+
+karena early stopping.
+
+Best model diperoleh pada:
+
+```text
+Best epoch     : 17
+Best val loss  : 0.540659
+```
+
+Model disimpan sebagai:
+
+```text
+outputs/yolo/models/best_model.pth
+```
+
+---
+
+# 14. YOLO Test Evaluation
+
+Hasil evaluasi training menghasilkan:
+
+```text
+MAE  : 0.391496
+MSE  : 0.494536
+RMSE : 0.703232
+MAPE : 110.5642%
+R²   : 0.388572
+```
+
+Evaluasi terpisah kemudian dilakukan menggunakan pipeline evaluation.
+
+Hasil evaluasi pada skala asli:
+
+```text
+MAE   : 0.851906
+MSE   : 3.967761
+RMSE  : 1.991924
+sMAPE : 133.5164%
+R²    : 0.767294
+```
+
+Perbedaan angka tersebut terjadi karena evaluasi dilakukan pada tahap dan representasi data yang berbeda.
+
+Untuk interpretasi performa fisik, metric pada **skala asli** lebih relevan.
+
+---
+
+# 15. Catatan tentang MAPE
+
+MAPE pada dataset traffic tidak selalu dapat digunakan sebagai indikator utama.
+
+Beberapa feature memiliki banyak nilai:
+
+```text
+0
+```
+
+atau mendekati:
+
+```text
+0
+```
+
+Contohnya:
+
+```text
+bus_count
+truck_count
+queue_length_veh
+```
+
+Ketika nilai aktual mendekati nol:
+
+```text
+MAPE = |actual - prediction| / |actual|
+```
+
+dapat menghasilkan nilai yang sangat besar.
+
+Karena itu:
+
+```text
+MAPE tinggi
+```
+
+tidak selalu berarti model sepenuhnya gagal.
+
+Metric yang juga harus diperhatikan:
+
+```text
+MAE
+RMSE
+R²
+sMAPE
+```
+
+serta evaluasi per-feature dan per-sensor.
+
+---
+
+# 16. Perbandingan Dataset
+
+| Dataset  | Domain                  |             Sensor |                      Feature | Status         |
+| -------- | ----------------------- | -----------------: | ---------------------------: | -------------- |
+| TMU      | Road traffic            |           Terbatas |            Traffic variables | Trained        |
+| PEMS04   | Highway traffic         |       Multi-sensor |       Flow, occupancy, speed | Trained        |
+| Brisbane | Signalized intersection | Intersection lanes | Controller/traffic variables | Belum training |
+| YOLO     | SmartTwin intersection  |    12 lane sensors |             8 feature/sensor | Trained        |
+
+Perbedaan feature bukan masalah.
+
+Yang penting adalah:
+
+```text
+dataset
+   ↓
+feature sesuai dataset
+   ↓
+preprocessing sesuai dataset
+   ↓
+model interface sesuai jumlah feature
+```
+
+Tidak ada alasan untuk memaksa semua dataset mempunyai jumlah feature yang sama.
+
+---
+
+# 17. Mengapa Dataset Tidak Digabung?
+
+TMU, PEMS04, Brisbane, dan YOLO memiliki perbedaan:
+
+```text
+timestamp
+interval waktu
+unit
+sensor
+lokasi
+jenis jalan
+definisi traffic
+metode pengukuran
+vehicle classification
+feature
+```
+
+Contohnya:
 
 ```text
 PEMS04
-Sensor 1–20
-Flow + Occupancy + Speed
-Sequence 15 timestep
-Horizon 1 timestep
+flow + occupancy + speed
+```
+
+tidak secara otomatis memiliki arti yang sama dengan:
+
+```text
+YOLO
+vehicle_count + car_count + motorcycle_count + ...
+```
+
+Karena itu dataset digunakan secara independen.
+
+Tujuan eksperimen bukan membuat satu dataset campuran, tetapi membandingkan bagaimana forecasting bekerja pada karakteristik data yang berbeda.
+
+---
+
+# 18. Output Directory
+
+Semua output dipisahkan berdasarkan dataset.
+
+```text
+outputs/
+│
+├── tmu/
+│   ├── processed/
+│   ├── models/
+│   ├── metrics/
+│   ├── predictions/
+│   └── plots/
+│
+├── pems04/
+│   ├── processed/
+│   ├── models/
+│   ├── metrics/
+│   ├── prediction/
+│   └── plots/
+│
+├── brisbane/
+│   ├── processed/
+│   └── test/
+│
+└── yolo/
+    ├── processed/
+    ├── models/
+    ├── metrics/
+    └── plots/
+```
+
+Brisbane tidak memiliki folder model karena training belum dilakukan.
+
+YOLO memiliki:
+
+```text
+processed/
+models/
+metrics/
+plots/
+```
+
+karena pipeline YOLO telah mencapai tahap training dan evaluation.
+
+---
+
+# 19. Script Pipeline
+
+## TMU
+
+```text
+scripts/tmu/
 ```
 
 Pipeline:
 
 ```text
-PEMS04.npz
-     ↓
+01_inspect
 02_preprocess
-     ↓
-Sensor 1–20
-     ↓
-15 timestep sequence
-     ↓
 03_train
-     ↓
-best_model
-     ↓
 04_evaluate
-     ↓
 05_predict
 ```
 
-Kemudian dibandingkan dengan eksperimen:
+---
+
+## PEMS04
 
 ```text
-Sensor 1–10
+scripts/pems04/
 ```
 
-Perbandingan:
+Pipeline:
 
 ```text
-                Sensor 1–10    Sensor 1–20
-
-MAE                 ?              ?
-RMSE                ?              ?
-MAPE                ?              ?
-R²                  ?              ?
-Training time       ?              ?
-Parameters          ?              ?
-Inference time      ?              ?
+01_inspect
+02_preprocess
+03_train
+04_evaluate
+05_predict
 ```
 
 ---
 
-# 34. Eksperimen Sensor Berikutnya
-
-Tidak langsung menggunakan seluruh 307 sensor.
-
-Jika sensor 1–20 memberikan peningkatan yang jelas, eksperimen dapat dilanjutkan:
+## Brisbane
 
 ```text
-1–10
-   ↓
-1–20
-   ↓
-1–30
-   ↓
-...
+scripts/brisbane/
 ```
 
-Jika penambahan sensor tidak lagi memberikan peningkatan yang berarti, eksperimen dapat dihentikan.
-
-Prinsip:
-
-> Cari jumlah sensor yang memberikan trade-off terbaik antara performa dan kompleksitas.
-
----
-
-# 35. Brisbane Training
-
-Setelah data Brisbane cukup terkumpul:
+Pipeline saat ini berfokus pada:
 
 ```text
-Brisbane API
-     ↓
-MariaDB
-     ↓
-brisbane_traffic
-     ↓
-Export / preprocessing
-     ↓
-Feature selection
-     ↓
-Sequence generation
-     ↓
-LSTM
-```
-
-Sebelum training harus diperiksa:
-
-```text
-timestamp
-missing timestep
-duplicate
-interval
-distribusi feature
-outlier
-jumlah data
-```
-
-Tidak boleh langsung training hanya karena data sudah masuk database.
-
----
-
-# 36. Mengapa Brisbane Tidak Langsung Ditraining Sekarang
-
-Brisbane collector baru bertugas mengumpulkan data.
-
-Model membutuhkan data historis yang cukup untuk mempelajari:
-
-```text
-jam sibuk
-jam normal
-perubahan traffic
-hari berbeda
-pola temporal
-```
-
-Semakin pendek periode data:
-
-```text
-pola temporal ↓
-```
-
-Semakin sulit memastikan model benar-benar belajar pola traffic.
-
-Karena itu selama Brisbane mengumpulkan data, pekerjaan lain dapat dilakukan paralel:
-
-```text
-Brisbane collector
-        +
-PEMS04 experiments
-        +
-TMU analysis
-        +
-SUMO preparation
-        +
-YOLO integration
-```
-
----
-
-# 37. Strategi Pengembangan Dataset
-
-Tidak semua dataset harus berakhir menjadi satu model.
-
-Strategi:
-
-```text
-TMU
- ↓
-Baseline forecasting
-```
-
-```text
-PEMS04
- ↓
-Multi-sensor forecasting
- ↓
-Sensor experiment
-```
-
-```text
-Brisbane
- ↓
-Intersection forecasting
- ↓
-Real-time/historical adaptation
-```
-
-Kemudian:
-
-```text
-TMU
-PEMS04
-Brisbane
-   ↓
-Knowledge / feature / architecture comparison
-   ↓
-SmartTwin Forecasting Design
-```
-
-Bukan:
-
-```text
-TMU + PEMS04 + Brisbane
-          ↓
-     langsung merge
-```
-
----
-
-# 38. Data Leakage Checklist
-
-Sebelum setiap training:
-
-```text
-[ ] Chronological split
-[ ] Scaler fit hanya pada training
-[ ] Validation tidak masuk training
-[ ] Test tidak masuk training
-[ ] Tidak menggunakan future information
-[ ] Sequence dibuat setelah split yang benar
-```
-
----
-
-# 39. Dataset Quality Checklist
-
-Sebelum training:
-
-```text
-[ ] Timestamp valid
-[ ] Timestamp terurut
-[ ] Interval diketahui
-[ ] Missing timestep diperiksa
-[ ] Duplicate diperiksa
-[ ] Missing value diperiksa
-[ ] Outlier diperiksa
-[ ] Unit feature diketahui
-[ ] Feature definition diketahui
-```
-
----
-
-# 40. Model Evaluation Checklist
-
-Model tidak dianggap berhasil hanya karena training selesai.
-
-Periksa:
-
-```text
-[ ] Training loss turun
-[ ] Validation loss masuk akal
-[ ] Tidak overfitting parah
-[ ] Test prediction mengikuti actual
-[ ] MAE dihitung
-[ ] RMSE dihitung
-[ ] MAPE dihitung dengan hati-hati
-[ ] R² dihitung
-[ ] Per-feature metrics diperiksa
-[ ] Per-sensor metrics diperiksa
-```
-
----
-
-# 41. Jika Model Jelek
-
-Jangan langsung:
-
-```text
-Tambah layer
-Tambah neuron
-Tambah epoch
-Ganti LSTM
-Ganti dataset
-```
-
-Urutan pemeriksaan:
-
-```text
-1. Dataset
-2. Timestamp
-3. Missing value
-4. Duplicate
-5. Interval
-6. Feature
-7. Target
-8. Sequence
-9. Scaling
-10. Data split
-11. Leakage
-12. Model
-13. Hyperparameter
-```
-
----
-
-# 42. Jika MAPE Sangat Besar
-
-MAPE tidak boleh langsung digunakan sebagai satu-satunya indikator.
-
-Jika actual mendekati nol:
-
-```text
-actual ≈ 0
-```
-
-maka:
-
-```text
-percentage error
-```
-
-dapat menjadi sangat besar.
-
-Contoh PEMS04:
-
-```text
-Overall MAPE = 142.578%
-```
-
-Nilai tersebut perlu dianalisis bersama:
-
-```text
-MAE
-RMSE
-R²
-```
-
-dan distribusi target.
-
----
-
-# 43. Aturan Penting
-
-## RULE 1 — Jangan mengejar dataset tanpa batas
-
-Dataset tambahan hanya digunakan jika memberikan manfaat nyata.
-
-Deadline lebih penting daripada jumlah dataset.
-
----
-
-## RULE 2 — Jangan menggabungkan dataset secara sembarangan
-
-Periksa:
-
-```text
-timestamp
-unit
-interval
-geographic meaning
-sensor meaning
-measurement method
-```
-
----
-
-## RULE 3 — Jangan mengklaim feature yang tidak tersedia
-
-Jika hanya memiliki:
-
-```text
-density_proxy
-```
-
-jangan menyebutnya:
-
-```text
-actual traffic density
-```
-
----
-
-## RULE 4 — Jangan random split time-series
-
-Gunakan chronological split.
-
----
-
-## RULE 5 — Jangan fit scaler menggunakan test data
-
-Scaler harus berasal dari training data.
-
----
-
-## RULE 6 — Jangan menghapus model eksperimen
-
-Setiap eksperimen harus memiliki output terpisah atau identitas eksperimen yang jelas.
-
----
-
-## RULE 7 — Jangan mengubah target hanya karena metric jelek
-
-Periksa terlebih dahulu:
-
-```text
-dataset
+data collection
+inspection
 preprocessing
-sequence
-scaling
-target
-leakage
+```
+
+Training belum dilakukan karena historical data belum mencukupi.
+
+---
+
+## YOLO
+
+```text
+scripts/yolo/
+```
+
+Pipeline:
+
+```text
+01_inspect_yolo.py
+02_preprocess_yolo.py
+03_train_yolo.py
+04_evaluate_yolo.py
+05_predict_yolo.py
+```
+
+Status:
+
+```text
+[x] Inspection
+[x] Preprocessing
+[x] Training
+[x] Evaluation
+[ ] Prediction final
 ```
 
 ---
 
-## RULE 8 — Jangan membuat LSTM terlalu kompleks tanpa alasan
+# 20. Data Leakage Prevention
 
-Kompleksitas harus memiliki alasan eksperimental.
+Semua training time-series menggunakan chronological split.
+
+Tidak digunakan random split untuk membagi masa lalu dan masa depan.
+
+Prosedur:
+
+```text
+Past ------------------------------> Future
+
+|--------- TRAIN --------|-- VAL --|-- TEST --|
+```
+
+Scaler juga hanya di-fit menggunakan training data.
+
+```text
+TRAIN
+  ↓
+fit scaler
+  ↓
+transform TRAIN
+transform VAL
+transform TEST
+```
+
+Validation dan test tidak digunakan untuk fitting scaler.
+
+Hal ini dilakukan untuk mencegah informasi masa depan masuk ke proses training.
 
 ---
 
-## RULE 9 — LSTM bukan PPO
+# 21. Forecasting SmartTwin
+
+Dataset YOLO memberikan jalur yang lebih langsung menuju sistem SmartTwin:
 
 ```text
-LSTM = Forecasting
-PPO  = Decision Making
-```
-
----
-
-## RULE 10 — Output harus dapat digunakan tahap berikutnya
-
-Forecast harus dapat diterjemahkan menjadi traffic state dan digunakan dalam:
-
-```text
-Scenario Generator
-SUMO
-PPO
-```
-
----
-
-# 44. Roadmap Saat Ini
-
-Roadmap pengembangan forecasting:
-
-```text
-                    ┌──────────────┐
-                    │     TMU      │
-                    │   Baseline   │
-                    └──────┬───────┘
-                           ↓
-                     LSTM Baseline
-                           │
-                           ↓
-                      Evaluation
-                           │
-                           │
-                    ┌──────┴───────┐
-                    ↓              ↓
-                PEMS04         Brisbane
-             Multi-sensor      Intersection
-                    │              │
-                    ↓              ↓
-                1–10 sensor     Data Collection
-                    │              │
-                    ↓              │
-                1–20 sensor        │
-                    │              │
-                    ↓              ↓
-              Sensor Analysis   Preprocessing
-                    │              │
-                    └──────┬───────┘
-                           ↓
-                    Feature Mapping
-                           ↓
-                    Traffic State
-                           ↓
-                         YOLO
-                           ↓
-                    LSTM Forecast
-                           ↓
-                  Scenario Generator
-                           ↓
-                         SUMO
-                           ↓
-                  Performance Analysis
-                           ↓
-                          PPO
-                           ↓
-              Signal Timing Recommendation
-```
-
----
-
-# 45. Langkah Berikutnya
-
-Prioritas pengembangan saat ini:
-
-### Step 1 — PEMS04 Sensor 1–20
-
-```text
-02_preprocess
-      ↓
-03_train
-      ↓
-04_evaluate
-      ↓
-05_predict
-```
-
-Kemudian bandingkan:
-
-```text
-PEMS04 1–10
-vs
-PEMS04 1–20
-```
-
----
-
-### Step 2 — Lanjutkan pengumpulan Brisbane
-
-Collector tetap berjalan:
-
-```text
-API
- ↓
-MariaDB
- ↓
-brisbane_traffic
-```
-
-Sambil menunggu data bertambah, tidak perlu menghentikan eksperimen PEMS04.
-
----
-
-### Step 3 — Analisis Brisbane
-
-Setelah data cukup:
-
-```text
-timestamp analysis
-missing data
-duplicate
-interval
-distribution
-correlation
-feature selection
-```
-
----
-
-### Step 4 — Brisbane preprocessing
-
-Tentukan feature dan target berdasarkan data nyata.
-
----
-
-### Step 5 — Brisbane LSTM
-
-Bangun model dengan pipeline yang konsisten:
-
-```text
-preprocess
-→ sequence
-→ train
-→ evaluate
-→ predict
-```
-
----
-
-### Step 6 — Bandingkan Dataset
-
-Bandingkan karakteristik:
-
-```text
-TMU
-PEMS04
-Brisbane
-```
-
-bukan hanya berdasarkan metric, tetapi juga:
-
-```text
-data structure
-temporal resolution
-feature availability
-sensor coverage
-intersection relevance
-forecast capability
-```
-
----
-
-### Step 7 — Feature Mapping
-
-Setelah model dan dataset dipahami:
-
-```text
-PEMS04
-      +
-Brisbane
-      +
-YOLO Traffic State
-```
-
-dipetakan ke konsep traffic state SmartTwin.
-
----
-
-### Step 8 — Integrasi SmartTwin
-
-Final pipeline:
-
-```text
+CCTV
+  ↓
 YOLO
- ↓
-Traffic State Builder
- ↓
-Current Traffic State
-       +
-LSTM Forecast
- ↓
+  ↓
+Vehicle Detection
+  ↓
+Traffic State
+  ↓
+12 Lane Sensors
+  ↓
+8 Features / Sensor
+  ↓
+96 Features / Timestep
+  ↓
+Sequence 15 Timestep
+  ↓
+LSTM
+  ↓
+Forecast 1 Timestep
+  ↓
+Traffic Forecast
+```
+
+Output forecasting kemudian dapat digunakan oleh komponen berikutnya dalam SmartTwin:
+
+```text
+Traffic Forecast
+       ↓
 Scenario Generator
- ↓
+       ↓
 SUMO
- ↓
+       ↓
+Traffic Simulation
+       ↓
 Performance Analysis
- ↓
-PPO
- ↓
+       ↓
+Adaptive Decision
+       ↓
 Signal Timing Recommendation
 ```
 
 ---
 
-# 46. Prinsip Akhir Project
+# 22. Posisi Masing-Masing Dataset dalam Penelitian
 
-Tujuan akhir bukan:
+Dataset tidak mempunyai posisi yang sama.
 
-```text
-DATA
- ↓
-LSTM
- ↓
-selesai
-```
-
-Tetapi:
+### TMU
 
 ```text
-DATA
- ↓
-TRAFFIC STATE
- ↓
-PREDICTION
- ↓
-SCENARIO
- ↓
-SIMULATION
- ↓
-DECISION
+Baseline
 ```
 
-atau secara sederhana:
+Digunakan untuk memastikan pipeline forecasting dapat berjalan.
+
+### PEMS04
 
 ```text
-DATA → PREDICTION → SIMULATION → DECISION
+Multi-sensor experiment
 ```
 
-TMU membantu membangun **baseline**.
+Digunakan untuk menguji forecasting dengan banyak sensor dan beberapa feature traffic.
 
-PEMS04 membantu menguji **multi-sensor traffic forecasting**.
-
-Brisbane membantu mendekatkan sistem ke **traffic intersection dan data yang dikumpulkan secara real-time**.
-
-YOLO nantinya menyediakan **traffic state aktual dari kamera**.
-
-SUMO digunakan untuk **menguji skenario traffic**.
-
-PPO digunakan untuk **mengambil keputusan pengaturan lampu lalu lintas**.
-
-Dengan demikian LSTM tetap berada pada fungsi yang jelas:
+### Brisbane
 
 ```text
-LSTM
-=
-Future Traffic Forecast
+Intersection data exploration
 ```
 
-dan bukan mengambil alih fungsi simulator maupun reinforcement learning.
+Digunakan untuk mengeksplorasi sumber data intersection yang lebih dekat dengan kebutuhan SmartTwin.
+
+Namun belum cukup untuk training.
+
+### YOLO
+
+```text
+SmartTwin-specific traffic forecasting
+```
+
+Digunakan untuk menghubungkan traffic detection aktual SmartTwin dengan forecasting.
 
 ---
 
-# 47. Current Decision
+# 23. Kesimpulan
 
-Konfigurasi eksperimen aktif:
+Eksperimen forecasting SmartTwin berkembang dari dataset publik menuju data yang dihasilkan langsung oleh sistem.
 
-```text
-Dataset:
-PEMS04
-
-Sensor:
-1–10
-
-Feature:
-Flow
-Occupancy
-Speed
-
-Sequence:
-15 timestep
-
-Forecast horizon:
-1 timestep
-
-Model:
-2-layer LSTM
-
-Hidden size:
-64
-
-Dropout:
-0.2
-
-Batch size:
-64
-
-Learning rate:
-0.001
-
-Early stopping:
-10 epochs
-
-Split:
-70 / 15 / 15 chronological
-
-Evaluation:
-MAE
-RMSE
-MAPE
-R²
-```
-
-Eksperimen berikutnya:
+Tahap awal:
 
 ```text
-PEMS04
-Sensor 1–20
-Flow + Occupancy + Speed
-15 timestep
-1 timestep forecast
-```
-
-Sementara:
-
-```text
-Brisbane collector
-        ↓
-MariaDB
-        ↓
-terus mengumpulkan data
-```
-
-Setelah eksperimen PEMS04 selesai:
-
-```text
-Brisbane preprocessing
-        ↓
-Brisbane LSTM
-        ↓
-Evaluation
-        ↓
-Prediction
+TMU
+ ↓
+Baseline
 ```
 
 Kemudian:
 
 ```text
 PEMS04
-+
-Brisbane
-+
-YOLO Traffic State
-        ↓
-Feature Mapping
-        ↓
-SmartTwin Forecasting
-        ↓
-Scenario Generator
-        ↓
-SUMO
-        ↓
-PPO
+ ↓
+Multi-sensor forecasting
 ```
 
+Selanjutnya:
+
+```text
+Brisbane
+ ↓
+Intersection data exploration
+```
+
+dan akhirnya:
+
+```text
+YOLO SmartTwin
+ ↓
+Actual traffic state
+ ↓
+Intersection forecasting
+```
+
+Dengan pendekatan tersebut, forecasting tidak hanya diuji menggunakan dataset publik, tetapi juga mulai diarahkan pada data lalu lintas yang benar-benar berasal dari lingkungan SmartTwin.
+
+**Catatan penting:** dataset TMU dan PEMS04 digunakan sebagai eksperimen/baseline, Brisbane masih pada tahap pengumpulan/eksplorasi data, sedangkan dataset YOLO telah berhasil melewati preprocessing, training, dan evaluation.
