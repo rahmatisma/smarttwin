@@ -2,3 +2,8 @@
 eclipse-sumo
 traci
 sumolib
+
+# Dipakai traffic_state_builder.py, yang mengimpor skema TrafficState dari
+# backend/app/schemas/traffic.py. Versinya disamakan dengan pin di
+# backend/requirements.txt supaya validasi berperilaku sama di kedua sisi.
+pydantic==2.13.4
