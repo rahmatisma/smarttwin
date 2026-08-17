@@ -54,7 +54,24 @@ NOTE:
 - approach = north/south/east/west, mengikuti Approach di
   docs/data-contract.md. lane_id adalah lajur DI DALAM satu lengan.
 - vehicle_count = car + motorcycle + bus + truck crossing the counting line
-  during the current one-second interval.
+  during the current one-second interval, DIPECAH PER LAJUR: crossing
+  dicatat pada lajur tempat kendaraan berada saat memotong garis.
+  car_count/motorcycle_count/bus_count/truck_count adalah rincian kelas
+  dari populasi yang sama, jadi keempatnya selalu berjumlah
+  vehicle_count.
+- DUA POPULASI dalam satu baris — jangan dicampur:
+      ALIRAN    (memotong garis)  -> vehicle_count + *_count
+      KEHADIRAN (terlihat di frame) -> queue_length_veh,
+                                       queue_length_m_est,
+                                       density_index
+  Konsekuensinya vehicle_count wajar jauh lebih kecil daripada jumlah
+  kendaraan yang terlihat di layar, dan kendaraan yang berhenti
+  mengantre menyumbang ke kolom queue TAPI tidak ke vehicle_count
+  selama ia belum bergerak melewati garis.
+  Sampai 17 Agustus 2026 kolom volume keliru diambil dari KEHADIRAN,
+  sehingga COUNTING_LINES/ARAH_MASUK tidak berpengaruh sama sekali
+  terhadap CSV. Angka volume sebelum tanggal itu tidak sebanding
+  dengan angka sesudahnya.
 - person and bicycle are still detected and tracked, but deliberately NOT
   written to the CSV: docs/data-contract.md limits VehicleClass to
   motorcycle/car/bus/truck. Person detection is kept because it is what
@@ -69,8 +86,10 @@ NOTE:
   supaya tidak pernah tertukar dengan hasil pengukuran.
   Dihitung dari kendaraan yang BERSTATUS ANTRE saja (penghitung
   queue_* per kelas), populasi yang sama persis dengan
-  queue_length_veh — bukan dari *_count yang berisi seluruh kendaraan
-  terdeteksi. Jadi kedua kolom queue itu selalu sepadan.
+  queue_length_veh — bukan dari *_count, yang sejak 17 Agustus 2026
+  berisi crossing (aliran) dan justru populasi yang berlawanan.
+  Jadi kedua kolom queue itu selalu sepadan satu sama lain, tapi
+  TIDAK sepadan dengan kolom volume.
 - density_index = indeks kepadatan ternormalisasi:
       jumlah kendaraan terdeteksi / fraksi luas jalan
   BUKAN veh/km. Butuh kalibrasi kamera terhadap ukuran dunia nyata
@@ -175,16 +194,43 @@ CAMERAS = {
     "west": os.path.join(VIDEO_DIR, "CCTV_3.mp4"),
 
     # Pingit 4 (Jl. Pangeran Diponegoro) — lengan timur
+    #
+    # Sumbernya CCTV_2.mp4 — VIDEO YANG SAMA dengan north. Itu
+    # bukan salah ketik.
+    #
+    # CCTV 4 sempat jadi sumber east lalu ditinggalkan (lihat 6C).
+    # Penggantinya: menarik lengan Diponegoro dari koridor jalan
+    # yang terlihat di frame CCTV 2 — dua lengan dari satu kamera,
+    # dibedakan oleh garis hitungnya masing-masing. Garis east
+    # digambar dari analisa langsung frame CCTV 2, jadi ia memang
+    # dikalibrasi untuk video ini.
+    #
+    # Sampai 16 Agustus 2026 pengaturan ini tidak ada gunanya:
+    # kolom volume CSV diambil dari kendaraan yang terlihat di
+    # frame, bukan dari crossing, sehingga east dan north — video
+    # sama, garis beda — menghasilkan 7.578 baris yang identik
+    # byte demi byte. Sejak kolom volume benar-benar bersumber
+    # dari crossing (17 Agustus 2026), garis yang berbeda baru
+    # menghasilkan angka yang berbeda.
+    #
+    # YANG MASIH TERBUKA — bukan soal garisnya, tapi soal koridor
+    # tempat garis itu dipasang: koridor tersebut Diponegoro atau
+    # Magelang? Belum diuji dengan bearing terhadap network SUMO
+    # maupun uji silang kendaraan antar-kamera. Kalau ternyata
+    # Magelang, east dan north menghitung lengan yang sama dua
+    # kali — kesalahan yang jauh lebih halus daripada baris
+    # identik kemarin, karena angkanya akan kelihatan wajar.
+    #
+    # Cara menonaktifkan kalau pertanyaan itu nanti terjawab
+    # buruk: komentari baris di bawah dan hidupkan kembali entri
+    # "east" di LENGAN_TIDAK_TERUKUR (bagian 6C).
     "east": os.path.join(VIDEO_DIR, "CCTV_2.mp4"),
     #
-    # SENGAJA TIDAK DIPROSES. East tidak diukur langsung dari
-    # CCTV 4: kameranya tidak mencakup mulut lengan Diponegoro.
-    # Barisnya tetap muncul di CSV, tapi sebagai penanda "tidak
-    # terukur" — lihat LENGAN_TIDAK_TERUKUR di bagian 6C.
-    #
-    # Membiarkannya mati juga menghemat waktu run: CCTV_4.mp4
-    # butuh imgsz=1920 supaya kendaraannya terdeteksi, jauh lebih
-    # lambat dari tiga lengan lain, dan hasilnya toh dibuang.
+    # CCTV 4 sebagai sumber east — DITINGGALKAN, bukan sekadar
+    # dimatikan. Kameranya tidak mencakup mulut lengan Diponegoro
+    # (bukti dan angkanya di bagian 6C), dan ia butuh imgsz=1920
+    # supaya kendaraannya terdeteksi — jauh lebih lambat dari
+    # lengan lain.
     # "east": os.path.join(VIDEO_DIR, "CCTV_4.mp4"),
 }
 
@@ -484,15 +530,33 @@ COUNTING_LINES = {
     # tersendiri yang belum diputuskan.
     "north": (0.10, 0.65, 0.90, 0.65),
 
-    # Pingit 4 / CCTV 4 — TIDAK DIPAKAI.
+    # Pingit 4 (Jl. Pangeran Diponegoro) — lengan timur.
     #
-    # Nilai default ini dibiarkan hanya supaya get_line() tidak
-    # meledak kalau east suatu saat dihidupkan lagi. East TIDAK
-    # diproses (lihat CAMERAS) dan barisnya di CSV diisi penanda
-    # "tidak terukur", bukan hasil garis ini.
+    # PENTING: garis ini ditentukan dari analisa langsung frame
+    # CCTV_2.mp4, yaitu video yang MEMANG dipakai east sekarang
+    # (lihat CAMERAS). Jadi ia sudah menunjuk ke posisi yang
+    # dimaksud di frame yang benar — bukan sisa kalibrasi CCTV 4.
     #
-    # Dua kandidat garis sudah diuji berdampingan pada lintasan
-    # yang sama, t=960..1020 s, setiap frame, imgsz=1920:
+    # Sejak 17 Agustus 2026 garis ini BENAR-BENAR menentukan kolom
+    # volume east di CSV. Sebelumnya kolom volume diambil dari
+    # kendaraan yang terlihat di frame, jadi garis ini — dan
+    # seluruh kalibrasi di bagian 6 — tidak berpengaruh sama
+    # sekali. Menggeser angka di sini sekarang langsung menggeser
+    # angka di CSV.
+    #
+    # Yang MASIH terbuka bukan posisi garisnya, melainkan
+    # identitas koridor tempat ia dipasang: koridor jalan yang
+    # terlihat di frame CCTV 2 itu Diponegoro atau Magelang?
+    # Belum pernah diuji dengan bearing terhadap network SUMO
+    # maupun uji silang kendaraan antar-kamera. Kalau ternyata
+    # Magelang, east dan north menghitung lengan yang sama dua
+    # kali. Lihat bagian 6C.
+    #
+    # RIWAYAT — dua kandidat garis untuk CCTV 4 (sumber east yang
+    # LAMA, sudah ditinggalkan) sempat diuji berdampingan pada
+    # lintasan yang sama, t=960..1020 s, setiap frame, imgsz=1920.
+    # Angka di bawah bukan salah satunya, dan tidak sebanding
+    # dengannya — beda kamera, beda frame:
     #
     #                                     mentah  terpakai  murni
     #   (0.651,0.419,0.865,0.378)  -6 deg    54      35     18,5 %
@@ -501,7 +565,10 @@ COUNTING_LINES = {
     # Yang pertama menghasilkan angka tapi kemurnian arahnya cuma
     # 18,5 % — campuran beberapa pergerakan, bukan volume satu
     # lengan. Yang kedua habis disaring karena seluruh crossingnya
-    # bergerak KELUAR simpang. Keduanya ditolak.
+    # bergerak KELUAR simpang. Keduanya ditolak, dan CCTV 4 ikut
+    # ditinggalkan sebagai sumber east.
+    #
+    # Angka di bawah adalah penggantinya, digambar di frame CCTV 2.
     "east":  (0.964, 0.659, 0.745, 0.461),
 
     # Pingit 1 / CCTV 1 — TERVERIFIKASI 16 Agustus 2026.
@@ -545,10 +612,19 @@ COUNTING_LINES = {
 # crossing dihitung ke arah mana pun: pada CCTV 3, 3 dari 14
 # crossing (21 %) datang dari jalur arah berlawanan.
 #
-# None = tidak disaring. Sengaja untuk north/east: keduanya
-# memotret badan simpang, kendaraannya berbelok ke segala arah,
-# jadi "satu arah masuk" belum punya arti di sana. Menebak angka
-# untuk keduanya lebih berbahaya daripada membiarkannya terbuka.
+# None = tidak disaring. Sengaja untuk north: kameranya memotret
+# BADAN SIMPANG, kendaraannya berbelok ke segala arah, jadi "satu
+# arah masuk" belum punya arti di sana. Menebak angkanya lebih
+# berbahaya daripada membiarkannya terbuka.
+#
+# east dulu juga None dengan alasan yang sama. Sekarang ia punya
+# nilai, sepasang dengan garis hitung east yang digambar di frame
+# CCTV 2 (lihat COUNTING_LINES). Arah itu BELUM diadu dengan
+# crossing nyata seperti yang sudah dilakukan untuk south (67/67)
+# dan west (optical flow per kotak uji) — jadi kalau angka east
+# nanti terasa terlalu kecil, tersangka pertamanya di sini:
+# filter arah yang terlalu ketat akan membuang crossing yang
+# sebenarnya sah.
 ARAH_MASUK = {
     # Turun = menuju stop line. Terverifikasi: seluruh 67 crossing
     # CCTV 1 pada uji 60 detik searah ini.
@@ -566,7 +642,14 @@ ARAH_MASUK = {
 # 6C. LENGAN YANG TIDAK DIUKUR LANGSUNG
 # ============================================================
 #
-# east tidak diukur langsung dari CCTV 4 — kamera tidak mencakup
+# STATUS SEKARANG: KOSONG — tidak ada lengan yang ditandai
+# "tidak terukur". Keempat lengan diproses, termasuk east.
+#
+# Mekanismenya sendiri dipertahankan utuh karena east masih bisa
+# jatuh kembali ke sini; cara menghidupkannya ada di bawah.
+#
+# RIWAYAT — kenapa east pernah ada di daftar ini:
+# east semula diukur dari CCTV 4, dan kamera itu tidak mencakup
 # mulut lengan Diponegoro. Rincian investigasinya ada di
 # cv/_arsip/ (BUKTI_pita_atas_CCTV4_vs_CCTV2.jpg dan
 # CATATAN-sync-cctv1.md); ringkasnya:
@@ -580,9 +663,24 @@ ARAH_MASUK = {
 #   - Estimasi dari arus keluar TIDAK dipakai: belum tervalidasi,
 #     dan harness pengukurnya sendiri bermasalah.
 #
-# Karena itu barisnya tetap ditulis ke CSV supaya keempat lengan
-# hadir dan jumlah barisnya konsisten, TAPI seluruh kolom angka
-# dikosongkan.
+# Bukti yang sama mencatat sesuatu tentang CCTV 2 yang belakangan
+# jadi dasar pengaturan sekarang: di frame CCTV 2 koridor jalan
+# MENERUS melewati y=0,28H — 74 deteksi lolos di atas garis itu,
+# terjauh y≈279 px (y/H 0,259). Jadi CCTV 2 memang memuat sebuah
+# koridor jalan yang memanjang, dan di koridor itulah garis east
+# sekarang dipasang (COUNTING_LINES["east"]).
+#
+# YANG BELUM DIBUKTIKAN: koridor itu Diponegoro atau Magelang.
+# Bukti tersebut dibuat untuk menjawab pertanyaan lain (isi pita
+# atas CCTV 4), jadi ia menunjukkan ADA koridor di sana, bukan
+# koridor itu lengan yang mana. Menjawabnya perlu bearing garis
+# terhadap network SUMO (TLS SIMPANG_CENTER) atau uji silang:
+# satu kendaraan yang sama terlihat di dua kamera pada detik yang
+# sama, lalu ditelusuri masuk dari lengan mana.
+#
+# Kalau east dikembalikan ke sini, barisnya tetap ditulis ke CSV
+# supaya keempat lengan hadir dan jumlah barisnya konsisten, TAPI
+# seluruh kolom angka dikosongkan.
 #
 # KENAPA KOSONG, BUKAN 0
 # ----------------------
@@ -986,7 +1084,21 @@ class PerSecondCounter:
     def __init__(self, camera_name, peta_jam):
         self.camera_name = camera_name
 
-        self.counts = defaultdict(int)
+        # Crossing yang terkumpul pada detik yang sedang berjalan,
+        # DIPECAH PER LAJUR:
+        #
+        #     self.counts[lane_id][object_type] = jumlah crossing
+        #
+        # Dulu ini defaultdict(int) datar yang hanya di-key oleh
+        # object_type, dan isinya cuma dipakai untuk print() ke
+        # layar — kolom volume di CSV justru diambil dari kendaraan
+        # yang TERLIHAT di frame. Akibatnya garis hitung tidak
+        # berpengaruh sama sekali terhadap CSV; dua lengan yang
+        # memakai video sama menghasilkan baris identik walau
+        # garisnya beda. Lihat catatan "SEMANTIK KOLOM" di bagian 10.
+        self.counts = defaultdict(
+            lambda: defaultdict(int)
+        )
 
         # Peta frame -> jam dinding (lihat bagian 4B). Batas detik
         # dibaca dari sini, BUKAN dari time.time(): satu baris CSV
@@ -1009,9 +1121,17 @@ class PerSecondCounter:
         self.latest_stats = {}
 
 
-    def add(self, object_type):
+    def add(self, object_type, lane_id):
+        """
+        Mencatat SATU crossing garis hitung.
+
+        lane_id wajib: lajur tempat kendaraan berada pada frame
+        saat ia memotong garis, hasil get_lane_id(). Tanpa itu
+        volume tidak bisa dipecah per lajur dan kolom volume CSV
+        terpaksa jatuh kembali ke hitungan kehadiran.
+        """
         with self.lock:
-            self.counts[object_type] += 1
+            self.counts[lane_id][object_type] += 1
 
 
     def update(
@@ -1068,7 +1188,9 @@ class PerSecondCounter:
                 lane_counts=lane_counts
             )
 
-            self.counts = defaultdict(int)
+            self.counts = defaultdict(
+                lambda: defaultdict(int)
+            )
 
             self.detik_berjalan = detik_bulat
 
@@ -1101,7 +1223,9 @@ class PerSecondCounter:
                 lane_counts=lane_counts
             )
 
-            self.counts = defaultdict(int)
+            self.counts = defaultdict(
+                lambda: defaultdict(int)
+            )
 
             self.detik_berjalan = None
 
@@ -1123,29 +1247,57 @@ class PerSecondCounter:
         )
 
         # ----------------------------------------------------
-        # Volume per second
+        # SEMANTIK KOLOM — BACA SEBELUM MENGUBAH
         # ----------------------------------------------------
-
-        car_count = self.counts["car"]
-        motorcycle_count = self.counts["motorcycle"]
-        bus_count = self.counts["bus"]
-        truck_count = self.counts["truck"]
-
-        vehicle_count = (
-            car_count
-            + motorcycle_count
-            + bus_count
-            + truck_count
-        )
+        #
+        # Ada DUA populasi berbeda di satu baris CSV, dan keduanya
+        # sengaja tidak dicampur:
+        #
+        #   ALIRAN (self.counts)     kendaraan yang MEMOTONG garis
+        #                            hitung selama detik ini
+        #     -> vehicle_count, car_count, motorcycle_count,
+        #        bus_count, truck_count
+        #
+        #   KEHADIRAN (lane_counts)  kendaraan yang TERLIHAT di
+        #                            frame pada detik ini
+        #     -> queue_length_veh, queue_length_m_est,
+        #        density_index
+        #
+        # Kenapa dipisah: volume/detik itu ukuran ALIRAN — satu
+        # kendaraan boleh dihitung sekali seumur hidupnya (dijaga
+        # counted_ids). Antrean dan kepadatan justru ukuran
+        # KEHADIRAN — kendaraan yang berhenti mengantre harus tetap
+        # terhitung di setiap detik ia masih ada di sana. Memakai
+        # satu populasi untuk keduanya salah di dua arah sekaligus.
+        #
+        # RIWAYAT — kenapa catatan ini panjang:
+        # sampai 17 Agustus 2026 kolom volume DIAMBIL DARI KEHADIRAN,
+        # padahal docstring di kepala berkas sudah menjanjikan
+        # crossing sejak awal. Akibatnya COUNTING_LINES dan
+        # ARAH_MASUK tidak berpengaruh apa pun terhadap CSV: seluruh
+        # kalibrasi garis di bagian 6 cuma menggambar garis di
+        # layar. Ketahuan karena east dan north — yang membaca video
+        # yang sama dengan garis berbeda — menghasilkan 7.578 baris
+        # yang identik byte demi byte.
+        #
+        # Jadi kalau suatu saat kolom volume terasa "terlalu kecil"
+        # dibanding yang terlihat di layar, ITU MEMANG BENAR: yang
+        # di layar adalah kehadiran, yang di kolom adalah aliran.
+        # Jangan diperbaiki dengan mengembalikannya ke lane_counts.
+        # ----------------------------------------------------
 
         # ----------------------------------------------------
         # Satu baris per lane
         # ----------------------------------------------------
         #
-        # Untuk lane yang tidak memiliki crossing pada detik
-        # tersebut, volume tetap 0.
+        # Lajur yang ditulis = gabungan lajur yang PUNYA KEHADIRAN
+        # dan lajur yang PUNYA CROSSING pada detik ini.
         #
-        # queue_length dan density dibagi berdasarkan lane.
+        # Gabungan, bukan salah satu: crossing bisa terjadi di lajur
+        # yang pada frame penutup detik sudah kosong (kendaraannya
+        # keburu lewat), dan sebaliknya lajur yang macet total punya
+        # antrean tanpa satu pun crossing. Kalau hanya salah satu
+        # yang dipakai, salah satu jenis baris itu hilang diam-diam.
         # ----------------------------------------------------
 
         file_exists = os.path.exists(CSV_PATH)
@@ -1167,10 +1319,17 @@ class PerSecondCounter:
             with _KUNCI_TIMESTAMP:
                 TIMESTAMP_TERTULIS.add(timestamp)
 
+            lanes = list(lane_counts.keys())
+
+            # .keys() langsung, BUKAN self.counts[lane] — indexing
+            # defaultdict akan membuat lajur kosong baru sambil
+            # diiterasi.
+            for lane_id in self.counts.keys():
+                if lane_id not in lanes:
+                    lanes.append(lane_id)
+
             # Jika belum ada lane yang terdeteksi,
             # tetap tulis lane_1.
-            lanes = lane_counts.keys()
-
             if not lanes:
                 lanes = ["lane_1"]
 
@@ -1181,16 +1340,34 @@ class PerSecondCounter:
                     {}
                 )
 
-                car = lane.get("car_count", 0)
-                motorcycle = lane.get("motorcycle_count", 0)
-                bus = lane.get("bus_count", 0)
-                truck = lane.get("truck_count", 0)
+                # ALIRAN — crossing garis hitung pada lajur ini.
+                # .get() supaya lajur yang cuma punya kehadiran
+                # tidak ikut terbuat di self.counts.
+                crossing = self.counts.get(
+                    lane_id,
+                    {}
+                )
+
+                car = crossing.get("car", 0)
+                motorcycle = crossing.get("motorcycle", 0)
+                bus = crossing.get("bus", 0)
+                truck = crossing.get("truck", 0)
+
+                vehicle_count_lane = (
+                    car
+                    + motorcycle
+                    + bus
+                    + truck
+                )
 
                 # Estimasi panjang antrean dalam meter.
                 #
                 # Sumbernya queue_* — kendaraan yang benar-benar
-                # berstatus antre — BUKAN *_count di atas yang berisi
-                # semua kendaraan terdeteksi termasuk yang melaju.
+                # berstatus antre pada detik ini — BUKAN car/
+                # motorcycle/bus/truck di atas, yang sekarang berisi
+                # crossing (aliran) dan justru populasi yang
+                # berlawanan: kendaraan yang antre malah TIDAK
+                # memotong garis selama ia masih berhenti.
                 # Dengan begitu queue_length_m_est dan
                 # queue_length_veh menghitung populasi yang sama.
                 #
@@ -1212,8 +1389,9 @@ class PerSecondCounter:
 
                     lane_id,
 
-                    # Volume kendaraan per detik
-                    lane.get("vehicle_count", 0),
+                    # Volume kendaraan per detik — ALIRAN
+                    # (crossing garis), bukan kehadiran di frame
+                    vehicle_count_lane,
 
                     car,
                     motorcycle,
@@ -1233,6 +1411,16 @@ class PerSecondCounter:
                     )
                 ])
 
+
+        # Total crossing seluruh lajur pada detik ini — angka yang
+        # sama dengan jumlah kolom vehicle_count baris-baris di
+        # atas, supaya yang terlihat di terminal bisa langsung
+        # diadu dengan yang masuk CSV.
+        vehicle_count = sum(
+            per_kelas.get(kelas, 0)
+            for per_kelas in self.counts.values()
+            for kelas in ("car", "motorcycle", "bus", "truck")
+        )
 
         print(
             f"[{timestamp}] "
@@ -1627,6 +1815,20 @@ class CameraProcessor:
                     # (lihat catatan CSV output di header file), jadi
                     # key f"{object_type}_count" untuk keduanya memang
                     # tidak ada di lane_current.
+                    #
+                    # PERHATIAN — ini hitungan KEHADIRAN (kendaraan
+                    # yang terlihat di frame), BUKAN isi kolom
+                    # car_count/motorcycle_count/... di CSV. Kolom
+                    # CSV diambil dari crossing garis; lihat catatan
+                    # "SEMANTIK KOLOM" di write_csv.
+                    #
+                    # Yang masih memakai angka kehadiran ini cuma
+                    # perhitungan DENSITY di bawah. Key "vehicle_count"
+                    # di lane_current sengaja dipertahankan sebagai
+                    # subtotal kehadiran, tapi TIDAK ADA yang
+                    # membacanya lagi untuk CSV — jangan disambungkan
+                    # kembali ke kolom volume, itu persis cacat yang
+                    # bikin east dan north keluar identik.
                     # ----------------------------------------
 
                     if object_type in VEHICLE_CLASSES.values():
@@ -1774,8 +1976,13 @@ class CameraProcessor:
                         not in self.counted_ids
                     ):
 
+                        # lane_id = lajur pada frame saat garis
+                        # dipotong (dihitung di atas dari centroid).
+                        # Dipakai supaya volume CSV bisa dipecah per
+                        # lajur, bukan cuma total per lengan.
                         self.counter.add(
-                            object_type
+                            object_type,
+                            lane_id
                         )
 
                         self.counted_ids.add(
