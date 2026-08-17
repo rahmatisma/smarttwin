@@ -16,10 +16,30 @@ class VehicleDetection(BaseModel):
 # 2) Output Traffic State Builder (Rahmat, agregasi dari VehicleDetection)
 class ApproachState(BaseModel):
     approach: Approach
+
+    # Kendaraan yang MEMOTONG counting line selama window ini (aliran).
+    # Nama level-kontrak; di CSV CV kolomnya bernama vehicle_count.
     volume: int
-    queue_length_m: float
-    density_veh_per_km: float
-    avg_speed_kmh: float
+
+    # Antrean sebagai JUMLAH KENDARAAN (mentah, hasil pengamatan)
+    queue_length_veh: int
+
+    # Turunan antrean dalam METER. _est karena diturunkan dari jumlah
+    # kendaraan lewat panjang ruang antrean per jenis, bukan diukur.
+    queue_length_m_est: float
+
+    # Proxy dari lane occupancy per-frame: jumlah kendaraan yang TERLIHAT
+    # di frame dibagi fraksi lebar lajur. BUKAN kendaraan/km, dan belum
+    # dikalibrasi ke jarak dunia nyata — jangan disajikan sebagai
+    # kepadatan fisik sebelum kalibrasi kamera ada.
+    density_index: float
+
+    # None = BELUM DIUKUR, bukan 0 km/h.
+    # Belum ada sumber data kecepatan: CSV CV tidak punya kolom kecepatan,
+    # dan menurunkannya dari tracking butuh kalibrasi kamera ke jarak
+    # dunia nyata yang belum tersedia. 0.0 akan terbaca sebagai
+    # "terukur, hasilnya diam" — klaim yang tidak kita punya buktinya.
+    avg_speed_kmh: float | None = None
 
 class TrafficState(BaseModel):
     intersection_id: str
