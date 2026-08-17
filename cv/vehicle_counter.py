@@ -42,6 +42,13 @@ CSV output:
     density_index
 
 NOTE:
+- timestamp = JAM REKAMAN, diturunkan dari posisi frame lewat peta
+  keping di sync_report.json — bukan jam laptop saat diproses.
+  Karena itu keempat lengan memakai detik yang sama persis, dan
+  hasilnya tidak berubah walau videonya diproses ulang di mesin
+  lain. Detiknya melompat di sambungan keping: rentang yang
+  dibuang saat sinkronisasi memang tidak punya rekaman. Lihat
+  bagian 4B.
 - intersection_id konstan (INTERSECTION_ID) karena seluruh kamera
   memantau simpang yang sama. Yang membedakan baris adalah approach.
 - approach = north/south/east/west, mengikuti Approach di
@@ -75,12 +82,15 @@ NOTE:
   For a real intersection, adjust LANE_REGIONS to match the actual lanes.
 """
 
+import bisect
 import csv
+import json
 import os
+import re
 import time
 import threading
 from collections import defaultdict
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import cv2
 from ultralytics import YOLO
@@ -139,19 +149,43 @@ VIDEO_DIR = os.path.join(BASE_DIR, "videos")
 # itu lengan selatan, Pingit 2 lengan utara. Versi sebelumnya
 # tertukar persis di dua lengan ini.
 #
-# Rekaman yang sudah ada baru Pingit 1 dan Pingit 2; lengan
-# east/west menyusul begitu videonya tersedia.
+# Keempat lengan sekarang aktif (16 Agustus 2026).
+#
+# Yang dibaca adalah video HASIL SINKRONISASI, bukan rekaman
+# mentah: keempatnya sudah dipotong ke jendela waktu bersama
+# lewat sync_videos.py, jadi frame ke-N di keempat file itu
+# jam dindingnya sama. Rekaman mentahnya dulu bernama
+# "CCTV 1.mp4" (pakai spasi); nama sekarang pakai garis bawah.
+#
+# Catatan dari proses sinkronisasi yang masih berlaku di sini:
+# laju jam tiap channel DVR tidak sama persis (selisih ~0,3%
+# antara Pingit 3 dan Pingit 4), jadi di ujung rekaman ~56 menit
+# keempatnya bisa hanyut ~10 detik satu sama lain. Aman untuk
+# agregasi per jendela 5 menit; tidak aman untuk mencocokkan
+# kejadian antar-lengan frame demi frame.
 
 CAMERAS = {
-    # Pingit 2 (Jl. Magelang) — lengan utara
-    "north": os.path.join(VIDEO_DIR, "CCTV 2.mp4"),
-
     # Pingit 1 (Jl. Tentara Pelajar) — lengan selatan
-    "south": os.path.join(VIDEO_DIR, "CCTV 1.mp4"),
+    "south": os.path.join(VIDEO_DIR, "CCTV_1.mp4"),
 
-    # Belum ada rekamannya:
-    # "east": Pingit 4 (Jl. Pangeran Diponegoro)
-    # "west": Pingit 3 (Jl. Kyai Mojo)
+    # Pingit 2 (Jl. Magelang) — lengan utara
+    "north": os.path.join(VIDEO_DIR, "CCTV_2.mp4"),
+
+    # Pingit 3 (Jl. Kyai Mojo) — lengan barat
+    "west": os.path.join(VIDEO_DIR, "CCTV_3.mp4"),
+
+    # Pingit 4 (Jl. Pangeran Diponegoro) — lengan timur
+    "east": os.path.join(VIDEO_DIR, "CCTV_2.mp4"),
+    #
+    # SENGAJA TIDAK DIPROSES. East tidak diukur langsung dari
+    # CCTV 4: kameranya tidak mencakup mulut lengan Diponegoro.
+    # Barisnya tetap muncul di CSV, tapi sebagai penanda "tidak
+    # terukur" — lihat LENGAN_TIDAK_TERUKUR di bagian 6C.
+    #
+    # Membiarkannya mati juga menghemat waktu run: CCTV_4.mp4
+    # butuh imgsz=1920 supaya kendaraannya terdeteksi, jauh lebih
+    # lambat dari tiga lengan lain, dan hasilnya toh dibuang.
+    # "east": os.path.join(VIDEO_DIR, "CCTV_4.mp4"),
 }
 
 
@@ -173,6 +207,228 @@ CSV_PATH = os.path.join(
     OUTPUT_DIR,
     "smarttwin_traffic_data.csv"
 )
+
+
+# ============================================================
+# 4B. JAM DINDING DARI POSISI FRAME
+# ============================================================
+#
+# Diberi nomor 4B, bukan 5, supaya penomoran bagian sesudahnya
+# tidak bergeser — beberapa komentar di file ini menunjuk ke
+# "bagian 9" dan seterusnya.
+#
+# MASALAH YANG DIPERBAIKI
+# -----------------------
+# Versi sebelumnya menulis timestamp CSV dengan datetime.now(),
+# yaitu jam LAPTOP saat frame itu selesai diproses. Empat thread
+# YOLO tidak jalan dengan kecepatan yang sama, jadi detik yang
+# sama di dunia nyata muncul dengan timestamp berbeda-beda di
+# tiap lengan — persis hal yang bikin sinkronisasi videonya
+# jadi sia-sia begitu masuk CSV.
+#
+# Sekarang timestamp diturunkan dari POSISI FRAME di video, jadi
+# hasilnya sama saja mau diproses di laptop cepat atau lambat,
+# mau realtime atau ditinggal semalaman.
+#
+# KENAPA TIDAK CUKUP (idx / fps) + jam mulai
+# ------------------------------------------
+# Video hasil sinkronisasi BUKAN rekaman utuh. Isinya 18 keping
+# yang disambung; di antaranya ada 15 jeda yang dibuang (1 di
+# depan + 14 di tengah). Kalau waktunya dianggap berjalan linear
+# dari awal sampai akhir, di ujung video meleset **342 detik
+# (5 menit 42 detik)** — bukan urusan pembulatan, tapi salah
+# menit. Karena itu peta di bawah memetakan per keping.
+#
+# Di DALAM satu keping, (idx / fps) memang cukup: selisih antara
+# n_frame/fps dan durasi yang dilaporkan sync_report.json paling
+# besar 0,0153 detik, jauh di bawah resolusi CSV yang 1 detik.
+#
+# SUMBER ANGKA
+# ------------
+# cv/output/sync_report.json:
+#   videos[].potongan[].w0       jam dinding awal keping
+#                                (detik sejak tengah malam)
+#   videos[].potongan[].n_frame  jumlah frame keping itu di
+#                                video keluaran
+#
+# Dipakai w0 milik VIDEO MASING-MASING, bukan dipakai[].mulai
+# yang global, supaya tiap kamera memakai angka hasil fit-nya
+# sendiri. (Sudah dicek: keduanya sama sampai <0,002 detik, dan
+# keempat video punya n_frame yang identik keping demi keping —
+# 78.046 frame @30 fps. Jadi baris CSV keempat lengan memang
+# akan jatuh pada detik yang sama.)
+#
+# Nomor frame dihitung SENDIRI dari pembacaan berurutan, tidak
+# pernah dari CAP_PROP_POS_FRAMES. Itu pelajaran dari investigasi
+# CCTV 1: pada MP4 terfragmentasi, posisi hasil seek bisa
+# berbohong walau jam di layarnya terbaca sempurna.
+# ============================================================
+
+SYNC_REPORT_PATH = os.path.join(
+    OUTPUT_DIR,
+    "sync_report.json"
+)
+
+# TANGGAL REKAMAN — SATU-SATUNYA ANGKA DI SINI YANG TIDAK TERBACA
+# DARI DATA, TOLONG DIKONFIRMASI.
+#
+# Jam burned-in di CCTV cuma memuat HH:MM:SS, tanpa tanggal, jadi
+# sync_report.json juga tidak menyimpan tanggal. Nilai di bawah
+# disimpulkan dari mtime video sumber yang tercatat di clockmap:
+# CCTV 3 dan CCTV 4 selesai ditulis 2026-08-15 17:27:1x, sementara
+# jam di layarnya berhenti 17:26:3x — selisih kurang dari satu
+# menit. Kalau rekamannya ternyata hari lain, ganti baris ini saja;
+# tidak ada tempat lain yang perlu diubah.
+TANGGAL_REKAMAN = "2026-08-15"
+
+
+class PetaJamVideo:
+    """
+    Peta nomor frame -> jam dinding untuk SATU video hasil
+    sinkronisasi.
+
+    Dibangun dari daftar potongan: tiap keping menyumbang
+    (frame_awal_kumulatif, jumlah frame, jam dinding awal).
+    Pencarian pakai bisect, jadi biayanya tetap sama walau
+    kepingnya nanti jadi ratusan.
+    """
+
+    def __init__(
+        self,
+        potongan,
+        tanggal_rekaman,
+        fps
+    ):
+        self.fps = fps
+
+        self.tengah_malam = datetime.strptime(
+            tanggal_rekaman,
+            "%Y-%m-%d"
+        )
+
+        # Indeks frame awal tiap keping, untuk bisect
+        self.frame_awal = []
+
+        # (jumlah_frame, jam_dinding_awal_detik) sejajar dengan
+        # self.frame_awal
+        self.keping = []
+
+        kumulatif = 0
+
+        for p in potongan:
+            self.frame_awal.append(kumulatif)
+
+            self.keping.append(
+                (p["n_frame"], p["w0"])
+            )
+
+            kumulatif += p["n_frame"]
+
+        self.total_frame = kumulatif
+
+
+    def detik_dinding(self, frame_idx):
+        """
+        Jam dinding frame ke-`frame_idx` dalam detik sejak tengah
+        malam.
+
+        Balikannya None kalau frame-nya di luar peta — itu berarti
+        videonya tidak cocok dengan laporannya, dan lebih baik
+        baris CSV-nya TIDAK ditulis daripada ditulis dengan jam
+        karangan.
+        """
+        if frame_idx < 0 or frame_idx >= self.total_frame:
+            return None
+
+        i = bisect.bisect_right(
+            self.frame_awal,
+            frame_idx
+        ) - 1
+
+        n_frame, wall_mulai = self.keping[i]
+
+        offset = frame_idx - self.frame_awal[i]
+
+        return wall_mulai + (offset / self.fps)
+
+
+    def waktu(self, detik_dinding):
+        """
+        Detik sejak tengah malam -> objek datetime bertanggal.
+        """
+        return self.tengah_malam + timedelta(
+            seconds=detik_dinding
+        )
+
+
+def nomor_kamera(path):
+    """
+    Menarik nomor kamera dari nama berkas: "CCTV_2.mp4" -> 2.
+
+    Sengaja lewat angka, bukan cocokkan nama mentah-mentah:
+    nama di sync_report.json masih nama rekaman asli ("CCTV 2.mp4",
+    pakai spasi), sedangkan berkas hasil sinkronisasi memakai
+    garis bawah.
+    """
+    cocok = re.search(
+        r"(\d+)",
+        os.path.basename(path)
+    )
+
+    return int(cocok.group(1)) if cocok else None
+
+
+def muat_peta_jam(video_path, fps):
+    """
+    Membangun PetaJamVideo untuk satu video dari sync_report.json.
+
+    Melempar RuntimeError kalau laporannya tidak ada atau videonya
+    tidak tercatat di situ. Sengaja GAGAL KERAS, tidak diam-diam
+    balik ke datetime.now() — jam laptop yang menyamar jadi jam
+    rekaman itu justru bug yang sedang diperbaiki di sini, dan
+    kalau ia kembali secara diam-diam tidak akan ketahuan dari
+    isi CSV-nya.
+    """
+    if not os.path.exists(SYNC_REPORT_PATH):
+        raise RuntimeError(
+            f"sync_report.json tidak ditemukan di "
+            f"{SYNC_REPORT_PATH}. Berkas itu satu-satunya sumber "
+            f"jam mulai tiap keping video hasil sinkronisasi."
+        )
+
+    with open(
+        SYNC_REPORT_PATH,
+        "r",
+        encoding="utf-8"
+    ) as file:
+        laporan = json.load(file)
+
+    nomor = nomor_kamera(video_path)
+
+    for v in laporan.get("videos", []):
+
+        if nomor_kamera(v["nama"]) != nomor:
+            continue
+
+        potongan = v.get("potongan", [])
+
+        if not potongan:
+            raise RuntimeError(
+                f"{v['nama']} tercatat di sync_report.json tapi "
+                f"tidak punya daftar potongan."
+            )
+
+        return PetaJamVideo(
+            potongan,
+            TANGGAL_REKAMAN,
+            fps
+        )
+
+    raise RuntimeError(
+        f"{os.path.basename(video_path)} tidak ada di "
+        f"sync_report.json. Video ini bukan keluaran "
+        f"sync_videos.py, jadi jam dindingnya tidak diketahui."
+    )
 
 
 # ============================================================
@@ -211,20 +467,140 @@ TRACK_CLASSES = list(YOLO_CLASSES.keys())
 # berarti garis horizontal pada 65% tinggi video.
 # ============================================================
 
-# BELUM DIKALIBRASI: keempat lengan masih memakai nilai default yang
-# sama. Sesuaikan per lengan begitu footage Simpang Pingit tersedia.
-#
 # Nilainya ruang-gambar (posisi di dalam frame), bukan arah mata
 # angin. Jadi kalibrasinya mengikuti VIDEO yang dipetakan ke key
 # itu di CAMERAS, bukan kompasnya. Kalau pemetaan kamera→key
 # berubah lagi, geometri di sini harus ikut pindah bersama
-# videonya. Sekarang aman ditukar-tukar karena keempatnya masih
-# nilai default yang identik.
+# videonya.
+#
+# PENTING — sejak batas ruas ditegakkan (lihat potongan_dalam_ruas
+# di bagian 9), angka x DI SINI BENAR-BENAR BERLAKU. Sebelumnya
+# untuk garis mendatar (y1 == y2) suku x hilang dari perhitungan
+# side_of_line, jadi 0.10..0.90 cuma hiasan gambar sementara
+# hitungannya memakai garis mendatar TAK HINGGA selebar frame.
 COUNTING_LINES = {
+    # BELUM DIKALIBRASI — masih default, dan kameranya memotret
+    # badan simpang (bukan ruas lurus), jadi butuh pendekatan
+    # tersendiri yang belum diputuskan.
     "north": (0.10, 0.65, 0.90, 0.65),
+
+    # Pingit 4 / CCTV 4 — TIDAK DIPAKAI.
+    #
+    # Nilai default ini dibiarkan hanya supaya get_line() tidak
+    # meledak kalau east suatu saat dihidupkan lagi. East TIDAK
+    # diproses (lihat CAMERAS) dan barisnya di CSV diisi penanda
+    # "tidak terukur", bukan hasil garis ini.
+    #
+    # Dua kandidat garis sudah diuji berdampingan pada lintasan
+    # yang sama, t=960..1020 s, setiap frame, imgsz=1920:
+    #
+    #                                     mentah  terpakai  murni
+    #   (0.651,0.419,0.865,0.378)  -6 deg    54      35     18,5 %
+    #   (0.793,0.536,0.807,0.334)  86 deg    28       0      0,0 %
+    #
+    # Yang pertama menghasilkan angka tapi kemurnian arahnya cuma
+    # 18,5 % — campuran beberapa pergerakan, bukan volume satu
+    # lengan. Yang kedua habis disaring karena seluruh crossingnya
+    # bergerak KELUAR simpang. Keduanya ditolak.
+    "east":  (0.964, 0.659, 0.745, 0.461),
+
+    # Pingit 1 / CCTV 1 — TERVERIFIKASI 16 Agustus 2026.
+    # Median jalan ada di ATAS garis, jadi jalur berlawanan tidak
+    # pernah menyentuhnya: 67 dari 67 crossing pada uji 60 detik
+    # bergerak turun (menuju stop line). Dibiarkan apa adanya.
+    #
+    # BELUM DIPERIKSA — kontradiksi yang masih menggantung:
+    # uji_estimasi_east.py melaporkan south cuma 1 crossing dalam
+    # 3x40 detik (0,5/menit), padahal verifikasi di atas memberi
+    # 67/67. Dugaan: artefak harness uji, bukan regresi logika
+    # south — harness itu memproses hanya setiap frame ke-2
+    # (LANGKAH=2) pada imgsz=960, jadi jejak terpecah dan sebagian
+    # besar perpotongan jatuh di antara frame yang disampel.
+    # Cara mengecek: jalankan ulang jendela yang sama dengan
+    # LANGKAH=1 dan imgsz penuh.
     "south": (0.10, 0.65, 0.90, 0.65),
-    "east": (0.10, 0.65, 0.90, 0.65),
-    "west": (0.10, 0.65, 0.90, 0.65),
+
+    # Pingit 3 / CCTV 3 — DIGANTI 16 Agustus 2026.
+    #
+    # Garis lama (0.10, 0.65, 0.90, 0.65) jatuh di bawah median,
+    # nyaris SEJAJAR arah lalu lintas, jadi mayoritas kendaraan
+    # tidak pernah memotongnya: cuma 14 crossing dari 174 track
+    # pada uji 60 detik yang sama.
+    #
+    # Garis baru memotong TEGAK LURUS jalur yang menuju simpang.
+    # Arah jalur diukur dengan optical flow per kotak uji:
+    #   jalur ATAS median  vx=+5,6..+7,8  -> MENUJU simpang (kanan)
+    #   jalur BAWAH median vx=-12..-18    -> MENJAUH
+    # Sumbu jalannya +11 derajat, jadi garis ini dipasang pada
+    # +101 derajat. Ujung bawah menempel di median, ujung atas
+    # menyeberangi kedua lajur sampai deretan kendaraan di tepi.
+    "west": (0.830, 0.753, 0.956, 0.345),
+}
+
+
+# ARAH MASUK SIMPANG — vektor di ruang-gambar (x ke kanan, y ke
+# bawah) yang menunjuk ke arah simpang.
+#
+# Dipakai untuk menolak kendaraan yang MENJAUHI simpang. Tanpa ini
+# crossing dihitung ke arah mana pun: pada CCTV 3, 3 dari 14
+# crossing (21 %) datang dari jalur arah berlawanan.
+#
+# None = tidak disaring. Sengaja untuk north/east: keduanya
+# memotret badan simpang, kendaraannya berbelok ke segala arah,
+# jadi "satu arah masuk" belum punya arti di sana. Menebak angka
+# untuk keduanya lebih berbahaya daripada membiarkannya terbuka.
+ARAH_MASUK = {
+    # Turun = menuju stop line. Terverifikasi: seluruh 67 crossing
+    # CCTV 1 pada uji 60 detik searah ini.
+    "south": (0.0, 1.0),
+
+    # Sumbu jalan +11 derajat dari hasil optical flow di atas.
+    "west": (0.98, 0.19),
+
+    "north": None,
+    "east": (-1.00, 0.05),
+}
+
+
+# ============================================================
+# 6C. LENGAN YANG TIDAK DIUKUR LANGSUNG
+# ============================================================
+#
+# east tidak diukur langsung dari CCTV 4 — kamera tidak mencakup
+# mulut lengan Diponegoro. Rincian investigasinya ada di
+# cv/_arsip/ (BUKTI_pita_atas_CCTV4_vs_CCTV2.jpg dan
+# CATATAN-sync-cctv1.md); ringkasnya:
+#
+#   - Pada y < 0,28H frame CCTV 4 tidak ada badan jalan sama
+#     sekali, hanya atap, baliho, dan kabel. YOLO imgsz=1920
+#     conf=0,25 memberi 0 deteksi di seluruh pita itu dari 150
+#     frame, dan 0 dari 289 lintasan berawal/berakhir di sana.
+#   - Dua kandidat garis pengganti sudah diuji dan dua-duanya
+#     ditolak (angkanya ada di COUNTING_LINES["east"]).
+#   - Estimasi dari arus keluar TIDAK dipakai: belum tervalidasi,
+#     dan harness pengukurnya sendiri bermasalah.
+#
+# Karena itu barisnya tetap ditulis ke CSV supaya keempat lengan
+# hadir dan jumlah barisnya konsisten, TAPI seluruh kolom angka
+# dikosongkan.
+#
+# KENAPA KOSONG, BUKAN 0
+# ----------------------
+# 0 terbaca sebagai "terukur, hasilnya nol kendaraan" — itu klaim
+# yang tidak kita punya buktinya. String kosong terbaca sebagai
+# NULL/NaN oleh pandas dan sebagian besar pembaca CSV, jadi tidak
+# bisa disalahartikan sebagai hasil deteksi.
+#
+# PERHATIAN UNTUK KONSUMEN HILIR: kalau ada yang menjumlahkan
+# volume per lengan, sel kosong ini harus di-skip secara sadar
+# (mis. .sum(skipna=True) atau .dropna()), bukan di-fillna(0).
+# Meng-nol-kannya mengembalikan persis kesalahan yang dihindari
+# di sini.
+LENGAN_TIDAK_TERUKUR = {
+    # "east": (
+    #     "east tidak diukur langsung dari CCTV 4 - kamera tidak "
+    #     "mencakup mulut lengan Diponegoro"
+    # ),
 }
 
 
@@ -461,6 +837,16 @@ def get_line(frame_width, frame_height, camera_name):
 
 
 def side_of_line(point, line_p1, line_p2):
+    """
+    Di sisi mana titik ini terhadap GARIS TAK HINGGA line_p1-line_p2.
+
+    Fungsi ini sengaja dibiarkan tak hingga — itu memang definisi
+    "sisi". Yang dulu keliru bukan fungsinya, melainkan memakai
+    dia SENDIRIAN sebagai uji penyeberangan: untuk garis mendatar
+    (y1 == y2) suku (y2-y1)*(x-x1) jadi nol, sehingga hasilnya
+    hanya bergantung pada y dan panjang ruas x-nya tidak berarti
+    apa-apa. Pembatas ruasnya ada di potongan_dalam_ruas().
+    """
     x, y = point
     x1, y1 = line_p1
     x2, y2 = line_p2
@@ -470,6 +856,68 @@ def side_of_line(point, line_p1, line_p2):
         -
         (y2 - y1) * (x - x1)
     )
+
+
+def potongan_dalam_ruas(
+    titik_lama,
+    titik_baru,
+    line_p1,
+    line_p2
+):
+    """
+    True kalau perpindahan titik_lama -> titik_baru memotong RUAS
+    garis (line_p1..line_p2), bukan perpanjangannya.
+
+    Dihitung dari titik potong sebenarnya, bukan sekadar mengecek
+    x centroid ada di antara x1 dan x2. Bedanya baru terasa pada
+    garis miring seperti "west", dan biayanya sama-sama beberapa
+    perkalian.
+
+    Parameter t adalah posisi titik potong di sepanjang garis:
+    t=0 di line_p1, t=1 di line_p2. Jadi syaratnya 0 <= t <= 1.
+    """
+    rx = titik_baru[0] - titik_lama[0]
+    ry = titik_baru[1] - titik_lama[1]
+
+    sx = line_p2[0] - line_p1[0]
+    sy = line_p2[1] - line_p1[1]
+
+    penyebut = rx * sy - ry * sx
+
+    # Gerakannya sejajar garis — tidak ada titik potong tunggal.
+    if abs(penyebut) < 1e-9:
+        return False
+
+    qx = line_p1[0] - titik_lama[0]
+    qy = line_p1[1] - titik_lama[1]
+
+    t = (qx * ry - qy * rx) / penyebut
+
+    return 0.0 <= t <= 1.0
+
+
+def menuju_simpang(camera_name, dx, dy):
+    """
+    True kalau perpindahan (dx, dy) mengarah ke simpang.
+
+    Dipakai untuk membuang kendaraan yang MENJAUHI simpang, yang
+    seharusnya tidak masuk volume approach.
+
+    Uji yang dipakai: hasil kali titik antara vektor gerak dan
+    vektor ARAH_MASUK. Positif = komponen geraknya searah menuju
+    simpang. Tanda dx/dy inilah yang selama ini sudah dihitung
+    untuk deteksi berhenti tapi langsung dibuang (cuma
+    magnitudonya yang dipakai).
+
+    Lengan tanpa ARAH_MASUK (north/east) mengembalikan True —
+    perilakunya persis seperti sebelumnya, tidak ada yang disaring.
+    """
+    arah = ARAH_MASUK.get(camera_name)
+
+    if arah is None:
+        return True
+
+    return (dx * arah[0] + dy * arah[1]) > 0
 
 
 def get_lane_id(camera_name, cx, frame_width):
@@ -504,6 +952,15 @@ CSV_HEADER = [
 ]
 
 
+# Detik-detik yang benar-benar ditulis pada RUN INI. Dipakai
+# untuk membangkitkan baris lengan yang tidak diukur pada detik
+# yang sama persis, tanpa membaca ulang CSV lama yang mungkin
+# sudah berisi hasil run sebelumnya (file ini ditulis mode append).
+TIMESTAMP_TERTULIS = set()
+
+_KUNCI_TIMESTAMP = threading.Lock()
+
+
 def initialize_csv():
     """
     Membuat header CSV jika file belum ada.
@@ -526,12 +983,25 @@ def initialize_csv():
 
 class PerSecondCounter:
 
-    def __init__(self, camera_name):
+    def __init__(self, camera_name, peta_jam):
         self.camera_name = camera_name
 
         self.counts = defaultdict(int)
 
-        self.second_start = time.time()
+        # Peta frame -> jam dinding (lihat bagian 4B). Batas detik
+        # dibaca dari sini, BUKAN dari time.time(): satu baris CSV
+        # harus mewakili satu detik VIDEO, bukan satu detik kerja
+        # laptop. Kalau pakai jam laptop, thread yang kebetulan
+        # lambat akan memadatkan beberapa detik video ke dalam
+        # satu baris, dan volume/detik-nya jadi bohong.
+        self.peta_jam = peta_jam
+
+        # Detik dinding (bulat) yang sedang dikumpulkan
+        self.detik_berjalan = None
+
+        # Snapshot terakhir, dipakai flush_akhir() untuk menutup
+        # detik terakhir saat videonya habis
+        self.snapshot = None
 
         self.lock = threading.Lock()
 
@@ -549,35 +1019,106 @@ class PerSecondCounter:
         current_counts,
         queue_length,
         density,
-        lane_counts
+        lane_counts,
+        frame_idx
     ):
-        now = time.time()
+        detik = self.peta_jam.detik_dinding(
+            frame_idx
+        )
+
+        # Frame di luar peta: tidak ada jam yang bisa
+        # dipertanggungjawabkan, jadi tidak ada baris ditulis.
+        if detik is None:
+            return
+
+        detik_bulat = int(detik)
 
         with self.lock:
-            elapsed = now - self.second_start
 
-            if elapsed >= 1.0:
+            self.snapshot = (
+                current_counts,
+                queue_length,
+                density,
+                lane_counts
+            )
 
-                self.write_csv(
-                    current_counts=current_counts,
-                    queue_length=queue_length,
-                    density=density,
-                    lane_counts=lane_counts
-                )
+            # Frame pertama: buka detik pertama, belum ada yang
+            # bisa ditutup
+            if self.detik_berjalan is None:
+                self.detik_berjalan = detik_bulat
 
-                self.counts = defaultdict(int)
+                return
 
-                self.second_start = now
+            # Masih di detik yang sama -> terus kumpulkan
+            if detik_bulat == self.detik_berjalan:
+                return
+
+            # Detik berganti -> tutup detik yang baru saja lewat.
+            #
+            # Di sambungan antar-keping, detik_bulat bisa melompat
+            # puluhan detik sekaligus. Itu memang benar: rentang
+            # yang dilompati tidak ada rekamannya, jadi CSV-nya
+            # sengaja berlubang di situ. Jangan diisi baris kosong
+            # supaya tidak terbaca sebagai "lalu lintas nol".
+            self.write_csv(
+                detik_dinding=self.detik_berjalan,
+                current_counts=current_counts,
+                queue_length=queue_length,
+                density=density,
+                lane_counts=lane_counts
+            )
+
+            self.counts = defaultdict(int)
+
+            self.detik_berjalan = detik_bulat
+
+
+    def flush_akhir(self):
+        """
+        Menutup detik terakhir saat video habis.
+
+        Tanpa ini, detik terakhir tiap video hilang tanpa suara —
+        cacat lama yang ikut terbawa dari versi berbasis
+        time.time().
+        """
+        with self.lock:
+
+            if self.detik_berjalan is None or self.snapshot is None:
+                return
+
+            (
+                current_counts,
+                queue_length,
+                density,
+                lane_counts
+            ) = self.snapshot
+
+            self.write_csv(
+                detik_dinding=self.detik_berjalan,
+                current_counts=current_counts,
+                queue_length=queue_length,
+                density=density,
+                lane_counts=lane_counts
+            )
+
+            self.counts = defaultdict(int)
+
+            self.detik_berjalan = None
 
 
     def write_csv(
         self,
+        detik_dinding,
         current_counts,
         queue_length,
         density,
         lane_counts
     ):
-        timestamp = datetime.now().strftime(
+        # Jam REKAMAN, diturunkan dari posisi frame — bukan
+        # datetime.now(). Lihat bagian 4B.
+        timestamp = self.peta_jam.waktu(
+            detik_dinding
+        ).strftime(
             "%Y-%m-%d %H:%M:%S"
         )
 
@@ -620,6 +1161,11 @@ class PerSecondCounter:
 
             if not file_exists:
                 writer.writerow(CSV_HEADER)
+
+            # Detik ini dicatat supaya lengan yang tidak diukur
+            # bisa diberi baris pada detik yang sama (bagian 6C).
+            with _KUNCI_TIMESTAMP:
+                TIMESTAMP_TERTULIS.add(timestamp)
 
             # Jika belum ada lane yang terdeteksi,
             # tetap tulis lane_1.
@@ -706,11 +1252,14 @@ class CameraProcessor:
     def __init__(
         self,
         camera_name,
-        video_path
+        video_path,
+        peta_jam
     ):
         self.camera_name = camera_name
 
         self.video_path = video_path
+
+        self.peta_jam = peta_jam
 
         self.running = True
 
@@ -719,7 +1268,8 @@ class CameraProcessor:
         self.lock = threading.Lock()
 
         self.counter = PerSecondCounter(
-            camera_name
+            camera_name,
+            peta_jam
         )
 
         # ----------------------------------------------------
@@ -806,6 +1356,17 @@ class CameraProcessor:
         frame_delay = 1.0 / fps
 
 
+        # ----------------------------------------------------
+        # Nomor frame
+        # ----------------------------------------------------
+        #
+        # Dihitung sendiri dari pembacaan berurutan. TIDAK pakai
+        # CAP_PROP_POS_FRAMES: pada MP4 terfragmentasi nilai itu
+        # bisa meleset, dan seluruh timestamp CSV bergantung
+        # padanya. Lihat bagian 4B.
+        frame_idx = -1
+
+
         # ====================================================
         # LOOP
         # ====================================================
@@ -824,6 +1385,9 @@ class CameraProcessor:
                 )
 
                 break
+
+
+            frame_idx += 1
 
 
             height, width = frame.shape[:2]
@@ -1181,10 +1745,31 @@ class CameraProcessor:
                     # CROSSING
                     # ----------------------------------------
 
+                    # Dua syarat BARU disisipkan di antara yang lama:
+                    #
+                    # 1. (lama) tanda sisi berubah -> memang
+                    #    menyeberang garis tak hingga
+                    # 2. BARU: titik potongnya jatuh di dalam ruas
+                    #    yang digambar, bukan di perpanjangannya
+                    # 3. BARU: geraknya menuju simpang, bukan
+                    #    menjauh
+                    # 4. (lama) belum pernah dihitung
                     if (
                         previous_side is not None
                         and previous_side
                         * current_side < 0
+                        and previous_centroid is not None
+                        and potongan_dalam_ruas(
+                            previous_centroid,
+                            (cx, cy),
+                            line_p1,
+                            line_p2
+                        )
+                        and menuju_simpang(
+                            self.camera_name,
+                            cx - previous_centroid[0],
+                            cy - previous_centroid[1]
+                        )
                         and track_id
                         not in self.counted_ids
                     ):
@@ -1534,7 +2119,9 @@ class CameraProcessor:
 
                 density=total_density,
 
-                lane_counts=lane_current
+                lane_counts=lane_current,
+
+                frame_idx=frame_idx
             )
 
 
@@ -1570,12 +2157,70 @@ class CameraProcessor:
 
         cap.release()
 
+        # Tutup detik terakhir sebelum thread-nya mati
+        self.counter.flush_akhir()
+
         self.running = False
 
 
 # ============================================================
 # 12. MAIN
 # ============================================================
+
+def tulis_lengan_tidak_terukur():
+    """
+    Menulis baris CSV untuk lengan di LENGAN_TIDAK_TERUKUR
+    (bagian 6C), satu baris per detik yang benar-benar ditulis
+    lengan lain pada run ini.
+
+    Seluruh kolom angka dikosongkan — lihat catatan di bagian 6C
+    soal kenapa kosong dan bukan 0.
+    """
+    if not LENGAN_TIDAK_TERUKUR:
+        return
+
+    with _KUNCI_TIMESTAMP:
+        detik = sorted(TIMESTAMP_TERTULIS)
+
+    if not detik:
+        print(
+            "[WARNING] Tidak ada baris terukur sama sekali, "
+            "jadi baris lengan tidak-terukur juga dilewati."
+        )
+        return
+
+    # timestamp, intersection_id, approach, lane_id, lalu 8 kolom
+    # angka yang semuanya dikosongkan.
+    kosong = [""] * (len(CSV_HEADER) - 4)
+
+    with open(
+        CSV_PATH,
+        "a",
+        newline="",
+        encoding="utf-8"
+    ) as file:
+
+        writer = csv.writer(file)
+
+        for approach in LENGAN_TIDAK_TERUKUR:
+            for timestamp in detik:
+                writer.writerow(
+                    [
+                        timestamp,
+                        INTERSECTION_ID,
+                        approach,
+                        "lane_1",
+                    ]
+                    + kosong
+                )
+
+    for approach, alasan in LENGAN_TIDAK_TERUKUR.items():
+        print(
+            f"[INFO] {approach}: {len(detik)} baris ditulis "
+            f"sebagai TIDAK TERUKUR (semua kolom angka kosong) - "
+            f"{alasan}."
+        )
+
 
 def main():
 
@@ -1653,13 +2298,81 @@ def main():
             continue
 
 
+        # ----------------------------------------------------
+        # Peta jam dinding
+        # ----------------------------------------------------
+        #
+        # Dibangun di sini, bukan di dalam thread, supaya
+        # kegagalannya muncul SEBELUM YOLO dimuat dan sebelum
+        # ada baris CSV yang tertulis. Kalau petanya tidak bisa
+        # dibuat, seluruh proses dibatalkan — bukan dilanjutkan
+        # dengan jam laptop.
+        cek = cv2.VideoCapture(video_path)
+
+        fps_video = cek.get(cv2.CAP_PROP_FPS)
+
+        frame_video = int(
+            cek.get(cv2.CAP_PROP_FRAME_COUNT)
+        )
+
+        cek.release()
+
+        if fps_video <= 0:
+
+            print(
+                f"[ERROR] fps {camera_name} terbaca "
+                f"{fps_video}; jam dinding tidak bisa dihitung."
+            )
+
+            return
+
+        try:
+            peta_jam = muat_peta_jam(
+                video_path,
+                fps_video
+            )
+
+        except RuntimeError as e:
+
+            print(
+                f"[ERROR] {camera_name}: {e}"
+            )
+
+            return
+
+        # Jumlah frame video harus cocok dengan jumlah frame di
+        # laporan. Kalau tidak, videonya bukan hasil run yang
+        # sama dengan laporannya, dan setiap timestamp sesudah
+        # keping pertama akan meleset.
+        if peta_jam.total_frame != frame_video:
+
+            print(
+                f"[ERROR] {camera_name}: video punya "
+                f"{frame_video} frame, sync_report.json "
+                f"mencatat {peta_jam.total_frame}. "
+                f"Laporannya bukan milik video ini."
+            )
+
+            return
+
+        print(
+            f"[INFO] {camera_name}: jam dinding "
+            f"{peta_jam.waktu(peta_jam.detik_dinding(0)).strftime('%H:%M:%S')}"
+            f" - "
+            f"{peta_jam.waktu(peta_jam.detik_dinding(frame_video - 1)).strftime('%H:%M:%S')}"
+            f" ({len(peta_jam.frame_awal)} keping)"
+        )
+
+
         processors[
             camera_name
         ] = CameraProcessor(
 
             camera_name,
 
-            video_path
+            video_path,
+
+            peta_jam
         )
 
 
