@@ -1,68 +1,155 @@
-import json
-import time
-from pathlib import Path
+"""
+======================================================================
+YOLO TRAFFIC LSTM EVALUATION
+======================================================================
 
-import joblib
+Purpose:
+    Evaluate the trained YOLO Traffic LSTM baseline model.
+
+Pipeline:
+    1. Load processed test dataset
+    2. Load training configuration
+    3. Load scaler
+    4. Load best LSTM model
+    5. Generate predictions
+    6. Validate numerical outputs
+    7. Calculate scaled-space metrics
+    8. Inverse transform predictions and targets
+    9. Calculate original-space metrics
+    10. Evaluate per traffic feature
+    11. Evaluate per sensor
+    12. Save prediction results
+    13. Save evaluation reports
+    14. Generate plots
+
+Expected directory:
+
+    outputs/
+    └── yolo/
+        ├── processed/
+        │   ├── X_test.npy
+        │   ├── y_test.npy
+        │   ├── scaler_X.pkl
+        │   ├── scaler_y.pkl              # optional but recommended
+        │   ├── feature_metadata.json
+        │   └── ...
+        │
+        ├── models/
+        │   ├── best_model.pt
+        │   ├── training_config.json
+        │   └── training_history.json
+        │
+        └── evaluation/
+            ├── plots/
+            └── ...
+======================================================================
+"""
+
+from pathlib import Path
+import json
+import pickle
+import warnings
+
 import numpy as np
 import pandas as pd
 import torch
 import torch.nn as nn
+
 import matplotlib.pyplot as plt
 
 from sklearn.metrics import (
     mean_absolute_error,
     mean_squared_error,
-    r2_score
 )
 
+warnings.filterwarnings("ignore")
 
-# ============================================================
+
+# ======================================================================
 # PATH CONFIGURATION
-# ============================================================
+# ======================================================================
 
-BASE_DIR = Path(__file__).resolve().parents[2]
+SCRIPT_DIR = Path(__file__).resolve().parent
+FORECASTING_DIR = SCRIPT_DIR.parent.parent
 
-PROCESSED_DIR = (
-    BASE_DIR
+OUTPUT_DIR = (
+    FORECASTING_DIR
     / "outputs"
     / "yolo"
+)
+
+PROCESSED_DIR = (
+    OUTPUT_DIR
     / "processed"
 )
 
 MODEL_DIR = (
-    BASE_DIR
-    / "outputs"
-    / "yolo"
+    OUTPUT_DIR
     / "models"
 )
 
-METRICS_DIR = (
-    BASE_DIR
-    / "outputs"
-    / "yolo"
-    / "metrics"
+EVALUATION_DIR = (
+    OUTPUT_DIR
+    / "evaluation"
 )
 
-PREDICTION_FILE = (
-    BASE_DIR
-    / "outputs"
-    / "yolo"
-    / "test_predictions.npz"
+PLOT_DIR = (
+    EVALUATION_DIR
+    / "plots"
 )
 
-SCALER_PATH = (
+EVALUATION_DIR.mkdir(
+    parents=True,
+    exist_ok=True,
+)
+
+PLOT_DIR.mkdir(
+    parents=True,
+    exist_ok=True,
+)
+
+
+# ======================================================================
+# FILE PATHS
+# ======================================================================
+
+X_TEST_PATH = (
+    PROCESSED_DIR
+    / "X_test.npy"
+)
+
+Y_TEST_PATH = (
+    PROCESSED_DIR
+    / "y_test.npy"
+)
+
+# Recommended:
+# scaler_y.pkl should be the scaler used for target y.
+SCALER_Y_PATH = (
+    PROCESSED_DIR
+    / "scaler_y.pkl"
+)
+
+# Fallback for pipelines that intentionally use
+# one scaler for both X and y.
+SCALER_X_PATH = (
     PROCESSED_DIR
     / "scaler_X.pkl"
 )
 
-CONFIG_PATH = (
-    PROCESSED_DIR
-    / "yolo_config.json"
+MODEL_PATH = (
+    MODEL_DIR
+    / "best_model.pt"
 )
 
-SENSOR_CONFIG_PATH = (
-    PROCESSED_DIR
-    / "sensor_config.json"
+CONFIG_PATH = (
+    MODEL_DIR
+    / "training_config.json"
+)
+
+HISTORY_PATH = (
+    MODEL_DIR
+    / "training_history.json"
 )
 
 FEATURE_METADATA_PATH = (
@@ -70,59 +157,25 @@ FEATURE_METADATA_PATH = (
     / "feature_metadata.json"
 )
 
-BEST_MODEL_PATH = (
-    MODEL_DIR
-    / "best_model.pth"
-)
 
-METRICS_DIR.mkdir(
-    parents=True,
-    exist_ok=True
-)
+# ======================================================================
+# DEFAULT SENSOR / FEATURE CONFIGURATION
+# ======================================================================
 
-PLOTS_DIR = (
-    BASE_DIR
-    / "outputs"
-    / "yolo"
-    / "plots"
-)
+APPROACHES = [
+    "north",
+    "east",
+    "south",
+    "west",
+]
 
-PLOTS_DIR.mkdir(
-    parents=True,
-    exist_ok=True
-)
+LANES = [
+    "lane_1",
+    "lane_2",
+    "lane_3",
+]
 
-
-# ============================================================
-# EXPERIMENT CONFIGURATION
-# ============================================================
-
-DATASET_NAME = "YOLO Traffic Dataset"
-
-INTERSECTION_ID = "simpang4-pingit"
-
-SEQUENCE_LENGTH = 15
-
-FORECAST_HORIZON = 1
-
-NUM_SENSORS = 12
-
-FEATURES_PER_SENSOR = 8
-
-INPUT_SIZE = (
-    NUM_SENSORS
-    * FEATURES_PER_SENSOR
-)
-
-OUTPUT_SIZE = INPUT_SIZE
-
-HIDDEN_SIZE = 64
-
-NUM_LAYERS = 2
-
-DROPOUT = 0.2
-
-FEATURE_NAMES = [
+FEATURES = [
     "vehicle_count",
     "car_count",
     "motorcycle_count",
@@ -130,57 +183,377 @@ FEATURE_NAMES = [
     "truck_count",
     "queue_length_veh",
     "queue_length_m_est",
-    "density_index"
+    "density_index",
 ]
 
-SENSOR_START = 1
+NUM_SENSORS = 12
+NUM_FEATURES = 8
 
-SENSOR_END = 12
-
-RANDOM_SEED = 42
-
-
-# ============================================================
-# DEVICE
-# ============================================================
-
-DEVICE = torch.device(
-    "cuda"
-    if torch.cuda.is_available()
-    else "cpu"
+EXPECTED_OUTPUT_SIZE = (
+    NUM_SENSORS
+    * NUM_FEATURES
 )
 
 
-# ============================================================
-# REPRODUCIBILITY
-# ============================================================
+# ======================================================================
+# UTILITY
+# ======================================================================
 
-def set_seed(
-    seed=RANDOM_SEED
+def print_header(title):
+
+    print()
+    print("=" * 70)
+    print(title)
+    print("=" * 70)
+
+
+def print_subheader(title):
+
+    print()
+    print("-" * 70)
+    print(title)
+    print("-" * 70)
+
+
+def ensure_file(
+    path,
+    description,
 ):
 
-    np.random.seed(
-        seed
-    )
+    if not path.exists():
 
-    torch.manual_seed(
-        seed
-    )
-
-    if torch.cuda.is_available():
-
-        torch.cuda.manual_seed_all(
-            seed
+        raise FileNotFoundError(
+            f"\n[ERROR] {description} tidak ditemukan:\n"
+            f"        {path}\n"
         )
 
-    torch.backends.cudnn.deterministic = True
 
-    torch.backends.cudnn.benchmark = False
+def save_json(
+    data,
+    path,
+):
+
+    with open(
+        path,
+        "w",
+        encoding="utf-8",
+    ) as f:
+
+        json.dump(
+            data,
+            f,
+            indent=4,
+            ensure_ascii=False,
+            default=str,
+        )
 
 
-# ============================================================
-# LSTM MODEL
-# ============================================================
+# ======================================================================
+# LOAD TRAINING CONFIG
+# ======================================================================
+
+def load_training_config():
+
+    print_header(
+        "LOADING TRAINING CONFIGURATION"
+    )
+
+    ensure_file(
+        CONFIG_PATH,
+        "Training configuration",
+    )
+
+    with open(
+        CONFIG_PATH,
+        "r",
+        encoding="utf-8",
+    ) as f:
+
+        config = json.load(f)
+
+    if not isinstance(
+        config,
+        dict,
+    ):
+
+        raise ValueError(
+            "training_config.json harus berupa JSON object."
+        )
+
+    print(
+        "[INFO] Training configuration:"
+    )
+
+    print(
+        f"       Dataset          : "
+        f"{config.get('dataset', 'N/A')}"
+    )
+
+    print(
+        f"       Model            : "
+        f"{config.get('model', 'N/A')}"
+    )
+
+    print(
+        f"       Input size       : "
+        f"{config.get('input_size', 'N/A')}"
+    )
+
+    print(
+        f"       Output size      : "
+        f"{config.get('output_size', 'N/A')}"
+    )
+
+    print(
+        f"       Sequence length  : "
+        f"{config.get('sequence_length', 'N/A')}"
+    )
+
+    print(
+        f"       Forecast horizon : "
+        f"{config.get('forecast_horizon', 'N/A')} second"
+    )
+
+    print(
+        f"       Hidden size      : "
+        f"{config.get('hidden_size', 'N/A')}"
+    )
+
+    print(
+        f"       LSTM layers      : "
+        f"{config.get('num_layers', 'N/A')}"
+    )
+
+    print(
+        f"       Dropout          : "
+        f"{config.get('dropout', 'N/A')}"
+    )
+
+    print(
+        f"       Batch size       : "
+        f"{config.get('batch_size', 'N/A')}"
+    )
+
+    print(
+        f"       Learning rate    : "
+        f"{config.get('learning_rate', 'N/A')}"
+    )
+
+    print(
+        f"       Device           : "
+        f"{config.get('device', 'N/A')}"
+    )
+
+    print(
+        "[OK] Training configuration loaded."
+    )
+
+    return config
+
+
+# ======================================================================
+# LOAD TEST DATA
+# ======================================================================
+
+def load_test_data():
+
+    print_header(
+        "LOADING TEST DATA"
+    )
+
+    ensure_file(
+        X_TEST_PATH,
+        "X_test.npy",
+    )
+
+    ensure_file(
+        Y_TEST_PATH,
+        "y_test.npy",
+    )
+
+    X_test = np.load(
+        X_TEST_PATH
+    )
+
+    y_test = np.load(
+        Y_TEST_PATH
+    )
+
+    print(
+        f"[INFO] X_test : {X_test.shape}"
+    )
+
+    print(
+        f"[INFO] y_test : {y_test.shape}"
+    )
+
+    return (
+        X_test,
+        y_test,
+    )
+
+
+# ======================================================================
+# NUMERICAL VALIDATION
+# ======================================================================
+
+def validate_test_data(
+    X_test,
+    y_test,
+):
+
+    print_header(
+        "NUMERICAL DATA VALIDATION"
+    )
+
+    x_nan = int(
+        np.isnan(X_test).sum()
+    )
+
+    x_inf = int(
+        np.isinf(X_test).sum()
+    )
+
+    y_nan = int(
+        np.isnan(y_test).sum()
+    )
+
+    y_inf = int(
+        np.isinf(y_test).sum()
+    )
+
+    print(
+        f"[INFO] X_test | NaN: {x_nan} | Inf: {x_inf}"
+    )
+
+    print(
+        f"[INFO] y_test | NaN: {y_nan} | Inf: {y_inf}"
+    )
+
+    if x_nan > 0:
+
+        raise ValueError(
+            "X_test mengandung NaN."
+        )
+
+    if x_inf > 0:
+
+        raise ValueError(
+            "X_test mengandung Inf."
+        )
+
+    if y_nan > 0:
+
+        raise ValueError(
+            "y_test mengandung NaN."
+        )
+
+    if y_inf > 0:
+
+        raise ValueError(
+            "y_test mengandung Inf."
+        )
+
+    print(
+        "[OK] Test dataset numerically valid."
+    )
+
+
+# ======================================================================
+# LOAD TARGET SCALER
+# ======================================================================
+
+def load_scaler():
+
+    print_header(
+        "LOADING TARGET SCALER"
+    )
+
+    # --------------------------------------------------------------
+    # Prefer scaler_y.pkl
+    # --------------------------------------------------------------
+
+    if SCALER_Y_PATH.exists():
+
+        scaler_path = SCALER_Y_PATH
+
+        print(
+            "[INFO] Menggunakan scaler_y.pkl"
+        )
+
+    # --------------------------------------------------------------
+    # Fallback to scaler_X.pkl
+    # --------------------------------------------------------------
+
+    elif SCALER_X_PATH.exists():
+
+        scaler_path = SCALER_X_PATH
+
+        print(
+            "[WARN] scaler_y.pkl tidak ditemukan."
+        )
+
+        print(
+            "[WARN] Menggunakan scaler_X.pkl sebagai fallback."
+        )
+
+        print(
+            "[WARN] Pastikan scaler_X memang digunakan "
+            "untuk target y saat preprocessing."
+        )
+
+    else:
+
+        raise FileNotFoundError(
+            "\n[ERROR] Scaler tidak ditemukan.\n"
+            f"Dicari:\n"
+            f"  {SCALER_Y_PATH}\n"
+            f"  {SCALER_X_PATH}\n"
+        )
+
+    with open(
+        scaler_path,
+        "rb",
+    ) as f:
+
+        scaler = pickle.load(f)
+
+    print(
+        f"[INFO] Scaler path : {scaler_path}"
+    )
+
+    print(
+        f"[INFO] Scaler type : "
+        f"{type(scaler).__name__}"
+    )
+
+    # --------------------------------------------------------------
+    # Validate scaler feature count when available
+    # --------------------------------------------------------------
+
+    if hasattr(
+        scaler,
+        "n_features_in_",
+    ):
+
+        print(
+            f"[INFO] Scaler features : "
+            f"{scaler.n_features_in_}"
+        )
+
+    print(
+        "[OK] Scaler loaded."
+    )
+
+    return (
+        scaler,
+        scaler_path,
+    )
+
+
+# ======================================================================
+# MODEL
+# ======================================================================
 
 class TrafficLSTM(
     nn.Module
@@ -189,21 +562,13 @@ class TrafficLSTM(
     def __init__(
         self,
         input_size,
-        hidden_size=64,
-        num_layers=2,
-        output_size=96,
-        dropout=0.2
+        hidden_size,
+        num_layers,
+        dropout,
+        output_size,
     ):
 
         super().__init__()
-
-        self.input_size = input_size
-
-        self.hidden_size = hidden_size
-
-        self.num_layers = num_layers
-
-        self.output_size = output_size
 
         self.lstm = nn.LSTM(
             input_size=input_size,
@@ -214,1298 +579,1387 @@ class TrafficLSTM(
                 dropout
                 if num_layers > 1
                 else 0.0
-            )
+            ),
         )
 
-        self.dropout = nn.Dropout(
-            dropout
-        )
-
-        self.output_layer = nn.Linear(
+        self.fc = nn.Linear(
             hidden_size,
-            output_size
+            output_size,
         )
 
     def forward(
         self,
-        x
+        x,
     ):
 
-        lstm_output, _ = self.lstm(
-            x
-        )
+        output, _ = self.lstm(x)
 
         last_output = (
-            lstm_output[:, -1, :]
+            output[:, -1, :]
         )
 
-        last_output = self.dropout(
+        prediction = self.fc(
             last_output
         )
 
-        output = self.output_layer(
-            last_output
-        )
-
-        return output
+        return prediction
 
 
-# ============================================================
-# LOAD JSON
-# ============================================================
+# ======================================================================
+# DEVICE
+# ======================================================================
 
-def load_json(
-    path
+def get_device(
+    config
 ):
 
-    if not path.exists():
-
-        print(
-            f"[WARNING] File tidak ditemukan:"
+    configured_device = str(
+        config.get(
+            "device",
+            "cpu",
         )
+    ).lower()
 
-        print(
-            f"          {path}"
-        )
+    if (
+        configured_device == "cuda"
+        and torch.cuda.is_available()
+    ):
 
-        return None
-
-    with open(
-        path,
-        "r",
-        encoding="utf-8"
-    ) as file:
-
-        return json.load(
-            file
-        )
-
-
-# ============================================================
-# LOAD CONFIGURATION
-# ============================================================
-
-def load_configuration():
-
-    config = load_json(
-        CONFIG_PATH
-    )
-
-    if config is not None:
-
-        print(
-            "[OK] yolo_config.json loaded."
+        device = torch.device(
+            "cuda"
         )
 
     else:
 
-        print(
-            "[WARNING] Menggunakan konfigurasi default."
+        device = torch.device(
+            "cpu"
         )
 
-    return config
+        if configured_device == "cuda":
 
+            print(
+                "[WARN] Config meminta CUDA, "
+                "tetapi CUDA tidak tersedia."
+            )
 
-# ============================================================
-# LOAD SCALER
-# ============================================================
-
-def load_scaler():
-
-    if not SCALER_PATH.exists():
-
-        raise FileNotFoundError(
-            f"Scaler tidak ditemukan:\n"
-            f"{SCALER_PATH}"
-        )
-
-    scaler = joblib.load(
-        SCALER_PATH
-    )
+            print(
+                "[WARN] Evaluation menggunakan CPU."
+            )
 
     print(
-        "[OK] Scaler loaded."
+        f"[INFO] Evaluation device : {device}"
     )
 
-    print(
-        f"[INFO] Scaler feature count : "
-        f"{len(scaler.mean_)}"
+    return device
+
+
+# ======================================================================
+# LOAD MODEL
+# ======================================================================
+
+def load_model(
+    config,
+    device,
+):
+
+    print_header(
+        "LOADING BEST MODEL"
     )
 
-    if len(scaler.mean_) != INPUT_SIZE:
-
-        raise ValueError(
-            "Jumlah feature pada scaler tidak sesuai.\n"
-            f"Expected : {INPUT_SIZE}\n"
-            f"Got      : {len(scaler.mean_)}"
-        )
-
-    return scaler
-
-
-# ============================================================
-# LOAD TEST DATA
-# ============================================================
-
-def load_test_data():
-
-    X_test_path = (
-        PROCESSED_DIR
-        / "X_test.npy"
+    ensure_file(
+        MODEL_PATH,
+        "Best model",
     )
 
-    y_test_path = (
-        PROCESSED_DIR
-        / "y_test.npy"
+    input_size = int(
+        config["input_size"]
     )
 
-    if not X_test_path.exists():
-
-        raise FileNotFoundError(
-            f"X_test tidak ditemukan:\n"
-            f"{X_test_path}"
-        )
-
-    if not y_test_path.exists():
-
-        raise FileNotFoundError(
-            f"y_test tidak ditemukan:\n"
-            f"{y_test_path}"
-        )
-
-    X_test = np.load(
-        X_test_path
-    ).astype(
-        np.float32
+    hidden_size = int(
+        config["hidden_size"]
     )
 
-    y_test = np.load(
-        y_test_path
-    ).astype(
-        np.float32
+    num_layers = int(
+        config["num_layers"]
     )
 
-    print("=" * 70)
-
-    print(
-        "TEST DATA"
+    dropout = float(
+        config["dropout"]
     )
 
-    print("=" * 70)
-
-    print(
-        f"[INFO] X_test : {X_test.shape}"
-    )
-
-    print(
-        f"[INFO] y_test : {y_test.shape}"
-    )
-
-    # --------------------------------------------------------
-    # Validation
-    # --------------------------------------------------------
-
-    if X_test.ndim != 3:
-
-        raise ValueError(
-            "X_test harus memiliki 3 dimensi:\n"
-            "(samples, sequence, features)"
-        )
-
-    if y_test.ndim != 2:
-
-        raise ValueError(
-            "y_test harus memiliki 2 dimensi:\n"
-            "(samples, features)"
-        )
-
-    if X_test.shape[1] != SEQUENCE_LENGTH:
-
-        raise ValueError(
-            f"Sequence length tidak sesuai.\n"
-            f"Expected : {SEQUENCE_LENGTH}\n"
-            f"Got      : {X_test.shape[1]}"
-        )
-
-    if X_test.shape[2] != INPUT_SIZE:
-
-        raise ValueError(
-            f"Input feature count tidak sesuai.\n"
-            f"Expected : {INPUT_SIZE}\n"
-            f"Got      : {X_test.shape[2]}"
-        )
-
-    if y_test.shape[1] != OUTPUT_SIZE:
-
-        raise ValueError(
-            f"Output feature count tidak sesuai.\n"
-            f"Expected : {OUTPUT_SIZE}\n"
-            f"Got      : {y_test.shape[1]}"
-        )
-
-    if X_test.shape[0] != y_test.shape[0]:
-
-        raise ValueError(
-            "Jumlah sample X_test dan y_test berbeda."
-        )
-
-    if np.isnan(X_test).any():
-
-        raise ValueError(
-            "X_test mengandung NaN."
-        )
-
-    if np.isnan(y_test).any():
-
-        raise ValueError(
-            "y_test mengandung NaN."
-        )
-
-    if np.isinf(X_test).any():
-
-        raise ValueError(
-            "X_test mengandung Inf."
-        )
-
-    if np.isinf(y_test).any():
-
-        raise ValueError(
-            "y_test mengandung Inf."
-        )
-
-    print(
-        "[OK] Test data valid."
-    )
-
-    return (
-        X_test,
-        y_test
-    )
-
-
-# ============================================================
-# LOAD TRAINED MODEL
-# ============================================================
-
-def load_model():
-
-    if not BEST_MODEL_PATH.exists():
-
-        raise FileNotFoundError(
-            f"Best model tidak ditemukan:\n"
-            f"{BEST_MODEL_PATH}"
-        )
-
-    print("=" * 70)
-
-    print(
-        "MODEL LOADING"
-    )
-
-    print("=" * 70)
-
-    print(
-        f"[INFO] Model path:"
-    )
-
-    print(
-        f"       {BEST_MODEL_PATH}"
+    output_size = int(
+        config["output_size"]
     )
 
     model = TrafficLSTM(
-        input_size=INPUT_SIZE,
-        hidden_size=HIDDEN_SIZE,
-        num_layers=NUM_LAYERS,
-        output_size=OUTPUT_SIZE,
-        dropout=DROPOUT
+        input_size=input_size,
+        hidden_size=hidden_size,
+        num_layers=num_layers,
+        dropout=dropout,
+        output_size=output_size,
     )
 
     checkpoint = torch.load(
-        BEST_MODEL_PATH,
-        map_location=DEVICE
+        MODEL_PATH,
+        map_location=device,
+        weights_only=False,
     )
 
-    if (
-        isinstance(
-            checkpoint,
-            dict
-        )
-        and "model_state_dict"
-        in checkpoint
+    # --------------------------------------------------------------
+    # Support several checkpoint formats
+    # --------------------------------------------------------------
+
+    if isinstance(
+        checkpoint,
+        dict,
     ):
 
-        model.load_state_dict(
-            checkpoint[
+        if "model_state_dict" in checkpoint:
+
+            state_dict = checkpoint[
                 "model_state_dict"
             ]
-        )
 
-        best_epoch = checkpoint.get(
-            "epoch",
-            None
-        )
+        elif "state_dict" in checkpoint:
 
-        best_val_loss = checkpoint.get(
-            "val_loss",
-            None
-        )
+            state_dict = checkpoint[
+                "state_dict"
+            ]
 
-        print(
-            "[OK] Checkpoint loaded."
-        )
+        else:
 
-        if best_epoch is not None:
-
-            print(
-                f"[INFO] Best epoch    : "
-                f"{best_epoch}"
-            )
-
-        if best_val_loss is not None:
-
-            print(
-                f"[INFO] Best val loss : "
-                f"{best_val_loss:.6f}"
-            )
+            # Assume checkpoint itself is state_dict
+            state_dict = checkpoint
 
     else:
 
-        model.load_state_dict(
-            checkpoint
+        state_dict = checkpoint
+
+    if not isinstance(
+        state_dict,
+        dict,
+    ):
+
+        raise ValueError(
+            "Format checkpoint model tidak dikenali."
         )
 
-        print(
-            "[OK] State dict loaded."
-        )
+    # --------------------------------------------------------------
+    # Remove possible DataParallel prefix
+    # --------------------------------------------------------------
 
-    model = model.to(
-        DEVICE
+    cleaned_state_dict = {}
+
+    for key, value in state_dict.items():
+
+        if key.startswith(
+            "module."
+        ):
+
+            new_key = key[
+                len("module.") :
+            ]
+
+        else:
+
+            new_key = key
+
+        cleaned_state_dict[
+            new_key
+        ] = value
+
+    model.load_state_dict(
+        cleaned_state_dict
     )
+
+    model.to(device)
 
     model.eval()
 
-    parameter_count = sum(
-        p.numel()
-        for p in model.parameters()
+    print(
+        "[INFO] Model : TrafficLSTM"
     )
 
     print(
-        f"[INFO] Parameters : "
-        f"{parameter_count:,}"
+        f"[INFO] Input size  : {input_size}"
+    )
+
+    print(
+        f"[INFO] Hidden size : {hidden_size}"
+    )
+
+    print(
+        f"[INFO] Layers      : {num_layers}"
+    )
+
+    print(
+        f"[INFO] Dropout     : {dropout}"
+    )
+
+    print(
+        f"[INFO] Output size : {output_size}"
+    )
+
+    print(
+        f"[INFO] Device      : {device}"
+    )
+
+    print(
+        "[OK] Best model loaded."
     )
 
     return model
 
 
-# ============================================================
-# LOAD SAVED TEST PREDICTION
-# ============================================================
+# ======================================================================
+# PREDICTION
+# ======================================================================
 
-def load_saved_prediction():
-
-    if not PREDICTION_FILE.exists():
-
-        print(
-            "[WARNING] test_predictions.npz tidak ditemukan."
-        )
-
-        return None
-
-    print("=" * 70)
-
-    print(
-        "LOADING SAVED PREDICTION"
-    )
-
-    print("=" * 70)
-
-    data = np.load(
-        PREDICTION_FILE
-    )
-
-    print(
-        f"[INFO] NPZ keys : "
-        f"{data.files}"
-    )
-
-    prediction = None
-
-    # --------------------------------------------------------
-    # Cari key prediction
-    # --------------------------------------------------------
-
-    possible_keys = [
-        "prediction",
-        "predictions",
-        "y_pred",
-        "test_predictions"
-    ]
-
-    for key in possible_keys:
-
-        if key in data.files:
-
-            prediction = data[key]
-
-            print(
-                f"[OK] Prediction loaded "
-                f"from key: {key}"
-            )
-
-            break
-
-    if prediction is None:
-
-        print(
-            "[WARNING] Tidak menemukan array prediction."
-        )
-
-        return None
-
-    prediction = prediction.astype(
-        np.float32
-    )
-
-    print(
-        f"[INFO] Prediction shape : "
-        f"{prediction.shape}"
-    )
-
-    return prediction
-
-
-# ============================================================
-# GENERATE PREDICTION
-# ============================================================
-
-def generate_prediction(
+def generate_predictions(
     model,
-    X_test
+    X_test,
+    device,
+    batch_size=32,
 ):
 
-    print("=" * 70)
-
-    print(
-        "GENERATING TEST PREDICTION"
+    print_header(
+        "GENERATING TEST PREDICTIONS"
     )
 
-    print("=" * 70)
-
-    input_tensor = torch.from_numpy(
-        X_test
-    ).float()
-
-    input_tensor = input_tensor.to(
-        DEVICE
+    X_tensor = torch.tensor(
+        X_test,
+        dtype=torch.float32,
     )
 
-    start_time = time.time()
+    dataset = (
+        torch.utils.data.TensorDataset(
+            X_tensor
+        )
+    )
+
+    loader = (
+        torch.utils.data.DataLoader(
+            dataset,
+            batch_size=batch_size,
+            shuffle=False,
+        )
+    )
+
+    predictions = []
 
     with torch.no_grad():
 
-        prediction = model(
-            input_tensor
+        for batch in loader:
+
+            X_batch = (
+                batch[0]
+                .to(device)
+            )
+
+            output = model(
+                X_batch
+            )
+
+            predictions.append(
+                output
+                .cpu()
+                .numpy()
+            )
+
+    if not predictions:
+
+        raise ValueError(
+            "Tidak ada prediction yang dihasilkan."
         )
 
-    inference_time = (
-        time.time()
-        - start_time
-    )
-
-    prediction = (
-        prediction
-        .detach()
-        .cpu()
-        .numpy()
+    predictions = np.concatenate(
+        predictions,
+        axis=0,
     )
 
     print(
         f"[INFO] Prediction shape : "
-        f"{prediction.shape}"
+        f"{predictions.shape}"
     )
 
     print(
-        f"[INFO] Inference time   : "
-        f"{inference_time:.4f} seconds"
+        "[OK] Prediction completed."
     )
 
-    print(
-        f"[INFO] Avg/sample       : "
-        f"{inference_time / len(X_test):.6f} seconds"
-    )
-
-    return (
-        prediction,
-        inference_time
-    )
+    return predictions
 
 
-# ============================================================
-# INVERSE SCALING
-# ============================================================
+# ======================================================================
+# SHAPE VALIDATION
+# ======================================================================
 
-def inverse_transform(
-    data,
-    scaler,
-    name
+def validate_prediction_shape(
+    predictions,
+    y_test,
 ):
 
-    print("=" * 70)
-
-    print(
-        f"INVERSE SCALING - {name}"
+    print_header(
+        "PREDICTION SHAPE VALIDATION"
     )
 
-    print("=" * 70)
+    print(
+        f"[INFO] Prediction : "
+        f"{predictions.shape}"
+    )
 
-    if data.ndim != 2:
+    print(
+        f"[INFO] Actual     : "
+        f"{y_test.shape}"
+    )
+
+    if predictions.shape != y_test.shape:
 
         raise ValueError(
-            f"{name} harus berbentuk "
-            f"(samples, features).\n"
-            f"Got: {data.shape}"
+            "\nPrediction shape tidak sama dengan y_test.\n"
+            f"Prediction : {predictions.shape}\n"
+            f"y_test     : {y_test.shape}\n"
         )
-
-    if data.shape[1] != INPUT_SIZE:
-
-        raise ValueError(
-            f"Jumlah feature {name} tidak sesuai.\n"
-            f"Expected : {INPUT_SIZE}\n"
-            f"Got      : {data.shape[1]}"
-        )
-
-    # --------------------------------------------------------
-    # IMPORTANT
-    #
-    # YOLO scaler dibuat menggunakan 96 feature langsung.
-    #
-    # Jadi:
-    #
-    # (samples, 96)
-    #
-    # langsung inverse_transform.
-    #
-    # JANGAN reshape menjadi (sensor, feature).
-    # --------------------------------------------------------
-
-    result = scaler.inverse_transform(
-        data
-    )
 
     print(
-        f"[OK] {name} berhasil "
-        f"dikembalikan ke skala asli."
-    )
-
-    return result
-
-
-# ============================================================
-# SAFE MAPE
-# ============================================================
-
-def calculate_mape(
-    actual,
-    prediction
-):
-
-    actual = np.asarray(
-        actual
-    )
-
-    prediction = np.asarray(
-        prediction
-    )
-
-    mask = (
-        np.abs(actual) > 1e-8
-    )
-
-    if not np.any(mask):
-
-        return np.nan
-
-    return (
-        np.mean(
-            np.abs(
-                (
-                    actual[mask]
-                    - prediction[mask]
-                )
-                /
-                np.abs(
-                    actual[mask]
-                )
-            )
-        )
-        * 100
+        "[OK] Prediction shape validation passed."
     )
 
 
-# ============================================================
-# SMAPE
-# ============================================================
-
-def calculate_smape(
-    actual,
-    prediction
-):
-
-    actual = np.asarray(
-        actual
-    )
-
-    prediction = np.asarray(
-        prediction
-    )
-
-    denominator = (
-        np.abs(actual)
-        + np.abs(prediction)
-    )
-
-    mask = (
-        denominator > 1e-8
-    )
-
-    if not np.any(mask):
-
-        return np.nan
-
-    return (
-        np.mean(
-            2
-            * np.abs(
-                prediction[mask]
-                - actual[mask]
-            )
-            /
-            denominator[mask]
-        )
-        * 100
-    )
-
-
-# ============================================================
-# CALCULATE METRICS
-# ============================================================
+# ======================================================================
+# METRICS
+# ======================================================================
 
 def calculate_metrics(
-    actual,
-    prediction
+    y_true,
+    y_pred,
 ):
 
-    actual_flat = actual.reshape(
-        -1
+    y_true_flat = (
+        np.asarray(y_true)
+        .reshape(-1)
     )
 
-    prediction_flat = prediction.reshape(
-        -1
-    )
-
-    mae = mean_absolute_error(
-        actual_flat,
-        prediction_flat
+    y_pred_flat = (
+        np.asarray(y_pred)
+        .reshape(-1)
     )
 
     mse = mean_squared_error(
-        actual_flat,
-        prediction_flat
+        y_true_flat,
+        y_pred_flat,
     )
 
     rmse = np.sqrt(
         mse
     )
 
-    r2 = r2_score(
-        actual_flat,
-        prediction_flat
-    )
-
-    mape = calculate_mape(
-        actual_flat,
-        prediction_flat
-    )
-
-    smape = calculate_smape(
-        actual_flat,
-        prediction_flat
+    mae = mean_absolute_error(
+        y_true_flat,
+        y_pred_flat,
     )
 
     return {
-        "MAE": float(mae),
-        "MSE": float(mse),
-        "RMSE": float(rmse),
-        "MAPE_percent": (
-            float(mape)
-            if not np.isnan(mape)
-            else None
-        ),
-        "sMAPE_percent": (
-            float(smape)
-            if not np.isnan(smape)
-            else None
-        ),
-        "R2": float(r2)
+        "mse": float(mse),
+        "rmse": float(rmse),
+        "mae": float(mae),
     }
 
 
-# ============================================================
-# OVERALL METRICS
-# ============================================================
+# ======================================================================
+# SCALED METRICS
+# ======================================================================
 
-def evaluate_overall(
-    actual,
-    prediction
+def evaluate_scaled(
+    y_test,
+    predictions,
 ):
 
-    print("=" * 70)
-
-    print(
-        "OVERALL TEST EVALUATION"
+    print_header(
+        "EVALUATION - SCALED SPACE"
     )
-
-    print("=" * 70)
 
     metrics = calculate_metrics(
-        actual,
-        prediction
-    )
-
-    print()
-
-    print(
-        "[OVERALL TEST METRICS]"
+        y_test,
+        predictions,
     )
 
     print(
-        f"MAE   : "
-        f"{metrics['MAE']:.6f}"
+        f"[SCALED] MSE  : "
+        f"{metrics['mse']:.6f}"
     )
 
     print(
-        f"MSE   : "
-        f"{metrics['MSE']:.6f}"
+        f"[SCALED] RMSE : "
+        f"{metrics['rmse']:.6f}"
     )
 
     print(
-        f"RMSE  : "
-        f"{metrics['RMSE']:.6f}"
-    )
-
-    print(
-        f"MAPE  : "
-        f"{metrics['MAPE_percent']:.4f}%"
-    )
-
-    print(
-        f"sMAPE : "
-        f"{metrics['sMAPE_percent']:.4f}%"
-    )
-
-    print(
-        f"R2    : "
-        f"{metrics['R2']:.6f}"
+        f"[SCALED] MAE  : "
+        f"{metrics['mae']:.6f}"
     )
 
     return metrics
 
 
-# ============================================================
-# PER FEATURE
-# ============================================================
+# ======================================================================
+# INVERSE TRANSFORM
+# ======================================================================
 
-def evaluate_per_feature(
-    actual,
-    prediction
+def inverse_transform_targets(
+    scaler,
+    y_test,
+    predictions,
 ):
 
-    print("=" * 70)
-
-    print(
-        "EVALUATION PER FEATURE"
+    print_header(
+        "INVERSE TRANSFORM TO ORIGINAL SCALE"
     )
 
-    print("=" * 70)
+    n_samples = (
+        y_test.shape[0]
+    )
 
-    rows = []
+    n_features = (
+        y_test.shape[1]
+    )
 
-    for feature_index, feature_name in enumerate(
-        FEATURE_NAMES
+    print(
+        f"[INFO] Samples  : {n_samples}"
+    )
+
+    print(
+        f"[INFO] Features : {n_features}"
+    )
+
+    # --------------------------------------------------------------
+    # Validate scaler dimension when possible
+    # --------------------------------------------------------------
+
+    if hasattr(
+        scaler,
+        "n_features_in_",
     ):
 
-        # ----------------------------------------------------
-        # Ambil feature dari setiap sensor
-        #
-        # Layout:
-        #
-        # sensor 1:
-        #   feature 0..7
-        #
-        # sensor 2:
-        #   feature 0..7
-        #
-        # ...
-        #
-        # ----------------------------------------------------
-
-        indices = np.arange(
-            feature_index,
-            INPUT_SIZE,
-            FEATURES_PER_SENSOR
+        scaler_features = int(
+            scaler.n_features_in_
         )
 
-        actual_feature = (
-            actual[:, indices]
-            .reshape(-1)
+        if (
+            scaler_features
+            != n_features
+        ):
+
+            raise ValueError(
+                "\nJumlah feature scaler tidak cocok "
+                "dengan y_test.\n"
+                f"Scaler : {scaler_features}\n"
+                f"y_test: {n_features}\n"
+            )
+
+    y_true_original = (
+        scaler.inverse_transform(
+            y_test
+        )
+    )
+
+    y_pred_original = (
+        scaler.inverse_transform(
+            predictions
+        )
+    )
+
+    print(
+        f"[INFO] Actual original shape : "
+        f"{y_true_original.shape}"
+    )
+
+    print(
+        f"[INFO] Prediction original shape : "
+        f"{y_pred_original.shape}"
+    )
+
+    print(
+        "[OK] Inverse transform completed."
+    )
+
+    return (
+        y_true_original,
+        y_pred_original,
+    )
+
+
+# ======================================================================
+# ORIGINAL SCALE METRICS
+# ======================================================================
+
+def evaluate_original_scale(
+    y_true,
+    y_pred,
+):
+
+    print_header(
+        "EVALUATION - ORIGINAL TRAFFIC SCALE"
+    )
+
+    metrics = calculate_metrics(
+        y_true,
+        y_pred,
+    )
+
+    print(
+        f"[TEST] MSE  : "
+        f"{metrics['mse']:.6f}"
+    )
+
+    print(
+        f"[TEST] RMSE : "
+        f"{metrics['rmse']:.6f}"
+    )
+
+    print(
+        f"[TEST] MAE  : "
+        f"{metrics['mae']:.6f}"
+    )
+
+    return metrics
+
+
+# ======================================================================
+# FEATURE METADATA LOADER
+# ======================================================================
+
+def load_feature_metadata():
+
+    print_header(
+        "LOADING FEATURE METADATA"
+    )
+
+    ensure_file(
+        FEATURE_METADATA_PATH,
+        "Feature metadata",
+    )
+
+    with open(
+        FEATURE_METADATA_PATH,
+        "r",
+        encoding="utf-8",
+    ) as f:
+
+        metadata = json.load(f)
+
+    if not isinstance(
+        metadata,
+        dict,
+    ):
+
+        raise ValueError(
+            "feature_metadata.json harus berupa dictionary."
         )
 
-        prediction_feature = (
-            prediction[:, indices]
-            .reshape(-1)
+    if "features" not in metadata:
+
+        raise ValueError(
+            "feature_metadata.json tidak memiliki key 'features'."
         )
 
-        metrics = calculate_metrics(
-            actual_feature,
-            prediction_feature
+    feature_metadata = (
+        metadata["features"]
+    )
+
+    if not isinstance(
+        feature_metadata,
+        list,
+    ):
+
+        raise ValueError(
+            "metadata['features'] harus berupa list."
         )
 
-        rows.append(
+    if len(
+        feature_metadata
+    ) != EXPECTED_OUTPUT_SIZE:
+
+        raise ValueError(
+            "Jumlah feature metadata tidak sesuai.\n"
+            f"Ditemukan : {len(feature_metadata)}\n"
+            f"Diharapkan: {EXPECTED_OUTPUT_SIZE}"
+        )
+
+    required_keys = [
+        "index",
+        "sensor_id",
+        "approach",
+        "lane_id",
+        "feature",
+    ]
+
+    for i, item in enumerate(
+        feature_metadata
+    ):
+
+        if not isinstance(
+            item,
+            dict,
+        ):
+
+            raise ValueError(
+                f"Metadata index {i} bukan dictionary."
+            )
+
+        for key in required_keys:
+
+            if key not in item:
+
+                raise ValueError(
+                    f"Metadata index {i} "
+                    f"tidak memiliki key '{key}'."
+                )
+
+        if item["index"] != i:
+
+            raise ValueError(
+                "Index metadata tidak berurutan.\n"
+                f"Posisi    : {i}\n"
+                f"Metadata  : {item['index']}"
+            )
+
+        if item["feature"] not in FEATURES:
+
+            raise ValueError(
+                f"Feature tidak dikenal: "
+                f"{item['feature']}"
+            )
+
+    print(
+        f"[INFO] Feature metadata loaded : "
+        f"{len(feature_metadata)} features"
+    )
+
+    # --------------------------------------------------------------
+    # Validate sensor count
+    # --------------------------------------------------------------
+
+    sensor_ids = sorted(
+        {
+            item["sensor_id"]
+            for item in feature_metadata
+        }
+    )
+
+    print(
+        f"[INFO] Sensor count : "
+        f"{len(sensor_ids)}"
+    )
+
+    print(
+        f"[INFO] Sensor IDs   : "
+        f"{sensor_ids}"
+    )
+
+    if len(
+        sensor_ids
+    ) != NUM_SENSORS:
+
+        raise ValueError(
+            "Jumlah sensor metadata tidak sesuai.\n"
+            f"Ditemukan : {len(sensor_ids)}\n"
+            f"Diharapkan: {NUM_SENSORS}"
+        )
+
+    # --------------------------------------------------------------
+    # Validate 8 features per sensor
+    # --------------------------------------------------------------
+
+    for sensor_id in sensor_ids:
+
+        sensor_features = [
+            item["feature"]
+            for item in feature_metadata
+            if item["sensor_id"] == sensor_id
+        ]
+
+        if len(
+            sensor_features
+        ) != NUM_FEATURES:
+
+            raise ValueError(
+                f"Sensor {sensor_id} memiliki "
+                f"{len(sensor_features)} feature, "
+                f"diharapkan {NUM_FEATURES}."
+            )
+
+    print(
+        "[OK] Feature metadata validation passed."
+    )
+
+    return feature_metadata
+
+
+# ======================================================================
+# PER FEATURE EVALUATION
+# ======================================================================
+
+def evaluate_per_feature(
+    y_true,
+    y_pred,
+    feature_metadata,
+):
+
+    print_header(
+        "EVALUATION PER TRAFFIC FEATURE"
+    )
+
+    if (
+        y_true.shape
+        != y_pred.shape
+    ):
+
+        raise ValueError(
+            f"Shape y_true dan y_pred berbeda:\n"
+            f"y_true: {y_true.shape}\n"
+            f"y_pred: {y_pred.shape}"
+        )
+
+    if (
+        len(feature_metadata)
+        != y_true.shape[1]
+    ):
+
+        raise ValueError(
+            f"Jumlah metadata ({len(feature_metadata)}) "
+            f"tidak sama dengan output model "
+            f"({y_true.shape[1]})."
+        )
+
+    # ==============================================================
+    # DETAIL SENSOR + FEATURE
+    # ==============================================================
+
+    detailed_rows = []
+
+    for feature_idx, metadata in enumerate(
+        feature_metadata
+    ):
+
+        true_values = (
+            y_true[:, feature_idx]
+        )
+
+        pred_values = (
+            y_pred[:, feature_idx]
+        )
+
+        mse = mean_squared_error(
+            true_values,
+            pred_values,
+        )
+
+        rmse = np.sqrt(
+            mse
+        )
+
+        mae = mean_absolute_error(
+            true_values,
+            pred_values,
+        )
+
+        detailed_rows.append(
             {
-                "feature": feature_name,
-                "MAE": metrics["MAE"],
-                "MSE": metrics["MSE"],
-                "RMSE": metrics["RMSE"],
-                "MAPE_percent": metrics[
-                    "MAPE_percent"
+                "index": feature_idx,
+                "sensor_id": metadata[
+                    "sensor_id"
                 ],
-                "sMAPE_percent": metrics[
-                    "sMAPE_percent"
+                "approach": metadata[
+                    "approach"
                 ],
-                "R2": metrics["R2"]
+                "lane_id": metadata[
+                    "lane_id"
+                ],
+                "feature": metadata[
+                    "feature"
+                ],
+                "mae": float(mae),
+                "rmse": float(rmse),
+                "mse": float(mse),
             }
         )
 
-    dataframe = pd.DataFrame(
-        rows
+    detailed_df = pd.DataFrame(
+        detailed_rows
     )
 
+    # ==============================================================
+    # AGGREGATE BY TRAFFIC FEATURE
+    # ==============================================================
+
+    aggregate_rows = []
+
+    for feature in FEATURES:
+
+        indices = [
+            i
+            for i, metadata in enumerate(
+                feature_metadata
+            )
+            if metadata["feature"] == feature
+        ]
+
+        if not indices:
+            continue
+
+        true_values = (
+            y_true[:, indices]
+        )
+
+        pred_values = (
+            y_pred[:, indices]
+        )
+
+        true_flat = (
+            true_values
+            .reshape(-1)
+        )
+
+        pred_flat = (
+            pred_values
+            .reshape(-1)
+        )
+
+        mse = mean_squared_error(
+            true_flat,
+            pred_flat,
+        )
+
+        rmse = np.sqrt(
+            mse
+        )
+
+        mae = mean_absolute_error(
+            true_flat,
+            pred_flat,
+        )
+
+        aggregate_rows.append(
+            {
+                "feature": feature,
+                "mae": float(mae),
+                "rmse": float(rmse),
+                "mse": float(mse),
+                "feature_count": len(indices),
+            }
+        )
+
+    aggregate_df = pd.DataFrame(
+        aggregate_rows
+    )
+
+    # ==============================================================
+    # PRINT
+    # ==============================================================
+
     print()
+    print(
+        "-" * 70
+    )
 
     print(
-        dataframe.to_string(
+        "PER TRAFFIC FEATURE"
+    )
+
+    print(
+        "-" * 70
+    )
+
+    if not aggregate_df.empty:
+
+        print(
+            aggregate_df.to_string(
+                index=False,
+                float_format=lambda x:
+                    f"{x:.6f}",
+            )
+        )
+
+    print()
+    print(
+        "-" * 70
+    )
+
+    print(
+        "DETAILED SENSOR-FEATURE"
+    )
+
+    print(
+        "-" * 70
+    )
+
+    print(
+        detailed_df.to_string(
             index=False,
             float_format=lambda x:
-                f"{x:.6f}"
+                f"{x:.6f}",
         )
     )
 
-    output_path = (
-        METRICS_DIR
-        / "evaluation_per_feature.csv"
+    # ==============================================================
+    # SAVE CSV
+    # ==============================================================
+
+    detailed_path = (
+        EVALUATION_DIR
+        / "metrics_per_sensor_feature.csv"
     )
 
-    dataframe.to_csv(
-        output_path,
-        index=False
+    aggregate_path = (
+        EVALUATION_DIR
+        / "metrics_per_feature.csv"
     )
 
-    print()
+    detailed_df.to_csv(
+        detailed_path,
+        index=False,
+    )
+
+    aggregate_df.to_csv(
+        aggregate_path,
+        index=False,
+    )
 
     print(
-        f"[SAVED] {output_path}"
+        f"\n[SAVED] {detailed_path}"
     )
 
-    return dataframe
+    print(
+        f"[SAVED] {aggregate_path}"
+    )
+
+    return (
+        detailed_df,
+        aggregate_df,
+    )
 
 
-# ============================================================
-# PER SENSOR
-# ============================================================
+# ======================================================================
+# PER SENSOR EVALUATION
+# ======================================================================
 
 def evaluate_per_sensor(
-    actual,
-    prediction
+    y_true,
+    y_pred,
+    feature_metadata,
 ):
 
-    print("=" * 70)
-
-    print(
+    print_header(
         "EVALUATION PER SENSOR"
     )
 
-    print("=" * 70)
+    sensor_groups = {}
+
+    # --------------------------------------------------------------
+    # Group feature indices by sensor
+    # --------------------------------------------------------------
+
+    for index, metadata in enumerate(
+        feature_metadata
+    ):
+
+        sensor_id = metadata[
+            "sensor_id"
+        ]
+
+        if sensor_id not in sensor_groups:
+
+            sensor_groups[
+                sensor_id
+            ] = []
+
+        sensor_groups[
+            sensor_id
+        ].append(index)
 
     rows = []
 
-    for sensor_index in range(
-        NUM_SENSORS
+    for sensor_id in sorted(
+        sensor_groups.keys()
     ):
 
-        start = (
-            sensor_index
-            * FEATURES_PER_SENSOR
+        indices = sensor_groups[
+            sensor_id
+        ]
+
+        true_values = (
+            y_true[:, indices]
         )
 
-        end = (
-            start
-            + FEATURES_PER_SENSOR
+        pred_values = (
+            y_pred[:, indices]
         )
 
-        actual_sensor = (
-            actual[:, start:end]
+        true_flat = (
+            true_values
             .reshape(-1)
         )
 
-        prediction_sensor = (
-            prediction[:, start:end]
+        pred_flat = (
+            pred_values
             .reshape(-1)
         )
 
-        metrics = calculate_metrics(
-            actual_sensor,
-            prediction_sensor
+        mse = mean_squared_error(
+            true_flat,
+            pred_flat,
         )
 
-        sensor_id = (
-            SENSOR_START
-            + sensor_index
+        rmse = np.sqrt(
+            mse
+        )
+
+        mae = mean_absolute_error(
+            true_flat,
+            pred_flat,
+        )
+
+        metadata = (
+            feature_metadata[
+                indices[0]
+            ]
         )
 
         rows.append(
             {
-                "sensor": sensor_id,
-                "MAE": metrics["MAE"],
-                "MSE": metrics["MSE"],
-                "RMSE": metrics["RMSE"],
-                "MAPE_percent": metrics[
-                    "MAPE_percent"
+                "sensor_id": sensor_id,
+                "approach": metadata[
+                    "approach"
                 ],
-                "sMAPE_percent": metrics[
-                    "sMAPE_percent"
+                "lane_id": metadata[
+                    "lane_id"
                 ],
-                "R2": metrics["R2"]
+                "sensor": (
+                    f"{metadata['approach']}/"
+                    f"{metadata['lane_id']}"
+                ),
+                "mae": float(mae),
+                "rmse": float(rmse),
+                "mse": float(mse),
+                "feature_count": len(indices),
             }
         )
 
-    dataframe = pd.DataFrame(
+    sensor_df = pd.DataFrame(
         rows
     )
 
     print()
+    print(
+        "-" * 70
+    )
 
     print(
-        dataframe.to_string(
-            index=False,
-            float_format=lambda x:
-                f"{x:.6f}"
+        "PER SENSOR"
+    )
+
+    print(
+        "-" * 70
+    )
+
+    if not sensor_df.empty:
+
+        print(
+            sensor_df.to_string(
+                index=False,
+                float_format=lambda x:
+                    f"{x:.6f}",
+            )
         )
+
+    sensor_path = (
+        EVALUATION_DIR
+        / "metrics_per_sensor.csv"
     )
 
-    output_path = (
-        METRICS_DIR
-        / "evaluation_per_sensor.csv"
+    sensor_df.to_csv(
+        sensor_path,
+        index=False,
     )
-
-    dataframe.to_csv(
-        output_path,
-        index=False
-    )
-
-    print()
 
     print(
-        f"[SAVED] {output_path}"
+        f"\n[SAVED] {sensor_path}"
     )
 
-    return dataframe
+    return sensor_df
 
 
-# ============================================================
-# PER SENSOR + FEATURE
-# ============================================================
+# ======================================================================
+# SAVE PREDICTIONS
+# ======================================================================
 
-def evaluate_sensor_feature(
-    actual,
-    prediction
+def save_predictions(
+    y_test_scaled,
+    y_true_original,
+    y_pred_original,
 ):
 
-    print("=" * 70)
-
-    print(
-        "EVALUATION PER SENSOR + FEATURE"
+    print_header(
+        "SAVING PREDICTIONS"
     )
 
-    print("=" * 70)
+    scaled_path = (
+        EVALUATION_DIR
+        / "y_test_actual_scaled.npy"
+    )
+
+    original_actual_path = (
+        EVALUATION_DIR
+        / "y_test_actual_original.npy"
+    )
+
+    original_prediction_path = (
+        EVALUATION_DIR
+        / "y_test_prediction_original.npy"
+    )
+
+    np.save(
+        scaled_path,
+        np.asarray(
+            y_test_scaled,
+            dtype=np.float32,
+        ),
+    )
+
+    np.save(
+        original_actual_path,
+        np.asarray(
+            y_true_original,
+            dtype=np.float32,
+        ),
+    )
+
+    np.save(
+        original_prediction_path,
+        np.asarray(
+            y_pred_original,
+            dtype=np.float32,
+        ),
+    )
+
+    print(
+        f"[SAVED] {scaled_path}"
+    )
+
+    print(
+        f"[SAVED] {original_actual_path}"
+    )
+
+    print(
+        f"[SAVED] {original_prediction_path}"
+    )
+
+
+# ======================================================================
+# PREDICTION CSV
+# ======================================================================
+
+def save_prediction_csv(
+    y_true,
+    y_pred,
+    feature_metadata,
+):
+
+    print_header(
+        "CREATING PREDICTION CSV"
+    )
 
     rows = []
 
-    for sensor_index in range(
-        NUM_SENSORS
+    for sample_idx in range(
+        y_true.shape[0]
     ):
 
-        sensor_id = (
-            SENSOR_START
-            + sensor_index
-        )
-
-        base_index = (
-            sensor_index
-            * FEATURES_PER_SENSOR
-        )
-
-        for feature_index, feature_name in enumerate(
-            FEATURE_NAMES
+        for feature_idx, metadata in enumerate(
+            feature_metadata
         ):
 
-            column_index = (
-                base_index
-                + feature_index
+            actual = float(
+                y_true[
+                    sample_idx,
+                    feature_idx,
+                ]
             )
 
-            actual_values = (
-                actual[:, column_index]
+            prediction = float(
+                y_pred[
+                    sample_idx,
+                    feature_idx,
+                ]
             )
 
-            prediction_values = (
-                prediction[:, column_index]
+            error = (
+                prediction
+                - actual
             )
 
-            metrics = calculate_metrics(
-                actual_values,
-                prediction_values
+            absolute_error = abs(
+                error
             )
 
             rows.append(
                 {
-                    "sensor": sensor_id,
-                    "feature": feature_name,
-                    "MAE": metrics["MAE"],
-                    "MSE": metrics["MSE"],
-                    "RMSE": metrics["RMSE"],
-                    "MAPE_percent": metrics[
-                        "MAPE_percent"
+                    "sample": sample_idx,
+                    "index": feature_idx,
+                    "sensor_id": metadata[
+                        "sensor_id"
                     ],
-                    "sMAPE_percent": metrics[
-                        "sMAPE_percent"
+                    "approach": metadata[
+                        "approach"
                     ],
-                    "R2": metrics["R2"]
+                    "lane_id": metadata[
+                        "lane_id"
+                    ],
+                    "feature": metadata[
+                        "feature"
+                    ],
+                    "actual": actual,
+                    "prediction": prediction,
+                    "error": error,
+                    "absolute_error": absolute_error,
                 }
             )
 
-    dataframe = pd.DataFrame(
+    df = pd.DataFrame(
         rows
     )
 
     output_path = (
-        METRICS_DIR
-        / "evaluation_sensor_feature.csv"
+        EVALUATION_DIR
+        / "predictions_long.csv"
     )
 
-    dataframe.to_csv(
+    df.to_csv(
         output_path,
-        index=False
+        index=False,
     )
 
     print(
         f"[SAVED] {output_path}"
     )
 
-    return dataframe
+    return df
 
 
-# ============================================================
-# SAVE PREDICTION COMPARISON
-# ============================================================
+# ======================================================================
+# TRAINING HISTORY PLOT
+# ======================================================================
 
-def save_prediction_comparison(
-    actual,
-    prediction
-):
+def plot_training_history():
 
-    rows = []
-
-    # --------------------------------------------------------
-    # Simpan beberapa sample pertama.
-    #
-    # Ini bukan untuk menggantikan seluruh hasil evaluasi.
-    # Hanya untuk inspeksi.
-    # --------------------------------------------------------
-
-    max_samples = min(
-        100,
-        actual.shape[0]
+    print_header(
+        "PLOTTING TRAINING HISTORY"
     )
 
-    for sample_index in range(
-        max_samples
+    if not HISTORY_PATH.exists():
+
+        print(
+            "[WARN] training_history.json tidak ditemukan."
+        )
+
+        return
+
+    with open(
+        HISTORY_PATH,
+        "r",
+        encoding="utf-8",
+    ) as f:
+
+        history = json.load(f)
+
+    if not isinstance(
+        history,
+        dict,
     ):
 
-        for sensor_index in range(
-            NUM_SENSORS
-        ):
+        print(
+            "[WARN] Format training_history tidak dikenali."
+        )
 
-            sensor_id = (
-                SENSOR_START
-                + sensor_index
-            )
+        return
 
-            base_index = (
-                sensor_index
-                * FEATURES_PER_SENSOR
-            )
-
-            row = {
-                "sample": sample_index,
-                "sensor": sensor_id
-            }
-
-            for feature_index, feature_name in enumerate(
-                FEATURE_NAMES
-            ):
-
-                column_index = (
-                    base_index
-                    + feature_index
-                )
-
-                row[
-                    f"actual_{feature_name}"
-                ] = float(
-                    actual[
-                        sample_index,
-                        column_index
-                    ]
-                )
-
-                row[
-                    f"predicted_{feature_name}"
-                ] = float(
-                    prediction[
-                        sample_index,
-                        column_index
-                    ]
-                )
-
-            rows.append(
-                row
-            )
-
-    dataframe = pd.DataFrame(
-        rows
+    train_loss = history.get(
+        "train_loss",
+        history.get(
+            "train_losses"
+        ),
     )
 
-    output_path = (
-        METRICS_DIR
-        / "prediction_comparison.csv"
+    val_loss = history.get(
+        "val_loss",
+        history.get(
+            "val_losses"
+        ),
     )
 
-    dataframe.to_csv(
-        output_path,
-        index=False
+    if (
+        train_loss is None
+        or val_loss is None
+    ):
+
+        print(
+            "[WARN] train_loss / val_loss tidak ditemukan."
+        )
+
+        return
+
+    min_length = min(
+        len(train_loss),
+        len(val_loss),
     )
 
-    print(
-        f"[SAVED] {output_path}"
-    )
+    if min_length == 0:
 
-    return dataframe
+        print(
+            "[WARN] Training history kosong."
+        )
 
+        return
 
-# ============================================================
-# SAVE NUMPY RESULTS
-# ============================================================
+    train_loss = train_loss[
+        :min_length
+    ]
 
-def save_evaluation_arrays(
-    actual,
-    prediction
-):
+    val_loss = val_loss[
+        :min_length
+    ]
 
-    output_path = (
-        METRICS_DIR
-        / "evaluation_arrays.npz"
-    )
-
-    np.savez(
-        output_path,
-        actual=actual,
-        prediction=prediction
-    )
-
-    print(
-        f"[SAVED] {output_path}"
-    )
-
-
-# ============================================================
-# PLOT ACTUAL VS PREDICTION
-# ============================================================
-
-def plot_feature_prediction(
-    actual,
-    prediction,
-    sensor_index=0,
-    feature_index=0,
-    max_points=200
-):
-
-    sensor_id = (
-        SENSOR_START
-        + sensor_index
-    )
-
-    feature_name = (
-        FEATURE_NAMES[
-            feature_index
-        ]
-    )
-
-    column_index = (
-        sensor_index
-        * FEATURES_PER_SENSOR
-        + feature_index
-    )
-
-    actual_values = (
-        actual[
-            :max_points,
-            column_index
-        ]
-    )
-
-    prediction_values = (
-        prediction[
-            :max_points,
-            column_index
-        ]
+    epochs = range(
+        1,
+        min_length + 1,
     )
 
     plt.figure(
-        figsize=(12, 5)
+        figsize=(10, 6)
     )
 
     plt.plot(
-        actual_values,
-        label="Actual"
+        epochs,
+        train_loss,
+        label="Train Loss",
     )
 
     plt.plot(
-        prediction_values,
-        label="Prediction"
-    )
-
-    plt.title(
-        f"Actual vs Prediction - "
-        f"Sensor {sensor_id} - "
-        f"{feature_name}"
+        epochs,
+        val_loss,
+        label="Validation Loss",
     )
 
     plt.xlabel(
-        "Test sample"
+        "Epoch"
     )
 
     plt.ylabel(
-        feature_name
+        "MSE Loss"
+    )
+
+    plt.title(
+        "YOLO Traffic LSTM Training History"
     )
 
     plt.legend()
@@ -1516,20 +1970,14 @@ def plot_feature_prediction(
 
     plt.tight_layout()
 
-    filename = (
-        f"actual_vs_prediction_"
-        f"sensor_{sensor_id}_"
-        f"{feature_name}.png"
-    )
-
     output_path = (
-        PLOTS_DIR
-        / filename
+        PLOT_DIR
+        / "training_validation_loss.png"
     )
 
     plt.savefig(
         output_path,
-        dpi=150
+        dpi=200,
     )
 
     plt.close()
@@ -1539,510 +1987,1096 @@ def plot_feature_prediction(
     )
 
 
-# ============================================================
-# PLOT ALL FEATURES - SENSOR 1
-# ============================================================
+# ======================================================================
+# FEATURE METRIC PLOT
+# ======================================================================
 
-def plot_all_features_sensor(
-    actual,
-    prediction,
-    sensor_index=0,
-    max_points=200
+def plot_feature_metrics(
+    feature_df,
 ):
 
-    sensor_id = (
-        SENSOR_START
-        + sensor_index
+    print_header(
+        "PLOTTING FEATURE METRICS"
     )
 
-    for feature_index in range(
-        FEATURES_PER_SENSOR
-    ):
+    if feature_df.empty:
 
-        plot_feature_prediction(
-            actual=actual,
-            prediction=prediction,
-            sensor_index=sensor_index,
-            feature_index=feature_index,
-            max_points=max_points
+        print(
+            "[WARN] Feature metrics kosong."
         )
 
+        return
 
-# ============================================================
-# SAVE SUMMARY JSON
-# ============================================================
+    # --------------------------------------------------------------
+    # MAE
+    # --------------------------------------------------------------
 
-def save_summary(
-    overall_metrics,
-    feature_metrics,
-    sensor_metrics,
-    inference_time,
-    prediction_source
-):
+    plt.figure(
+        figsize=(12, 6)
+    )
 
-    summary = {
+    plt.bar(
+        feature_df["feature"],
+        feature_df["mae"],
+    )
 
-        "dataset": DATASET_NAME,
+    plt.xlabel(
+        "Traffic Feature"
+    )
 
-        "intersection": INTERSECTION_ID,
+    plt.ylabel(
+        "MAE"
+    )
 
-        "evaluation_type": (
-            "chronological held-out test set"
-        ),
+    plt.title(
+        "MAE per Traffic Feature"
+    )
 
-        "sequence_length": (
-            SEQUENCE_LENGTH
-        ),
+    plt.xticks(
+        rotation=45,
+        ha="right",
+    )
 
-        "forecast_horizon": (
-            FORECAST_HORIZON
-        ),
+    plt.grid(
+        axis="y",
+        alpha=0.3,
+    )
 
-        "sensors": {
-            "start": SENSOR_START,
-            "end": SENSOR_END,
-            "count": NUM_SENSORS
-        },
-
-        "features_per_sensor": (
-            FEATURES_PER_SENSOR
-        ),
-
-        "input_size": (
-            INPUT_SIZE
-        ),
-
-        "output_size": (
-            OUTPUT_SIZE
-        ),
-
-        "features": FEATURE_NAMES,
-
-        "model": {
-
-            "type": "LSTM",
-
-            "hidden_size": (
-                HIDDEN_SIZE
-            ),
-
-            "num_layers": (
-                NUM_LAYERS
-            ),
-
-            "dropout": (
-                DROPOUT
-            )
-        },
-
-        "prediction_source": (
-            prediction_source
-        ),
-
-        "inference_time_seconds": (
-            float(inference_time)
-        ),
-
-        "overall_metrics": (
-            overall_metrics
-        ),
-
-        "feature_metrics": (
-            feature_metrics.to_dict(
-                orient="records"
-            )
-        ),
-
-        "sensor_metrics": (
-            sensor_metrics.to_dict(
-                orient="records"
-            )
-        )
-    }
+    plt.tight_layout()
 
     output_path = (
-        METRICS_DIR
-        / "evaluation_summary.json"
+        PLOT_DIR
+        / "mae_per_feature.png"
     )
 
-    with open(
+    plt.savefig(
         output_path,
-        "w",
-        encoding="utf-8"
-    ) as file:
+        dpi=200,
+    )
 
-        json.dump(
-            summary,
-            file,
-            indent=4
-        )
+    plt.close()
+
+    print(
+        f"[SAVED] {output_path}"
+    )
+
+    # --------------------------------------------------------------
+    # RMSE
+    # --------------------------------------------------------------
+
+    plt.figure(
+        figsize=(12, 6)
+    )
+
+    plt.bar(
+        feature_df["feature"],
+        feature_df["rmse"],
+    )
+
+    plt.xlabel(
+        "Traffic Feature"
+    )
+
+    plt.ylabel(
+        "RMSE"
+    )
+
+    plt.title(
+        "RMSE per Traffic Feature"
+    )
+
+    plt.xticks(
+        rotation=45,
+        ha="right",
+    )
+
+    plt.grid(
+        axis="y",
+        alpha=0.3,
+    )
+
+    plt.tight_layout()
+
+    output_path = (
+        PLOT_DIR
+        / "rmse_per_feature.png"
+    )
+
+    plt.savefig(
+        output_path,
+        dpi=200,
+    )
+
+    plt.close()
 
     print(
         f"[SAVED] {output_path}"
     )
 
 
-# ============================================================
+# ======================================================================
+# SENSOR METRIC PLOT
+# ======================================================================
+
+def plot_sensor_metrics(
+    sensor_df,
+):
+
+    print_header(
+        "PLOTTING SENSOR METRICS"
+    )
+
+    if sensor_df.empty:
+
+        print(
+            "[WARN] Sensor metrics kosong."
+        )
+
+        return
+
+    plt.figure(
+        figsize=(12, 6)
+    )
+
+    plt.bar(
+        sensor_df["sensor"],
+        sensor_df["mae"],
+    )
+
+    plt.xlabel(
+        "Sensor"
+    )
+
+    plt.ylabel(
+        "MAE"
+    )
+
+    plt.title(
+        "MAE per Traffic Sensor"
+    )
+
+    plt.xticks(
+        rotation=45,
+        ha="right",
+    )
+
+    plt.grid(
+        axis="y",
+        alpha=0.3,
+    )
+
+    plt.tight_layout()
+
+    output_path = (
+        PLOT_DIR
+        / "mae_per_sensor.png"
+    )
+
+    plt.savefig(
+        output_path,
+        dpi=200,
+    )
+
+    plt.close()
+
+    print(
+        f"[SAVED] {output_path}"
+    )
+
+    # --------------------------------------------------------------
+    # RMSE
+    # --------------------------------------------------------------
+
+    plt.figure(
+        figsize=(12, 6)
+    )
+
+    plt.bar(
+        sensor_df["sensor"],
+        sensor_df["rmse"],
+    )
+
+    plt.xlabel(
+        "Sensor"
+    )
+
+    plt.ylabel(
+        "RMSE"
+    )
+
+    plt.title(
+        "RMSE per Traffic Sensor"
+    )
+
+    plt.xticks(
+        rotation=45,
+        ha="right",
+    )
+
+    plt.grid(
+        axis="y",
+        alpha=0.3,
+    )
+
+    plt.tight_layout()
+
+    output_path = (
+        PLOT_DIR
+        / "rmse_per_sensor.png"
+    )
+
+    plt.savefig(
+        output_path,
+        dpi=200,
+    )
+
+    plt.close()
+
+    print(
+        f"[SAVED] {output_path}"
+    )
+
+
+# ======================================================================
+# ACTUAL VS PREDICTION PLOT
+# ======================================================================
+
+def plot_actual_vs_prediction(
+    y_true,
+    y_pred,
+    feature_metadata,
+):
+
+    print_header(
+        "PLOTTING ACTUAL VS PREDICTION"
+    )
+
+    selected_features = [
+        "vehicle_count",
+        "motorcycle_count",
+        "queue_length_veh",
+        "density_index",
+    ]
+
+    for feature in selected_features:
+
+        indices = [
+            i
+            for i, metadata in enumerate(
+                feature_metadata
+            )
+            if metadata["feature"] == feature
+        ]
+
+        if not indices:
+
+            print(
+                f"[WARN] Feature {feature} tidak ditemukan."
+            )
+
+            continue
+
+        # ----------------------------------------------------------
+        # Average across all sensors
+        # ----------------------------------------------------------
+
+        actual = np.mean(
+            y_true[:, indices],
+            axis=1,
+        )
+
+        prediction = np.mean(
+            y_pred[:, indices],
+            axis=1,
+        )
+
+        # ----------------------------------------------------------
+        # Limit displayed samples
+        # ----------------------------------------------------------
+
+        n = min(
+            len(actual),
+            250,
+        )
+
+        x = np.arange(
+            n
+        )
+
+        plt.figure(
+            figsize=(12, 6)
+        )
+
+        plt.plot(
+            x,
+            actual[:n],
+            label="Actual",
+        )
+
+        plt.plot(
+            x,
+            prediction[:n],
+            label="Prediction",
+        )
+
+        plt.xlabel(
+            "Test Sample"
+        )
+
+        plt.ylabel(
+            feature
+        )
+
+        plt.title(
+            f"Actual vs Prediction - {feature}"
+        )
+
+        plt.legend()
+
+        plt.grid(
+            alpha=0.3
+        )
+
+        plt.tight_layout()
+
+        safe_name = (
+            feature.replace(
+                "_",
+                "-",
+            )
+        )
+
+        output_path = (
+            PLOT_DIR
+            / (
+                "actual_vs_prediction_"
+                f"{safe_name}.png"
+            )
+        )
+
+        plt.savefig(
+            output_path,
+            dpi=200,
+        )
+
+        plt.close()
+
+        print(
+            f"[SAVED] {output_path}"
+        )
+
+
+# ======================================================================
+# ERROR DISTRIBUTION
+# ======================================================================
+
+def plot_error_distribution(
+    y_true,
+    y_pred,
+):
+
+    print_header(
+        "PLOTTING ERROR DISTRIBUTION"
+    )
+
+    error = (
+        y_pred
+        - y_true
+    ).reshape(-1)
+
+    plt.figure(
+        figsize=(10, 6)
+    )
+
+    plt.hist(
+        error,
+        bins=50,
+    )
+
+    plt.xlabel(
+        "Prediction Error"
+    )
+
+    plt.ylabel(
+        "Frequency"
+    )
+
+    plt.title(
+        "Prediction Error Distribution"
+    )
+
+    plt.grid(
+        axis="y",
+        alpha=0.3,
+    )
+
+    plt.tight_layout()
+
+    output_path = (
+        PLOT_DIR
+        / "prediction_error_distribution.png"
+    )
+
+    plt.savefig(
+        output_path,
+        dpi=200,
+    )
+
+    plt.close()
+
+    print(
+        f"[SAVED] {output_path}"
+    )
+
+
+# ======================================================================
+# SAVE FINAL REPORT
+# ======================================================================
+
+def save_final_report(
+    config,
+    scaler_path,
+    scaled_metrics,
+    original_metrics,
+    feature_df,
+    detailed_feature_df,
+    sensor_df,
+):
+
+    print_header(
+        "SAVING FINAL EVALUATION REPORT"
+    )
+
+    report = {
+
+        # ----------------------------------------------------------
+        # Dataset
+        # ----------------------------------------------------------
+
+        "dataset": config.get(
+            "dataset"
+        ),
+
+        # ----------------------------------------------------------
+        # Model
+        # ----------------------------------------------------------
+
+        "model": {
+
+            "architecture": config.get(
+                "model"
+            ),
+
+            "input_size": config.get(
+                "input_size"
+            ),
+
+            "hidden_size": config.get(
+                "hidden_size"
+            ),
+
+            "num_layers": config.get(
+                "num_layers"
+            ),
+
+            "dropout": config.get(
+                "dropout"
+            ),
+
+            "output_size": config.get(
+                "output_size"
+            ),
+        },
+
+        # ----------------------------------------------------------
+        # Forecast
+        # ----------------------------------------------------------
+
+        "forecast": {
+
+            "sequence_length": config.get(
+                "sequence_length"
+            ),
+
+            "forecast_horizon": config.get(
+                "forecast_horizon"
+            ),
+        },
+
+        # ----------------------------------------------------------
+        # Scaler
+        # ----------------------------------------------------------
+
+        "scaler": {
+
+            "path": str(
+                scaler_path
+            ),
+
+            "type": type(
+                pickle.load(
+                    open(
+                        scaler_path,
+                        "rb",
+                    )
+                )
+            ).__name__,
+        },
+
+        # ----------------------------------------------------------
+        # Metrics
+        # ----------------------------------------------------------
+
+        "test_metrics_scaled":
+            scaled_metrics,
+
+        "test_metrics_original_scale":
+            original_metrics,
+
+        # ----------------------------------------------------------
+        # Feature metrics
+        # ----------------------------------------------------------
+
+        "metrics_per_feature":
+            feature_df.to_dict(
+                orient="records"
+            ),
+
+        # ----------------------------------------------------------
+        # Sensor metrics
+        # ----------------------------------------------------------
+
+        "metrics_per_sensor":
+            sensor_df.to_dict(
+                orient="records"
+            ),
+
+        # ----------------------------------------------------------
+        # Detailed sensor-feature metrics
+        # ----------------------------------------------------------
+
+        "metrics_per_sensor_feature":
+            detailed_feature_df.to_dict(
+                orient="records"
+            ),
+
+        # ----------------------------------------------------------
+        # Best / worst
+        # ----------------------------------------------------------
+
+        "best_feature_mae": (
+
+            float(
+                feature_df[
+                    "mae"
+                ].min()
+            )
+
+            if not feature_df.empty
+
+            else None
+        ),
+
+        "worst_feature_mae": (
+
+            float(
+                feature_df[
+                    "mae"
+                ].max()
+            )
+
+            if not feature_df.empty
+
+            else None
+        ),
+
+        "best_sensor_mae": (
+
+            float(
+                sensor_df[
+                    "mae"
+                ].min()
+            )
+
+            if not sensor_df.empty
+
+            else None
+        ),
+
+        "worst_sensor_mae": (
+
+            float(
+                sensor_df[
+                    "mae"
+                ].max()
+            )
+
+            if not sensor_df.empty
+
+            else None
+        ),
+
+        # ----------------------------------------------------------
+        # Evaluation directory
+        # ----------------------------------------------------------
+
+        "evaluation_directory":
+            str(
+                EVALUATION_DIR
+            ),
+    }
+
+    output_path = (
+        EVALUATION_DIR
+        / "evaluation_report.json"
+    )
+
+    save_json(
+        report,
+        output_path,
+    )
+
+    print(
+        f"[SAVED] {output_path}"
+    )
+
+    return report
+
+
+# ======================================================================
 # MAIN
-# ============================================================
+# ======================================================================
 
 def main():
 
-    set_seed()
+    print()
 
-    print("=" * 70)
+    print(
+        "=" * 70
+    )
 
     print(
         "YOLO TRAFFIC LSTM EVALUATION"
     )
 
-    print("=" * 70)
-
     print(
-        f"[INFO] Device : {DEVICE}"
-    )
-
-    print()
-
-    print("=" * 70)
-
-    print(
-        "EVALUATION CONFIGURATION"
-    )
-
-    print("=" * 70)
-
-    print(
-        f"[INFO] Dataset          : "
-        f"{DATASET_NAME}"
+        "=" * 70
     )
 
     print(
-        f"[INFO] Intersection     : "
-        f"{INTERSECTION_ID}"
+        f"[INFO] Output directory : "
+        f"{OUTPUT_DIR}"
     )
 
     print(
-        f"[INFO] Sensors          : "
-        f"{NUM_SENSORS}"
+        f"[INFO] Evaluation dir   : "
+        f"{EVALUATION_DIR}"
     )
 
-    print(
-        f"[INFO] Features/sensor  : "
-        f"{FEATURES_PER_SENSOR}"
+    # ==============================================================
+    # CONFIG
+    # ==============================================================
+
+    config = (
+        load_training_config()
     )
 
-    print(
-        f"[INFO] Input size       : "
-        f"{INPUT_SIZE}"
+    # ==============================================================
+    # DEVICE
+    # ==============================================================
+
+    device = get_device(
+        config
     )
 
-    print(
-        f"[INFO] Output size      : "
-        f"{OUTPUT_SIZE}"
+    # ==============================================================
+    # LOAD FEATURE METADATA
+    # ==============================================================
+
+    feature_metadata = (
+        load_feature_metadata()
     )
 
-    print(
-        f"[INFO] Sequence length  : "
-        f"{SEQUENCE_LENGTH}"
-    )
-
-    print(
-        f"[INFO] Forecast horizon : "
-        f"{FORECAST_HORIZON}"
-    )
-
-    print()
-
-    print(
-        "[INFO] Features:"
-    )
-
-    for feature in FEATURE_NAMES:
-
-        print(
-            f"       - {feature}"
-        )
-
-    # --------------------------------------------------------
-    # Configuration
-    # --------------------------------------------------------
-
-    load_configuration()
-
-    # --------------------------------------------------------
-    # Scaler
-    # --------------------------------------------------------
-
-    scaler = load_scaler()
-
-    # --------------------------------------------------------
-    # Test data
-    # --------------------------------------------------------
+    # ==============================================================
+    # LOAD TEST DATA
+    # ==============================================================
 
     (
         X_test,
-        y_test_scaled
+        y_test,
     ) = load_test_data()
 
-    # --------------------------------------------------------
-    # Model
-    # --------------------------------------------------------
+    # ==============================================================
+    # NUMERICAL VALIDATION
+    # ==============================================================
 
-    model = load_model()
-
-    # --------------------------------------------------------
-    # Prediction
-    # --------------------------------------------------------
-
-    saved_prediction = (
-        load_saved_prediction()
+    validate_test_data(
+        X_test,
+        y_test,
     )
 
-    prediction_source = (
-        "saved test_predictions.npz"
+    # ==============================================================
+    # CONFIG SHAPE
+    # ==============================================================
+
+    expected_input_size = int(
+        config[
+            "input_size"
+        ]
     )
 
-    if saved_prediction is not None:
+    expected_output_size = int(
+        config[
+            "output_size"
+        ]
+    )
 
-        # ----------------------------------------------------
-        # Pastikan shape sesuai
-        # ----------------------------------------------------
+    if (
+        expected_output_size
+        != EXPECTED_OUTPUT_SIZE
+    ):
 
-        if (
-            saved_prediction.shape
-            != y_test_scaled.shape
-        ):
+        raise ValueError(
+            "\nOutput size pada config tidak sesuai "
+            "dengan struktur metadata.\n"
+            f"Config : {expected_output_size}\n"
+            f"Metadata: {EXPECTED_OUTPUT_SIZE}\n"
+        )
 
-            print(
-                "[WARNING] Shape prediction "
-                "tidak sesuai dengan y_test."
-            )
+    # ==============================================================
+    # X TEST SHAPE
+    # ==============================================================
 
-            print(
-                f"[INFO] Prediction : "
-                f"{saved_prediction.shape}"
-            )
+    if X_test.ndim != 3:
 
-            print(
-                f"[INFO] y_test     : "
-                f"{y_test_scaled.shape}"
-            )
+        raise ValueError(
+            f"X_test harus 3 dimensi.\n"
+            f"Ditemukan: {X_test.ndim}"
+        )
 
-            print(
-                "[INFO] Prediction akan "
-                "digenerate ulang dari best model."
-            )
+    if y_test.ndim != 2:
 
-            (
-                prediction_scaled,
-                inference_time
-            ) = generate_prediction(
-                model=model,
-                X_test=X_test
-            )
+        raise ValueError(
+            f"y_test harus 2 dimensi.\n"
+            f"Ditemukan: {y_test.ndim}"
+        )
 
-            prediction_source = (
-                "best_model.pth"
-            )
+    if (
+        X_test.shape[2]
+        != expected_input_size
+    ):
 
-        else:
+        raise ValueError(
+            "\nInput size mismatch.\n"
+            f"Config : {expected_input_size}\n"
+            f"X_test: {X_test.shape[2]}"
+        )
 
-            prediction_scaled = (
-                saved_prediction
-            )
+    if (
+        y_test.shape[1]
+        != expected_output_size
+    ):
 
-            inference_time = 0.0
+        raise ValueError(
+            "\nOutput size mismatch.\n"
+            f"Config : {expected_output_size}\n"
+            f"y_test: {y_test.shape[1]}"
+        )
 
-            print(
-                "[OK] Menggunakan prediction "
-                "dari training."
-            )
+    if (
+        y_test.shape[1]
+        != len(feature_metadata)
+    ):
 
-    else:
+        raise ValueError(
+            "\nMetadata/output mismatch.\n"
+            f"Metadata : {len(feature_metadata)}\n"
+            f"y_test   : {y_test.shape[1]}"
+        )
 
-        (
-            prediction_scaled,
-            inference_time
-        ) = generate_prediction(
+    print(
+        "[OK] Dataset shape matches "
+        "training configuration."
+    )
+
+    # ==============================================================
+    # LOAD SCALER
+    # ==============================================================
+
+    (
+        scaler,
+        scaler_path,
+    ) = load_scaler()
+
+    # ==============================================================
+    # LOAD MODEL
+    # ==============================================================
+
+    model = load_model(
+        config,
+        device,
+    )
+
+    # ==============================================================
+    # GENERATE PREDICTIONS
+    # ==============================================================
+
+    predictions = (
+        generate_predictions(
             model=model,
-            X_test=X_test
-        )
-
-        prediction_source = (
-            "best_model.pth"
-        )
-
-    # --------------------------------------------------------
-    # Inverse scaling
-    # --------------------------------------------------------
-
-    y_test_original = (
-        inverse_transform(
-            data=y_test_scaled,
-            scaler=scaler,
-            name="y_test"
+            X_test=X_test,
+            device=device,
+            batch_size=int(
+                config.get(
+                    "batch_size",
+                    32,
+                )
+            ),
         )
     )
 
-    prediction_original = (
-        inverse_transform(
-            data=prediction_scaled,
-            scaler=scaler,
-            name="prediction"
+    # ==============================================================
+    # PREDICTION NUMERICAL VALIDATION
+    # ==============================================================
+
+    prediction_nan = int(
+        np.isnan(
+            predictions
+        ).sum()
+    )
+
+    prediction_inf = int(
+        np.isinf(
+            predictions
+        ).sum()
+    )
+
+    print(
+        f"[INFO] Prediction | "
+        f"NaN: {prediction_nan} | "
+        f"Inf: {prediction_inf}"
+    )
+
+    if (
+        prediction_nan > 0
+        or prediction_inf > 0
+    ):
+
+        raise ValueError(
+            "Prediction mengandung NaN atau Inf."
+        )
+
+    # ==============================================================
+    # PREDICTION SHAPE
+    # ==============================================================
+
+    validate_prediction_shape(
+        predictions,
+        y_test,
+    )
+
+    # ==============================================================
+    # SCALED METRICS
+    # ==============================================================
+
+    scaled_metrics = (
+        evaluate_scaled(
+            y_test,
+            predictions,
         )
     )
 
-    # --------------------------------------------------------
-    # Physical cleaning
-    #
-    # Semua traffic count/density/queue
-    # tidak boleh negatif.
-    # --------------------------------------------------------
+    # ==============================================================
+    # INVERSE TRANSFORM
+    # ==============================================================
 
-    y_test_original = np.maximum(
-        y_test_original,
-        0
+    (
+        y_true_original,
+        y_pred_original,
+    ) = inverse_transform_targets(
+        scaler,
+        y_test,
+        predictions,
     )
 
-    prediction_original = np.maximum(
-        prediction_original,
-        0
-    )
+    # ==============================================================
+    # ORIGINAL SCALE METRICS
+    # ==============================================================
 
-    # --------------------------------------------------------
-    # Overall
-    # --------------------------------------------------------
-
-    overall_metrics = (
-        evaluate_overall(
-            actual=y_test_original,
-            prediction=prediction_original
+    original_metrics = (
+        evaluate_original_scale(
+            y_true_original,
+            y_pred_original,
         )
     )
 
-    # --------------------------------------------------------
-    # Feature
-    # --------------------------------------------------------
+    # ==============================================================
+    # PER FEATURE
+    # ==============================================================
 
-    feature_metrics = (
-        evaluate_per_feature(
-            actual=y_test_original,
-            prediction=prediction_original
-        )
+    (
+        detailed_feature_df,
+        feature_df,
+    ) = evaluate_per_feature(
+        y_true_original,
+        y_pred_original,
+        feature_metadata,
     )
 
-    # --------------------------------------------------------
-    # Sensor
-    # --------------------------------------------------------
+    # ==============================================================
+    # PER SENSOR
+    # ==============================================================
 
-    sensor_metrics = (
+    sensor_df = (
         evaluate_per_sensor(
-            actual=y_test_original,
-            prediction=prediction_original
+            y_true_original,
+            y_pred_original,
+            feature_metadata,
         )
     )
 
-    # --------------------------------------------------------
-    # Sensor + feature
-    # --------------------------------------------------------
+    # ==============================================================
+    # SAVE PREDICTIONS
+    # ==============================================================
 
-    evaluate_sensor_feature(
-        actual=y_test_original,
-        prediction=prediction_original
+    save_predictions(
+        y_test_scaled=y_test,
+        y_true_original=y_true_original,
+        y_pred_original=y_pred_original,
     )
 
-    # --------------------------------------------------------
-    # Comparison
-    # --------------------------------------------------------
+    # ==============================================================
+    # SAVE PREDICTION CSV
+    # ==============================================================
 
-    save_prediction_comparison(
-        actual=y_test_original,
-        prediction=prediction_original
+    save_prediction_csv(
+        y_true_original,
+        y_pred_original,
+        feature_metadata,
     )
 
-    # --------------------------------------------------------
-    # Arrays
-    # --------------------------------------------------------
+    # ==============================================================
+    # PLOTS
+    # ==============================================================
 
-    save_evaluation_arrays(
-        actual=y_test_original,
-        prediction=prediction_original
+    plot_training_history()
+
+    plot_feature_metrics(
+        feature_df
     )
 
-    # --------------------------------------------------------
-    # Plot
-    #
-    # Sensor 1, semua feature.
-    # --------------------------------------------------------
-
-    plot_all_features_sensor(
-        actual=y_test_original,
-        prediction=prediction_original,
-        sensor_index=0,
-        max_points=200
+    plot_sensor_metrics(
+        sensor_df
     )
 
-    # --------------------------------------------------------
-    # Summary
-    # --------------------------------------------------------
-
-    save_summary(
-        overall_metrics=overall_metrics,
-        feature_metrics=feature_metrics,
-        sensor_metrics=sensor_metrics,
-        inference_time=inference_time,
-        prediction_source=prediction_source
+    plot_actual_vs_prediction(
+        y_true_original,
+        y_pred_original,
+        feature_metadata,
     )
 
-    # --------------------------------------------------------
-    # Final
-    # --------------------------------------------------------
+    plot_error_distribution(
+        y_true_original,
+        y_pred_original,
+    )
+
+    # ==============================================================
+    # FINAL REPORT
+    # ==============================================================
+
+    save_final_report(
+        config=config,
+        scaler_path=scaler_path,
+        scaled_metrics=scaled_metrics,
+        original_metrics=original_metrics,
+        feature_df=feature_df,
+        detailed_feature_df=detailed_feature_df,
+        sensor_df=sensor_df,
+    )
+
+    # ==============================================================
+    # FINAL SUMMARY
+    # ==============================================================
+
+    print_header(
+        "YOLO LSTM EVALUATION SUMMARY"
+    )
+
+    print()
+    print(
+        "[MODEL]"
+    )
+
+    print(
+        f"Architecture       : "
+        f"{config.get('model')}"
+    )
+
+    print(
+        f"Sequence length    : "
+        f"{config.get('sequence_length')}"
+    )
+
+    print(
+        f"Forecast horizon   : "
+        f"{config.get('forecast_horizon')} second"
+    )
+
+    print(
+        f"Hidden size        : "
+        f"{config.get('hidden_size')}"
+    )
+
+    print(
+        f"LSTM layers        : "
+        f"{config.get('num_layers')}"
+    )
+
+    print(
+        f"Output size        : "
+        f"{config.get('output_size')}"
+    )
 
     print()
 
-    print("=" * 70)
-
     print(
-        "YOLO LSTM EVALUATION COMPLETED"
+        "[TEST - SCALED SPACE]"
     )
 
-    print("=" * 70)
+    print(
+        f"MAE  : "
+        f"{scaled_metrics['mae']:.6f}"
+    )
+
+    print(
+        f"RMSE : "
+        f"{scaled_metrics['rmse']:.6f}"
+    )
+
+    print(
+        f"MSE  : "
+        f"{scaled_metrics['mse']:.6f}"
+    )
 
     print()
 
     print(
-        "[OVERALL TEST RESULT]"
+        "[TEST - ORIGINAL SCALE]"
     )
 
     print(
-        f"MAE   : "
-        f"{overall_metrics['MAE']:.6f}"
+        f"MAE  : "
+        f"{original_metrics['mae']:.6f}"
     )
 
     print(
-        f"MSE   : "
-        f"{overall_metrics['MSE']:.6f}"
+        f"RMSE : "
+        f"{original_metrics['rmse']:.6f}"
     )
 
     print(
-        f"RMSE  : "
-        f"{overall_metrics['RMSE']:.6f}"
-    )
-
-    print(
-        f"MAPE  : "
-        f"{overall_metrics['MAPE_percent']:.4f}%"
-    )
-
-    print(
-        f"sMAPE : "
-        f"{overall_metrics['sMAPE_percent']:.4f}%"
-    )
-
-    print(
-        f"R2    : "
-        f"{overall_metrics['R2']:.6f}"
+        f"MSE  : "
+        f"{original_metrics['mse']:.6f}"
     )
 
     print()
@@ -2052,54 +3086,77 @@ def main():
     )
 
     print(
-        f"[SAVED] "
-        f"{METRICS_DIR / 'evaluation_per_feature.csv'}"
+        f"Evaluation directory:"
     )
 
     print(
-        f"[SAVED] "
-        f"{METRICS_DIR / 'evaluation_per_sensor.csv'}"
-    )
-
-    print(
-        f"[SAVED] "
-        f"{METRICS_DIR / 'evaluation_sensor_feature.csv'}"
-    )
-
-    print(
-        f"[SAVED] "
-        f"{METRICS_DIR / 'prediction_comparison.csv'}"
-    )
-
-    print(
-        f"[SAVED] "
-        f"{METRICS_DIR / 'evaluation_arrays.npz'}"
-    )
-
-    print(
-        f"[SAVED] "
-        f"{METRICS_DIR / 'evaluation_summary.json'}"
+        f"{EVALUATION_DIR}"
     )
 
     print()
 
     print(
-        f"[PLOTS]"
+        "[NEXT]"
     )
 
     print(
-        f"[SAVED] "
-        f"{PLOTS_DIR}"
+        "1. Review training/validation loss."
+    )
+
+    print(
+        "2. Review MAE/RMSE per traffic feature."
+    )
+
+    print(
+        "3. Review MAE/RMSE per sensor."
+    )
+
+    print(
+        "4. Review detailed sensor-feature metrics."
+    )
+
+    print(
+        "5. Review actual vs prediction plots."
+    )
+
+    print(
+        "6. Review prediction error distribution."
+    )
+
+    print(
+        "7. Establish the baseline."
+    )
+
+    print(
+        "8. Experiment with sequence length."
+    )
+
+    print(
+        "9. Experiment with temporal resolution."
+    )
+
+    print(
+        "10. Only then perform hyperparameter tuning."
     )
 
     print()
 
-    print("=" * 70)
+    print(
+        "=" * 70
+    )
+
+    print(
+        "YOLO LSTM EVALUATION COMPLETED"
+    )
+
+    print(
+        "=" * 70
+    )
 
 
-# ============================================================
+# ======================================================================
 # ENTRY POINT
-# ============================================================
+# ======================================================================
 
 if __name__ == "__main__":
 

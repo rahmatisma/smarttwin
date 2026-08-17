@@ -1,39 +1,178 @@
-import json
 from pathlib import Path
+import json
+import pickle
+import random
 
-import joblib
 import numpy as np
 import pandas as pd
+
 from sklearn.preprocessing import StandardScaler
 
 
 # ============================================================
-# PATH CONFIGURATION
+# ============================================================
+# PREPROCESSING PIPELINE
+# ============================================================
+#
+# Pipeline preprocessing dataset YOLO Traffic:
+#
+# 1. LOAD DATA
+#    Membaca dataset CSV hasil agregasi/deteksi YOLO.
+#
+# 2. COLUMN VALIDATION
+#    Memastikan seluruh kolom yang dibutuhkan tersedia.
+#
+# 3. BASIC DATA CLEANING
+#    - Konversi timestamp
+#    - Filter intersection
+#    - Konversi fitur ke numeric
+#    - Validasi nilai negatif
+#    - Sorting data berdasarkan waktu dan sensor
+#
+# 4. DUPLICATE CHECK
+#    Memastikan tidak ada dua record untuk sensor yang sama
+#    pada timestamp yang sama.
+#
+# 5. TIMESTAMP NORMALIZATION
+#    Membentuk timeline kontinu berdasarkan resolusi waktu.
+#    Baseline menggunakan resolusi 1 detik.
+#
+# 6. SENSOR MATRIX CONSTRUCTION
+#    Mengubah data long-format menjadi wide-format:
+#
+#        12 sensor × 8 fitur = 96 fitur/timestep
+#
+#    Sensor:
+#        north/lane_1
+#        north/lane_2
+#        north/lane_3
+#        east/lane_1
+#        east/lane_2
+#        east/lane_3
+#        south/lane_1
+#        south/lane_2
+#        south/lane_3
+#        west/lane_1
+#        west/lane_2
+#        west/lane_3
+#
+# 7. MISSING DATA ANALYSIS
+#    Mengukur jumlah missing timestep secara global
+#    dan per sensor.
+#
+# 8. CHRONOLOGICAL DATA SPLIT
+#    Data dibagi berdasarkan urutan waktu:
+#
+#        TRAIN      = 70%
+#        VALIDATION = 15%
+#        TEST       = 15%
+#
+#    Tidak menggunakan random split agar tidak terjadi
+#    temporal leakage.
+#
+# 9. CAUSAL MISSING VALUE IMPUTATION
+#    Missing hanya diisi menggunakan data masa lalu.
+#
+#    Gap pendek:
+#        forward fill <= 5 detik
+#
+#    Gap panjang:
+#        tetap NaN
+#
+#    Tidak menggunakan:
+#        - backward fill
+#        - interpolasi
+#        - future value
+#
+#    Tujuannya menjaga sifat forecasting agar tidak melihat
+#    informasi masa depan.
+#
+# 10. VALID TIMESTEP FILTERING
+#     Timestep yang masih mengandung NaN/Inf setelah
+#     forward fill dianggap invalid.
+#
+#     Timestep invalid tidak digunakan untuk training.
+#
+# 11. FEATURE SCALING
+#     StandardScaler digunakan agar skala antar fitur lebih
+#     seimbang.
+#
+#     Scaler HANYA di-fit menggunakan TRAINING DATA.
+#
+#     Validation dan test hanya menggunakan scaler yang sama.
+#
+# 12. SEQUENCE CREATION
+#     Membentuk input sequence untuk LSTM:
+#
+#         X = beberapa timestep sebelumnya
+#         y = timestep berikutnya
+#
+#     Baseline:
+#
+#         sequence_length = 15 detik
+#         forecast_horizon = 1 detik
+#
+# 13. TEMPORAL CONTINUITY CHECK
+#     Sequence hanya dibuat jika timestamp benar-benar
+#     kontinu sesuai resolusi waktu.
+#
+# 14. NUMERICAL VALIDATION
+#     Memastikan X dan y tidak mengandung:
+#
+#         NaN
+#         Inf
+#
+# 15. SAVE ARTIFACTS
+#     Menyimpan:
+#
+#         X_train
+#         y_train
+#         X_val
+#         y_val
+#         X_test
+#         y_test
+#         scaler
+#         timestamp
+#         sensor configuration
+#         feature metadata
+#         preprocessing report
+#
+# ============================================================
+# IMPORTANT
+# ============================================================
+#
+# Tahap ini adalah BASELINE PREPROCESSING.
+#
+# Jangan melakukan tuning LSTM di file ini.
+#
+# Eksperimen berikutnya dilakukan terpisah:
+#
+#   Experiment 1:
+#       sequence length
+#
+#   Experiment 2:
+#       temporal resolution
+#
+#   Experiment 3:
+#       model architecture
+#
+#   Experiment 4:
+#       hyperparameter tuning
+#
+# ============================================================
 # ============================================================
 
-BASE_DIR = Path(__file__).resolve().parents[2]
 
-DATA_PATH = (
-    BASE_DIR
-    / "data"
-    / "smarttwin_traffic_data_copy.csv"
-)
+# ============================================================
+# PATH
+# ============================================================
 
-OUTPUT_DIR = (
-    BASE_DIR
-    / "outputs"
-    / "yolo"
-)
+SCRIPT_DIR = Path(__file__).resolve().parent
+FORECASTING_DIR = SCRIPT_DIR.parent.parent
 
-PROCESSED_DIR = (
-    OUTPUT_DIR
-    / "processed"
-)
-
-PROCESSED_DIR.mkdir(
-    parents=True,
-    exist_ok=True
-)
+DATA_DIR = FORECASTING_DIR / "data"
+OUTPUT_ROOT = FORECASTING_DIR / "outputs" / "yolo"
+PROCESSED_DIR = OUTPUT_ROOT / "processed"
 
 
 # ============================================================
@@ -42,10 +181,9 @@ PROCESSED_DIR.mkdir(
 
 DATASET_NAME = "YOLO Traffic Dataset"
 
-INTERSECTION_ID = "simpang4-pingit"
+INPUT_CSV = DATA_DIR / "smarttwin_traffic_data.csv"
 
-SEQUENCE_LENGTH = 15
-FORECAST_HORIZON = 1
+INTERSECTION_ID = "simpang4-pingit"
 
 
 # ============================================================
@@ -56,33 +194,48 @@ APPROACHES = [
     "north",
     "east",
     "south",
-    "west"
+    "west",
 ]
 
 LANES = [
     "lane_1",
     "lane_2",
-    "lane_3"
+    "lane_3",
 ]
 
 
 # ============================================================
-# FEATURES
+# TRAFFIC FEATURES
+# ============================================================
+#
+# Delapan fitur yang digunakan sebagai input dan target LSTM.
+#
+# vehicle_count
+#     Total kendaraan pada lane.
+#
+# car_count
+#     Jumlah mobil.
+#
+# motorcycle_count
+#     Jumlah sepeda motor.
+#
+# bus_count
+#     Jumlah bus.
+#
+# truck_count
+#     Jumlah truk.
+#
+# queue_length_veh
+#     Panjang antrean dalam jumlah kendaraan.
+#
+# queue_length_m_est
+#     Estimasi panjang antrean dalam meter.
+#
+# density_index
+#     Indeks kepadatan lalu lintas.
+#
 # ============================================================
 
-# IMPORTANT:
-# Semua fitur lalu lintas numerik dari dataset YOLO digunakan.
-#
-# Jangan dikurangi menjadi hanya 3 fitur seperti PEMS04.
-#
-# Total:
-#
-# 8 features
-# ×
-# 12 lane sensors
-# =
-# 96 input features per timestep
-#
 FEATURE_NAMES = [
     "vehicle_count",
     "car_count",
@@ -91,56 +244,85 @@ FEATURE_NAMES = [
     "truck_count",
     "queue_length_veh",
     "queue_length_m_est",
-    "density_index"
+    "density_index",
 ]
 
 
-NUM_FEATURES = len(
-    FEATURE_NAMES
-)
-
-NUM_SENSORS = (
-    len(APPROACHES)
-    * len(LANES)
-)
+NUM_SENSORS = len(APPROACHES) * len(LANES)
+NUM_FEATURES = len(FEATURE_NAMES)
 
 INPUT_FEATURES_PER_TIMESTEP = (
-    NUM_SENSORS
-    * NUM_FEATURES
+    NUM_SENSORS * NUM_FEATURES
 )
 
 
 # ============================================================
-# SENSOR ORDER
+# TEMPORAL CONFIGURATION
+# ============================================================
+#
+# BASELINE:
+#
+# Resolusi data      : 1 detik
+# Sequence length    : 15 timestep
+# Forecast horizon   : 1 timestep
+#
+# Artinya:
+#
+# 15 detik data sebelumnya
+#             ↓
+#           LSTM
+#             ↓
+# prediksi 1 detik berikutnya
+#
 # ============================================================
 
-# Urutan sensor dibuat tetap.
+TIME_RESOLUTION_SECONDS = 1
+
+SEQUENCE_LENGTH = 15
+
+FORECAST_HORIZON = 1
+
+
+# ============================================================
+# MISSING DATA CONFIGURATION
+# ============================================================
 #
-# north/lane_1
-# north/lane_2
-# north/lane_3
-# east/lane_1
-# east/lane_2
-# east/lane_3
-# south/lane_1
-# south/lane_2
-# south/lane_3
-# west/lane_1
-# west/lane_2
-# west/lane_3
+# Missing value TIDAK langsung diganti dengan 0.
+#
+# Karena:
+#
+# missing != tidak ada kendaraan
+#
+# Contoh:
+#
+# timestamp:
+# 10:01:01 -> 5 kendaraan
+# 10:01:02 -> missing
+# 10:01:03 -> missing
+# 10:01:04 -> 6 kendaraan
+#
+# Untuk gap pendek <= 5 detik:
+#
+# 5 -> 5 -> 5 -> 6
+#
+# Untuk gap panjang:
+#
+# 5 -> NaN -> NaN -> ... -> 6
+#
+# Sequence yang mengandung NaN akan dibuang.
+#
+# ============================================================
 
-SENSOR_COLUMNS = []
+MAX_FORWARD_FILL_SECONDS = 5
 
-for approach in APPROACHES:
 
-    for lane in LANES:
+# ============================================================
+# CHRONOLOGICAL SPLIT
+# ============================================================
 
-        SENSOR_COLUMNS.append(
-            (
-                approach,
-                lane
-            )
-        )
+TRAIN_RATIO = 0.70
+VAL_RATIO = 0.15
+TEST_RATIO = 0.15
 
 
 # ============================================================
@@ -149,268 +331,194 @@ for approach in APPROACHES:
 
 RANDOM_SEED = 42
 
-np.random.seed(
-    RANDOM_SEED
-)
-
 
 # ============================================================
-# PRINT CONFIGURATION
+# HELPERS
 # ============================================================
 
-def print_configuration():
+def set_seed():
 
+    random.seed(RANDOM_SEED)
+
+    np.random.seed(RANDOM_SEED)
+
+
+def print_header(title):
+
+    print()
     print("=" * 70)
-    print("YOLO TRAFFIC DATA PREPROCESSING")
+    print(title)
     print("=" * 70)
 
-    print(
-        f"[INFO] Dataset          : "
-        f"{DATASET_NAME}"
+
+def ensure_directories():
+
+    PROCESSED_DIR.mkdir(
+        parents=True,
+        exist_ok=True
     )
 
-    print(
-        f"[INFO] Source CSV       : "
-        f"{DATA_PATH}"
-    )
 
-    print(
-        f"[INFO] Intersection     : "
-        f"{INTERSECTION_ID}"
-    )
+def save_json(path, data):
 
-    print(
-        f"[INFO] Sequence length  : "
-        f"{SEQUENCE_LENGTH}"
-    )
+    with open(
+        path,
+        "w",
+        encoding="utf-8"
+    ) as file:
 
-    print(
-        f"[INFO] Forecast horizon : "
-        f"{FORECAST_HORIZON}"
-    )
-
-    print(
-        f"[INFO] Approaches       : "
-        f"{len(APPROACHES)}"
-    )
-
-    print(
-        f"[INFO] Lanes/approach   : "
-        f"{len(LANES)}"
-    )
-
-    print(
-        f"[INFO] Sensors          : "
-        f"{NUM_SENSORS}"
-    )
-
-    print(
-        f"[INFO] Features/sensor : "
-        f"{NUM_FEATURES}"
-    )
-
-    print(
-        f"[INFO] Features/timestep: "
-        f"{INPUT_FEATURES_PER_TIMESTEP}"
-    )
-
-    print("=" * 70)
+        json.dump(
+            data,
+            file,
+            indent=4,
+            ensure_ascii=False
+        )
 
 
 # ============================================================
 # LOAD DATA
 # ============================================================
 
-def load_data():
+def load_dataset():
 
-    print()
-    print("=" * 70)
-    print("DATA LOADING")
-    print("=" * 70)
+    print_header("DATA LOADING")
 
-    if not DATA_PATH.exists():
+    print(
+        f"[INFO] Dataset     : {DATASET_NAME}"
+    )
+
+    print(
+        f"[INFO] Source CSV  : {INPUT_CSV}"
+    )
+
+    if not INPUT_CSV.exists():
 
         raise FileNotFoundError(
-            "Dataset tidak ditemukan:\n"
-            f"{DATA_PATH}"
+            f"Dataset tidak ditemukan:\n{INPUT_CSV}"
         )
 
-    dataframe = pd.read_csv(
-        DATA_PATH
+    df = pd.read_csv(INPUT_CSV)
+
+    print(
+        f"[INFO] Rows        : {len(df):,}"
     )
 
     print(
-        f"[INFO] Rows    : "
-        f"{len(dataframe):,}"
-    )
-
-    print(
-        f"[INFO] Columns : "
-        f"{len(dataframe.columns)}"
+        f"[INFO] Columns     : {len(df.columns)}"
     )
 
     print()
-    print(
-        "[INFO] Columns:"
-    )
+    print("[INFO] Columns:")
 
-    for column in dataframe.columns:
+    for column in df.columns:
 
         print(
             f"       - {column}"
         )
 
-    return dataframe
+    return df
 
 
 # ============================================================
-# VALIDATE REQUIRED COLUMNS
+# COLUMN VALIDATION
 # ============================================================
 
-def validate_columns(
-    dataframe
-):
+def validate_columns(df):
 
-    print()
-    print("=" * 70)
-    print("COLUMN VALIDATION")
-    print("=" * 70)
+    print_header("COLUMN VALIDATION")
 
     required_columns = [
         "timestamp",
         "intersection_id",
         "approach",
-        "lane_id"
+        "lane_id",
+        *FEATURE_NAMES,
     ]
 
-    required_columns.extend(
-        FEATURE_NAMES
-    )
-
-    missing_columns = [
+    missing = [
         column
         for column in required_columns
-        if column not in dataframe.columns
+        if column not in df.columns
     ]
 
-    if missing_columns:
+    if missing:
 
         raise ValueError(
             "Kolom berikut tidak ditemukan:\n"
             + "\n".join(
                 f"- {column}"
-                for column in missing_columns
+                for column in missing
             )
         )
 
     print(
-        "[OK] Semua kolom yang dibutuhkan "
-        "tersedia."
+        "[OK] Semua kolom yang dibutuhkan tersedia."
     )
 
 
 # ============================================================
-# CLEAN BASIC DATA
+# BASIC DATA CLEANING
 # ============================================================
 
-def clean_basic_data(
-    dataframe
-):
+def basic_cleaning(df):
 
-    print()
-    print("=" * 70)
-    print("BASIC DATA CLEANING")
-    print("=" * 70)
+    print_header("BASIC DATA CLEANING")
 
-    dataframe = dataframe.copy()
+    df = df.copy()
 
     # --------------------------------------------------------
-    # Timestamp
+    # Timestamp conversion
     # --------------------------------------------------------
 
-    dataframe["timestamp"] = pd.to_datetime(
-        dataframe["timestamp"],
+    df["timestamp"] = pd.to_datetime(
+        df["timestamp"],
         errors="coerce"
     )
 
     invalid_timestamp = (
-        dataframe["timestamp"]
+        df["timestamp"]
         .isna()
         .sum()
     )
 
     print(
         f"[INFO] Invalid timestamp : "
-        f"{invalid_timestamp}"
+        f"{invalid_timestamp:,}"
     )
 
     if invalid_timestamp > 0:
 
-        dataframe = dataframe.dropna(
+        df = df.dropna(
             subset=["timestamp"]
         )
 
     # --------------------------------------------------------
-    # Intersection
+    # Filter intersection
     # --------------------------------------------------------
 
-    dataframe = dataframe[
-        dataframe["intersection_id"]
+    df = df[
+        df["intersection_id"]
         == INTERSECTION_ID
     ].copy()
 
     print(
         f"[INFO] Intersection rows : "
-        f"{len(dataframe):,}"
+        f"{len(df):,}"
     )
 
     # --------------------------------------------------------
-    # Approach
-    # --------------------------------------------------------
-
-    dataframe["approach"] = (
-        dataframe["approach"]
-        .astype(str)
-        .str.lower()
-        .str.strip()
-    )
-
-    # --------------------------------------------------------
-    # Lane
-    # --------------------------------------------------------
-
-    dataframe["lane_id"] = (
-        dataframe["lane_id"]
-        .astype(str)
-        .str.lower()
-        .str.strip()
-    )
-
-    dataframe = dataframe[
-        dataframe["approach"]
-        .isin(APPROACHES)
-    ].copy()
-
-    dataframe = dataframe[
-        dataframe["lane_id"]
-        .isin(LANES)
-    ].copy()
-
-    # --------------------------------------------------------
-    # Numeric features
+    # Numeric conversion
     # --------------------------------------------------------
 
     for feature in FEATURE_NAMES:
 
-        dataframe[feature] = pd.to_numeric(
-            dataframe[feature],
+        df[feature] = pd.to_numeric(
+            df[feature],
             errors="coerce"
         )
 
     invalid_numeric = (
-        dataframe[
-            FEATURE_NAMES
-        ]
+        df[FEATURE_NAMES]
         .isna()
         .sum()
         .sum()
@@ -418,28 +526,21 @@ def clean_basic_data(
 
     print(
         f"[INFO] Invalid numeric values : "
-        f"{invalid_numeric}"
+        f"{invalid_numeric:,}"
     )
 
     if invalid_numeric > 0:
 
-        dataframe[
-            FEATURE_NAMES
-        ] = (
-            dataframe[
-                FEATURE_NAMES
-            ]
-            .fillna(0)
+        raise ValueError(
+            "Ditemukan nilai numerik invalid."
         )
 
     # --------------------------------------------------------
-    # Negative physical values
+    # Negative values
     # --------------------------------------------------------
 
     negative_count = (
-        dataframe[
-            FEATURE_NAMES
-        ]
+        df[FEATURE_NAMES]
         .lt(0)
         .sum()
         .sum()
@@ -447,509 +548,360 @@ def clean_basic_data(
 
     print(
         f"[INFO] Negative feature values : "
-        f"{negative_count}"
+        f"{negative_count:,}"
     )
 
-    # Traffic counts and queue/density
-    # should not be negative.
+    if negative_count > 0:
 
-    for feature in FEATURE_NAMES:
-
-        dataframe[feature] = (
-            dataframe[feature]
-            .clip(lower=0)
+        raise ValueError(
+            "Ditemukan nilai negatif "
+            "pada traffic features."
         )
 
     # --------------------------------------------------------
     # Sort chronologically
     # --------------------------------------------------------
 
-    dataframe = dataframe.sort_values(
+    df = df.sort_values(
         [
             "timestamp",
             "approach",
-            "lane_id"
+            "lane_id",
         ]
-    ).reset_index(
-        drop=True
-    )
+    ).reset_index(drop=True)
 
     print(
         "[OK] Basic cleaning completed."
     )
 
-    return dataframe
+    return df
 
 
 # ============================================================
-# REMOVE DUPLICATE SENSOR RECORDS
+# DUPLICATE SENSOR RECORD CHECK
 # ============================================================
 
-def remove_duplicates(
-    dataframe
-):
+def check_duplicates(df):
 
-    print()
-    print("=" * 70)
-    print("DUPLICATE SENSOR RECORD CHECK")
-    print("=" * 70)
-
-    duplicate_mask = (
-        dataframe.duplicated(
-            subset=[
-                "timestamp",
-                "approach",
-                "lane_id"
-            ],
-            keep=False
-        )
+    print_header(
+        "DUPLICATE SENSOR RECORD CHECK"
     )
 
-    duplicate_count = (
-        duplicate_mask.sum()
+    key_columns = [
+        "timestamp",
+        "intersection_id",
+        "approach",
+        "lane_id",
+    ]
+
+    duplicates = df.duplicated(
+        subset=key_columns,
+        keep=False
     )
+
+    duplicate_count = duplicates.sum()
 
     print(
-        f"[INFO] Duplicate rows : "
+        f"[INFO] Duplicate sensor records : "
         f"{duplicate_count:,}"
     )
 
     if duplicate_count > 0:
 
-        print(
-            "[INFO] Duplicate sensor "
-            "records akan diagregasi."
-        )
-
-        dataframe = (
-            dataframe
-            .groupby(
-                [
-                    "timestamp",
-                    "approach",
-                    "lane_id"
-                ],
-                as_index=False
-            )[FEATURE_NAMES]
-            .mean()
-        )
-
-    else:
-
-        print(
-            "[OK] Tidak ditemukan "
-            "duplicate sensor record."
-        )
-
-    return dataframe
-
-
-# ============================================================
-# TIMESTAMP NORMALIZATION
-# ============================================================
-
-def normalize_timestamp(
-    dataframe
-):
-
-    print()
-    print("=" * 70)
-    print("TIMESTAMP NORMALIZATION")
-    print("=" * 70)
-
-    dataframe = dataframe.copy()
-
-    # --------------------------------------------------------
-    # Dataset mayoritas memiliki interval 1 detik.
-    #
-    # Kita normalkan timestamp ke resolusi 1 detik.
-    #
-    # Contoh:
-    #
-    # 16:30:12.000
-    # 16:30:13.000
-    # 16:30:14.000
-    #
-    # --------------------------------------------------------
-
-    dataframe["timestamp"] = (
-        dataframe["timestamp"]
-        .dt.floor("1s")
-    )
-
-    # Jika setelah flooring muncul duplicate,
-    # agregasi kembali.
-
-    dataframe = (
-        dataframe
-        .groupby(
-            [
-                "timestamp",
-                "approach",
-                "lane_id"
-            ],
-            as_index=False
-        )[FEATURE_NAMES]
-        .mean()
-    )
-
-    dataframe = dataframe.sort_values(
-        [
-            "timestamp",
-            "approach",
-            "lane_id"
+        duplicate_rows = df.loc[
+            duplicates,
+            key_columns
         ]
-    ).reset_index(
-        drop=True
+
+        print()
+        print(
+            duplicate_rows.head(20)
+        )
+
+        raise ValueError(
+            "Ditemukan duplicate sensor record."
+        )
+
+    print(
+        "[OK] Tidak ditemukan duplicate "
+        "sensor record."
+    )
+
+
+# ============================================================
+# DATASET INFORMATION
+# ============================================================
+
+def print_dataset_information(df):
+
+    print_header(
+        "DATASET INFORMATION"
     )
 
     print(
         f"[INFO] Timestamp count : "
-        f"{dataframe['timestamp'].nunique():,}"
+        f"{df['timestamp'].nunique():,}"
     )
 
     print(
         f"[INFO] Start : "
-        f"{dataframe['timestamp'].min()}"
+        f"{df['timestamp'].min()}"
     )
 
     print(
         f"[INFO] End   : "
-        f"{dataframe['timestamp'].max()}"
+        f"{df['timestamp'].max()}"
+    )
+
+    duration = (
+        df["timestamp"].max()
+        - df["timestamp"].min()
     )
 
     print(
-        "[OK] Timestamp normalized."
+        f"[INFO] Duration : "
+        f"{duration}"
     )
-
-    return dataframe
-
-
-# ============================================================
-# CREATE COMPLETE TIMESTAMP INDEX
-# ============================================================
-
-def create_timestamp_index(
-    dataframe
-):
 
     print()
-    print("=" * 70)
-    print("TIMESTAMP INDEX")
-    print("=" * 70)
+    print("[INFO] Approaches:")
 
-    start_time = (
-        dataframe["timestamp"]
-        .min()
+    print(
+        df["approach"]
+        .value_counts()
+        .sort_index()
     )
 
-    end_time = (
-        dataframe["timestamp"]
-        .max()
+    print()
+    print("[INFO] Lanes:")
+
+    print(
+        df["lane_id"]
+        .value_counts()
+        .sort_index()
     )
 
-    timestamps = pd.date_range(
-        start=start_time,
-        end=end_time,
-        freq="1s"
+
+# ============================================================
+# FEATURE STATISTICS
+# ============================================================
+
+def print_feature_statistics(df):
+
+    print_header(
+        "FEATURE STATISTICS"
+    )
+
+    for feature in FEATURE_NAMES:
+
+        values = df[feature]
+
+        print()
+        print(
+            f"[INFO] {feature}"
+        )
+
+        print(
+            f"       Min  : "
+            f"{values.min():.6f}"
+        )
+
+        print(
+            f"       Max  : "
+            f"{values.max():.6f}"
+        )
+
+        print(
+            f"       Mean : "
+            f"{values.mean():.6f}"
+        )
+
+        zero_percentage = (
+            (values == 0).mean()
+            * 100
+        )
+
+        print(
+            f"       Zero : "
+            f"{zero_percentage:.2f}%"
+        )
+
+
+# ============================================================
+# TIMESTAMP ANALYSIS
+# ============================================================
+
+def analyze_timestamps(df):
+
+    print_header(
+        "TIMESTAMP ANALYSIS"
+    )
+
+    timestamps = (
+        df["timestamp"]
+        .drop_duplicates()
+        .sort_values()
+    )
+
+    start = timestamps.min()
+    end = timestamps.max()
+
+    expected_index = pd.date_range(
+        start=start,
+        end=end,
+        freq=f"{TIME_RESOLUTION_SECONDS}s"
+    )
+
+    actual_index = pd.DatetimeIndex(
+        timestamps
+    )
+
+    missing_timestamps = (
+        expected_index
+        .difference(actual_index)
     )
 
     print(
         f"[INFO] Original timestamps : "
-        f"{dataframe['timestamp'].nunique():,}"
+        f"{len(actual_index):,}"
     )
 
     print(
-        f"[INFO] Expected 1-second "
-        f"timestamps : "
-        f"{len(timestamps):,}"
+        f"[INFO] Expected timestamps : "
+        f"{len(expected_index):,}"
     )
 
     print(
-        f"[INFO] Missing timestamp "
-        f"slots : "
-        f"{len(timestamps) - dataframe['timestamp'].nunique():,}"
+        f"[INFO] Missing timestamp slots : "
+        f"{len(missing_timestamps):,}"
     )
 
-    return timestamps
+    if len(missing_timestamps) > 0:
 
+        print()
+        print(
+            "[INFO] Contoh missing timestamp:"
+        )
 
-# ============================================================
-# BUILD COMPLETE LANE TABLE
-# ============================================================
+        for timestamp in missing_timestamps[:20]:
 
-def build_lane_table(
-    dataframe,
-    timestamps
-):
-
-    print()
-    print("=" * 70)
-    print("BUILDING COMPLETE LANE TABLE")
-    print("=" * 70)
-
-    # --------------------------------------------------------
-    # IMPORTANT
-    #
-    # Tidak menggunakan MultiIndex.reindex().
-    #
-    # Kita membangun tabel secara eksplisit supaya:
-    #
-    # timestamp × approach × lane
-    #
-    # selalu memiliki struktur yang konsisten.
-    # --------------------------------------------------------
-
-    complete_rows = []
-
-    for timestamp in timestamps:
-
-        timestamp_data = dataframe[
-            dataframe["timestamp"]
-            == timestamp
-        ]
-
-        # Membuat lookup:
-        #
-        # (approach, lane) -> values
-
-        lookup = {}
-
-        for row in timestamp_data.itertuples(
-            index=False
-        ):
-
-            key = (
-                row.approach,
-                row.lane_id
+            print(
+                f"       {timestamp}"
             )
 
-            values = [
-                getattr(
-                    row,
-                    feature
-                )
-                for feature in FEATURE_NAMES
-            ]
+    # --------------------------------------------------------
+    # Gap distribution
+    # --------------------------------------------------------
 
-            lookup[key] = values
-
-        # ----------------------------------------------------
-        # Selalu buat 12 sensor.
-        # ----------------------------------------------------
-
-        for approach in APPROACHES:
-
-            for lane in LANES:
-
-                key = (
-                    approach,
-                    lane
-                )
-
-                if key in lookup:
-
-                    values = lookup[key]
-
-                else:
-
-                    # Tidak ada data pada timestamp
-                    # tersebut.
-                    #
-                    # Diisi 0 karena:
-                    #
-                    # tidak ada kendaraan
-                    # /
-                    # tidak ada queue
-                    # /
-                    # tidak ada density.
-                    #
-                    # Ini juga menjaga dimensi
-                    # input LSTM tetap konsisten.
-
-                    values = [
-                        0.0
-                        for _ in FEATURE_NAMES
-                    ]
-
-                row_data = {
-                    "timestamp":
-                        timestamp,
-
-                    "approach":
-                        approach,
-
-                    "lane_id":
-                        lane
-                }
-
-                for feature, value in zip(
-                    FEATURE_NAMES,
-                    values
-                ):
-
-                    row_data[feature] = (
-                        float(value)
-                    )
-
-                complete_rows.append(
-                    row_data
-                )
-
-    table = pd.DataFrame(
-        complete_rows
+    differences = (
+        actual_index
+        .to_series()
+        .diff()
+        .dropna()
     )
 
-    table = table.sort_values(
+    print()
+    print(
+        "[INFO] Timestamp gap distribution:"
+    )
+
+    print(
+        differences
+        .value_counts()
+        .head(15)
+    )
+
+    return expected_index
+
+
+# ============================================================
+# BUILD SENSOR MATRIX
+# ============================================================
+
+def build_raw_matrix(
+    df,
+    expected_index
+):
+
+    print_header(
+        "BUILDING RAW TIMESTEP MATRIX"
+    )
+
+    indexed = df.set_index(
         [
             "timestamp",
             "approach",
-            "lane_id"
+            "lane_id",
         ]
-    ).reset_index(
-        drop=True
     )
 
-    expected_rows = (
-        len(timestamps)
-        * NUM_SENSORS
-    )
-
-    print(
-        f"[INFO] Expected rows : "
-        f"{expected_rows:,}"
-    )
-
-    print(
-        f"[INFO] Actual rows   : "
-        f"{len(table):,}"
-    )
-
-    if len(table) != expected_rows:
-
-        raise ValueError(
-            "Jumlah baris complete lane table "
-            "tidak sesuai."
-        )
-
-    print(
-        "[OK] Complete lane table created."
-    )
-
-    return table
-
-
-# ============================================================
-# BUILD TIMESTEP MATRIX
-# ============================================================
-
-def build_timestep_matrix(
-    lane_table
-):
-
-    print()
-    print("=" * 70)
-    print("BUILDING TIMESTEP MATRIX")
-    print("=" * 70)
-
-    timestamps = (
-        lane_table[
-            "timestamp"
+    wide = indexed[
+        FEATURE_NAMES
+    ].unstack(
+        [
+            "approach",
+            "lane_id",
         ]
-        .drop_duplicates()
-        .sort_values()
-        .tolist()
     )
 
-    matrix = []
+    # --------------------------------------------------------
+    # Force deterministic sensor/feature ordering.
+    #
+    # Setiap timestep selalu memiliki struktur:
+    #
+    # north lane_1 -> 8 feature
+    # north lane_2 -> 8 feature
+    # north lane_3 -> 8 feature
+    # east  lane_1 -> 8 feature
+    # ...
+    #
+    # Total:
+    #
+    # 12 sensor × 8 feature = 96 feature
+    # --------------------------------------------------------
 
-    for timestamp in timestamps:
+    desired_columns = []
 
-        timestamp_data = (
-            lane_table[
-                lane_table[
-                    "timestamp"
-                ]
-                == timestamp
-            ]
-        )
+    for approach in APPROACHES:
 
-        # ----------------------------------------------------
-        # Pastikan jumlah sensor = 12
-        # ----------------------------------------------------
-
-        if len(timestamp_data) != NUM_SENSORS:
-
-            raise ValueError(
-                f"Timestamp {timestamp} "
-                f"tidak memiliki "
-                f"{NUM_SENSORS} sensor."
-            )
-
-        # ----------------------------------------------------
-        # Ambil sensor berdasarkan urutan tetap
-        # ----------------------------------------------------
-
-        timestep_values = []
-
-        for approach, lane in (
-            SENSOR_COLUMNS
-        ):
-
-            sensor_data = (
-                timestamp_data[
-                    (
-                        timestamp_data[
-                            "approach"
-                        ]
-                        == approach
-                    )
-                    &
-                    (
-                        timestamp_data[
-                            "lane_id"
-                        ]
-                        == lane
-                    )
-                ]
-            )
-
-            if len(sensor_data) != 1:
-
-                raise ValueError(
-                    f"Sensor duplicate/missing:\n"
-                    f"timestamp={timestamp}\n"
-                    f"approach={approach}\n"
-                    f"lane={lane}"
-                )
-
-            row = sensor_data.iloc[0]
+        for lane in LANES:
 
             for feature in FEATURE_NAMES:
 
-                timestep_values.append(
-                    float(
-                        row[feature]
+                desired_columns.append(
+                    (
+                        feature,
+                        approach,
+                        lane,
                     )
                 )
 
-        matrix.append(
-            timestep_values
-        )
-
-    matrix = np.asarray(
-        matrix,
-        dtype=np.float32
+    desired_index = pd.MultiIndex.from_tuples(
+        desired_columns,
+        names=[
+            "feature",
+            "approach",
+            "lane_id",
+        ]
     )
 
-    print(
-        f"[INFO] Timestep count : "
-        f"{matrix.shape[0]:,}"
+    wide = wide.reindex(
+        columns=desired_index
     )
 
+    # --------------------------------------------------------
+    # Reindex complete timeline.
+    # --------------------------------------------------------
+
+    wide = wide.reindex(
+        expected_index
+    )
+
+    wide.index.name = "timestamp"
+
     print(
-        f"[INFO] Features/timestep : "
-        f"{matrix.shape[1]}"
+        f"[INFO] Matrix shape : "
+        f"{wide.shape}"
     )
 
     expected_features = (
@@ -957,372 +909,509 @@ def build_timestep_matrix(
         * NUM_FEATURES
     )
 
-    if matrix.shape[1] != (
-        expected_features
-    ):
+    if wide.shape[1] != expected_features:
 
         raise ValueError(
-            "Jumlah feature timestep "
-            "tidak sesuai.\n"
-            f"Expected: {expected_features}\n"
-            f"Got: {matrix.shape[1]}"
+            "Jumlah feature tidak sesuai.\n"
+            f"Expected : {expected_features}\n"
+            f"Actual   : {wide.shape[1]}"
         )
 
-    print(
-        f"[OK] Matrix shape: "
-        f"{matrix.shape}"
+    raw_path = (
+        PROCESSED_DIR
+        / "timestep_matrix_raw.csv"
     )
 
-    return (
-        matrix,
-        timestamps
+    wide.to_csv(
+        raw_path
     )
+
+    print(
+        f"[SAVED] {raw_path}"
+    )
+
+    return wide
 
 
 # ============================================================
-# DATA VALIDATION
+# MISSING SENSOR ANALYSIS
 # ============================================================
 
-def validate_matrix(
-    matrix
-):
+def analyze_missing_sensors(wide):
 
-    print()
-    print("=" * 70)
-    print("NUMERICAL DATA VALIDATION")
-    print("=" * 70)
+    print_header(
+        "MISSING SENSOR ANALYSIS"
+    )
 
-    nan_count = (
-        np.isnan(matrix)
+    total_cells = (
+        wide.shape[0]
+        * wide.shape[1]
+    )
+
+    missing_cells = (
+        wide.isna()
+        .sum()
         .sum()
     )
 
-    inf_count = (
-        np.isinf(matrix)
-        .sum()
+    print(
+        f"[INFO] Total matrix cells : "
+        f"{total_cells:,}"
     )
 
     print(
-        f"[INFO] NaN count : "
-        f"{nan_count:,}"
+        f"[INFO] Missing cells      : "
+        f"{missing_cells:,}"
     )
 
     print(
-        f"[INFO] Inf count : "
-        f"{inf_count:,}"
-    )
-
-    if nan_count > 0:
-
-        raise ValueError(
-            "Dataset masih mengandung NaN."
-        )
-
-    if inf_count > 0:
-
-        raise ValueError(
-            "Dataset masih mengandung Inf."
-        )
-
-    print(
-        "[OK] Tidak ditemukan NaN atau Inf."
+        f"[INFO] Missing percentage : "
+        f"{missing_cells / total_cells * 100:.2f}%"
     )
 
     print()
     print(
-        "[FEATURE STATISTICS]"
+        "[INFO] Missing per sensor:"
     )
 
-    for feature_index, feature_name in enumerate(
-        FEATURE_NAMES
-    ):
+    sensor_report = []
 
-        # Feature berada pada posisi yang sama
-        # untuk setiap sensor.
-        #
-        # Contoh:
-        # sensor 0:
-        # index 0-7
-        #
-        # sensor 1:
-        # index 8-15
-        #
-        # dst.
+    for approach in APPROACHES:
 
-        values = matrix[
-            :,
-            feature_index::NUM_FEATURES
-        ]
+        for lane in LANES:
 
-        print(
-            f"\n[INFO] {feature_name}"
-        )
+            sensor_columns = [
+                (
+                    feature,
+                    approach,
+                    lane,
+                )
+                for feature in FEATURE_NAMES
+            ]
 
-        print(
-            f"       Min  : "
-            f"{np.min(values):.6f}"
-        )
+            sensor_data = wide[
+                sensor_columns
+            ]
 
-        print(
-            f"       Max  : "
-            f"{np.max(values):.6f}"
-        )
+            # Sensor dianggap missing pada timestep
+            # jika seluruh feature sensor tersebut NaN.
 
-        print(
-            f"       Mean : "
-            f"{np.mean(values):.6f}"
-        )
+            missing = (
+                sensor_data
+                .isna()
+                .all(axis=1)
+                .sum()
+            )
+
+            total = len(sensor_data)
+
+            percentage = (
+                missing / total * 100
+            )
+
+            print(
+                f"       {approach:5s} / "
+                f"{lane:6s} : "
+                f"{missing:4d} missing "
+                f"({percentage:6.2f}%)"
+            )
+
+            sensor_report.append(
+                {
+                    "approach": approach,
+                    "lane_id": lane,
+                    "missing_timesteps": int(
+                        missing
+                    ),
+                    "missing_percentage": float(
+                        percentage
+                    ),
+                }
+            )
+
+    return sensor_report
 
 
 # ============================================================
 # CHRONOLOGICAL SPLIT
 # ============================================================
 
-def chronological_split(
-    matrix
-):
+def split_timeline(wide):
 
-    print()
-    print("=" * 70)
-    print("CHRONOLOGICAL SPLIT")
-    print("=" * 70)
-
-    total_timesteps = (
-        len(matrix)
+    print_header(
+        "CHRONOLOGICAL TIMELINE SPLIT"
     )
+
+    total = len(wide)
 
     train_end = int(
-        total_timesteps
-        * 0.70
+        total * TRAIN_RATIO
     )
 
-    val_end = int(
-        total_timesteps
-        * 0.85
+    val_end = (
+        train_end
+        + int(total * VAL_RATIO)
     )
 
-    train = matrix[
+    train = wide.iloc[
         :train_end
-    ]
+    ].copy()
 
-    val = matrix[
+    val = wide.iloc[
         train_end:val_end
-    ]
+    ].copy()
 
-    test = matrix[
+    test = wide.iloc[
         val_end:
-    ]
+    ].copy()
 
     print(
         f"[INFO] Total timesteps : "
-        f"{total_timesteps:,}"
+        f"{total:,}"
     )
 
     print()
+    print("[TRAIN]")
+
     print(
-        "[TRAIN]"
+        f"       Timesteps : "
+        f"{len(train):,}"
     )
 
     print(
-        f"       Shape : "
-        f"{train.shape}"
-    )
-
-    print()
-    print(
-        "[VALIDATION]"
+        f"       Start    : "
+        f"{train.index.min()}"
     )
 
     print(
-        f"       Shape : "
-        f"{val.shape}"
+        f"       End      : "
+        f"{train.index.max()}"
     )
 
     print()
+    print("[VALIDATION]")
+
     print(
-        "[TEST]"
+        f"       Timesteps : "
+        f"{len(val):,}"
     )
 
     print(
-        f"       Shape : "
-        f"{test.shape}"
+        f"       Start    : "
+        f"{val.index.min()}"
+    )
+
+    print(
+        f"       End      : "
+        f"{val.index.max()}"
     )
 
     print()
+    print("[TEST]")
+
     print(
-        "[INFO] Split ratio:"
+        f"       Timesteps : "
+        f"{len(test):,}"
     )
 
     print(
-        "       Train : 70%"
+        f"       Start    : "
+        f"{test.index.min()}"
     )
 
     print(
-        "       Val   : 15%"
+        f"       End      : "
+        f"{test.index.max()}"
     )
 
-    print(
-        "       Test  : 15%"
-    )
-
-    return (
-        train,
-        val,
-        test
-    )
+    return train, val, test
 
 
 # ============================================================
-# SCALING
+# CAUSAL MISSING VALUE HANDLING
 # ============================================================
 
-def scale_data(
+def causal_fill_split(
+    split_df,
+    max_fill_seconds
+):
+
+    """
+    Forward-fill hanya menggunakan nilai masa lalu.
+
+    Tidak menggunakan:
+        - backward fill
+        - interpolation
+        - future value
+
+    Gap <= max_fill_seconds:
+        di-forward-fill.
+
+    Gap > max_fill_seconds:
+        tetap NaN.
+
+    Penting:
+    Forward fill dilakukan per kolom sensor-feature.
+    """
+
+    filled = split_df.copy()
+
+    filled = filled.ffill(
+        limit=max_fill_seconds
+    )
+
+    return filled
+
+
+def impute_splits(
     train,
     val,
     test
 ):
 
-    print()
-    print("=" * 70)
-    print("SCALER")
-    print("=" * 70)
+    print_header(
+        "CAUSAL MISSING VALUE HANDLING"
+    )
 
     print(
-        "[INFO] Fitting scaler menggunakan "
-        "TRAINING DATA saja."
+        "[INFO] Strategy:"
+    )
+
+    print(
+        f"       Forward fill <= "
+        f"{MAX_FORWARD_FILL_SECONDS} seconds"
+    )
+
+    print(
+        "       Gap lebih panjang "
+        "tetap NaN."
+    )
+
+    print(
+        "       Sequence yang melewati "
+        "gap panjang akan dibuang."
+    )
+
+    train_filled = causal_fill_split(
+        train,
+        MAX_FORWARD_FILL_SECONDS
+    )
+
+    val_filled = causal_fill_split(
+        val,
+        MAX_FORWARD_FILL_SECONDS
+    )
+
+    test_filled = causal_fill_split(
+        test,
+        MAX_FORWARD_FILL_SECONDS
+    )
+
+    print()
+
+    print(
+        f"[INFO] TRAIN unresolved NaN : "
+        f"{train_filled.isna().sum().sum():,}"
+    )
+
+    print(
+        f"[INFO] VAL unresolved NaN   : "
+        f"{val_filled.isna().sum().sum():,}"
+    )
+
+    print(
+        f"[INFO] TEST unresolved NaN  : "
+        f"{test_filled.isna().sum().sum():,}"
+    )
+
+    return (
+        train_filled,
+        val_filled,
+        test_filled,
+    )
+
+
+# ============================================================
+# MATRIX TO NUMPY
+# ============================================================
+
+def matrix_to_numpy(df):
+
+    return df.to_numpy(
+        dtype=np.float32
+    )
+
+
+# ============================================================
+# VALID TIMESTEP CHECK
+# ============================================================
+
+def get_valid_rows(matrix):
+
+    return np.isfinite(
+        matrix
+    ).all(axis=1)
+
+
+# ============================================================
+# SCALER
+# ============================================================
+
+def fit_scaler(
+    train_matrix
+):
+
+    print_header(
+        "SCALER"
     )
 
     scaler = StandardScaler()
 
-    # --------------------------------------------------------
-    # Fit hanya training data
-    # --------------------------------------------------------
+    print(
+        "[INFO] Fitting scaler "
+        "menggunakan TRAINING DATA saja."
+    )
 
     scaler.fit(
-        train
-    )
-
-    train_scaled = (
-        scaler.transform(
-            train
-        )
-    )
-
-    val_scaled = (
-        scaler.transform(
-            val
-        )
-    )
-
-    test_scaled = (
-        scaler.transform(
-            test
-        )
+        train_matrix
     )
 
     print(
-        "[OK] Scaler fitted menggunakan "
-        "training data."
+        "[OK] Scaler fitted."
     )
 
-    print(
-        "[OK] Scaling completed."
-    )
+    return scaler
 
-    return (
-        train_scaled.astype(
-            np.float32
-        ),
-        val_scaled.astype(
-            np.float32
-        ),
-        test_scaled.astype(
-            np.float32
-        ),
-        scaler
+
+def transform_matrix(
+    matrix,
+    scaler
+):
+
+    return scaler.transform(
+        matrix
+    ).astype(
+        np.float32
     )
 
 
 # ============================================================
-# CREATE SEQUENCES
+# SEQUENCE CREATION
 # ============================================================
 
 def create_sequences(
-    data
+    matrix,
+    timestamps,
+    sequence_length,
+    forecast_horizon
 ):
 
-    print()
-    print("=" * 70)
-    print("SEQUENCE CREATION")
-    print("=" * 70)
+    print_header(
+        "SEQUENCE CREATION"
+    )
 
     X = []
     y = []
 
-    total_samples = (
-        len(data)
-        - SEQUENCE_LENGTH
-        - FORECAST_HORIZON
-        + 1
-    )
+    X_timestamps = []
+    y_timestamps = []
 
-    if total_samples <= 0:
+    total = len(matrix)
 
-        raise ValueError(
-            "Data terlalu sedikit untuk "
-            "membuat sequence."
-        )
+    # --------------------------------------------------------
+    # Contoh baseline:
+    #
+    # sequence_length = 15
+    # forecast_horizon = 1
+    #
+    # t1 ... t15 -> prediksi t16
+    #
+    # --------------------------------------------------------
 
-    for index in range(
-        total_samples
+    for end_idx in range(
+        sequence_length,
+        total - forecast_horizon + 1
     ):
 
-        start = index
-
-        end = (
-            index
-            + SEQUENCE_LENGTH
+        start_idx = (
+            end_idx
+            - sequence_length
         )
 
-        target_end = (
-            end
-            + FORECAST_HORIZON
-        )
-
-        input_sequence = (
-            data[
-                start:end
-            ]
-        )
-
-        target_sequence = (
-            data[
-                end:target_end
-            ]
+        target_idx = (
+            end_idx
+            + forecast_horizon
+            - 1
         )
 
         # ----------------------------------------------------
-        # Forecast horizon = 1
-        #
-        # X:
-        # (15, 96)
-        #
-        # y:
-        # (96)
+        # TIMESTAMP CONTINUITY
         # ----------------------------------------------------
 
-        if FORECAST_HORIZON == 1:
-
-            target_sequence = (
-                target_sequence[0]
+        expected_seconds = (
+            (
+                sequence_length
+                + forecast_horizon
+                - 1
             )
+            * TIME_RESOLUTION_SECONDS
+        )
+
+        actual_seconds = (
+            timestamps[target_idx]
+            - timestamps[start_idx]
+        ).total_seconds()
+
+        if actual_seconds != expected_seconds:
+
+            continue
+
+        # ----------------------------------------------------
+        # INPUT WINDOW
+        # ----------------------------------------------------
+
+        input_window = matrix[
+            start_idx:end_idx
+        ]
+
+        # ----------------------------------------------------
+        # TARGET
+        # ----------------------------------------------------
+
+        target = matrix[
+            target_idx
+        ]
+
+        # ----------------------------------------------------
+        # NUMERICAL VALIDATION
+        # ----------------------------------------------------
+
+        if not np.isfinite(
+            input_window
+        ).all():
+
+            continue
+
+        if not np.isfinite(
+            target
+        ).all():
+
+            continue
 
         X.append(
-            input_sequence
+            input_window
         )
 
         y.append(
-            target_sequence
+            target
+        )
+
+        X_timestamps.append(
+            timestamps[start_idx]
+        )
+
+        y_timestamps.append(
+            timestamps[target_idx]
         )
 
     X = np.asarray(
@@ -1345,131 +1434,81 @@ def create_sequences(
         f"{y.shape}"
     )
 
+    print(
+        f"[INFO] Valid sequences : "
+        f"{len(X):,}"
+    )
+
     return (
         X,
-        y
+        y,
+        np.asarray(
+            X_timestamps,
+            dtype="datetime64[ns]"
+        ),
+        np.asarray(
+            y_timestamps,
+            dtype="datetime64[ns]"
+        ),
     )
 
 
 # ============================================================
-# RESHAPE FOR LSTM
+# SEQUENCE VALIDATION
 # ============================================================
 
-def reshape_for_lstm(
+def validate_sequences(
+    name,
     X,
     y
 ):
 
     print()
-    print("=" * 70)
-    print("LSTM SHAPE PREPARATION")
-    print("=" * 70)
-
-    # --------------------------------------------------------
-    # Saat ini:
-    #
-    # X = (samples, 15, 96)
-    # y = (samples, 96)
-    #
-    # Ini sudah merupakan format yang dibutuhkan
-    # LSTM dengan input_size = 96.
-    # --------------------------------------------------------
-
-    expected_x_features = (
-        NUM_SENSORS
-        * NUM_FEATURES
+    print(
+        f"[VALIDATION] {name}"
     )
 
-    if X.shape[2] != (
-        expected_x_features
+    nan_X = np.isnan(X).sum()
+    nan_y = np.isnan(y).sum()
+
+    inf_X = np.isinf(X).sum()
+    inf_y = np.isinf(y).sum()
+
+    print(
+        f"       NaN X : {nan_X:,}"
+    )
+
+    print(
+        f"       NaN y : {nan_y:,}"
+    )
+
+    print(
+        f"       Inf X : {inf_X:,}"
+    )
+
+    print(
+        f"       Inf y : {inf_y:,}"
+    )
+
+    if (
+        nan_X > 0
+        or nan_y > 0
+        or inf_X > 0
+        or inf_y > 0
     ):
 
         raise ValueError(
-            "X feature dimension tidak sesuai."
-        )
-
-    if y.shape[1] != (
-        expected_x_features
-    ):
-
-        raise ValueError(
-            "y feature dimension tidak sesuai."
+            f"{name} masih mengandung "
+            "NaN atau Inf."
         )
 
     print(
-        f"[INFO] LSTM input size : "
-        f"{X.shape[2]}"
-    )
-
-    print(
-        f"[INFO] LSTM output size: "
-        f"{y.shape[1]}"
-    )
-
-    print(
-        "[OK] LSTM shapes valid."
-    )
-
-    return (
-        X,
-        y
+        "       [OK] Numerical validation passed."
     )
 
 
 # ============================================================
-# SAVE NUMPY DATA
-# ============================================================
-
-def save_numpy(
-    name,
-    array
-):
-
-    path = (
-        PROCESSED_DIR
-        / name
-    )
-
-    np.save(
-        path,
-        array
-    )
-
-    print(
-        f"[SAVED] {path}"
-    )
-
-
-# ============================================================
-# SAVE TIMESTAMPS
-# ============================================================
-
-def save_timestamps(
-    timestamps
-):
-
-    path = (
-        PROCESSED_DIR
-        / "timestamps.npy"
-    )
-
-    timestamp_array = np.asarray(
-        timestamps,
-        dtype="datetime64[ns]"
-    )
-
-    np.save(
-        path,
-        timestamp_array
-    )
-
-    print(
-        f"[SAVED] {path}"
-    )
-
-
-# ============================================================
-# SAVE SENSOR CONFIGURATION
+# SAVE SENSOR CONFIG
 # ============================================================
 
 def save_sensor_config():
@@ -1489,14 +1528,9 @@ def save_sensor_config():
 
             sensors.append(
                 {
-                    "sensor_id":
-                        sensor_id,
-
-                    "approach":
-                        approach,
-
-                    "lane_id":
-                        lane
+                    "sensor_id": sensor_id,
+                    "approach": approach,
+                    "lane_id": lane,
                 }
             )
 
@@ -1534,22 +1568,80 @@ def save_sensor_config():
         "sensor_order":
             [
                 f"{approach}/{lane}"
-                for approach, lane
-                in SENSOR_COLUMNS
-            ]
+                for approach in APPROACHES
+                for lane in LANES
+            ],
     }
 
-    with open(
+    save_json(
         path,
-        "w",
-        encoding="utf-8"
-    ) as file:
+        config
+    )
 
-        json.dump(
-            config,
-            file,
-            indent=4
-        )
+    print(
+        f"[SAVED] {path}"
+    )
+
+
+# ============================================================
+# SAVE FEATURE METADATA
+# ============================================================
+
+def save_feature_metadata():
+
+    path = (
+        PROCESSED_DIR
+        / "feature_metadata.json"
+    )
+
+    metadata = []
+
+    index = 0
+
+    for approach in APPROACHES:
+
+        for lane in LANES:
+
+            sensor_id = (
+                APPROACHES.index(approach)
+                * len(LANES)
+                + LANES.index(lane)
+                + 1
+            )
+
+            for feature in FEATURE_NAMES:
+
+                metadata.append(
+                    {
+                        "index":
+                            index,
+
+                        "sensor_id":
+                            sensor_id,
+
+                        "approach":
+                            approach,
+
+                        "lane_id":
+                            lane,
+
+                        "feature":
+                            feature,
+                    }
+                )
+
+                index += 1
+
+    save_json(
+        path,
+        {
+            "feature_count":
+                len(metadata),
+
+            "features":
+                metadata,
+        }
+    )
 
     print(
         f"[SAVED] {path}"
@@ -1575,90 +1667,92 @@ def save_preprocess_config():
         "intersection_id":
             INTERSECTION_ID,
 
+        "timestamp_resolution_seconds":
+            TIME_RESOLUTION_SECONDS,
+
         "sequence_length":
             SEQUENCE_LENGTH,
 
         "forecast_horizon":
             FORECAST_HORIZON,
 
-        "split": {
+        "split":
+            {
+                "train":
+                    TRAIN_RATIO,
 
-            "train":
-                0.70,
+                "validation":
+                    VAL_RATIO,
 
-            "validation":
-                0.15,
+                "test":
+                    TEST_RATIO,
+            },
 
-            "test":
-                0.15
-        },
+        "sensors":
+            {
+                "count":
+                    NUM_SENSORS,
 
-        "sensors": {
+                "approaches":
+                    APPROACHES,
 
-            "count":
-                NUM_SENSORS,
+                "lanes":
+                    LANES,
+            },
 
-            "approaches":
-                APPROACHES,
+        "features":
+            {
+                "names":
+                    FEATURE_NAMES,
 
-            "lanes":
-                LANES
-        },
+                "count":
+                    NUM_FEATURES,
 
-        "features": {
+                "per_timestep":
+                    INPUT_FEATURES_PER_TIMESTEP,
+            },
 
-            "names":
-                FEATURE_NAMES,
-
-            "count":
-                NUM_FEATURES,
-
-            "per_timestep":
-                INPUT_FEATURES_PER_TIMESTEP
-        },
-
-        "model_input": {
-
-            "shape":
-                [
+        "model_input":
+            {
+                "sequence_length":
                     SEQUENCE_LENGTH,
-                    INPUT_FEATURES_PER_TIMESTEP
-                ],
 
-            "input_size":
-                INPUT_FEATURES_PER_TIMESTEP,
+                "input_size":
+                    INPUT_FEATURES_PER_TIMESTEP,
 
-            "output_size":
-                INPUT_FEATURES_PER_TIMESTEP
-        },
+                "output_size":
+                    INPUT_FEATURES_PER_TIMESTEP,
+            },
 
-        "missing_sensor_strategy":
-            "fill_zero",
+        "missing_data":
+            {
+                "strategy":
+                    "causal_forward_fill",
 
-        "timestamp_resolution":
-            "1 second",
+                "max_forward_fill_seconds":
+                    MAX_FORWARD_FILL_SECONDS,
+
+                "unresolved_gap_strategy":
+                    "drop_sequence",
+            },
 
         "scaler":
-            "StandardScaler",
+            {
+                "type":
+                    "StandardScaler",
 
-        "scaler_fit":
-            "training_data_only",
+                "fit":
+                    "training_data_only",
+            },
 
         "random_seed":
-            RANDOM_SEED
+            RANDOM_SEED,
     }
 
-    with open(
+    save_json(
         path,
-        "w",
-        encoding="utf-8"
-    ) as file:
-
-        json.dump(
-            config,
-            file,
-            indent=4
-        )
+        config
+    )
 
     print(
         f"[SAVED] {path}"
@@ -1669,122 +1763,21 @@ def save_preprocess_config():
 # SAVE SCALER
 # ============================================================
 
-def save_scaler(
-    scaler
-):
+def save_scaler(scaler):
 
     path = (
         PROCESSED_DIR
         / "scaler_X.pkl"
     )
 
-    joblib.dump(
-        scaler,
-        path
-    )
-
-    print(
-        f"[SAVED] {path}"
-    )
-
-
-# ============================================================
-# SAVE COMPLETE LANE TABLE
-# ============================================================
-
-def save_lane_table(
-    lane_table
-):
-
-    path = (
-        PROCESSED_DIR
-        / "complete_lane_table.csv"
-    )
-
-    lane_table.to_csv(
-        path,
-        index=False
-    )
-
-    print(
-        f"[SAVED] {path}"
-    )
-
-
-# ============================================================
-# SAVE RAW TIMESTEP MATRIX
-# ============================================================
-
-def save_raw_matrix(
-    matrix
-):
-
-    path = (
-        PROCESSED_DIR
-        / "timestep_matrix.npy"
-    )
-
-    np.save(
-        path,
-        matrix
-    )
-
-    print(
-        f"[SAVED] {path}"
-    )
-
-
-# ============================================================
-# SAVE FEATURE METADATA
-# ============================================================
-
-def save_feature_metadata():
-
-    path = (
-        PROCESSED_DIR
-        / "feature_metadata.json"
-    )
-
-    metadata = {
-
-        "features":
-            FEATURE_NAMES,
-
-        "num_features":
-            NUM_FEATURES,
-
-        "num_sensors":
-            NUM_SENSORS,
-
-        "features_per_timestep":
-            INPUT_FEATURES_PER_TIMESTEP,
-
-        "feature_layout":
-            "sensor-major",
-
-        "layout_example": {
-
-            "sensor_1":
-                FEATURE_NAMES,
-
-            "sensor_2":
-                FEATURE_NAMES,
-
-            "sensor_12":
-                FEATURE_NAMES
-        }
-    }
-
     with open(
         path,
-        "w",
-        encoding="utf-8"
+        "wb"
     ) as file:
 
-        json.dump(
-            metadata,
-            file,
-            indent=4
+        pickle.dump(
+            scaler,
+            file
         )
 
     print(
@@ -1793,28 +1786,787 @@ def save_feature_metadata():
 
 
 # ============================================================
-# SUMMARY
+# SAVE ARRAY
 # ============================================================
 
-def print_summary(
-    X_train,
-    y_train,
-    X_val,
-    y_val,
-    X_test,
-    y_test,
-    matrix
+def save_array(
+    name,
+    array
 ):
 
-    print()
+    path = (
+        PROCESSED_DIR
+        / f"{name}.npy"
+    )
+
+    np.save(
+        path,
+        array
+    )
+
+    print(
+        f"[SAVED] {path}"
+    )
+
+
+# ============================================================
+# SAVE TIMESTAMPS
+# ============================================================
+
+def save_timestamps(
+    timestamps
+):
+
+    path = (
+        PROCESSED_DIR
+        / "timestamps.npy"
+    )
+
+    np.save(
+        path,
+        np.asarray(
+            timestamps,
+            dtype="datetime64[ns]"
+        )
+    )
+
+    print(
+        f"[SAVED] {path}"
+    )
+
+
+def save_sequence_timestamps(
+    name,
+    timestamps
+):
+
+    path = (
+        PROCESSED_DIR
+        / f"{name}.npy"
+    )
+
+    np.save(
+        path,
+        timestamps
+    )
+
+    print(
+        f"[SAVED] {path}"
+    )
+
+
+# ============================================================
+# SAVE PREPROCESS REPORT
+# ============================================================
+
+def save_preprocess_report(
+    df,
+    raw_matrix,
+    train_filled,
+    val_filled,
+    test_filled,
+    X_train,
+    X_val,
+    X_test,
+):
+
+    path = (
+        PROCESSED_DIR
+        / "preprocessing_report.json"
+    )
+
+    report = {
+
+        "dataset":
+            DATASET_NAME,
+
+        "source_csv":
+            str(INPUT_CSV),
+
+        "intersection_id":
+            INTERSECTION_ID,
+
+        "raw":
+            {
+                "rows":
+                    int(len(df)),
+
+                "columns":
+                    int(len(df.columns)),
+
+                "timestamp_count":
+                    int(
+                        df.timestamp.nunique()
+                    ),
+
+                "start":
+                    str(
+                        df.timestamp.min()
+                    ),
+
+                "end":
+                    str(
+                        df.timestamp.max()
+                    ),
+
+                "duration_seconds":
+                    int(
+                        (
+                            df.timestamp.max()
+                            - df.timestamp.min()
+                        ).total_seconds()
+                    ),
+            },
+
+        "matrix":
+            {
+                "rows":
+                    int(raw_matrix.shape[0]),
+
+                "features":
+                    int(raw_matrix.shape[1]),
+            },
+
+        "missing":
+            {
+                "raw_missing_cells":
+                    int(
+                        raw_matrix
+                        .isna()
+                        .sum()
+                        .sum()
+                    ),
+
+                "train_unresolved_nan":
+                    int(
+                        train_filled
+                        .isna()
+                        .sum()
+                        .sum()
+                    ),
+
+                "val_unresolved_nan":
+                    int(
+                        val_filled
+                        .isna()
+                        .sum()
+                        .sum()
+                    ),
+
+                "test_unresolved_nan":
+                    int(
+                        test_filled
+                        .isna()
+                        .sum()
+                        .sum()
+                    ),
+            },
+
+        "sequences":
+            {
+                "train":
+                    int(len(X_train)),
+
+                "validation":
+                    int(len(X_val)),
+
+                "test":
+                    int(len(X_test)),
+            },
+
+        "configuration":
+            {
+                "resolution_seconds":
+                    TIME_RESOLUTION_SECONDS,
+
+                "sequence_length":
+                    SEQUENCE_LENGTH,
+
+                "forecast_horizon":
+                    FORECAST_HORIZON,
+
+                "max_forward_fill_seconds":
+                    MAX_FORWARD_FILL_SECONDS,
+            },
+    }
+
+    save_json(
+        path,
+        report
+    )
+
+    print(
+        f"[SAVED] {path}"
+    )
+
+
+# ============================================================
+# MAIN
+# ============================================================
+
+def main():
+
     print("=" * 70)
-    print("PREPROCESSING SUMMARY")
+    print(
+        "YOLO TRAFFIC DATA PREPROCESSING V3"
+    )
     print("=" * 70)
 
-    print()
     print(
-        "[DATA]"
+        f"[INFO] Dataset           : "
+        f"{DATASET_NAME}"
     )
+
+    print(
+        f"[INFO] Source CSV        : "
+        f"{INPUT_CSV}"
+    )
+
+    print(
+        f"[INFO] Intersection      : "
+        f"{INTERSECTION_ID}"
+    )
+
+    print(
+        f"[INFO] Timestamp         : "
+        f"{TIME_RESOLUTION_SECONDS} second"
+    )
+
+    print(
+        f"[INFO] Sequence length   : "
+        f"{SEQUENCE_LENGTH}"
+    )
+
+    print(
+        f"[INFO] Forecast horizon  : "
+        f"{FORECAST_HORIZON}"
+    )
+
+    print(
+        f"[INFO] Sensors           : "
+        f"{NUM_SENSORS}"
+    )
+
+    print(
+        f"[INFO] Features/sensor   : "
+        f"{NUM_FEATURES}"
+    )
+
+    print(
+        f"[INFO] Features/timestep : "
+        f"{INPUT_FEATURES_PER_TIMESTEP}"
+    )
+
+    print(
+        f"[INFO] Missing strategy  : "
+        f"forward fill <= "
+        f"{MAX_FORWARD_FILL_SECONDS}s"
+    )
+
+    print("=" * 70)
+
+    set_seed()
+
+    ensure_directories()
+
+    # ========================================================
+    # 1. LOAD DATA
+    # ========================================================
+
+    df = load_dataset()
+
+    # ========================================================
+    # 2. COLUMN VALIDATION
+    # ========================================================
+
+    validate_columns(df)
+
+    # ========================================================
+    # 3. BASIC CLEANING
+    # ========================================================
+
+    df = basic_cleaning(df)
+
+    # ========================================================
+    # 4. DUPLICATE CHECK
+    # ========================================================
+
+    check_duplicates(df)
+
+    # ========================================================
+    # 5. DATASET INFORMATION
+    # ========================================================
+
+    print_dataset_information(df)
+
+    # ========================================================
+    # 6. FEATURE STATISTICS
+    # ========================================================
+
+    print_feature_statistics(df)
+
+    # ========================================================
+    # 7. TIMESTAMP ANALYSIS
+    # ========================================================
+
+    expected_index = analyze_timestamps(
+        df
+    )
+
+    # ========================================================
+    # 8. BUILD SENSOR MATRIX
+    # ========================================================
+
+    raw_matrix = build_raw_matrix(
+        df,
+        expected_index
+    )
+
+    # ========================================================
+    # 9. MISSING DATA ANALYSIS
+    # ========================================================
+
+    sensor_report = (
+        analyze_missing_sensors(
+            raw_matrix
+        )
+    )
+
+    # ========================================================
+    # 10. CHRONOLOGICAL SPLIT
+    # ========================================================
+
+    (
+        train_raw,
+        val_raw,
+        test_raw,
+    ) = split_timeline(
+        raw_matrix
+    )
+
+    # ========================================================
+    # 11. CAUSAL MISSING DATA HANDLING
+    # ========================================================
+
+    (
+        train_filled,
+        val_filled,
+        test_filled,
+    ) = impute_splits(
+        train_raw,
+        val_raw,
+        test_raw
+    )
+
+    # ========================================================
+    # 12. CONVERT TO NUMPY
+    # ========================================================
+
+    train_matrix_raw = (
+        matrix_to_numpy(
+            train_filled
+        )
+    )
+
+    val_matrix_raw = (
+        matrix_to_numpy(
+            val_filled
+        )
+    )
+
+    test_matrix_raw = (
+        matrix_to_numpy(
+            test_filled
+        )
+    )
+
+    # ========================================================
+    # 13. VALID TIMESTEP FILTERING
+    # ========================================================
+
+    train_valid_rows = (
+        get_valid_rows(
+            train_matrix_raw
+        )
+    )
+
+    val_valid_rows = (
+        get_valid_rows(
+            val_matrix_raw
+        )
+    )
+
+    test_valid_rows = (
+        get_valid_rows(
+            test_matrix_raw
+        )
+    )
+
+    print_header(
+        "VALID TIMESTEP CHECK"
+    )
+
+    print(
+        f"[INFO] Train valid rows : "
+        f"{train_valid_rows.sum():,} / "
+        f"{len(train_valid_rows):,}"
+    )
+
+    print(
+        f"[INFO] Val valid rows   : "
+        f"{val_valid_rows.sum():,} / "
+        f"{len(val_valid_rows):,}"
+    )
+
+    print(
+        f"[INFO] Test valid rows  : "
+        f"{test_valid_rows.sum():,} / "
+        f"{len(test_valid_rows):,}"
+    )
+
+    # ========================================================
+    # 14. FIT SCALER USING TRAINING DATA ONLY
+    # ========================================================
+
+    scaler_input = (
+        train_matrix_raw[
+            train_valid_rows
+        ]
+    )
+
+    if len(scaler_input) == 0:
+
+        raise ValueError(
+            "Tidak ada training timestep "
+            "yang valid."
+        )
+
+    scaler = fit_scaler(
+        scaler_input
+    )
+
+    # ========================================================
+    # 15. SCALE DATA
+    # ========================================================
+
+    print_header(
+        "SCALING"
+    )
+
+    train_scaled = np.full_like(
+        train_matrix_raw,
+        np.nan,
+        dtype=np.float32
+    )
+
+    val_scaled = np.full_like(
+        val_matrix_raw,
+        np.nan,
+        dtype=np.float32
+    )
+
+    test_scaled = np.full_like(
+        test_matrix_raw,
+        np.nan,
+        dtype=np.float32
+    )
+
+    train_scaled[
+        train_valid_rows
+    ] = transform_matrix(
+        train_matrix_raw[
+            train_valid_rows
+        ],
+        scaler
+    )
+
+    val_scaled[
+        val_valid_rows
+    ] = transform_matrix(
+        val_matrix_raw[
+            val_valid_rows
+        ],
+        scaler
+    )
+
+    test_scaled[
+        test_valid_rows
+    ] = transform_matrix(
+        test_matrix_raw[
+            test_valid_rows
+        ],
+        scaler
+    )
+
+    print(
+        "[OK] Scaling completed."
+    )
+
+    # ========================================================
+    # 16. CREATE TRAINING SEQUENCES
+    # ========================================================
+
+    (
+        X_train,
+        y_train,
+        X_train_ts,
+        y_train_ts,
+    ) = create_sequences(
+        train_scaled,
+        train_filled.index,
+        SEQUENCE_LENGTH,
+        FORECAST_HORIZON
+    )
+
+    # ========================================================
+    # 17. CREATE VALIDATION SEQUENCES
+    # ========================================================
+
+    (
+        X_val,
+        y_val,
+        X_val_ts,
+        y_val_ts,
+    ) = create_sequences(
+        val_scaled,
+        val_filled.index,
+        SEQUENCE_LENGTH,
+        FORECAST_HORIZON
+    )
+
+    # ========================================================
+    # 18. CREATE TEST SEQUENCES
+    # ========================================================
+
+    (
+        X_test,
+        y_test,
+        X_test_ts,
+        y_test_ts,
+    ) = create_sequences(
+        test_scaled,
+        test_filled.index,
+        SEQUENCE_LENGTH,
+        FORECAST_HORIZON
+    )
+
+    # ========================================================
+    # 19. VALIDATE SEQUENCES
+    # ========================================================
+
+    print_header(
+        "SEQUENCE VALIDATION"
+    )
+
+    validate_sequences(
+        "TRAIN",
+        X_train,
+        y_train
+    )
+
+    validate_sequences(
+        "VALIDATION",
+        X_val,
+        y_val
+    )
+
+    validate_sequences(
+        "TEST",
+        X_test,
+        y_test
+    )
+
+    # ========================================================
+    # 20. SAVE PROCESSED ARRAYS
+    # ========================================================
+
+    print_header(
+        "SAVING PROCESSED DATA"
+    )
+
+    save_array(
+        "X_train",
+        X_train
+    )
+
+    save_array(
+        "y_train",
+        y_train
+    )
+
+    save_array(
+        "X_val",
+        X_val
+    )
+
+    save_array(
+        "y_val",
+        y_val
+    )
+
+    save_array(
+        "X_test",
+        X_test
+    )
+
+    save_array(
+        "y_test",
+        y_test
+    )
+
+    # ========================================================
+    # 21. SAVE SCALER
+    # ========================================================
+
+    save_scaler(
+        scaler
+    )
+
+    # ========================================================
+    # 22. SAVE TIMESTAMPS
+    # ========================================================
+
+    save_timestamps(
+        expected_index
+    )
+
+    save_sequence_timestamps(
+        "train_input_timestamps",
+        X_train_ts
+    )
+
+    save_sequence_timestamps(
+        "train_target_timestamps",
+        y_train_ts
+    )
+
+    save_sequence_timestamps(
+        "val_input_timestamps",
+        X_val_ts
+    )
+
+    save_sequence_timestamps(
+        "val_target_timestamps",
+        y_val_ts
+    )
+
+    save_sequence_timestamps(
+        "test_input_timestamps",
+        X_test_ts
+    )
+
+    save_sequence_timestamps(
+        "test_target_timestamps",
+        y_test_ts
+    )
+
+    # ========================================================
+    # 23. SAVE CLEAN MATRIX
+    # ========================================================
+
+    clean_matrix_path = (
+        PROCESSED_DIR
+        / "timestep_matrix_clean.csv"
+    )
+
+    clean_columns = []
+
+    for approach in APPROACHES:
+
+        for lane in LANES:
+
+            for feature in FEATURE_NAMES:
+
+                clean_columns.append(
+                    f"{approach}_{lane}_{feature}"
+                )
+
+    clean_matrix = pd.concat(
+        [
+            train_filled,
+            val_filled,
+            test_filled,
+        ]
+    )
+
+    clean_matrix.columns = (
+        clean_columns
+    )
+
+    clean_matrix.to_csv(
+        clean_matrix_path,
+        index_label="timestamp"
+    )
+
+    print(
+        f"[SAVED] {clean_matrix_path}"
+    )
+
+    # ========================================================
+    # 24. SAVE MISSING SENSOR REPORT
+    # ========================================================
+
+    save_json(
+        PROCESSED_DIR
+        / "missing_sensor_report.json",
+        {
+            "max_forward_fill_seconds":
+                MAX_FORWARD_FILL_SECONDS,
+
+            "sensors":
+                sensor_report,
+        }
+    )
+
+    print(
+        "[SAVED] "
+        f"{PROCESSED_DIR / 'missing_sensor_report.json'}"
+    )
+
+    # ========================================================
+    # 25. SAVE SENSOR CONFIGURATION
+    # ========================================================
+
+    save_sensor_config()
+
+    # ========================================================
+    # 26. SAVE FEATURE METADATA
+    # ========================================================
+
+    save_feature_metadata()
+
+    # ========================================================
+    # 27. SAVE PREPROCESSING CONFIG
+    # ========================================================
+
+    save_preprocess_config()
+
+    # ========================================================
+    # 28. SAVE PREPROCESSING REPORT
+    # ========================================================
+
+    save_preprocess_report(
+        df,
+        raw_matrix,
+        train_filled,
+        val_filled,
+        test_filled,
+        X_train,
+        X_val,
+        X_test,
+    )
+
+    # ========================================================
+    # 29. SUMMARY
+    # ========================================================
+
+    print_header(
+        "PREPROCESSING SUMMARY"
+    )
+
+    print()
+
+    print("[DATA]")
 
     print(
         f"Dataset             : "
@@ -1827,8 +2579,13 @@ def print_summary(
     )
 
     print(
-        f"Timesteps           : "
-        f"{len(matrix):,}"
+        f"Timestamp resolution: "
+        f"{TIME_RESOLUTION_SECONDS} second"
+    )
+
+    print(
+        f"Total timesteps     : "
+        f"{len(expected_index):,}"
     )
 
     print(
@@ -1847,20 +2604,22 @@ def print_summary(
     )
 
     print()
+
+    print("[MISSING DATA]")
+
     print(
-        "[FEATURES]"
+        f"Forward fill limit  : "
+        f"{MAX_FORWARD_FILL_SECONDS} sec"
     )
 
-    for feature in FEATURE_NAMES:
-
-        print(
-            f"       - {feature}"
-        )
+    print(
+        "Long unresolved gaps: "
+        "sequence dibuang"
+    )
 
     print()
-    print(
-        "[SEQUENCE]"
-    )
+
+    print("[SEQUENCE]")
 
     print(
         f"Sequence length     : "
@@ -1873,9 +2632,8 @@ def print_summary(
     )
 
     print()
-    print(
-        "[OUTPUT SHAPES]"
-    )
+
+    print("[OUTPUT SHAPES]")
 
     print(
         f"X_train : "
@@ -1908,337 +2666,106 @@ def print_summary(
     )
 
     print()
-    print(
-        "[MODEL INTERFACE]"
-    )
+
+    print("[MODEL INTERFACE]")
 
     print(
-        f"LSTM input_size     : "
+        f"LSTM input_size  : "
         f"{INPUT_FEATURES_PER_TIMESTEP}"
     )
 
     print(
-        f"LSTM output_size    : "
+        f"LSTM output_size : "
         f"{INPUT_FEATURES_PER_TIMESTEP}"
     )
 
     print()
-    print(
-        "[OUTPUT DIRECTORY]"
-    )
+
+    print("[OUTPUT DIRECTORY]")
 
     print(
         f"{PROCESSED_DIR}"
     )
 
-
-# ============================================================
-# MAIN
-# ============================================================
-
-def main():
-
-    print_configuration()
-
-    # --------------------------------------------------------
-    # Load
-    # --------------------------------------------------------
-
-    dataframe = load_data()
-
-    # --------------------------------------------------------
-    # Validate columns
-    # --------------------------------------------------------
-
-    validate_columns(
-        dataframe
-    )
-
-    # --------------------------------------------------------
-    # Basic cleaning
-    # --------------------------------------------------------
-
-    dataframe = clean_basic_data(
-        dataframe
-    )
-
-    # --------------------------------------------------------
-    # Remove duplicate sensor records
-    # --------------------------------------------------------
-
-    dataframe = remove_duplicates(
-        dataframe
-    )
-
-    # --------------------------------------------------------
-    # Normalize timestamp
-    # --------------------------------------------------------
-
-    dataframe = normalize_timestamp(
-        dataframe
-    )
-
-    # --------------------------------------------------------
-    # Create complete timestamp index
-    # --------------------------------------------------------
-
-    timestamps = (
-        create_timestamp_index(
-            dataframe
-        )
-    )
-
-    # --------------------------------------------------------
-    # Build complete lane table
-    # --------------------------------------------------------
-
-    lane_table = (
-        build_lane_table(
-            dataframe,
-            timestamps
-        )
-    )
-
-    # --------------------------------------------------------
-    # Save lane table
-    # --------------------------------------------------------
-
-    save_lane_table(
-        lane_table
-    )
-
-    # --------------------------------------------------------
-    # Build timestep matrix
-    # --------------------------------------------------------
-
-    (
-        matrix,
-        timestamps
-    ) = build_timestep_matrix(
-        lane_table
-    )
-
-    # --------------------------------------------------------
-    # Validate numerical matrix
-    # --------------------------------------------------------
-
-    validate_matrix(
-        matrix
-    )
-
-    # --------------------------------------------------------
-    # Save raw matrix
-    # --------------------------------------------------------
-
-    save_raw_matrix(
-        matrix
-    )
-
-    # --------------------------------------------------------
-    # Chronological split
-    # --------------------------------------------------------
-
-    (
-        train,
-        val,
-        test
-    ) = chronological_split(
-        matrix
-    )
-
-    # --------------------------------------------------------
-    # Scale
-    # --------------------------------------------------------
-
-    (
-        train_scaled,
-        val_scaled,
-        test_scaled,
-        scaler
-    ) = scale_data(
-        train,
-        val,
-        test
-    )
-
-    # --------------------------------------------------------
-    # Create sequences
-    # --------------------------------------------------------
-
-    (
-        X_train,
-        y_train
-    ) = create_sequences(
-        train_scaled
-    )
-
-    (
-        X_val,
-        y_val
-    ) = create_sequences(
-        val_scaled
-    )
-
-    (
-        X_test,
-        y_test
-    ) = create_sequences(
-        test_scaled
-    )
-
-    # --------------------------------------------------------
-    # Validate LSTM shape
-    # --------------------------------------------------------
-
-    (
-        X_train,
-        y_train
-    ) = reshape_for_lstm(
-        X_train,
-        y_train
-    )
-
-    (
-        X_val,
-        y_val
-    ) = reshape_for_lstm(
-        X_val,
-        y_val
-    )
-
-    (
-        X_test,
-        y_test
-    ) = reshape_for_lstm(
-        X_test,
-        y_test
-    )
-
-    # --------------------------------------------------------
-    # Save processed arrays
-    # --------------------------------------------------------
-
     print()
+
     print("=" * 70)
-    print("SAVING PROCESSED DATA")
-    print("=" * 70)
 
-    save_numpy(
-        "X_train.npy",
-        X_train
-    )
-
-    save_numpy(
-        "y_train.npy",
-        y_train
-    )
-
-    save_numpy(
-        "X_val.npy",
-        X_val
-    )
-
-    save_numpy(
-        "y_val.npy",
-        y_val
-    )
-
-    save_numpy(
-        "X_test.npy",
-        X_test
-    )
-
-    save_numpy(
-        "y_test.npy",
-        y_test
-    )
-
-    # --------------------------------------------------------
-    # Save scaler
-    # --------------------------------------------------------
-
-    save_scaler(
-        scaler
-    )
-
-    # --------------------------------------------------------
-    # Save timestamps
-    # --------------------------------------------------------
-
-    save_timestamps(
-        timestamps
-    )
-
-    # --------------------------------------------------------
-    # Save metadata
-    # --------------------------------------------------------
-
-    save_sensor_config()
-
-    save_feature_metadata()
-
-    save_preprocess_config()
-
-    # --------------------------------------------------------
-    # Final summary
-    # --------------------------------------------------------
-
-    print_summary(
-        X_train=X_train,
-        y_train=y_train,
-        X_val=X_val,
-        y_val=y_val,
-        X_test=X_test,
-        y_test=y_test,
-        matrix=matrix
-    )
-
-    print()
-    print("=" * 70)
     print(
-        "YOLO PREPROCESSING PIPELINE COMPLETED"
+        "YOLO PREPROCESSING V3 COMPLETED"
     )
+
     print("=" * 70)
 
     print()
+
     print(
-        "[OK] Dataset berhasil diproses."
+        "[OK] Data cleaning completed."
     )
 
     print(
-        "[OK] Semua 8 traffic features digunakan."
+        "[OK] Timestamp continuity checked."
     )
 
     print(
-        "[OK] Semua 12 lane sensors digunakan."
+        "[OK] 12 lane sensors preserved."
     )
 
     print(
-        "[OK] Input LSTM = 96 features/timestep."
+        "[OK] 8 traffic features preserved."
     )
 
     print(
-        "[OK] Sequence = 15 timestep."
+        "[OK] Missing values handled causally."
     )
 
     print(
-        "[OK] Forecast horizon = 1 timestep."
+        "[OK] Long missing gaps are not fabricated."
+    )
+
+    print(
+        "[OK] StandardScaler fitted on training data only."
+    )
+
+    print(
+        "[OK] Temporal sequence continuity validated."
+    )
+
+    print(
+        "[OK] NaN/Inf sequence validation passed."
     )
 
     print()
+
+    print("[NEXT]")
+
     print(
-        "[NEXT]"
+        "Jangan langsung melakukan hyperparameter tuning."
     )
 
     print(
-        "Jalankan training:"
+        "Tahap eksperimen berikutnya:"
     )
 
     print(
-        "python scripts/yolo/03_train_yolo.py"
+        "1. Eksperimen sequence length"
     )
 
-    print("=" * 70)
+    print(
+        "2. Eksperimen temporal resolution"
+    )
+
+    print(
+        "3. Training baseline"
+    )
+
+    print(
+        "4. Evaluasi per-feature"
+    )
+
+    print(
+        "5. Hyperparameter tuning"
+    )
 
 
 # ============================================================

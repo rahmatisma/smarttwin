@@ -1,164 +1,190 @@
+from pathlib import Path
 import json
 import random
-import time
-from pathlib import Path
+import pickle
 
 import numpy as np
-import pandas as pd
-
 import torch
 import torch.nn as nn
 
-from torch.utils.data import (
-    DataLoader,
-    TensorDataset
+from torch.utils.data import TensorDataset, DataLoader
+
+
+# ============================================================
+# YOLO TRAFFIC LSTM BASELINE TRAINING
+# ============================================================
+#
+# PIPELINE SETELAH PREPROCESSING
+#
+# 1. Load hasil preprocessing
+#       X_train, y_train
+#       X_val,   y_val
+#       X_test,  y_test
+#
+# 2. Validasi bentuk dan numerical data
+#
+# 3. Konversi NumPy -> PyTorch Tensor
+#
+# 4. Membuat DataLoader
+#
+# 5. Membuat model LSTM baseline
+#
+# 6. Training menggunakan TRAINING SET
+#
+# 7. Validasi setiap epoch menggunakan VALIDATION SET
+#
+# 8. Early stopping berdasarkan validation loss
+#
+# 9. Menyimpan BEST MODEL
+#
+# 10. Evaluasi akhir pada TEST SET
+#
+# 11. Menyimpan:
+#       - best_model.pt
+#       - training_history.json
+#       - training_config.json
+#       - baseline_test_result.json
+#
+# ------------------------------------------------------------
+#
+# MODEL INPUT
+#
+# 12 sensors
+# × 8 traffic features
+# = 96 features / timestep
+#
+# Sequence length = 15 timestep
+#
+# Input:
+#     (batch, 15, 96)
+#
+# Output:
+#     (batch, 96)
+#
+# Artinya model memprediksi seluruh kondisi traffic
+# 1 detik berikutnya untuk seluruh 12 sensor.
+#
+# ------------------------------------------------------------
+#
+# CATATAN PENTING
+#
+# Ini adalah BASELINE.
+#
+# Belum melakukan:
+# - hyperparameter tuning
+# - sequence length experiment
+# - temporal resolution experiment
+# - architecture comparison
+#
+# Tujuan baseline adalah mendapatkan angka awal
+# yang nantinya menjadi pembanding eksperimen.
+# ============================================================
+
+
+# ============================================================
+# PATH
+# ============================================================
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+
+FORECASTING_DIR = (
+    SCRIPT_DIR.parent.parent
 )
 
-
-# ============================================================
-# PATH CONFIGURATION
-# ============================================================
-
-BASE_DIR = Path(__file__).resolve().parents[2]
-
-PROCESSED_DIR = (
-    BASE_DIR
+OUTPUT_ROOT = (
+    FORECASTING_DIR
     / "outputs"
     / "yolo"
+)
+
+PROCESSED_DIR = (
+    OUTPUT_ROOT
     / "processed"
 )
 
-OUTPUT_DIR = (
-    BASE_DIR
-    / "outputs"
-    / "yolo"
-)
-
 MODEL_DIR = (
-    OUTPUT_DIR
+    OUTPUT_ROOT
     / "models"
 )
 
-METRICS_DIR = (
-    OUTPUT_DIR
-    / "metrics"
-)
-
-PLOT_DIR = (
-    OUTPUT_DIR
-    / "plots"
-)
-
-
-MODEL_DIR.mkdir(
-    parents=True,
-    exist_ok=True
-)
-
-METRICS_DIR.mkdir(
-    parents=True,
-    exist_ok=True
-)
-
-PLOT_DIR.mkdir(
-    parents=True,
-    exist_ok=True
-)
-
 
 # ============================================================
-# DATA CONFIGURATION
+# DATA FILES
 # ============================================================
 
-DATASET_NAME = "YOLO Traffic Dataset"
-
-INTERSECTION_ID = "simpang4-pingit"
-
-SEQUENCE_LENGTH = 15
-
-FORECAST_HORIZON = 1
-
-NUM_SENSORS = 12
-
-NUM_FEATURES_PER_SENSOR = 8
-
-INPUT_SIZE = (
-    NUM_SENSORS
-    * NUM_FEATURES_PER_SENSOR
+X_TRAIN_PATH = (
+    PROCESSED_DIR
+    / "X_train.npy"
 )
 
-OUTPUT_SIZE = INPUT_SIZE
+Y_TRAIN_PATH = (
+    PROCESSED_DIR
+    / "y_train.npy"
+)
 
+X_VAL_PATH = (
+    PROCESSED_DIR
+    / "X_val.npy"
+)
 
-# ============================================================
-# FEATURES
-# ============================================================
+Y_VAL_PATH = (
+    PROCESSED_DIR
+    / "y_val.npy"
+)
 
-FEATURE_NAMES = [
-    "vehicle_count",
-    "car_count",
-    "motorcycle_count",
-    "bus_count",
-    "truck_count",
-    "queue_length_veh",
-    "queue_length_m_est",
-    "density_index"
-]
+X_TEST_PATH = (
+    PROCESSED_DIR
+    / "X_test.npy"
+)
 
+Y_TEST_PATH = (
+    PROCESSED_DIR
+    / "y_test.npy"
+)
 
-# ============================================================
-# SENSOR CONFIGURATION
-# ============================================================
-
-APPROACHES = [
-    "north",
-    "east",
-    "south",
-    "west"
-]
-
-LANES = [
-    "lane_1",
-    "lane_2",
-    "lane_3"
-]
-
-SENSOR_COUNT = (
-    len(APPROACHES)
-    * len(LANES)
+SCALER_PATH = (
+    PROCESSED_DIR
+    / "scaler_X.pkl"
 )
 
 
 # ============================================================
-# MODEL CONFIGURATION
+# TRAINING CONFIGURATION
 # ============================================================
 
-HIDDEN_SIZE = 64
+RANDOM_SEED = 42
+
+BATCH_SIZE = 32
+
+MAX_EPOCHS = 100
+
+LEARNING_RATE = 0.001
+
+WEIGHT_DECAY = 0.0
+
+
+# ============================================================
+# LSTM CONFIGURATION
+# ============================================================
+
+INPUT_SIZE = 96
+
+HIDDEN_SIZE = 128
 
 NUM_LAYERS = 2
 
 DROPOUT = 0.2
 
-BATCH_SIZE = 64
-
-LEARNING_RATE = 0.001
-
-WEIGHT_DECAY = 1e-5
-
-MAX_EPOCHS = 100
-
-PATIENCE = 15
-
-MIN_DELTA = 1e-6
-
-GRADIENT_CLIP = 1.0
+OUTPUT_SIZE = 96
 
 
 # ============================================================
-# RANDOM SEED
+# EARLY STOPPING
 # ============================================================
 
-RANDOM_SEED = 42
+EARLY_STOPPING_PATIENCE = 15
+
+MIN_DELTA = 1e-5
 
 
 # ============================================================
@@ -173,311 +199,128 @@ DEVICE = torch.device(
 
 
 # ============================================================
-# REPRODUCIBILITY
+# RANDOM SEED
 # ============================================================
 
-def set_seed(
-    seed=RANDOM_SEED
-):
+def set_seed():
+    """
+    Membuat eksperimen reproducible.
+    """
 
     random.seed(
-        seed
+        RANDOM_SEED
     )
 
     np.random.seed(
-        seed
+        RANDOM_SEED
     )
 
     torch.manual_seed(
-        seed
+        RANDOM_SEED
     )
 
     if torch.cuda.is_available():
 
+        torch.cuda.manual_seed(
+            RANDOM_SEED
+        )
+
         torch.cuda.manual_seed_all(
-            seed
+            RANDOM_SEED
         )
-
-    torch.backends.cudnn.deterministic = True
-
-    torch.backends.cudnn.benchmark = False
 
 
 # ============================================================
-# LSTM MODEL
+# DIRECTORY
 # ============================================================
 
-class TrafficLSTM(
-    nn.Module
-):
+def ensure_directories():
 
-    def __init__(
-        self,
-        input_size,
-        hidden_size=64,
-        num_layers=2,
-        output_size=96,
-        dropout=0.2
-    ):
-
-        super().__init__()
-
-        self.input_size = (
-            input_size
-        )
-
-        self.hidden_size = (
-            hidden_size
-        )
-
-        self.num_layers = (
-            num_layers
-        )
-
-        self.output_size = (
-            output_size
-        )
-
-        # ----------------------------------------------------
-        # LSTM
-        # ----------------------------------------------------
-
-        self.lstm = nn.LSTM(
-            input_size=input_size,
-            hidden_size=hidden_size,
-            num_layers=num_layers,
-            batch_first=True,
-            dropout=(
-                dropout
-                if num_layers > 1
-                else 0.0
-            )
-        )
-
-        # ----------------------------------------------------
-        # Dropout
-        # ----------------------------------------------------
-
-        self.dropout = nn.Dropout(
-            dropout
-        )
-
-        # ----------------------------------------------------
-        # Output layer
-        #
-        # 64 hidden units
-        # ->
-        # 96 predicted features
-        # ----------------------------------------------------
-
-        self.output_layer = nn.Linear(
-            hidden_size,
-            output_size
-        )
-
-    def forward(
-        self,
-        x
-    ):
-
-        # ----------------------------------------------------
-        # Input shape:
-        #
-        # (batch, sequence, 96)
-        # ----------------------------------------------------
-
-        lstm_output, _ = (
-            self.lstm(x)
-        )
-
-        # ----------------------------------------------------
-        # Take final timestep
-        #
-        # (batch, sequence, hidden)
-        #
-        # ->
-        #
-        # (batch, hidden)
-        # ----------------------------------------------------
-
-        last_output = (
-            lstm_output[:, -1, :]
-        )
-
-        last_output = (
-            self.dropout(
-                last_output
-            )
-        )
-
-        # ----------------------------------------------------
-        # Prediction
-        #
-        # (batch, 64)
-        #
-        # ->
-        #
-        # (batch, 96)
-        # ----------------------------------------------------
-
-        output = (
-            self.output_layer(
-                last_output
-            )
-        )
-
-        return output
-
-
-# ============================================================
-# LOAD CONFIGURATION
-# ============================================================
-
-def load_yolo_config():
-
-    config_path = (
-        PROCESSED_DIR
-        / "yolo_config.json"
+    MODEL_DIR.mkdir(
+        parents=True,
+        exist_ok=True
     )
-
-    if not config_path.exists():
-
-        print(
-            "[WARNING] yolo_config.json tidak ditemukan."
-        )
-
-        return None
-
-    with open(
-        config_path,
-        "r",
-        encoding="utf-8"
-    ) as file:
-
-        config = json.load(
-            file
-        )
-
-    return config
 
 
 # ============================================================
 # LOAD DATA
 # ============================================================
 
-def load_data():
+def load_numpy_data():
 
-    print()
-    print("=" * 70)
-    print("DATA LOADING")
-    print("=" * 70)
+    print_header(
+        "LOADING PREPROCESSED DATA"
+    )
 
-    files = {
+    required_files = [
+        X_TRAIN_PATH,
+        Y_TRAIN_PATH,
+        X_VAL_PATH,
+        Y_VAL_PATH,
+        X_TEST_PATH,
+        Y_TEST_PATH,
+    ]
 
-        "X_train":
-            PROCESSED_DIR
-            / "X_train.npy",
-
-        "y_train":
-            PROCESSED_DIR
-            / "y_train.npy",
-
-        "X_val":
-            PROCESSED_DIR
-            / "X_val.npy",
-
-        "y_val":
-            PROCESSED_DIR
-            / "y_val.npy",
-
-        "X_test":
-            PROCESSED_DIR
-            / "X_test.npy",
-
-        "y_test":
-            PROCESSED_DIR
-            / "y_test.npy"
-    }
-
-    # --------------------------------------------------------
-    # Check files
-    # --------------------------------------------------------
-
-    for name, path in files.items():
+    for path in required_files:
 
         if not path.exists():
 
             raise FileNotFoundError(
-                f"{name} tidak ditemukan:\n"
-                f"{path}"
+                f"File tidak ditemukan:\n{path}"
             )
 
-    # --------------------------------------------------------
-    # Load arrays
-    # --------------------------------------------------------
-
     X_train = np.load(
-        files["X_train"]
-    ).astype(
-        np.float32
+        X_TRAIN_PATH
     )
 
     y_train = np.load(
-        files["y_train"]
-    ).astype(
-        np.float32
+        Y_TRAIN_PATH
     )
 
     X_val = np.load(
-        files["X_val"]
-    ).astype(
-        np.float32
+        X_VAL_PATH
     )
 
     y_val = np.load(
-        files["y_val"]
-    ).astype(
-        np.float32
+        Y_VAL_PATH
     )
 
     X_test = np.load(
-        files["X_test"]
-    ).astype(
-        np.float32
+        X_TEST_PATH
     )
 
     y_test = np.load(
-        files["y_test"]
-    ).astype(
-        np.float32
-    )
-
-    # --------------------------------------------------------
-    # Print shapes
-    # --------------------------------------------------------
-
-    print(
-        f"[INFO] X_train : {X_train.shape}"
+        Y_TEST_PATH
     )
 
     print(
-        f"[INFO] y_train : {y_train.shape}"
+        f"[INFO] X_train : "
+        f"{X_train.shape}"
     )
 
     print(
-        f"[INFO] X_val   : {X_val.shape}"
+        f"[INFO] y_train : "
+        f"{y_train.shape}"
     )
 
     print(
-        f"[INFO] y_val   : {y_val.shape}"
+        f"[INFO] X_val   : "
+        f"{X_val.shape}"
     )
 
     print(
-        f"[INFO] X_test  : {X_test.shape}"
+        f"[INFO] y_val   : "
+        f"{y_val.shape}"
     )
 
     print(
-        f"[INFO] y_test  : {y_test.shape}"
+        f"[INFO] X_test  : "
+        f"{X_test.shape}"
+    )
+
+    print(
+        f"[INFO] y_test  : "
+        f"{y_test.shape}"
     )
 
     return (
@@ -486,52 +329,35 @@ def load_data():
         X_val,
         y_val,
         X_test,
-        y_test
+        y_test,
     )
 
 
 # ============================================================
-# VALIDATE DATA
+# DATA VALIDATION
 # ============================================================
 
-def validate_data(
+def validate_numpy_data(
     X_train,
     y_train,
     X_val,
     y_val,
     X_test,
-    y_test
+    y_test,
 ):
 
-    print()
-    print("=" * 70)
-    print("DATA VALIDATION")
-    print("=" * 70)
+    print_header(
+        "NUMERICAL DATA VALIDATION"
+    )
 
     datasets = {
-
-        "X_train":
-            X_train,
-
-        "y_train":
-            y_train,
-
-        "X_val":
-            X_val,
-
-        "y_val":
-            y_val,
-
-        "X_test":
-            X_test,
-
-        "y_test":
-            y_test
+        "X_train": X_train,
+        "y_train": y_train,
+        "X_val": X_val,
+        "y_val": y_val,
+        "X_test": X_test,
+        "y_test": y_test,
     }
-
-    # --------------------------------------------------------
-    # NaN / Inf check
-    # --------------------------------------------------------
 
     for name, data in datasets.items():
 
@@ -543,95 +369,135 @@ def validate_data(
             data
         ).sum()
 
-        if nan_count > 0:
+        print(
+            f"[INFO] {name:8s} | "
+            f"NaN: {nan_count:,} | "
+            f"Inf: {inf_count:,}"
+        )
 
-            raise ValueError(
-                f"{name} memiliki "
-                f"{nan_count} NaN."
-            )
-
-        if inf_count > 0:
-
-            raise ValueError(
-                f"{name} memiliki "
-                f"{inf_count} Inf."
-            )
-
-    # --------------------------------------------------------
-    # X shape
-    # --------------------------------------------------------
-
-    expected_x_shape = (
-        SEQUENCE_LENGTH,
-        INPUT_SIZE
-    )
-
-    expected_y_shape = (
-        OUTPUT_SIZE,
-    )
-
-    for name in [
-        "X_train",
-        "X_val",
-        "X_test"
-    ]:
-
-        data = datasets[name]
-
-        if data.ndim != 3:
-
-            raise ValueError(
-                f"{name} harus 3D "
-                f"(samples, sequence, features). "
-                f"Got: {data.shape}"
-            )
-
-        if tuple(
-            data.shape[1:]
-        ) != expected_x_shape:
-
-            raise ValueError(
-                f"{name} shape tidak sesuai.\n"
-                f"Expected: "
-                f"(samples, "
-                f"{SEQUENCE_LENGTH}, "
-                f"{INPUT_SIZE})\n"
-                f"Got: {data.shape}"
-            )
-
-    # --------------------------------------------------------
-    # Y shape
-    # --------------------------------------------------------
-
-    for name in [
-        "y_train",
-        "y_val",
-        "y_test"
-    ]:
-
-        data = datasets[name]
-
-        if data.ndim != 2:
-
-            raise ValueError(
-                f"{name} harus 2D "
-                f"(samples, features). "
-                f"Got: {data.shape}"
-            )
-
-        if data.shape[1] != (
-            OUTPUT_SIZE
+        if (
+            nan_count > 0
+            or inf_count > 0
         ):
 
             raise ValueError(
-                f"{name} memiliki "
-                f"{data.shape[1]} output features.\n"
-                f"Expected: "
-                f"{OUTPUT_SIZE}"
+                f"{name} mengandung "
+                "NaN atau Inf."
             )
 
+    print(
+        "[OK] Semua dataset "
+        "numerically valid."
+    )
+
+
+# ============================================================
+# SHAPE VALIDATION
+# ============================================================
+
+def validate_shapes(
+    X_train,
+    y_train,
+    X_val,
+    y_val,
+    X_test,
+    y_test,
+):
+
+    print_header(
+        "SHAPE VALIDATION"
+    )
+
+    expected_train_input = (
+        INPUT_SIZE
+    )
+
+    expected_output = (
+        OUTPUT_SIZE
+    )
+
     # --------------------------------------------------------
-    # Sample count consistency
+    # TRAIN
+    # --------------------------------------------------------
+
+    if X_train.ndim != 3:
+
+        raise ValueError(
+            "X_train harus memiliki "
+            "3 dimensi: "
+            "(samples, timesteps, features)."
+        )
+
+    if X_train.shape[2] != (
+        expected_train_input
+    ):
+
+        raise ValueError(
+            f"X_train feature size salah. "
+            f"Expected {expected_train_input}, "
+            f"got {X_train.shape[2]}"
+        )
+
+    if y_train.ndim != 2:
+
+        raise ValueError(
+            "y_train harus memiliki "
+            "2 dimensi: "
+            "(samples, features)."
+        )
+
+    if y_train.shape[1] != (
+        expected_output
+    ):
+
+        raise ValueError(
+            f"y_train output size salah. "
+            f"Expected {expected_output}, "
+            f"got {y_train.shape[1]}"
+        )
+
+    # --------------------------------------------------------
+    # VALIDATION
+    # --------------------------------------------------------
+
+    if X_val.shape[2] != (
+        expected_train_input
+    ):
+
+        raise ValueError(
+            "X_val feature size tidak sesuai."
+        )
+
+    if y_val.shape[1] != (
+        expected_output
+    ):
+
+        raise ValueError(
+            "y_val output size tidak sesuai."
+        )
+
+    # --------------------------------------------------------
+    # TEST
+    # --------------------------------------------------------
+
+    if X_test.shape[2] != (
+        expected_train_input
+    ):
+
+        raise ValueError(
+            "X_test feature size tidak sesuai."
+        )
+
+    if y_test.shape[1] != (
+        expected_output
+    ):
+
+        raise ValueError(
+            "y_test output size tidak sesuai."
+        )
+
+    # --------------------------------------------------------
+    # SAMPLE COUNT
     # --------------------------------------------------------
 
     if len(X_train) != len(y_train):
@@ -656,45 +522,12 @@ def validate_data(
         )
 
     print(
-        "[OK] Semua shape data valid."
-    )
-
-    print(
-        "[OK] Tidak ditemukan NaN."
-    )
-
-    print(
-        "[OK] Tidak ditemukan Inf."
-    )
-
-    print(
-        f"[INFO] Sequence length : "
-        f"{SEQUENCE_LENGTH}"
-    )
-
-    print(
-        f"[INFO] Input features  : "
-        f"{INPUT_SIZE}"
-    )
-
-    print(
-        f"[INFO] Output features : "
-        f"{OUTPUT_SIZE}"
-    )
-
-    print(
-        f"[INFO] Sensors         : "
-        f"{NUM_SENSORS}"
-    )
-
-    print(
-        f"[INFO] Features/sensor : "
-        f"{NUM_FEATURES_PER_SENSOR}"
+        "[OK] Shape validation passed."
     )
 
 
 # ============================================================
-# CREATE DATALOADERS
+# PYTORCH DATASET
 # ============================================================
 
 def create_dataloaders(
@@ -703,28 +536,69 @@ def create_dataloaders(
     X_val,
     y_val,
     X_test,
-    y_test
+    y_test,
 ):
 
-    print()
-    print("=" * 70)
-    print("DATALOADER")
-    print("=" * 70)
+    print_header(
+        "CREATING DATALOADERS"
+    )
+
+    # --------------------------------------------------------
+    # NumPy -> Tensor
+    # --------------------------------------------------------
+
+    X_train_tensor = torch.tensor(
+        X_train,
+        dtype=torch.float32
+    )
+
+    y_train_tensor = torch.tensor(
+        y_train,
+        dtype=torch.float32
+    )
+
+    X_val_tensor = torch.tensor(
+        X_val,
+        dtype=torch.float32
+    )
+
+    y_val_tensor = torch.tensor(
+        y_val,
+        dtype=torch.float32
+    )
+
+    X_test_tensor = torch.tensor(
+        X_test,
+        dtype=torch.float32
+    )
+
+    y_test_tensor = torch.tensor(
+        y_test,
+        dtype=torch.float32
+    )
+
+    # --------------------------------------------------------
+    # Dataset
+    # --------------------------------------------------------
 
     train_dataset = TensorDataset(
-        torch.from_numpy(X_train),
-        torch.from_numpy(y_train)
+        X_train_tensor,
+        y_train_tensor
     )
 
     val_dataset = TensorDataset(
-        torch.from_numpy(X_val),
-        torch.from_numpy(y_val)
+        X_val_tensor,
+        y_val_tensor
     )
 
     test_dataset = TensorDataset(
-        torch.from_numpy(X_test),
-        torch.from_numpy(y_test)
+        X_test_tensor,
+        y_test_tensor
     )
+
+    # --------------------------------------------------------
+    # DataLoader
+    # --------------------------------------------------------
 
     train_loader = DataLoader(
         train_dataset,
@@ -748,8 +622,8 @@ def create_dataloaders(
     )
 
     print(
-        f"[INFO] Train samples : "
-        f"{len(train_loader.dataset)}"
+        f"[INFO] Batch size : "
+        f"{BATCH_SIZE}"
     )
 
     print(
@@ -758,18 +632,8 @@ def create_dataloaders(
     )
 
     print(
-        f"[INFO] Val samples   : "
-        f"{len(val_loader.dataset)}"
-    )
-
-    print(
         f"[INFO] Val batches   : "
         f"{len(val_loader)}"
-    )
-
-    print(
-        f"[INFO] Test samples  : "
-        f"{len(test_loader.dataset)}"
     )
 
     print(
@@ -780,88 +644,121 @@ def create_dataloaders(
     return (
         train_loader,
         val_loader,
-        test_loader
+        test_loader,
     )
 
 
 # ============================================================
-# CREATE MODEL
+# LSTM MODEL
 # ============================================================
 
-def create_model():
+class TrafficLSTM(nn.Module):
 
-    print()
-    print("=" * 70)
-    print("MODEL CONFIGURATION")
-    print("=" * 70)
+    def __init__(
+        self,
+        input_size,
+        hidden_size,
+        num_layers,
+        output_size,
+        dropout,
+    ):
 
-    model = TrafficLSTM(
-        input_size=INPUT_SIZE,
-        hidden_size=HIDDEN_SIZE,
-        num_layers=NUM_LAYERS,
-        output_size=OUTPUT_SIZE,
-        dropout=DROPOUT
+        super().__init__()
+
+        # ----------------------------------------------------
+        # LSTM
+        # ----------------------------------------------------
+
+        self.lstm = nn.LSTM(
+            input_size=input_size,
+            hidden_size=hidden_size,
+            num_layers=num_layers,
+            batch_first=True,
+            dropout=(
+                dropout
+                if num_layers > 1
+                else 0.0
+            ),
+        )
+
+        # ----------------------------------------------------
+        # Output layer
+        # ----------------------------------------------------
+
+        self.fc = nn.Linear(
+            hidden_size,
+            output_size
+        )
+
+    def forward(
+        self,
+        x
+    ):
+
+        # x:
+        # (batch, sequence_length, input_size)
+
+        lstm_output, _ = (
+            self.lstm(x)
+        )
+
+        # Ambil hidden state pada
+        # timestep terakhir.
+
+        last_output = (
+            lstm_output[:, -1, :]
+        )
+
+        # Prediksi seluruh 96 features.
+
+        output = self.fc(
+            last_output
+        )
+
+        return output
+
+
+# ============================================================
+# MODEL SUMMARY
+# ============================================================
+
+def print_model_information(
+    model
+):
+
+    print_header(
+        "MODEL INFORMATION"
     )
 
-    model = model.to(
-        DEVICE
-    )
+    print(model)
 
-    parameter_count = sum(
+    total_parameters = sum(
         parameter.numel()
         for parameter in model.parameters()
     )
 
-    trainable_count = sum(
+    trainable_parameters = sum(
         parameter.numel()
         for parameter in model.parameters()
         if parameter.requires_grad
     )
 
+    print()
+
     print(
-        f"[INFO] Architecture : LSTM"
+        f"[INFO] Total parameters     : "
+        f"{total_parameters:,}"
     )
 
     print(
-        f"[INFO] Input size    : "
-        f"{INPUT_SIZE}"
+        f"[INFO] Trainable parameters : "
+        f"{trainable_parameters:,}"
     )
 
     print(
-        f"[INFO] Hidden size   : "
-        f"{HIDDEN_SIZE}"
+        f"[INFO] Device               : "
+        f"{DEVICE}"
     )
-
-    print(
-        f"[INFO] LSTM layers   : "
-        f"{NUM_LAYERS}"
-    )
-
-    print(
-        f"[INFO] Dropout       : "
-        f"{DROPOUT}"
-    )
-
-    print(
-        f"[INFO] Output size   : "
-        f"{OUTPUT_SIZE}"
-    )
-
-    print(
-        f"[INFO] Parameters    : "
-        f"{parameter_count:,}"
-    )
-
-    print(
-        f"[INFO] Trainable     : "
-        f"{trainable_count:,}"
-    )
-
-    print(
-        "[OK] Model created."
-    )
-
-    return model
 
 
 # ============================================================
@@ -872,7 +769,7 @@ def train_one_epoch(
     model,
     loader,
     criterion,
-    optimizer
+    optimizer,
 ):
 
     model.train()
@@ -884,22 +781,18 @@ def train_one_epoch(
     for X_batch, y_batch in loader:
 
         X_batch = X_batch.to(
-            DEVICE,
-            non_blocking=True
+            DEVICE
         )
 
         y_batch = y_batch.to(
-            DEVICE,
-            non_blocking=True
+            DEVICE
         )
 
         # ----------------------------------------------------
         # Clear gradients
         # ----------------------------------------------------
 
-        optimizer.zero_grad(
-            set_to_none=True
-        )
+        optimizer.zero_grad()
 
         # ----------------------------------------------------
         # Forward
@@ -923,15 +816,6 @@ def train_one_epoch(
         # ----------------------------------------------------
 
         loss.backward()
-
-        # ----------------------------------------------------
-        # Gradient clipping
-        # ----------------------------------------------------
-
-        torch.nn.utils.clip_grad_norm_(
-            model.parameters(),
-            max_norm=GRADIENT_CLIP
-        )
 
         # ----------------------------------------------------
         # Update weights
@@ -961,13 +845,13 @@ def train_one_epoch(
 
 
 # ============================================================
-# VALIDATION
+# VALIDATE ONE EPOCH
 # ============================================================
 
 def validate_one_epoch(
     model,
     loader,
-    criterion
+    criterion,
 ):
 
     model.eval()
@@ -981,13 +865,11 @@ def validate_one_epoch(
         for X_batch, y_batch in loader:
 
             X_batch = X_batch.to(
-                DEVICE,
-                non_blocking=True
+                DEVICE
             )
 
             y_batch = y_batch.to(
-                DEVICE,
-                non_blocking=True
+                DEVICE
             )
 
             prediction = model(
@@ -1021,213 +903,76 @@ def validate_one_epoch(
 
 
 # ============================================================
-# SAVE CHECKPOINT
-# ============================================================
-
-def save_checkpoint(
-    model,
-    optimizer,
-    epoch,
-    train_loss,
-    val_loss,
-    path
-):
-
-    checkpoint = {
-
-        "epoch":
-            epoch,
-
-        "model_state_dict":
-            model.state_dict(),
-
-        "optimizer_state_dict":
-            optimizer.state_dict(),
-
-        "train_loss":
-            float(train_loss),
-
-        "val_loss":
-            float(val_loss),
-
-        "dataset":
-            DATASET_NAME,
-
-        "intersection_id":
-            INTERSECTION_ID,
-
-        "sequence_length":
-            SEQUENCE_LENGTH,
-
-        "forecast_horizon":
-            FORECAST_HORIZON,
-
-        "num_sensors":
-            NUM_SENSORS,
-
-        "num_features_per_sensor":
-            NUM_FEATURES_PER_SENSOR,
-
-        "input_size":
-            INPUT_SIZE,
-
-        "output_size":
-            OUTPUT_SIZE,
-
-        "feature_names":
-            FEATURE_NAMES,
-
-        "hidden_size":
-            HIDDEN_SIZE,
-
-        "num_layers":
-            NUM_LAYERS,
-
-        "dropout":
-            DROPOUT,
-
-        "batch_size":
-            BATCH_SIZE,
-
-        "learning_rate":
-            LEARNING_RATE,
-
-        "weight_decay":
-            WEIGHT_DECAY,
-
-        "random_seed":
-            RANDOM_SEED
-    }
-
-    torch.save(
-        checkpoint,
-        path
-    )
-
-
-# ============================================================
-# TRAINING LOOP
+# TRAINING
 # ============================================================
 
 def train_model(
     model,
     train_loader,
-    val_loader
+    val_loader,
 ):
 
-    print()
-    print("=" * 70)
-    print("TRAINING")
-    print("=" * 70)
+    print_header(
+        "MODEL TRAINING"
+    )
 
     criterion = nn.MSELoss()
 
     optimizer = torch.optim.Adam(
         model.parameters(),
         lr=LEARNING_RATE,
-        weight_decay=WEIGHT_DECAY
+        weight_decay=WEIGHT_DECAY,
     )
-
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer,
-        mode="min",
-        factor=0.5,
-        patience=5
-    )
-
-    best_model_path = (
-        MODEL_DIR
-        / "best_model.pth"
-    )
-
-    history = []
 
     best_val_loss = float(
         "inf"
     )
 
-    best_epoch = 0
-
     patience_counter = 0
 
-    training_start = time.time()
+    history = {
+        "epoch": [],
+        "train_loss": [],
+        "val_loss": [],
+    }
 
-    print(
-        f"[INFO] Maximum epochs : "
-        f"{MAX_EPOCHS}"
+    best_model_path = (
+        MODEL_DIR
+        / "best_model.pt"
     )
-
-    print(
-        f"[INFO] Early stopping : "
-        f"{PATIENCE} epochs"
-    )
-
-    print(
-        f"[INFO] Learning rate   : "
-        f"{LEARNING_RATE}"
-    )
-
-    print(
-        f"[INFO] Weight decay    : "
-        f"{WEIGHT_DECAY}"
-    )
-
-    print(
-        f"[INFO] Loss function   : MSELoss"
-    )
-
-    print()
 
     for epoch in range(
         1,
         MAX_EPOCHS + 1
     ):
 
-        epoch_start = time.time()
-
-        train_loss = train_one_epoch(
-            model=model,
-            loader=train_loader,
-            criterion=criterion,
-            optimizer=optimizer
+        train_loss = (
+            train_one_epoch(
+                model,
+                train_loader,
+                criterion,
+                optimizer,
+            )
         )
 
-        val_loss = validate_one_epoch(
-            model=model,
-            loader=val_loader,
-            criterion=criterion
+        val_loss = (
+            validate_one_epoch(
+                model,
+                val_loader,
+                criterion,
+            )
         )
 
-        scheduler.step(
-            val_loss
+        history["epoch"].append(
+            epoch
         )
 
-        current_lr = (
-            optimizer.param_groups[0]["lr"]
+        history["train_loss"].append(
+            float(train_loss)
         )
 
-        epoch_time = (
-            time.time()
-            - epoch_start
-        )
-
-        history.append(
-            {
-                "epoch":
-                    epoch,
-
-                "train_loss":
-                    float(train_loss),
-
-                "val_loss":
-                    float(val_loss),
-
-                "learning_rate":
-                    float(current_lr),
-
-                "epoch_time_seconds":
-                    float(epoch_time)
-            }
+        history["val_loss"].append(
+            float(val_loss)
         )
 
         print(
@@ -1236,15 +981,11 @@ def train_model(
             f"Train Loss: "
             f"{train_loss:.6f} | "
             f"Val Loss: "
-            f"{val_loss:.6f} | "
-            f"LR: "
-            f"{current_lr:.7f} | "
-            f"Time: "
-            f"{epoch_time:.2f}s"
+            f"{val_loss:.6f}"
         )
 
         # ----------------------------------------------------
-        # Check improvement
+        # Best model
         # ----------------------------------------------------
 
         improvement = (
@@ -1258,25 +999,42 @@ def train_model(
                 val_loss
             )
 
-            best_epoch = (
-                epoch
-            )
-
             patience_counter = 0
 
-            save_checkpoint(
-                model=model,
-                optimizer=optimizer,
-                epoch=epoch,
-                train_loss=train_loss,
-                val_loss=val_loss,
-                path=best_model_path
+            torch.save(
+                {
+                    "model_state_dict":
+                        model.state_dict(),
+
+                    "input_size":
+                        INPUT_SIZE,
+
+                    "hidden_size":
+                        HIDDEN_SIZE,
+
+                    "num_layers":
+                        NUM_LAYERS,
+
+                    "dropout":
+                        DROPOUT,
+
+                    "output_size":
+                        OUTPUT_SIZE,
+
+                    "epoch":
+                        epoch,
+
+                    "best_val_loss":
+                        best_val_loss,
+
+                    "random_seed":
+                        RANDOM_SEED,
+                },
+                best_model_path
             )
 
             print(
-                f"       [BEST] "
-                f"Validation loss improved: "
-                f"{val_loss:.6f}"
+                "       [BEST MODEL SAVED]"
             )
 
         else:
@@ -1284,8 +1042,10 @@ def train_model(
             patience_counter += 1
 
             print(
-                f"       [NO IMPROVEMENT] "
-                f"{patience_counter}/{PATIENCE}"
+                f"       "
+                f"Early stopping counter: "
+                f"{patience_counter}/"
+                f"{EARLY_STOPPING_PATIENCE}"
             )
 
         # ----------------------------------------------------
@@ -1294,71 +1054,31 @@ def train_model(
 
         if (
             patience_counter
-            >= PATIENCE
+            >= EARLY_STOPPING_PATIENCE
         ):
 
             print()
 
             print(
-                f"[EARLY STOPPING] "
-                f"Training berhenti pada "
-                f"epoch {epoch}."
+                "[INFO] Early stopping triggered."
             )
 
             break
 
-    total_training_time = (
-        time.time()
-        - training_start
-    )
-
-    history_df = pd.DataFrame(
-        history
-    )
-
-    history_path = (
-        METRICS_DIR
-        / "training_history.csv"
-    )
-
-    history_df.to_csv(
-        history_path,
-        index=False
-    )
-
     print()
-    print(
-        f"[SAVED] "
-        f"{history_path}"
-    )
 
     print(
-        f"[SAVED] "
-        f"{best_model_path}"
-    )
-
-    print()
-    print(
-        f"[INFO] Best epoch       : "
-        f"{best_epoch}"
-    )
-
-    print(
-        f"[INFO] Best val loss    : "
+        f"[INFO] Best validation loss : "
         f"{best_val_loss:.6f}"
     )
 
     print(
-        f"[INFO] Training time    : "
-        f"{total_training_time:.2f} seconds"
+        f"[SAVED] {best_model_path}"
     )
 
     return (
+        history,
         best_model_path,
-        history_df,
-        best_epoch,
-        best_val_loss,
-        total_training_time
     )
 
 
@@ -1371,48 +1091,40 @@ def load_best_model(
     model_path
 ):
 
-    print()
-    print("=" * 70)
-    print("LOADING BEST MODEL")
-    print("=" * 70)
+    print_header(
+        "LOADING BEST MODEL"
+    )
 
     checkpoint = torch.load(
         model_path,
         map_location=DEVICE
     )
 
-    if (
-        isinstance(
-            checkpoint,
-            dict
-        )
-        and "model_state_dict"
-        in checkpoint
-    ):
+    model.load_state_dict(
+        checkpoint[
+            "model_state_dict"
+        ]
+    )
 
-        model.load_state_dict(
-            checkpoint[
-                "model_state_dict"
-            ]
-        )
-
-    else:
-
-        model.load_state_dict(
-            checkpoint
-        )
-
-    model = model.to(
+    model.to(
         DEVICE
     )
 
-    model.eval()
+    print(
+        f"[INFO] Best epoch : "
+        f"{checkpoint['epoch']}"
+    )
+
+    print(
+        f"[INFO] Best val loss : "
+        f"{checkpoint['best_val_loss']:.6f}"
+    )
 
     print(
         "[OK] Best model loaded."
     )
 
-    return model
+    return checkpoint
 
 
 # ============================================================
@@ -1421,581 +1133,288 @@ def load_best_model(
 
 def evaluate_test(
     model,
-    test_loader
+    test_loader,
 ):
 
-    print()
-    print("=" * 70)
-    print("TEST EVALUATION")
-    print("=" * 70)
+    print_header(
+        "TEST EVALUATION"
+    )
 
     criterion = nn.MSELoss()
 
     model.eval()
 
-    predictions = []
+    total_squared_error = 0.0
 
-    actuals = []
+    total_absolute_error = 0.0
 
-    total_loss = 0.0
-
-    total_samples = 0
-
-    start_time = time.time()
+    total_elements = 0
 
     with torch.no_grad():
 
         for X_batch, y_batch in test_loader:
 
             X_batch = X_batch.to(
-                DEVICE,
-                non_blocking=True
+                DEVICE
             )
 
             y_batch = y_batch.to(
-                DEVICE,
-                non_blocking=True
+                DEVICE
             )
 
             prediction = model(
                 X_batch
             )
 
-            loss = criterion(
-                prediction,
-                y_batch
+            # ------------------------------------------------
+            # MSE
+            # ------------------------------------------------
+
+            squared_error = (
+                (
+                    prediction
+                    - y_batch
+                ) ** 2
             )
 
-            batch_size = (
-                X_batch.size(0)
+            # ------------------------------------------------
+            # MAE
+            # ------------------------------------------------
+
+            absolute_error = (
+                torch.abs(
+                    prediction
+                    - y_batch
+                )
             )
 
-            total_loss += (
-                loss.item()
-                * batch_size
+            total_squared_error += (
+                squared_error.sum()
+                .item()
             )
 
-            total_samples += (
-                batch_size
+            total_absolute_error += (
+                absolute_error.sum()
+                .item()
             )
 
-            predictions.append(
-                prediction
-                .cpu()
-                .numpy()
+            total_elements += (
+                y_batch.numel()
             )
 
-            actuals.append(
-                y_batch
-                .cpu()
-                .numpy()
-            )
-
-    test_loss = (
-        total_loss
-        / total_samples
+    mse = (
+        total_squared_error
+        / total_elements
     )
 
-    inference_time = (
-        time.time()
-        - start_time
-    )
-
-    y_pred = np.concatenate(
-        predictions,
-        axis=0
-    )
-
-    y_true = np.concatenate(
-        actuals,
-        axis=0
-    )
-
-    print(
-        f"[INFO] Test MSE : "
-        f"{test_loss:.6f}"
-    )
-
-    print(
-        f"[INFO] Prediction shape : "
-        f"{y_pred.shape}"
-    )
-
-    print(
-        f"[INFO] Actual shape     : "
-        f"{y_true.shape}"
-    )
-
-    print(
-        f"[INFO] Inference time   : "
-        f"{inference_time:.4f} seconds"
-    )
-
-    return (
-        y_true,
-        y_pred,
-        test_loss,
-        inference_time
-    )
-
-
-# ============================================================
-# CALCULATE METRICS
-# ============================================================
-
-def calculate_metrics(
-    y_true,
-    y_pred
-):
-
-    true_flat = (
-        y_true.reshape(-1)
-    )
-
-    pred_flat = (
-        y_pred.reshape(-1)
-    )
-
-    error = (
-        pred_flat
-        - true_flat
-    )
-
-    mae = np.mean(
-        np.abs(error)
-    )
-
-    mse = np.mean(
-        error ** 2
+    mae = (
+        total_absolute_error
+        / total_elements
     )
 
     rmse = np.sqrt(
         mse
     )
 
-    # --------------------------------------------------------
-    # R2
-    # --------------------------------------------------------
-
-    ss_res = np.sum(
-        error ** 2
+    print(
+        f"[TEST] MSE  : "
+        f"{mse:.6f}"
     )
 
-    ss_tot = np.sum(
-        (
-            true_flat
-            - np.mean(true_flat)
-        ) ** 2
+    print(
+        f"[TEST] RMSE : "
+        f"{rmse:.6f}"
     )
 
-    if ss_tot == 0:
-
-        r2 = np.nan
-
-    else:
-
-        r2 = (
-            1
-            - (
-                ss_res
-                / ss_tot
-            )
-        )
-
-    # --------------------------------------------------------
-    # MAPE
-    # --------------------------------------------------------
-
-    non_zero_mask = (
-        np.abs(true_flat)
-        > 1e-6
+    print(
+        f"[TEST] MAE  : "
+        f"{mae:.6f}"
     )
-
-    if np.any(
-        non_zero_mask
-    ):
-
-        mape = np.mean(
-            np.abs(
-                (
-                    true_flat[
-                        non_zero_mask
-                    ]
-                    - pred_flat[
-                        non_zero_mask
-                    ]
-                )
-                /
-                true_flat[
-                    non_zero_mask
-                ]
-            )
-        ) * 100
-
-    else:
-
-        mape = np.nan
 
     return {
-
-        "MAE":
-            float(mae),
-
-        "MSE":
-            float(mse),
-
-        "RMSE":
-            float(rmse),
-
-        "MAPE_percent":
-            float(mape),
-
-        "R2":
-            float(r2)
+        "mse": float(mse),
+        "rmse": float(rmse),
+        "mae": float(mae),
     }
 
 
 # ============================================================
-# FEATURE METRICS
+# SAVE JSON
 # ============================================================
 
-def calculate_feature_metrics(
-    y_true,
-    y_pred
+def save_json(
+    path,
+    data
 ):
-
-    rows = []
-
-    for sensor_index in range(
-        NUM_SENSORS
-    ):
-
-        sensor_start = (
-            sensor_index
-            * NUM_FEATURES_PER_SENSOR
-        )
-
-        sensor_end = (
-            sensor_start
-            + NUM_FEATURES_PER_SENSOR
-        )
-
-        for feature_index, feature_name in enumerate(
-            FEATURE_NAMES
-        ):
-
-            feature_position = (
-                sensor_start
-                + feature_index
-            )
-
-            true_values = (
-                y_true[
-                    :,
-                    feature_position
-                ]
-            )
-
-            pred_values = (
-                y_pred[
-                    :,
-                    feature_position
-                ]
-            )
-
-            error = (
-                pred_values
-                - true_values
-            )
-
-            mae = np.mean(
-                np.abs(error)
-            )
-
-            mse = np.mean(
-                error ** 2
-            )
-
-            rmse = np.sqrt(
-                mse
-            )
-
-            ss_res = np.sum(
-                error ** 2
-            )
-
-            ss_tot = np.sum(
-                (
-                    true_values
-                    - np.mean(
-                        true_values
-                    )
-                ) ** 2
-            )
-
-            if ss_tot == 0:
-
-                r2 = np.nan
-
-            else:
-
-                r2 = (
-                    1
-                    - (
-                        ss_res
-                        / ss_tot
-                    )
-                )
-
-            rows.append(
-                {
-
-                    "sensor":
-                        sensor_index + 1,
-
-                    "feature":
-                        feature_name,
-
-                    "MAE":
-                        float(mae),
-
-                    "MSE":
-                        float(mse),
-
-                    "RMSE":
-                        float(rmse),
-
-                    "R2":
-                        float(r2)
-                }
-            )
-
-    return pd.DataFrame(
-        rows
-    )
-
-
-# ============================================================
-# SAVE TEST RESULTS
-# ============================================================
-
-def save_test_results(
-    y_true,
-    y_pred,
-    test_loss,
-    inference_time,
-    metrics
-):
-
-    prediction_path = (
-        OUTPUT_DIR
-        / "test_predictions.npz"
-    )
-
-    np.savez_compressed(
-        prediction_path,
-        y_true=y_true,
-        y_pred=y_pred
-    )
-
-    print(
-        f"[SAVED] "
-        f"{prediction_path}"
-    )
-
-    # --------------------------------------------------------
-    # Overall metrics
-    # --------------------------------------------------------
-
-    metrics_path = (
-        METRICS_DIR
-        / "test_metrics.json"
-    )
 
     with open(
-        metrics_path,
+        path,
         "w",
         encoding="utf-8"
     ) as file:
 
         json.dump(
-            {
-                "dataset":
-                    DATASET_NAME,
-
-                "intersection_id":
-                    INTERSECTION_ID,
-
-                "test_mse":
-                    float(test_loss),
-
-                "inference_time_seconds":
-                    float(
-                        inference_time
-                    ),
-
-                "metrics":
-                    metrics,
-
-                "sequence_length":
-                    SEQUENCE_LENGTH,
-
-                "forecast_horizon":
-                    FORECAST_HORIZON,
-
-                "num_sensors":
-                    NUM_SENSORS,
-
-                "features_per_sensor":
-                    NUM_FEATURES_PER_SENSOR,
-
-                "input_size":
-                    INPUT_SIZE,
-
-                "output_size":
-                    OUTPUT_SIZE,
-
-                "feature_names":
-                    FEATURE_NAMES
-            },
+            data,
             file,
-            indent=4
+            indent=4,
+            ensure_ascii=False
         )
 
-    print(
-        f"[SAVED] "
-        f"{metrics_path}"
-    )
-
 
 # ============================================================
-# SAVE TRAINING SUMMARY
+# SAVE TRAINING CONFIG
 # ============================================================
 
-def save_training_summary(
-    best_epoch,
-    best_val_loss,
-    total_training_time,
-    test_loss,
-    metrics
-):
+def save_training_config():
 
-    summary_path = (
-        METRICS_DIR
-        / "training_summary.json"
+    path = (
+        MODEL_DIR
+        / "training_config.json"
     )
 
-    summary = {
+    config = {
 
         "dataset":
-            DATASET_NAME,
+            "YOLO Traffic Dataset",
 
-        "intersection_id":
-            INTERSECTION_ID,
+        "input_size":
+            INPUT_SIZE,
 
-        "model": {
+        "output_size":
+            OUTPUT_SIZE,
 
-            "type":
-                "LSTM",
+        "sequence_length":
+            15,
 
-            "input_size":
-                INPUT_SIZE,
+        "forecast_horizon":
+            1,
 
-            "hidden_size":
-                HIDDEN_SIZE,
+        "model":
+            "LSTM",
 
-            "num_layers":
-                NUM_LAYERS,
+        "hidden_size":
+            HIDDEN_SIZE,
 
-            "dropout":
-                DROPOUT,
+        "num_layers":
+            NUM_LAYERS,
 
-            "output_size":
-                OUTPUT_SIZE
-        },
+        "dropout":
+            DROPOUT,
 
-        "data": {
+        "batch_size":
+            BATCH_SIZE,
 
-            "num_sensors":
-                NUM_SENSORS,
+        "max_epochs":
+            MAX_EPOCHS,
 
-            "features_per_sensor":
-                NUM_FEATURES_PER_SENSOR,
+        "learning_rate":
+            LEARNING_RATE,
 
-            "features":
-                FEATURE_NAMES,
+        "weight_decay":
+            WEIGHT_DECAY,
 
-            "sequence_length":
-                SEQUENCE_LENGTH,
+        "loss":
+            "MSELoss",
 
-            "forecast_horizon":
-                FORECAST_HORIZON
-        },
+        "optimizer":
+            "Adam",
 
-        "training": {
+        "early_stopping":
+            {
+                "patience":
+                    EARLY_STOPPING_PATIENCE,
 
-            "batch_size":
-                BATCH_SIZE,
+                "min_delta":
+                    MIN_DELTA,
+            },
 
-            "learning_rate":
-                LEARNING_RATE,
-
-            "weight_decay":
-                WEIGHT_DECAY,
-
-            "max_epochs":
-                MAX_EPOCHS,
-
-            "early_stopping_patience":
-                PATIENCE,
-
-            "best_epoch":
-                best_epoch,
-
-            "best_validation_loss":
-                float(
-                    best_val_loss
-                ),
-
-            "training_time_seconds":
-                float(
-                    total_training_time
-                )
-        },
-
-        "test": {
-
-            "mse":
-                float(
-                    test_loss
-                ),
-
-            "metrics":
-                metrics
-        },
+        "random_seed":
+            RANDOM_SEED,
 
         "device":
             str(DEVICE),
 
-        "random_seed":
-            RANDOM_SEED
+        "note":
+            "Baseline model. "
+            "Belum dilakukan hyperparameter tuning.",
     }
 
-    with open(
-        summary_path,
-        "w",
-        encoding="utf-8"
-    ) as file:
-
-        json.dump(
-            summary,
-            file,
-            indent=4
-        )
+    save_json(
+        path,
+        config
+    )
 
     print(
-        f"[SAVED] "
-        f"{summary_path}"
+        f"[SAVED] {path}"
+    )
+
+
+# ============================================================
+# SAVE HISTORY
+# ============================================================
+
+def save_training_history(
+    history
+):
+
+    path = (
+        MODEL_DIR
+        / "training_history.json"
+    )
+
+    save_json(
+        path,
+        history
+    )
+
+    print(
+        f"[SAVED] {path}"
+    )
+
+
+# ============================================================
+# SAVE TEST RESULT
+# ============================================================
+
+def save_test_result(
+    result
+):
+
+    path = (
+        MODEL_DIR
+        / "baseline_test_result.json"
+    )
+
+    save_json(
+        path,
+        result
+    )
+
+    print(
+        f"[SAVED] {path}"
+    )
+
+
+# ============================================================
+# PRINT HEADER
+# ============================================================
+
+def print_header(
+    title
+):
+
+    print()
+
+    print(
+        "=" * 70
+    )
+
+    print(
+        title
+    )
+
+    print(
+        "=" * 70
     )
 
 
@@ -2005,135 +1424,82 @@ def save_training_summary(
 
 def main():
 
-    # --------------------------------------------------------
-    # Seed
-    # --------------------------------------------------------
-
-    set_seed()
-
-    print("=" * 70)
     print(
-        "YOLO TRAFFIC LSTM TRAINING"
-    )
-    print("=" * 70)
-
-    print(
-        f"[INFO] Device : "
-        f"{DEVICE}"
-    )
-
-    # --------------------------------------------------------
-    # Configuration
-    # --------------------------------------------------------
-
-    print()
-    print("=" * 70)
-    print("TRAINING CONFIGURATION")
-    print("=" * 70)
-
-    print(
-        f"[INFO] Dataset           : "
-        f"{DATASET_NAME}"
+        "=" * 70
     )
 
     print(
-        f"[INFO] Intersection      : "
-        f"{INTERSECTION_ID}"
+        "YOLO TRAFFIC LSTM BASELINE TRAINING"
     )
 
     print(
-        f"[INFO] Sensors           : "
-        f"{NUM_SENSORS}"
+        "=" * 70
     )
 
     print(
-        f"[INFO] Features/sensor  : "
-        f"{NUM_FEATURES_PER_SENSOR}"
-    )
-
-    print(
-        f"[INFO] Input size        : "
+        f"[INFO] Input size       : "
         f"{INPUT_SIZE}"
     )
 
     print(
-        f"[INFO] Output size       : "
+        f"[INFO] Output size      : "
         f"{OUTPUT_SIZE}"
     )
 
     print(
-        f"[INFO] Sequence length   : "
-        f"{SEQUENCE_LENGTH}"
+        f"[INFO] Sequence length  : "
+        f"15"
     )
 
     print(
-        f"[INFO] Forecast horizon  : "
-        f"{FORECAST_HORIZON}"
+        f"[INFO] Forecast horizon : "
+        f"1 second"
     )
 
     print(
-        f"[INFO] Hidden size       : "
+        f"[INFO] Hidden size      : "
         f"{HIDDEN_SIZE}"
     )
 
     print(
-        f"[INFO] LSTM layers       : "
+        f"[INFO] LSTM layers      : "
         f"{NUM_LAYERS}"
     )
 
     print(
-        f"[INFO] Dropout           : "
+        f"[INFO] Dropout          : "
         f"{DROPOUT}"
     )
 
     print(
-        f"[INFO] Batch size        : "
+        f"[INFO] Batch size       : "
         f"{BATCH_SIZE}"
     )
 
     print(
-        f"[INFO] Learning rate     : "
+        f"[INFO] Learning rate    : "
         f"{LEARNING_RATE}"
     )
 
     print(
-        f"[INFO] Max epochs        : "
-        f"{MAX_EPOCHS}"
+        f"[INFO] Device           : "
+        f"{DEVICE}"
     )
 
     print(
-        f"[INFO] Early stopping    : "
-        f"{PATIENCE}"
+        "=" * 70
     )
 
-    print()
-    print(
-        "[INFO] Features:"
-    )
-
-    for feature in FEATURE_NAMES:
-
-        print(
-            f"       - {feature}"
-        )
-
     # --------------------------------------------------------
-    # Load YOLO config
+    # SETUP
     # --------------------------------------------------------
 
-    yolo_config = (
-        load_yolo_config()
-    )
+    set_seed()
 
-    if yolo_config is not None:
-
-        print()
-        print(
-            "[OK] yolo_config.json loaded."
-        )
+    ensure_directories()
 
     # --------------------------------------------------------
-    # Load data
+    # LOAD DATA
     # --------------------------------------------------------
 
     (
@@ -2142,290 +1508,264 @@ def main():
         X_val,
         y_val,
         X_test,
-        y_test
-    ) = load_data()
+        y_test,
+    ) = load_numpy_data()
 
     # --------------------------------------------------------
-    # Validate data
+    # VALIDATION
     # --------------------------------------------------------
 
-    validate_data(
-        X_train=X_train,
-        y_train=y_train,
-        X_val=X_val,
-        y_val=y_val,
-        X_test=X_test,
-        y_test=y_test
+    validate_numpy_data(
+        X_train,
+        y_train,
+        X_val,
+        y_val,
+        X_test,
+        y_test,
+    )
+
+    validate_shapes(
+        X_train,
+        y_train,
+        X_val,
+        y_val,
+        X_test,
+        y_test,
     )
 
     # --------------------------------------------------------
-    # Create loaders
+    # DATALOADER
     # --------------------------------------------------------
 
     (
         train_loader,
         val_loader,
-        test_loader
+        test_loader,
     ) = create_dataloaders(
-        X_train=X_train,
-        y_train=y_train,
-        X_val=X_val,
-        y_val=y_val,
-        X_test=X_test,
-        y_test=y_test
+        X_train,
+        y_train,
+        X_val,
+        y_val,
+        X_test,
+        y_test,
     )
 
     # --------------------------------------------------------
-    # Create model
+    # MODEL
     # --------------------------------------------------------
 
-    model = create_model()
+    model = TrafficLSTM(
+        input_size=INPUT_SIZE,
+        hidden_size=HIDDEN_SIZE,
+        num_layers=NUM_LAYERS,
+        output_size=OUTPUT_SIZE,
+        dropout=DROPOUT,
+    )
+
+    model = model.to(
+        DEVICE
+    )
+
+    print_model_information(
+        model
+    )
 
     # --------------------------------------------------------
-    # Train
+    # SAVE CONFIG
+    # --------------------------------------------------------
+
+    save_training_config()
+
+    # --------------------------------------------------------
+    # TRAIN
     # --------------------------------------------------------
 
     (
+        history,
         best_model_path,
-        history_df,
-        best_epoch,
-        best_val_loss,
-        total_training_time
     ) = train_model(
-        model=model,
-        train_loader=train_loader,
-        val_loader=val_loader
+        model,
+        train_loader,
+        val_loader,
     )
 
     # --------------------------------------------------------
-    # Load best model
+    # SAVE HISTORY
     # --------------------------------------------------------
 
-    model = load_best_model(
-        model=model,
-        model_path=best_model_path
+    save_training_history(
+        history
     )
 
     # --------------------------------------------------------
-    # Test evaluation
+    # LOAD BEST MODEL
     # --------------------------------------------------------
 
-    (
-        y_true,
-        y_pred,
-        test_loss,
-        inference_time
-    ) = evaluate_test(
-        model=model,
-        test_loader=test_loader
+    load_best_model(
+        model,
+        best_model_path
     )
 
     # --------------------------------------------------------
-    # Metrics
+    # TEST
     # --------------------------------------------------------
 
-    print()
-    print("=" * 70)
-    print("CALCULATING TEST METRICS")
-    print("=" * 70)
-
-    metrics = calculate_metrics(
-        y_true=y_true,
-        y_pred=y_pred
+    test_result = evaluate_test(
+        model,
+        test_loader
     )
 
-    feature_metrics = (
-        calculate_feature_metrics(
-            y_true=y_true,
-            y_pred=y_pred
-        )
+    # --------------------------------------------------------
+    # SAVE TEST RESULT
+    # --------------------------------------------------------
+
+    save_test_result(
+        test_result
+    )
+
+    # --------------------------------------------------------
+    # SUMMARY
+    # --------------------------------------------------------
+
+    print_header(
+        "BASELINE TRAINING SUMMARY"
     )
 
     print()
-    print(
-        "[OVERALL TEST METRICS]"
-    )
 
     print(
-        f"MAE  : "
-        f"{metrics['MAE']:.6f}"
+        "[DATA]"
     )
 
     print(
-        f"MSE  : "
-        f"{metrics['MSE']:.6f}"
+        f"Train samples : "
+        f"{len(X_train):,}"
     )
 
     print(
-        f"RMSE : "
-        f"{metrics['RMSE']:.6f}"
+        f"Val samples   : "
+        f"{len(X_val):,}"
     )
 
     print(
-        f"MAPE : "
-        f"{metrics['MAPE_percent']:.4f}%"
-    )
-
-    print(
-        f"R2   : "
-        f"{metrics['R2']:.6f}"
-    )
-
-    # --------------------------------------------------------
-    # Feature metrics
-    # --------------------------------------------------------
-
-    feature_metrics_path = (
-        METRICS_DIR
-        / "feature_metrics.csv"
-    )
-
-    feature_metrics.to_csv(
-        feature_metrics_path,
-        index=False
+        f"Test samples  : "
+        f"{len(X_test):,}"
     )
 
     print()
-    print(
-        f"[SAVED] "
-        f"{feature_metrics_path}"
-    )
 
-    # --------------------------------------------------------
-    # Test results
-    # --------------------------------------------------------
-
-    save_test_results(
-        y_true=y_true,
-        y_pred=y_pred,
-        test_loss=test_loss,
-        inference_time=inference_time,
-        metrics=metrics
-    )
-
-    # --------------------------------------------------------
-    # Training summary
-    # --------------------------------------------------------
-
-    save_training_summary(
-        best_epoch=best_epoch,
-        best_val_loss=best_val_loss,
-        total_training_time=total_training_time,
-        test_loss=test_loss,
-        metrics=metrics
-    )
-
-    # --------------------------------------------------------
-    # Final output
-    # --------------------------------------------------------
-
-    print()
-    print("=" * 70)
-    print(
-        "YOLO LSTM TRAINING COMPLETED"
-    )
-    print("=" * 70)
-
-    print()
     print(
         "[MODEL]"
     )
 
     print(
-        f"[OK] Best model : "
-        f"{best_model_path}"
+        "Architecture : LSTM"
     )
 
     print(
-        f"[OK] Best epoch : "
-        f"{best_epoch}"
-    )
-
-    print(
-        f"[OK] Best val loss : "
-        f"{best_val_loss:.6f}"
-    )
-
-    print()
-    print(
-        "[DATA INTERFACE]"
-    )
-
-    print(
-        f"[OK] Sensors : "
-        f"{NUM_SENSORS}"
-    )
-
-    print(
-        f"[OK] Features/sensor : "
-        f"{NUM_FEATURES_PER_SENSOR}"
-    )
-
-    print(
-        f"[OK] Input size : "
+        f"Input size   : "
         f"{INPUT_SIZE}"
     )
 
     print(
-        f"[OK] Output size : "
+        f"Hidden size  : "
+        f"{HIDDEN_SIZE}"
+    )
+
+    print(
+        f"Layers       : "
+        f"{NUM_LAYERS}"
+    )
+
+    print(
+        f"Dropout      : "
+        f"{DROPOUT}"
+    )
+
+    print(
+        f"Output size  : "
         f"{OUTPUT_SIZE}"
     )
 
-    print(
-        f"[OK] Sequence : "
-        f"{SEQUENCE_LENGTH}"
-    )
-
-    print(
-        f"[OK] Horizon : "
-        f"{FORECAST_HORIZON}"
-    )
-
     print()
+
     print(
         "[TEST RESULT]"
     )
 
     print(
-        f"MAE  : "
-        f"{metrics['MAE']:.6f}"
+        f"MSE  : "
+        f"{test_result['mse']:.6f}"
     )
 
     print(
         f"RMSE : "
-        f"{metrics['RMSE']:.6f}"
+        f"{test_result['rmse']:.6f}"
     )
 
     print(
-        f"MAPE : "
-        f"{metrics['MAPE_percent']:.4f}%"
-    )
-
-    print(
-        f"R2   : "
-        f"{metrics['R2']:.6f}"
+        f"MAE  : "
+        f"{test_result['mae']:.6f}"
     )
 
     print()
+
     print(
-        "[OUTPUT DIRECTORY]"
+        "[OUTPUT]"
     )
 
     print(
-        f"{OUTPUT_DIR}"
+        f"Model directory:"
+    )
+
+    print(
+        f"{MODEL_DIR}"
     )
 
     print()
+
     print(
         "[NEXT]"
     )
 
     print(
-        "Gunakan best_model.pth "
-        "untuk prediction."
+        "1. Plot training loss vs validation loss"
     )
 
-    print("=" * 70)
+    print(
+        "2. Evaluate prediction vs actual"
+    )
+
+    print(
+        "3. Evaluate MAE/RMSE per traffic feature"
+    )
+
+    print(
+        "4. Evaluate MAE/RMSE per sensor"
+    )
+
+    print(
+        "5. Establish baseline"
+    )
+
+    print(
+        "6. Baru lakukan eksperimen "
+        "sequence length dan temporal resolution"
+    )
+
+    print()
+
+    print(
+        "=" * 70
+    )
+
+    print(
+        "YOLO LSTM BASELINE TRAINING COMPLETED"
+    )
+
+    print(
+        "=" * 70
+    )
 
 
 # ============================================================
@@ -2433,5 +1773,4 @@ def main():
 # ============================================================
 
 if __name__ == "__main__":
-
     main()

@@ -13,7 +13,7 @@ BASE_DIR = Path(__file__).resolve().parents[2]
 DATA_PATH = (
     BASE_DIR
     / "data"
-    / "smarttwin_traffic_data_copy.csv"
+    / "smarttwin_traffic_data.csv"
 )
 
 
