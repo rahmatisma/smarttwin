@@ -20,7 +20,7 @@ BASE_DIR = Path(__file__).resolve().parents[2]
 PROCESSED_DIR = (
     BASE_DIR
     / "outputs"
-    / "pems04_20"
+    / "pems04_1_20"
     / "processed"
 )
 
