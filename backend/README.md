@@ -188,6 +188,8 @@ python -m venv .venv
 pip install -r requirements.txt
 
 uvicorn app.main:app --reload
+
+python -m uvicorn app.main:app --reload
 ```
 
 Swagger:

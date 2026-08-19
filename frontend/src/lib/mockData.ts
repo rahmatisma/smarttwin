@@ -1,14 +1,18 @@
 // Data dummy untuk frontend SmartTwin.
-// Nanti sumber data ini diganti dengan hasil fetch dari FastAPI.
-// Struktur object sengaja mengikuti types/traffic.ts agar component
-// tidak perlu diubah ketika backend sudah tersedia.
+//
+// Semua data traffic yang berasal dari backend harus mengikuti
+// docs/data-contract.md.
+//
+// Jika backend sudah tersedia, data mock traffic ini nantinya
+// diganti dengan hasil fetch dari FastAPI.
+
+/* =========================================================
+ * TYPES
+ * ========================================================= */
 
 import type {
   ApproachState,
-  VehicleClassCount,
-  SignalRecommendation,
-  ForecastPoint,
-  SignalStatus,
+  TrafficState,
 } from "@/types/traffic";
 
 /* =========================================================
@@ -19,104 +23,101 @@ export const mockApproachStates: ApproachState[] = [
   {
     approach: "north",
     volume: 65,
-    queueLengthM: 32,
-    densityVehPerKm: 86,
+
+    carCount: 18,
+    motorcycleCount: 43,
+    busCount: 1,
+    truckCount: 3,
+
+    queueLengthVeh: 8,
+    queueLengthMEst: 32,
+    densityIndex: 86,
     avgSpeedKmh: 41,
   },
+
   {
     approach: "south",
     volume: 60,
-    queueLengthM: 28,
-    densityVehPerKm: 82,
+
+    carCount: 20,
+    motorcycleCount: 36,
+    busCount: 1,
+    truckCount: 3,
+
+    queueLengthVeh: 7,
+    queueLengthMEst: 28,
+    densityIndex: 82,
     avgSpeedKmh: 43,
   },
+
   {
     approach: "east",
     volume: 82,
-    queueLengthM: 46,
-    densityVehPerKm: 132,
+
+    carCount: 24,
+    motorcycleCount: 51,
+    busCount: 2,
+    truckCount: 5,
+
+    queueLengthVeh: 12,
+    queueLengthMEst: 46,
+    densityIndex: 132,
     avgSpeedKmh: 18,
   },
+
   {
     approach: "west",
     volume: 73,
-    queueLengthM: 39,
-    densityVehPerKm: 118,
+
+    carCount: 16,
+    motorcycleCount: 54,
+    busCount: 2,
+    truckCount: 1,
+
+    queueLengthVeh: 10,
+    queueLengthMEst: 39,
+    densityIndex: 118,
     avgSpeedKmh: 21,
   },
 ];
 
 /*
  * Total volume:
+ *
  * North = 65
  * South = 60
  * East  = 82
  * West  = 73
  *
  * Total = 280 kendaraan
- *
- * Kondisi:
- * - Utara   : relatif lancar
- * - Selatan : relatif lancar
- * - Timur   : padat
- * - Barat   : sedang-padat
  */
 
-
-/* =========================================================
- * VEHICLE CLASSIFICATION
- * ========================================================= */
-
-/*
- * Total kendaraan disamakan dengan total volume pada
- * mockApproachStates:
- *
- * 280 kendaraan
- */
-
-export const mockVehicleClassCounts: VehicleClassCount[] = [
-  {
-    vehicleClass: "motorcycle",
-    count: 184,
-  },
-  {
-    vehicleClass: "car",
-    count: 78,
-  },
-  {
-    vehicleClass: "bus",
-    count: 6,
-  },
-  {
-    vehicleClass: "truck",
-    count: 12,
-  },
-];
-
-// Total = 280 kendaraan
+export const mockTrafficState: TrafficState = {
+  intersectionId: "simpang4-pingit",
+  windowStart: "2026-08-15T16:30:12",
+  windowEnd: "2026-08-15T16:30:17",
+  approaches: mockApproachStates,
+};
 
 
 /* =========================================================
  * CURRENT SIGNAL STATUS
  * ========================================================= */
 
-export const mockSignalStatus: SignalStatus = {
-  // Timur-Barat sedang mendapatkan lampu hijau karena
-  // kedua approach tersebut memiliki kondisi traffic
-  // paling padat.
-  activePhase: ["east", "west"],
+export const mockSignalStatus = {
+  intersectionId: "simpang4-pingit",
+
+  timestamp: "2026-08-15T16:30:17",
+
+  currentPhase: "phase-2",
 
   phaseName: "Fase 2 — Timur-Barat",
 
-  color: "green",
+  remainingSeconds: 18,
 
-  secondsRemaining: 18,
+  cycleTimeSeconds: 63,
 
-  cycleBreakdown: {
-    greenS: 35,
-    yellowS: 3,
-    redS: 25,
-  },
+  source: "mock",
 };
 
 
@@ -124,49 +125,25 @@ export const mockSignalStatus: SignalStatus = {
  * SIGNAL RECOMMENDATION
  * ========================================================= */
 
-export const mockRecommendation: SignalRecommendation = {
+export const mockRecommendation = {
   intersectionId: "simpang4-pingit",
 
-  generatedAt: new Date().toISOString(),
+  timestamp: "2026-08-15T16:30:17",
 
-  // Untuk sementara recommendation engine masih rule-based.
-  // Nanti dapat diganti menjadi "ppo" ketika model RL sudah siap.
-  engine: "rule-based",
+  recommendedPhase: "phase-2",
 
-  chosenScenario: {
-    scenarioId: "scn-04",
+  recommendedGreenSeconds: 45,
 
-    phases: [
-      {
-        phaseName: "Fase 1 (Utara-Selatan)",
-        greenDurationS: 30,
-      },
-      {
-        phaseName: "Fase 2 (Timur-Barat)",
-        greenDurationS: 45,
-      },
-      {
-        phaseName: "Fase 3 (Belok Kanan)",
-        greenDurationS: 20,
-      },
-      {
-        phaseName: "Fase 4 (Pejalan Kaki)",
-        greenDurationS: 15,
-      },
-    ],
+  currentGreenSeconds: 35,
 
-    cycleLengthS: 110,
+  expectedDelayReductionPercent: 18,
 
-    // Nilai simulasi untuk tampilan frontend.
-    avgDelayS: 34,
+  confidence: 0.85,
 
-    avgQueueLengthM: 29,
+  reason:
+    "Approach east dan west memiliki kepadatan traffic paling tinggi.",
 
-    throughputVeh: 1240,
-  },
-
-  // Nilai simulasi untuk frontend.
-  expectedImprovementPct: 18,
+  source: "mock",
 };
 
 
@@ -175,172 +152,111 @@ export const mockRecommendation: SignalRecommendation = {
  * ========================================================= */
 
 /*
- * Forecast dibuat berdasarkan kondisi traffic saat ini.
+ * Forecast:
  *
- * Horizon:
- * 0  = kondisi saat ini
- * 3  = 3 menit ke depan
- * 6  = 6 menit ke depan
- * 9  = 9 menit ke depan
- * 12 = 12 menit ke depan
- * 15 = 15 menit ke depan
+ * horizon 0  = kondisi saat ini
+ * horizon 3  = 3 menit ke depan
+ * horizon 6  = 6 menit ke depan
+ * horizon 9  = 9 menit ke depan
+ * horizon 12 = 12 menit ke depan
+ * horizon 15 = 15 menit ke depan
  *
- * ForecastPoint tetap dibuat per approach sesuai data contract.
- * ForecastChart kemudian menjumlahkannya untuk membentuk
- * satu garis total traffic.
+ * Struktur mengikuti Forecast pada data contract.
  */
 
-export const mockForecast: ForecastPoint[] = [
-  // -------------------------------------------------------
-  // 0 MINUTES — CURRENT
-  // -------------------------------------------------------
+export const mockForecast = {
+  intersectionId: "simpang4-pingit",
 
-  {
-    approach: "north",
-    horizonMinutes: 0,
-    predictedVolume: 65,
-  },
-  {
-    approach: "south",
-    horizonMinutes: 0,
-    predictedVolume: 60,
-  },
-  {
-    approach: "east",
-    horizonMinutes: 0,
-    predictedVolume: 82,
-  },
-  {
-    approach: "west",
-    horizonMinutes: 0,
-    predictedVolume: 73,
-  },
+  horizonMinutes: 15,
 
-  // -------------------------------------------------------
-  // 3 MINUTES
-  // -------------------------------------------------------
+  model: "mock",
 
-  {
-    approach: "north",
-    horizonMinutes: 3,
-    predictedVolume: 68,
-  },
-  {
-    approach: "south",
-    horizonMinutes: 3,
-    predictedVolume: 63,
-  },
-  {
-    approach: "east",
-    horizonMinutes: 3,
-    predictedVolume: 88,
-  },
-  {
-    approach: "west",
-    horizonMinutes: 3,
-    predictedVolume: 76,
-  },
+  predictions: [
+    {
+      timestamp: "2026-08-15T16:30:17",
 
-  // -------------------------------------------------------
-  // 6 MINUTES
-  // -------------------------------------------------------
+      predictedVehicleCount: 280,
 
-  {
-    approach: "north",
-    horizonMinutes: 6,
-    predictedVolume: 72,
-  },
-  {
-    approach: "south",
-    horizonMinutes: 6,
-    predictedVolume: 66,
-  },
-  {
-    approach: "east",
-    horizonMinutes: 6,
-    predictedVolume: 94,
-  },
-  {
-    approach: "west",
-    horizonMinutes: 6,
-    predictedVolume: 81,
-  },
+      predictedQueueLengthVeh: 37,
 
-  // -------------------------------------------------------
-  // 9 MINUTES
-  // -------------------------------------------------------
+      predictedQueueLengthMEst: 145,
 
-  {
-    approach: "north",
-    horizonMinutes: 9,
-    predictedVolume: 70,
-  },
-  {
-    approach: "south",
-    horizonMinutes: 9,
-    predictedVolume: 65,
-  },
-  {
-    approach: "east",
-    horizonMinutes: 9,
-    predictedVolume: 91,
-  },
-  {
-    approach: "west",
-    horizonMinutes: 9,
-    predictedVolume: 79,
-  },
+      predictedDensityIndex: 104.5,
 
-  // -------------------------------------------------------
-  // 12 MINUTES
-  // -------------------------------------------------------
+      predictedSpeedKmh: null,
+    },
 
-  {
-    approach: "north",
-    horizonMinutes: 12,
-    predictedVolume: 74,
-  },
-  {
-    approach: "south",
-    horizonMinutes: 12,
-    predictedVolume: 69,
-  },
-  {
-    approach: "east",
-    horizonMinutes: 12,
-    predictedVolume: 97,
-  },
-  {
-    approach: "west",
-    horizonMinutes: 12,
-    predictedVolume: 83,
-  },
+    {
+      timestamp: "2026-08-15T16:33:17",
 
-  // -------------------------------------------------------
-  // 15 MINUTES
-  // -------------------------------------------------------
+      predictedVehicleCount: 290,
 
-  {
-    approach: "north",
-    horizonMinutes: 15,
-    predictedVolume: 71,
-  },
-  {
-    approach: "south",
-    horizonMinutes: 15,
-    predictedVolume: 67,
-  },
-  {
-    approach: "east",
-    horizonMinutes: 15,
-    predictedVolume: 93,
-  },
-  {
-    approach: "west",
-    horizonMinutes: 15,
-    predictedVolume: 80,
-  },
-];
+      predictedQueueLengthVeh: 39,
+
+      predictedQueueLengthMEst: 151,
+
+      predictedDensityIndex: 108.2,
+
+      predictedSpeedKmh: null,
+    },
+
+    {
+      timestamp: "2026-08-15T16:36:17",
+
+      predictedVehicleCount: 313,
+
+      predictedQueueLengthVeh: 43,
+
+      predictedQueueLengthMEst: 162,
+
+      predictedDensityIndex: 114.6,
+
+      predictedSpeedKmh: null,
+    },
+
+    {
+      timestamp: "2026-08-15T16:39:17",
+
+      predictedVehicleCount: 305,
+
+      predictedQueueLengthVeh: 41,
+
+      predictedQueueLengthMEst: 158,
+
+      predictedDensityIndex: 112.1,
+
+      predictedSpeedKmh: null,
+    },
+
+    {
+      timestamp: "2026-08-15T16:42:17",
+
+      predictedVehicleCount: 323,
+
+      predictedQueueLengthVeh: 45,
+
+      predictedQueueLengthMEst: 169,
+
+      predictedDensityIndex: 118.4,
+
+      predictedSpeedKmh: null,
+    },
+
+    {
+      timestamp: "2026-08-15T16:45:17",
+
+      predictedVehicleCount: 311,
+
+      predictedQueueLengthVeh: 42,
+
+      predictedQueueLengthMEst: 161,
+
+      predictedDensityIndex: 115.3,
+
+      predictedSpeedKmh: null,
+    },
+  ],
+};
 
 
 /* =========================================================
@@ -350,9 +266,9 @@ export const mockForecast: ForecastPoint[] = [
 export const mockIntersection = {
   name: "Simpang Pingit, Yogyakarta",
 
-  // Koordinat masih menggunakan koordinat mock.
-  // Ganti setelah koordinat intersection final dari SUMO/OSM
-  // sudah ditentukan oleh tim.
+  // Koordinat masih mock.
+  // Ganti setelah koordinat intersection final
+  // dari SUMO/OSM sudah ditentukan oleh tim.
   coords: "-7.782800, 110.360830",
 };
 
@@ -363,16 +279,17 @@ export const mockIntersection = {
 
 /*
  * Occupancy masih merupakan data mock untuk tampilan.
- * Nanti dapat diganti dengan hasil perhitungan traffic state
- * dari backend.
+ *
+ * Nanti dapat diganti dengan hasil perhitungan traffic
+ * state dari backend.
  */
 export const mockOccupancyPct = 68;
 
 
-/*
- * Informasi cuaca hanya digunakan sebagai elemen pendukung
- * pada dashboard.
- */
+/* =========================================================
+ * WEATHER
+ * ========================================================= */
+
 export const mockWeather = {
   dateLabel: "10 Juli 2026",
   condition: "Berawan",

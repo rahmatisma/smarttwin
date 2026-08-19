@@ -1,17 +1,31 @@
-// Tipe-tipe ini mirror docs/data-contract.md (schema Pydantic yang sudah
-// disepakati tim). Field ditulis camelCase mengikuti konvensi TS/JS —
-// begitu wiring ke API asli (Minggu 4), tinggal sesuaikan penamaan di titik
-// fetch-nya saja, bukan di seluruh komponen.
+// SmartTwin frontend types.
+// Source of truth: docs/data-contract.md
+// Semua nama field mengikuti contract dan menggunakan camelCase.
 
 export type Approach = "north" | "south" | "east" | "west";
-export type VehicleClass = "motorcycle" | "car" | "bus" | "truck";
 
 export interface ApproachState {
   approach: Approach;
+
+  // Total kendaraan yang melewati counting line selama window.
   volume: number;
-  queueLengthM: number;
-  densityVehPerKm: number;
-  avgSpeedKmh: number;
+
+  // Jumlah kendaraan berdasarkan kelas.
+  carCount: number;
+  motorcycleCount: number;
+  busCount: number;
+  truckCount: number;
+
+  // Antrean.
+  queueLengthVeh: number;
+  queueLengthMEst: number;
+
+  // Proxy lane occupancy / kepadatan.
+  // Bukan vehicles/km.
+  densityIndex: number;
+
+  // null = data speed belum tersedia.
+  avgSpeedKmh: number | null;
 }
 
 export interface TrafficState {
@@ -19,45 +33,4 @@ export interface TrafficState {
   windowStart: string;
   windowEnd: string;
   approaches: ApproachState[];
-}
-
-export interface VehicleClassCount {
-  vehicleClass: VehicleClass;
-  count: number;
-}
-
-export interface SignalPhase {
-  phaseName: string;
-  greenDurationS: number;
-}
-
-export interface ScenarioResult {
-  scenarioId: string;
-  phases: SignalPhase[];
-  cycleLengthS: number;
-  avgDelayS: number;
-  avgQueueLengthM: number;
-  throughputVeh: number;
-}
-
-export interface SignalRecommendation {
-  intersectionId: string;
-  generatedAt: string;
-  engine: "rule-based" | "ppo";
-  chosenScenario: ScenarioResult;
-  expectedImprovementPct: number;
-}
-
-export interface ForecastPoint {
-  approach: Approach;
-  horizonMinutes: number; // menit ke depan, mis. 0, 3, 6, 9...
-  predictedVolume: number;
-}
-
-export interface SignalStatus {
-  activePhase: Approach[]; // arah mana yang lagi hijau, mis. ["north","south"]
-  phaseName: string;
-  color: "red" | "amber" | "green";
-  secondsRemaining: number;
-  cycleBreakdown: { greenS: number; yellowS: number; redS: number };
 }

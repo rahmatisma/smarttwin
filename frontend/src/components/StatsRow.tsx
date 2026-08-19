@@ -2,26 +2,53 @@ import { Car, Gauge, Milestone, PieChart, CloudSun } from "lucide-react";
 import type { ApproachState } from "@/types/traffic";
 import DonutRing from "./DonutRing";
 
-// Threshold ini kasar (di-eyeball dari range density hasil snapshot SUMO
-// nyata — sudah dibagi jumlah lajur per approach — bukan dari perhitungan
-// PKJI 2023) — cukup buat demo, tapi ganti dengan klasifikasi Level of
-// Service resmi begitu validasi PKJI (Minggu 4) selesai.
+// Threshold ini hanya untuk indikator visual dashboard sementara.
+// densityIndex merupakan proxy lane occupancy/kepadatan,
+// bukan nilai kepadatan resmi kendaraan/km dan bukan LOS PKJI.
 function congestionFromDensity(avgDensity: number): {
   label: string;
   color: "red" | "amber" | "green";
 } {
-  if (avgDensity >= 130) return { label: "Tinggi", color: "red" };
-  if (avgDensity >= 90) return { label: "Sedang", color: "amber" };
+  if (avgDensity >= 130) {
+    return { label: "Tinggi", color: "red" };
+  }
+
+  if (avgDensity >= 90) {
+    return { label: "Sedang", color: "amber" };
+  }
+
   return { label: "Rendah", color: "green" };
 }
 
 const colorClasses: Record<
   "red" | "amber" | "green",
-  { text: string; bg: string; ring: string; hex: string }
+  {
+    text: string;
+    bg: string;
+    ring: string;
+    hex: string;
+  }
 > = {
-  red: { text: "text-signal-red", bg: "bg-signal-red-dim", ring: "ring-signal-red/30", hex: "#f0483e" },
-  amber: { text: "text-signal-amber", bg: "bg-signal-amber-dim", ring: "ring-signal-amber/30", hex: "#f5a623" },
-  green: { text: "text-signal-green", bg: "bg-signal-green-dim", ring: "ring-signal-green/30", hex: "#2ecc71" },
+  red: {
+    text: "text-signal-red",
+    bg: "bg-signal-red-dim",
+    ring: "ring-signal-red/30",
+    hex: "#f0483e",
+  },
+
+  amber: {
+    text: "text-signal-amber",
+    bg: "bg-signal-amber-dim",
+    ring: "ring-signal-amber/30",
+    hex: "#f5a623",
+  },
+
+  green: {
+    text: "text-signal-green",
+    bg: "bg-signal-green-dim",
+    ring: "ring-signal-green/30",
+    hex: "#2ecc71",
+  },
 };
 
 function StatCard({
@@ -40,11 +67,20 @@ function StatCard({
       <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-surface-2 text-text-secondary">
         {icon}
       </div>
+
       <div className="min-w-0">
-        <div className="text-xs text-text-secondary">{label}</div>
+        <div className="text-xs text-text-secondary">
+          {label}
+        </div>
+
         <div className="font-mono text-lg font-semibold tabular-nums text-text">
           {value}
-          {unit && <span className="ml-1 text-xs font-normal text-text-muted">{unit}</span>}
+
+          {unit && (
+            <span className="ml-1 text-xs font-normal text-text-muted">
+              {unit}
+            </span>
+          )}
         </div>
       </div>
     </div>
@@ -58,55 +94,156 @@ export default function StatsRow({
 }: {
   approaches: ApproachState[];
   occupancyPct: number;
-  weather: { dateLabel: string; condition: string; tempC: number };
+  weather: {
+    dateLabel: string;
+    condition: string;
+    tempC: number;
+  };
 }) {
-  const totalVolume = approaches.reduce((sum, a) => sum + a.volume, 0);
+  /*
+   * =========================================================
+   * TRAFFIC METRICS
+   * =========================================================
+   */
+
+  // Total kendaraan dari seluruh approach.
+  const totalVolume = approaches.reduce(
+    (sum, approach) => sum + approach.volume,
+    0
+  );
+
+  /*
+   * avgSpeedKmh boleh null karena CSV CV saat ini
+   * belum menyediakan data speed.
+   *
+   * Hanya speed yang benar-benar tersedia yang dihitung.
+   */
+  const speedValues = approaches
+    .map((approach) => approach.avgSpeedKmh)
+    .filter((speed): speed is number => speed !== null);
+
   const avgSpeed =
-    approaches.reduce((sum, a) => sum + a.avgSpeedKmh, 0) / approaches.length;
-  const maxQueue = Math.max(...approaches.map((a) => a.queueLengthM));
+    speedValues.length > 0
+      ? speedValues.reduce((sum, speed) => sum + speed, 0) /
+        speedValues.length
+      : null;
+
+  /*
+   * queueLengthMEst = estimasi panjang antrean dalam meter.
+   */
+  const maxQueue =
+    approaches.length > 0
+      ? Math.max(
+          ...approaches.map(
+            (approach) => approach.queueLengthMEst
+          )
+        )
+      : 0;
+
+  /*
+   * densityIndex = proxy lane occupancy/kepadatan.
+   *
+   * BUKAN vehicles/km.
+   */
   const avgDensity =
-    approaches.reduce((sum, a) => sum + a.densityVehPerKm, 0) / approaches.length;
+    approaches.length > 0
+      ? approaches.reduce(
+          (sum, approach) => sum + approach.densityIndex,
+          0
+        ) / approaches.length
+      : 0;
+
   const congestion = congestionFromDensity(avgDensity);
   const c = colorClasses[congestion.color];
-  const congestionPct = Math.min(Math.round((avgDensity / 180) * 100), 100);
+
+  /*
+   * Persentase visual untuk DonutRing.
+   *
+   * Ini hanya indikator dashboard, bukan persentase
+   * occupancy fisik yang terkalibrasi.
+   */
+  const congestionPct = Math.min(
+    Math.round((avgDensity / 180) * 100),
+    100
+  );
 
   return (
     <div className="grid grid-cols-2 gap-3 px-6 py-4 md:grid-cols-3 xl:grid-cols-6">
+      {/* =====================================================
+          TOTAL VEHICLES
+          ===================================================== */}
+
       <StatCard
         icon={<Car className="h-4 w-4" />}
         label="Total Kendaraan"
         value={totalVolume.toLocaleString("id-ID")}
       />
+
+      {/* =====================================================
+          AVERAGE SPEED
+          ===================================================== */}
+
       <StatCard
         icon={<Gauge className="h-4 w-4" />}
         label="Kecepatan Rata-rata"
-        value={avgSpeed.toFixed(0)}
-        unit="km/jam"
+        value={
+          avgSpeed === null
+            ? "N/A"
+            : avgSpeed.toFixed(0)
+        }
+        unit={avgSpeed === null ? undefined : "km/jam"}
       />
+
+      {/* =====================================================
+          MAX QUEUE
+          ===================================================== */}
+
       <StatCard
         icon={<Milestone className="h-4 w-4" />}
         label="Antrean Terpanjang"
-        value={maxQueue.toFixed(0)}
+        value={maxQueue.toFixed(1)}
         unit="m"
       />
+
+      {/* =====================================================
+          OCCUPANCY
+          ===================================================== */}
+
       <StatCard
         icon={<PieChart className="h-4 w-4" />}
         label="Occupancy"
         value={occupancyPct.toString()}
         unit="%"
       />
+
+      {/* =====================================================
+          WEATHER
+          ===================================================== */}
+
       <div className="flex flex-1 items-center gap-3 rounded-lg border border-border bg-surface px-4 py-3">
         <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-surface-2 text-text-secondary">
           <CloudSun className="h-4 w-4" />
         </div>
+
         <div className="min-w-0">
-          <div className="truncate text-xs text-text-secondary">{weather.dateLabel}</div>
+          <div className="truncate text-xs text-text-secondary">
+            {weather.dateLabel}
+          </div>
+
           <div className="text-sm font-medium text-text">
             {weather.tempC}°C
-            <span className="ml-1 text-xs font-normal text-text-muted">{weather.condition}</span>
+
+            <span className="ml-1 text-xs font-normal text-text-muted">
+              {weather.condition}
+            </span>
           </div>
         </div>
       </div>
+
+      {/* =====================================================
+          CONGESTION
+          ===================================================== */}
+
       <div
         className={`flex flex-1 items-center gap-3 rounded-lg border border-border ${c.bg} px-4 py-3 ring-1 ${c.ring}`}
       >
@@ -115,17 +252,30 @@ export default function StatsRow({
             size={40}
             thickness={5}
             segments={[
-              { value: congestionPct, color: c.hex },
-              { value: 100 - congestionPct, color: "#232935" },
+              {
+                value: congestionPct,
+                color: c.hex,
+              },
+              {
+                value: 100 - congestionPct,
+                color: "#232935",
+              },
             ]}
           />
+
           <div className="pointer-events-none absolute inset-0 flex items-center justify-center font-mono text-[9px] font-semibold text-text">
             {congestionPct}%
           </div>
         </div>
+
         <div>
-          <div className="text-xs text-text-secondary">Tingkat Kepadatan</div>
-          <div className={`font-display text-sm font-semibold ${c.text}`}>
+          <div className="text-xs text-text-secondary">
+            Tingkat Kepadatan
+          </div>
+
+          <div
+            className={`font-display text-sm font-semibold ${c.text}`}
+          >
             {congestion.label}
           </div>
         </div>
