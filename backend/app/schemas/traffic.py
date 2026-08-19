@@ -14,34 +14,30 @@ class Approach(str, Enum):
 class ApproachState(BaseModel):
     approach: Approach
 
-    # Kendaraan yang memotong counting line selama window ini (aliran).
-    # Di CSV CV kolomnya bernama vehicle_count; "volume" adalah nama
-    # level-kontrak. Lihat docs/data-contract.md.
+    # Total kendaraan yang melewati counting line selama window.
     volume: int = Field(ge=0)
 
-    # Antrean: jumlah kendaraan (mentah) dan turunannya dalam meter.
+    # Jumlah kendaraan berdasarkan kelas.
+    carCount: int = Field(ge=0)
+    motorcycleCount: int = Field(ge=0)
+    busCount: int = Field(ge=0)
+    truckCount: int = Field(ge=0)
+
+    # Antrean.
     queueLengthVeh: int = Field(ge=0)
     queueLengthMEst: float = Field(ge=0)
 
-    # Proxy lane occupancy per-frame, BUKAN kendaraan/km. Belum
-    # dikalibrasi ke jarak dunia nyata.
+    # Proxy lane occupancy / kepadatan.
+    # Bukan vehicles/km.
     densityIndex: float = Field(ge=0)
 
-    # None = BELUM DIUKUR, bukan 0 km/h.
-    #
-    # PERHATIAN: ge=0 menerima 0.0, jadi placeholder 0.0 akan lolos
-    # validasi tanpa error dan terbaca sebagai "terukur, hasilnya diam".
-    # Kalau kecepatannya belum ada, isi None — jangan 0.0.
+    # Belum tersedia dari CSV CV.
+    # None berarti data belum diukur.
     avgSpeedKmh: float | None = Field(default=None, ge=0)
 
 
 class TrafficState(BaseModel):
     intersectionId: str
-
-    # datetime, bukan str — supaya sepadan dengan docs/data-contract.md.
-    # FastAPI menserialisasikannya jadi string ISO di response, jadi
-    # bentuk JSON yang dilihat frontend tidak berubah.
     windowStart: datetime
     windowEnd: datetime
-
     approaches: list[ApproachState]
