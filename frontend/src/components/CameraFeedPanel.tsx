@@ -1,16 +1,37 @@
 import { Bike, Car, Bus, Truck, Video } from "lucide-react";
-import type { VehicleClassCount, VehicleClass } from "@/types/traffic";
 
-type CameraStatus = { label: string; online: boolean };
+import type {
+  VehicleClassCount,
+  VehicleClass,
+} from "@/types/traffic";
 
-const ICONS: Record<VehicleClass, React.ReactNode> = {
-  motorcycle: <Bike className="h-3.5 w-3.5" />,
-  car: <Car className="h-3.5 w-3.5" />,
-  bus: <Bus className="h-3.5 w-3.5" />,
-  truck: <Truck className="h-3.5 w-3.5" />,
+type CameraStatus = {
+  label: string;
+  online: boolean;
 };
 
-const LABELS: Record<VehicleClass, string> = {
+const ICONS: Record<
+  VehicleClass,
+  React.ReactNode
+> = {
+  motorcycle: (
+    <Bike className="h-3.5 w-3.5" />
+  ),
+  car: (
+    <Car className="h-3.5 w-3.5" />
+  ),
+  bus: (
+    <Bus className="h-3.5 w-3.5" />
+  ),
+  truck: (
+    <Truck className="h-3.5 w-3.5" />
+  ),
+};
+
+const LABELS: Record<
+  VehicleClass,
+  string
+> = {
   motorcycle: "Motorcycle",
   car: "Car",
   bus: "Bus",
@@ -19,48 +40,101 @@ const LABELS: Record<VehicleClass, string> = {
 
 export default function CameraFeedPanel({
   counts,
-  cameraStatus,
+  cameraStatus = [],
 }: {
   counts: VehicleClassCount[];
-  cameraStatus: CameraStatus[];
+  cameraStatus?: CameraStatus[];
 }) {
   return (
     <div className="rounded-lg border border-border bg-surface p-4">
       <div className="mb-3 flex items-center justify-between">
-        <h2 className="font-display text-sm font-semibold text-text">Camera Feed</h2>
-        <span className="text-xs text-text-muted">CAM 01</span>
+        <h2 className="font-display text-sm font-semibold text-text">
+          Camera Feed
+        </h2>
+
+        <span className="text-xs text-text-muted">
+          DATASET
+        </span>
       </div>
 
       <div className="flex gap-3">
+        {/* =====================================================
+            CAMERA PREVIEW
+            ===================================================== */}
+
         <div className="flex aspect-square w-2/5 shrink-0 items-center justify-center rounded-md border border-border bg-surface-2">
           <div className="flex flex-col items-center gap-1.5 px-2 text-center text-text-muted">
             <Video className="h-5 w-5" />
-            <span className="text-[10px] leading-tight">Belum tersambung</span>
+
+            <span className="text-[10px] leading-tight">
+              Video rekaman
+              <br />
+              digunakan sebagai sumber data
+            </span>
           </div>
         </div>
 
+        {/* =====================================================
+            VEHICLE COUNTS
+            ===================================================== */}
+
         <div className="flex flex-1 flex-col justify-between gap-3">
           <div className="space-y-1">
-            {counts.map((c) => (
-              <div key={c.vehicleClass} className="flex items-center gap-1.5 text-xs">
-                <span className="text-text-secondary">{ICONS[c.vehicleClass]}</span>
-                <span className="text-text-secondary">{LABELS[c.vehicleClass]}</span>
-                <span className="ml-auto font-mono tabular-nums text-text">{c.count}</span>
+            {counts.length > 0 ? (
+              counts.map((c) => (
+                <div
+                  key={c.vehicleClass}
+                  className="flex items-center gap-1.5 text-xs"
+                >
+                  <span className="text-text-secondary">
+                    {ICONS[c.vehicleClass]}
+                  </span>
+
+                  <span className="text-text-secondary">
+                    {LABELS[c.vehicleClass]}
+                  </span>
+
+                  <span className="ml-auto font-mono tabular-nums text-text">
+                    {c.count.toLocaleString("id-ID")}
+                  </span>
+                </div>
+              ))
+            ) : (
+              <div className="text-xs text-text-muted">
+                Data kendaraan belum tersedia.
               </div>
-            ))}
+            )}
           </div>
 
+          {/* ===================================================
+              CAMERA STATUS
+              =================================================== */}
+
           <div className="space-y-1 border-t border-border pt-2">
-            {cameraStatus.map((cam) => (
-              <div key={cam.label} className="flex items-center gap-1.5 text-[10px]">
-                <span className="truncate text-text-secondary">{cam.label}</span>
-                <span
-                  className={`ml-auto h-1.5 w-1.5 shrink-0 rounded-full ${
-                    cam.online ? "bg-signal-green" : "bg-signal-red"
-                  }`}
-                />
+            {cameraStatus.length > 0 ? (
+              cameraStatus.map((cam) => (
+                <div
+                  key={cam.label}
+                  className="flex items-center gap-1.5 text-[10px]"
+                >
+                  <span className="truncate text-text-secondary">
+                    {cam.label}
+                  </span>
+
+                  <span
+                    className={`ml-auto h-1.5 w-1.5 shrink-0 rounded-full ${
+                      cam.online
+                        ? "bg-signal-green"
+                        : "bg-signal-red"
+                    }`}
+                  />
+                </div>
+              ))
+            ) : (
+              <div className="text-[10px] text-text-muted">
+                Status kamera belum tersedia
               </div>
-            ))}
+            )}
           </div>
         </div>
       </div>

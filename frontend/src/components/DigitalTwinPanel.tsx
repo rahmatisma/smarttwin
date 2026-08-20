@@ -1,4 +1,20 @@
-import type { ApproachState, SignalStatus, Approach } from "@/types/traffic";
+import type {
+  ApproachState,
+  SignalStatus,
+  Approach,
+} from "@/types/traffic";
+
+/*
+ * =========================================================
+ * SIGNAL COLOR
+ * =========================================================
+ *
+ * Warna ditentukan dari currentPhase.
+ *
+ * Ini hanya visualisasi frontend.
+ *
+ * Tidak ditambahkan ke data contract.
+ */
 
 const SIGNAL_COLOR = {
   red: "#f0483e",
@@ -6,11 +22,32 @@ const SIGNAL_COLOR = {
   green: "#2ecc71",
 } as const;
 
+/*
+ * =========================================================
+ * QUEUE DOT
+ * =========================================================
+ */
+
 function queueDotCount(volume: number) {
-  // Divisor 15, bukan 45 — disesuaikan ke skala volume asli hasil snapshot
-  // (puluhan kendaraan per 5 menit), bukan lagi skala dummy lama (ratusan).
-  return Math.min(Math.max(Math.round(volume / 15), 1), 7);
+  /*
+   * Divisor 15 disesuaikan dengan skala volume
+   * hasil snapshot.
+   *
+   * Ini hanya representasi visual jumlah kendaraan
+   * pada Digital Twin.
+   */
+
+  return Math.min(
+    Math.max(Math.round(volume / 15), 1),
+    7
+  );
 }
+
+/*
+ * =========================================================
+ * SIGNAL HEAD
+ * =========================================================
+ */
 
 function SignalHead({
   x,
@@ -23,7 +60,12 @@ function SignalHead({
   vertical: boolean;
   active: "red" | "amber" | "green";
 }) {
-  const dots: Array<"red" | "amber" | "green"> = ["red", "amber", "green"];
+  const dots: Array<"red" | "amber" | "green"> = [
+    "red",
+    "amber",
+    "green",
+  ];
+
   return (
     <g transform={`translate(${x}, ${y})`}>
       <rect
@@ -36,15 +78,30 @@ function SignalHead({
         stroke="#232935"
         strokeWidth={1}
       />
-      {dots.map((c, i) => {
-        const isActive = c === active;
-        const pos = vertical ? { cx: 0, cy: -8 + i * 8 } : { cx: -8 + i * 8, cy: 0 };
+
+      {dots.map((color, index) => {
+        const isActive = color === active;
+
+        const pos = vertical
+          ? {
+              cx: 0,
+              cy: -8 + index * 8,
+            }
+          : {
+              cx: -8 + index * 8,
+              cy: 0,
+            };
+
         return (
           <circle
-            key={c}
+            key={color}
             {...pos}
             r={2.6}
-            fill={isActive ? SIGNAL_COLOR[c] : "#232935"}
+            fill={
+              isActive
+                ? SIGNAL_COLOR[color]
+                : "#232935"
+            }
             opacity={isActive ? 1 : 0.6}
           >
             {isActive && (
@@ -62,6 +119,12 @@ function SignalHead({
   );
 }
 
+/*
+ * =========================================================
+ * QUEUE DOTS
+ * =========================================================
+ */
+
 function QueueDots({
   count,
   axis,
@@ -77,15 +140,95 @@ function QueueDots({
 }) {
   return (
     <>
-      {Array.from({ length: count }).map((_, i) => {
-        const moving = from + step * i;
-        const cx = axis === "x" ? moving : fixed;
-        const cy = axis === "x" ? fixed : moving;
-        return <circle key={i} cx={cx} cy={cy} r={4} fill="#8b93a1" opacity={0.85} />;
+      {Array.from({ length: count }).map((_, index) => {
+        const moving = from + step * index;
+
+        const cx =
+          axis === "x"
+            ? moving
+            : fixed;
+
+        const cy =
+          axis === "x"
+            ? fixed
+            : moving;
+
+        return (
+          <circle
+            key={index}
+            cx={cx}
+            cy={cy}
+            r={4}
+            fill="#8b93a1"
+            opacity={0.85}
+          />
+        );
       })}
     </>
   );
 }
+
+/*
+ * =========================================================
+ * SIGNAL STATE → VISUAL COLOR
+ * =========================================================
+ *
+ * Contract hanya memberikan currentPhase.
+ *
+ * Kita tidak menambahkan activePhase/color ke object signal.
+ * Warna visual dihitung di sini.
+ */
+
+function getSignalColor(
+  currentPhase: string,
+  approach: Approach
+): "red" | "amber" | "green" {
+  const phase = currentPhase.toLowerCase();
+
+  const isNorthSouth =
+    phase === "ns" ||
+    phase.includes("north") ||
+    phase.includes("south");
+
+  const isEastWest =
+    phase === "ew" ||
+    phase.includes("east") ||
+    phase.includes("west");
+
+  const isAmber =
+    phase.includes("amber") ||
+    phase.includes("yellow");
+
+  if (isNorthSouth) {
+    if (
+      approach === "north" ||
+      approach === "south"
+    ) {
+      return isAmber ? "amber" : "green";
+    }
+
+    return "red";
+  }
+
+  if (isEastWest) {
+    if (
+      approach === "east" ||
+      approach === "west"
+    ) {
+      return isAmber ? "amber" : "green";
+    }
+
+    return "red";
+  }
+
+  return "red";
+}
+
+/*
+ * =========================================================
+ * DIGITAL TWIN PANEL
+ * =========================================================
+ */
 
 export default function DigitalTwinPanel({
   approaches,
@@ -94,62 +237,339 @@ export default function DigitalTwinPanel({
   approaches: ApproachState[];
   signal: SignalStatus;
 }) {
+  /*
+   * Mapping approach berdasarkan arah.
+   */
+
   const byApproach = Object.fromEntries(
-    approaches.map((a) => [a.approach, a])
+    approaches.map((approach) => [
+      approach.approach,
+      approach,
+    ])
   ) as Record<Approach, ApproachState>;
 
-  const colorFor = (dir: Approach): "red" | "amber" | "green" =>
-    signal.activePhase.includes(dir) ? signal.color : "red";
+  /*
+   * Warna signal dihitung dari currentPhase.
+   */
+
+  const northColor = getSignalColor(
+    signal.currentPhase,
+    "north"
+  );
+
+  const southColor = getSignalColor(
+    signal.currentPhase,
+    "south"
+  );
+
+  const eastColor = getSignalColor(
+    signal.currentPhase,
+    "east"
+  );
+
+  const westColor = getSignalColor(
+    signal.currentPhase,
+    "west"
+  );
 
   return (
     <div className="rounded-lg border border-border bg-surface p-4">
+      {/* =====================================================
+          HEADER
+          ===================================================== */}
+
       <div className="mb-3 flex items-center justify-between">
-        <h2 className="font-display text-sm font-semibold text-text">Digital Twin</h2>
-        <span className="flex items-center gap-1.5 text-xs text-signal-green">
-          <span className="h-1.5 w-1.5 rounded-full bg-signal-green" />
-          Synced — TraCI Connected
+        <h2 className="font-display text-sm font-semibold text-text">
+          Digital Twin
+        </h2>
+
+        <span className="flex items-center gap-1.5 text-xs">
+          <span
+            className={`h-1.5 w-1.5 rounded-full ${
+              signal.source === "mock"
+                ? "bg-signal-amber"
+                : "bg-signal-green"
+            }`}
+          />
+
+          <span
+            className={
+              signal.source === "mock"
+                ? "text-signal-amber"
+                : "text-signal-green"
+            }
+          >
+            {signal.source === "mock"
+              ? "Simulated"
+              : "Synced"}
+          </span>
         </span>
       </div>
 
-      <svg viewBox="0 0 400 400" width={400} height={400} className="aspect-square w-full">
-        <rect x={165} y={0} width={70} height={165} fill="#171c27" />
-        <rect x={165} y={235} width={70} height={165} fill="#171c27" />
-        <rect x={0} y={165} width={165} height={70} fill="#171c27" />
-        <rect x={235} y={165} width={165} height={70} fill="#171c27" />
-        <rect x={165} y={165} width={70} height={70} fill="#1c212d" />
+      {/* =====================================================
+          INTERSECTION
+          ===================================================== */}
 
-        <line x1={200} y1={0} x2={200} y2={165} stroke="#2c3340" strokeWidth={2} strokeDasharray="10 8" />
-        <line x1={200} y1={235} x2={200} y2={400} stroke="#2c3340" strokeWidth={2} strokeDasharray="10 8" />
-        <line x1={0} y1={200} x2={165} y2={200} stroke="#2c3340" strokeWidth={2} strokeDasharray="10 8" />
-        <line x1={235} y1={200} x2={400} y2={200} stroke="#2c3340" strokeWidth={2} strokeDasharray="10 8" />
+      <div className="mb-3 flex items-center justify-between text-xs">
+        <span className="text-text-muted">
+          Intersection
+        </span>
 
-        <text x={200} y={18} textAnchor="middle" fill="#5b6472" fontSize={11} fontFamily="var(--font-sans)">UTARA</text>
-        <text x={200} y={392} textAnchor="middle" fill="#5b6472" fontSize={11} fontFamily="var(--font-sans)">SELATAN</text>
-        <text x={382} y={205} textAnchor="middle" fill="#5b6472" fontSize={11} fontFamily="var(--font-sans)">TIMUR</text>
-        <text x={18} y={205} textAnchor="middle" fill="#5b6472" fontSize={11} fontFamily="var(--font-sans)">BARAT</text>
+        <span className="font-mono text-text-secondary">
+          {signal.intersectionId}
+        </span>
+      </div>
+
+      {/* =====================================================
+          SVG INTERSECTION
+          ===================================================== */}
+
+      <svg
+        viewBox="0 0 400 400"
+        width={400}
+        height={400}
+        className="aspect-square w-full"
+      >
+        {/* North road */}
+
+        <rect
+          x={165}
+          y={0}
+          width={70}
+          height={165}
+          fill="#171c27"
+        />
+
+        {/* South road */}
+
+        <rect
+          x={165}
+          y={235}
+          width={70}
+          height={165}
+          fill="#171c27"
+        />
+
+        {/* West road */}
+
+        <rect
+          x={0}
+          y={165}
+          width={165}
+          height={70}
+          fill="#171c27"
+        />
+
+        {/* East road */}
+
+        <rect
+          x={235}
+          y={165}
+          width={165}
+          height={70}
+          fill="#171c27"
+        />
+
+        {/* Intersection */}
+
+        <rect
+          x={165}
+          y={165}
+          width={70}
+          height={70}
+          fill="#1c212d"
+        />
+
+        {/* Lane markings */}
+
+        <line
+          x1={200}
+          y1={0}
+          x2={200}
+          y2={165}
+          stroke="#2c3340"
+          strokeWidth={2}
+          strokeDasharray="10 8"
+        />
+
+        <line
+          x1={200}
+          y1={235}
+          x2={200}
+          y2={400}
+          stroke="#2c3340"
+          strokeWidth={2}
+          strokeDasharray="10 8"
+        />
+
+        <line
+          x1={0}
+          y1={200}
+          x2={165}
+          y2={200}
+          stroke="#2c3340"
+          strokeWidth={2}
+          strokeDasharray="10 8"
+        />
+
+        <line
+          x1={235}
+          y1={200}
+          x2={400}
+          y2={200}
+          stroke="#2c3340"
+          strokeWidth={2}
+          strokeDasharray="10 8"
+        />
+
+        {/* =================================================
+            DIRECTION LABELS
+            ================================================= */}
+
+        <text
+          x={200}
+          y={18}
+          textAnchor="middle"
+          fill="#5b6472"
+          fontSize={11}
+          fontFamily="var(--font-sans)"
+        >
+          UTARA
+        </text>
+
+        <text
+          x={200}
+          y={392}
+          textAnchor="middle"
+          fill="#5b6472"
+          fontSize={11}
+          fontFamily="var(--font-sans)"
+        >
+          SELATAN
+        </text>
+
+        <text
+          x={382}
+          y={205}
+          textAnchor="middle"
+          fill="#5b6472"
+          fontSize={11}
+          fontFamily="var(--font-sans)"
+        >
+          TIMUR
+        </text>
+
+        <text
+          x={18}
+          y={205}
+          textAnchor="middle"
+          fill="#5b6472"
+          fontSize={11}
+          fontFamily="var(--font-sans)"
+        >
+          BARAT
+        </text>
+
+        {/* =================================================
+            QUEUE VISUALIZATION
+            ================================================= */}
 
         {byApproach.north && (
-          <QueueDots count={queueDotCount(byApproach.north.volume)} axis="y" from={150} step={-16} fixed={200} />
-        )}
-        {byApproach.south && (
-          <QueueDots count={queueDotCount(byApproach.south.volume)} axis="y" from={250} step={16} fixed={200} />
-        )}
-        {byApproach.east && (
-          <QueueDots count={queueDotCount(byApproach.east.volume)} axis="x" from={250} step={16} fixed={200} />
-        )}
-        {byApproach.west && (
-          <QueueDots count={queueDotCount(byApproach.west.volume)} axis="x" from={150} step={-16} fixed={200} />
+          <QueueDots
+            count={queueDotCount(
+              byApproach.north.volume
+            )}
+            axis="y"
+            from={150}
+            step={-16}
+            fixed={200}
+          />
         )}
 
-        <SignalHead x={200} y={152} vertical active={colorFor("north")} />
-        <SignalHead x={200} y={248} vertical active={colorFor("south")} />
-        <SignalHead x={248} y={200} vertical={false} active={colorFor("east")} />
-        <SignalHead x={152} y={200} vertical={false} active={colorFor("west")} />
+        {byApproach.south && (
+          <QueueDots
+            count={queueDotCount(
+              byApproach.south.volume
+            )}
+            axis="y"
+            from={250}
+            step={16}
+            fixed={200}
+          />
+        )}
+
+        {byApproach.east && (
+          <QueueDots
+            count={queueDotCount(
+              byApproach.east.volume
+            )}
+            axis="x"
+            from={250}
+            step={16}
+            fixed={200}
+          />
+        )}
+
+        {byApproach.west && (
+          <QueueDots
+            count={queueDotCount(
+              byApproach.west.volume
+            )}
+            axis="x"
+            from={150}
+            step={-16}
+            fixed={200}
+          />
+        )}
+
+        {/* =================================================
+            SIGNAL HEADS
+            ================================================= */}
+
+        <SignalHead
+          x={200}
+          y={152}
+          vertical
+          active={northColor}
+        />
+
+        <SignalHead
+          x={200}
+          y={248}
+          vertical
+          active={southColor}
+        />
+
+        <SignalHead
+          x={248}
+          y={200}
+          vertical={false}
+          active={eastColor}
+        />
+
+        <SignalHead
+          x={152}
+          y={200}
+          vertical={false}
+          active={westColor}
+        />
       </svg>
 
-      <p className="mt-2 text-center text-xs text-text-muted">
-        Simulasi SUMO — posisi kendaraan indikatif, bukan video langsung
-      </p>
+      {/* =====================================================
+          FOOTER
+          ===================================================== */}
+
+      <div className="mt-2 text-center">
+        <p className="text-xs text-text-muted">
+          Simulasi SUMO — posisi kendaraan indikatif,
+          bukan video langsung
+        </p>
+
+        <p className="mt-1 text-[10px] text-text-muted">
+          Fase: {signal.phaseName} · Sisa{" "}
+          {signal.remainingSeconds} detik
+        </p>
+      </div>
     </div>
   );
 }

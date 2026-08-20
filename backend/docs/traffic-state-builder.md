@@ -125,15 +125,17 @@ metrics
 
 ### Tahap 2 — Time Window
 
-Data dikelompokkan berdasarkan window waktu.
+Traffic State Builder menggunakan window observasi sebesar **5 detik**.
+
+Contoh:
 
 ```text
 16:30:12 ── 16:30:17
-       ↓
+      ↓
 TrafficState #1
 
 16:30:17 ── 16:30:22
-       ↓
+      ↓
 TrafficState #2
 ```
 

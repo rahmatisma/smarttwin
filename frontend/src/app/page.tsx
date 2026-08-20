@@ -13,173 +13,309 @@ import ForecastChart from "@/components/ForecastChart";
 
 import { useTrafficSimulation } from "@/hooks/useTrafficSimulaton";
 
-import type { TrafficState } from "@/types/traffic";
+import type {
+  TrafficState,
+  VehicleClassCount,
+} from "@/types/traffic";
 
-import {
-  mockVehicleClassCounts,
-  mockRecommendation,
-  mockForecast,
-  mockIntersection,
-  mockOccupancyPct,
-  mockWeather,
-  mockCameraStatus,
-} from "@/lib/mockData";
+/*
+ * =========================================================
+ * BACKEND API
+ * =========================================================
+ */
 
 const API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
+  process.env.NEXT_PUBLIC_API_URL ??
+  "http://127.0.0.1:8000";
 
 export default function DashboardPage() {
+  /*
+   * =========================================================
+   * SIGNAL SIMULATION
+   * =========================================================
+   */
+
   const signal = useTrafficSimulation();
+
+  /*
+   * =========================================================
+   * TRAFFIC STATE
+   * =========================================================
+   */
 
   const [trafficState, setTrafficState] =
     useState<TrafficState | null>(null);
 
-  const [trafficLoading, setTrafficLoading] =
-    useState(true);
+  const [loading, setLoading] = useState(true);
 
-  const [trafficError, setTrafficError] =
+  const [error, setError] =
     useState<string | null>(null);
 
+  /*
+   * =========================================================
+   * FETCH TRAFFIC STATE
+   * =========================================================
+   *
+   * Sumber data:
+   *
+   * CSV / State Builder
+   *        ↓
+   * FastAPI
+   *        ↓
+   * /api/v1/traffic/state
+   *        ↓
+   * Dashboard
+   *
+   * Tidak menggunakan mockData.
+   */
+
   useEffect(() => {
-    async function fetchTrafficState() {
+    async function loadTrafficState() {
       try {
-        setTrafficLoading(true);
-        setTrafficError(null);
+        setLoading(true);
+        setError(null);
 
         const response = await fetch(
           `${API_BASE_URL}/api/v1/traffic/state`,
           {
+            method: "GET",
             cache: "no-store",
           }
         );
 
         if (!response.ok) {
           throw new Error(
-            `Traffic API returned ${response.status}`
+            `HTTP ${response.status}: ${response.statusText}`
           );
         }
 
-        const data: TrafficState = await response.json();
+        const data: TrafficState =
+          await response.json();
 
         setTrafficState(data);
-      } catch (error) {
+      } catch (err) {
         console.error(
-          "Failed to fetch traffic state:",
-          error
+          "Gagal mengambil traffic state:",
+          err
         );
 
-        setTrafficError(
-          "Data traffic dari backend tidak tersedia."
+        setError(
+          err instanceof Error
+            ? err.message
+            : "Gagal mengambil data traffic."
         );
       } finally {
-        setTrafficLoading(false);
+        setLoading(false);
       }
     }
 
-    fetchTrafficState();
-
-    const interval = setInterval(
-      fetchTrafficState,
-      5000
-    );
-
-    return () => clearInterval(interval);
+    loadTrafficState();
   }, []);
 
   /*
-   * Selama backend belum berhasil mengirim data,
-   * dashboard tetap menggunakan mock sebagai fallback.
-   *
-   * Begitu API berhasil:
-   *
-   * Backend TrafficState
-   *        ↓
-   * trafficState
-   *        ↓
-   * Dashboard components
+   * =========================================================
+   * LOADING
+   * =========================================================
    */
-  const approaches =
-    trafficState?.approaches ?? [];
+
+  if (loading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-bg">
+        <div className="text-sm text-text-secondary">
+          Mengambil data traffic dari backend...
+        </div>
+      </div>
+    );
+  }
+
+  /*
+   * =========================================================
+   * ERROR
+   * =========================================================
+   */
+
+  if (error || !trafficState) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-bg">
+        <div className="rounded-lg border border-border bg-surface p-6">
+          <div className="text-sm font-semibold text-text">
+            Gagal mengambil data traffic
+          </div>
+
+          <div className="mt-2 text-xs text-text-secondary">
+            {error ?? "Traffic state tidak tersedia."}
+          </div>
+
+          <div className="mt-4 text-xs text-text-muted">
+            Pastikan backend FastAPI sedang berjalan dan
+            endpoint /api/v1/traffic/state tersedia.
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  /*
+   * =========================================================
+   * VEHICLE CLASS COUNTS
+   * =========================================================
+   *
+   * Data dibentuk langsung dari TrafficState backend.
+   *
+   * Tidak ada angka dummy.
+   */
+
+  const vehicleClassCounts: VehicleClassCount[] = [
+    {
+      vehicleClass: "motorcycle",
+      count: trafficState.approaches.reduce(
+        (sum, approach) =>
+          sum + approach.motorcycleCount,
+        0
+      ),
+    },
+
+    {
+      vehicleClass: "car",
+      count: trafficState.approaches.reduce(
+        (sum, approach) =>
+          sum + approach.carCount,
+        0
+      ),
+    },
+
+    {
+      vehicleClass: "bus",
+      count: trafficState.approaches.reduce(
+        (sum, approach) =>
+          sum + approach.busCount,
+        0
+      ),
+    },
+
+    {
+      vehicleClass: "truck",
+      count: trafficState.approaches.reduce(
+        (sum, approach) =>
+          sum + approach.truckCount,
+        0
+      ),
+    },
+  ];
+
+  /*
+   * =========================================================
+   * INTERSECTION
+   * =========================================================
+   *
+   * Menggunakan intersectionId dari backend.
+   */
 
   const intersectionName =
-    trafficState?.intersectionId ??
-    mockIntersection.name;
+    trafficState.intersectionId;
+
+  /*
+   * =========================================================
+   * WEATHER
+   * =========================================================
+   *
+   * Weather belum tersedia di TrafficState contract.
+   *
+   * Jangan membuat angka suhu atau kondisi cuaca palsu.
+   */
+
+  const weather = {
+    dateLabel: new Date(
+      trafficState.windowEnd
+    ).toLocaleDateString("id-ID"),
+
+    condition: "Data tidak tersedia",
+
+    tempC: null,
+  };
+
+  /*
+   * =========================================================
+   * DASHBOARD
+   * =========================================================
+   */
 
   return (
     <div className="flex min-h-screen bg-bg">
       <Sidebar />
 
       <div className="flex-1">
+        {/* ===================================================
+            HEADER
+            =================================================== */}
+
         <Header
           locationName={intersectionName}
-          coords={mockIntersection.coords}
+          coords="Koordinat belum tersedia"
         />
 
-        {/* =====================================================
-            TRAFFIC STATUS
-            ===================================================== */}
-
-        {trafficLoading && !trafficState && (
-          <div className="px-6 pt-4 text-sm text-text-secondary">
-            Mengambil data traffic dari backend...
-          </div>
-        )}
-
-        {trafficError && !trafficState && (
-          <div className="px-6 pt-4 text-sm text-signal-amber">
-            {trafficError}
-          </div>
-        )}
+        {/* ===================================================
+            STATISTICS
+            =================================================== */}
 
         <StatsRow
-          approaches={approaches}
-          occupancyPct={mockOccupancyPct}
-          weather={mockWeather}
+          approaches={trafficState.approaches}
+          weather={weather}
         />
 
-        {/* =====================================================
-            MAIN DASHBOARD
-            ===================================================== */}
-
         <div className="flex flex-col gap-4 px-6 pb-6">
+
+          {/* =================================================
+              DIGITAL TWIN + CAMERA
+              ================================================= */}
+
           <div className="grid grid-cols-1 gap-4 xl:grid-cols-[2fr_1fr]">
-            {/* =================================================
-                DIGITAL TWIN
-                ================================================= */}
+
+            {/* DIGITAL TWIN */}
 
             <DigitalTwinPanel
-              approaches={approaches}
+              approaches={trafficState.approaches}
               signal={signal}
             />
 
+            {/* RIGHT COLUMN */}
+
             <div className="flex flex-col gap-4">
-              {/* ===============================================
-                  CAMERA
-                  =============================================== */}
+
+              {/* CAMERA */}
 
               <CameraFeedPanel
-                counts={mockVehicleClassCounts}
-                cameraStatus={mockCameraStatus}
+                counts={vehicleClassCounts}
+                cameraStatus={[]}
               />
 
-              {/* ===============================================
-                  SIGNAL
-                  =============================================== */}
+              {/* SIGNAL STATUS */}
 
-              <SignalStatusPanel signal={signal} />
+              <SignalStatusPanel
+                signal={signal}
+              />
+
             </div>
           </div>
 
-          {/* ===================================================
+          {/* =================================================
               RECOMMENDATION + FORECAST
-              =================================================== */}
+              ================================================= */}
 
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+
+            {/* RECOMMENDATION */}
+
             <RecommendationPanel
-              recommendation={mockRecommendation}
+              recommendation={null}
             />
 
-            <ForecastChart data={mockForecast} />
+            {/* FORECAST */}
+
+            <ForecastChart
+              data={null}
+            />
+
           </div>
         </div>
       </div>

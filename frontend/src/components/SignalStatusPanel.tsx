@@ -1,59 +1,132 @@
 import type { SignalStatus } from "@/types/traffic";
-import DonutRing from "./DonutRing";
 
-const COLOR_MAP = {
-  red: { text: "text-signal-red", hex: "#f0483e" },
-  amber: { text: "text-signal-amber", hex: "#f5a623" },
-  green: { text: "text-signal-green", hex: "#2ecc71" },
-} as const;
-
-export default function SignalStatusPanel({ signal }: { signal: SignalStatus }) {
-  const c = COLOR_MAP[signal.color];
-  const { greenS, yellowS, redS } = signal.cycleBreakdown;
-
+export default function SignalStatusPanel({
+  signal,
+}: {
+  signal: SignalStatus;
+}) {
   return (
     <div className="rounded-lg border border-border bg-surface p-4">
-      <h2 className="mb-3 font-display text-sm font-semibold text-text">Signal Status</h2>
+      {/* =====================================================
+          HEADER
+          ===================================================== */}
 
-      <div className="flex items-center justify-between gap-4">
-        <div className="min-w-0">
-          <div className="truncate text-sm text-text-secondary">{signal.phaseName}</div>
-          <div className="font-mono text-3xl font-bold tabular-nums text-text">
-            {signal.secondsRemaining}
-            <span className="ml-1 text-sm font-normal text-text-muted">detik</span>
+      <div className="mb-3 flex items-center justify-between">
+        <h2 className="font-display text-sm font-semibold text-text">
+          Signal Status
+        </h2>
+
+        <span
+          className={
+            signal.source === "mock"
+              ? "text-xs text-signal-amber"
+              : "text-xs text-signal-green"
+          }
+        >
+          {signal.source === "mock" ? "Simulated" : "Connected"}
+        </span>
+      </div>
+
+      {/* =====================================================
+          SIGNAL INFORMATION
+          ===================================================== */}
+
+      <div className="space-y-4">
+        {/* Current Phase */}
+
+        <div className="rounded-md border border-border bg-surface-2 p-3">
+          <div className="text-xs text-text-muted">
+            Current Phase
           </div>
 
-          <div className="mt-3 space-y-1 text-xs">
-            <div className="flex items-center gap-2">
-              <span className="h-1.5 w-1.5 rounded-full bg-signal-green" />
-              <span className="text-text-secondary">Green</span>
-              <span className="ml-auto font-mono tabular-nums text-text">{greenS}</span>
+          <div className="mt-1 font-display text-sm font-semibold text-text">
+            {signal.phaseName}
+          </div>
+
+          <div className="mt-1 text-xs text-text-secondary">
+            Phase ID: {signal.currentPhase}
+          </div>
+        </div>
+
+        {/* =================================================
+            REMAINING TIME
+            ================================================= */}
+
+        <div className="flex items-end justify-between gap-4">
+          <div>
+            <div className="text-xs text-text-muted">
+              Remaining Time
             </div>
-            <div className="flex items-center gap-2">
-              <span className="h-1.5 w-1.5 rounded-full bg-signal-amber" />
-              <span className="text-text-secondary">Yellow</span>
-              <span className="ml-auto font-mono tabular-nums text-text">{yellowS}</span>
+
+            <div className="mt-1 font-mono text-3xl font-bold tabular-nums text-text">
+              {signal.remainingSeconds}
+
+              <span className="ml-1 text-sm font-normal text-text-muted">
+                detik
+              </span>
             </div>
-            <div className="flex items-center gap-2">
-              <span className="h-1.5 w-1.5 rounded-full bg-signal-red" />
-              <span className="text-text-secondary">Red</span>
-              <span className="ml-auto font-mono tabular-nums text-text">{redS}</span>
+          </div>
+
+          {/* =================================================
+              CYCLE TIME
+              ================================================= */}
+
+          <div className="text-right">
+            <div className="text-xs text-text-muted">
+              Cycle Time
+            </div>
+
+            <div className="mt-1 font-mono text-lg font-semibold tabular-nums text-text">
+              {signal.cycleTimeSeconds}
+
+              <span className="ml-1 text-xs font-normal text-text-muted">
+                detik
+              </span>
             </div>
           </div>
         </div>
 
-        <div className="relative shrink-0">
-          <DonutRing
-            size={92}
-            thickness={11}
-            segments={[
-              { value: greenS, color: COLOR_MAP.green.hex },
-              { value: yellowS, color: COLOR_MAP.amber.hex },
-              { value: redS, color: COLOR_MAP.red.hex },
-            ]}
-          />
-          <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-            <span className={`h-3 w-3 rounded-full ${c.text}`} style={{ backgroundColor: c.hex }} />
+        {/* =================================================
+            INTERSECTION
+            ================================================= */}
+
+        <div className="border-t border-border pt-3">
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-text-muted">
+              Intersection
+            </span>
+
+            <span className="font-mono text-xs text-text-secondary">
+              {signal.intersectionId}
+            </span>
+          </div>
+        </div>
+
+        {/* =================================================
+            TIMESTAMP
+            ================================================= */}
+
+        <div>
+          <div className="text-xs text-text-muted">
+            Last Update
+          </div>
+
+          <div className="mt-1 text-xs text-text-secondary">
+            {new Date(signal.timestamp).toLocaleString("id-ID")}
+          </div>
+        </div>
+
+        {/* =================================================
+            SOURCE
+            ================================================= */}
+
+        <div>
+          <div className="text-xs text-text-muted">
+            Data Source
+          </div>
+
+          <div className="mt-1 text-xs font-medium text-text-secondary">
+            {signal.source}
           </div>
         </div>
       </div>

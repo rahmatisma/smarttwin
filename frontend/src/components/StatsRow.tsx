@@ -1,24 +1,60 @@
-import { Car, Gauge, Milestone, PieChart, CloudSun } from "lucide-react";
+import {
+  Car,
+  Gauge,
+  Milestone,
+  PieChart,
+  CloudSun,
+} from "lucide-react";
+
 import type { ApproachState } from "@/types/traffic";
+
 import DonutRing from "./DonutRing";
 
-// Threshold ini hanya untuk indikator visual dashboard sementara.
-// densityIndex merupakan proxy lane occupancy/kepadatan,
-// bukan nilai kepadatan resmi kendaraan/km dan bukan LOS PKJI.
+/*
+ * =========================================================
+ * CONGESTION CLASSIFICATION
+ * =========================================================
+ *
+ * densityIndex merupakan proxy lane occupancy/kepadatan.
+ *
+ * BUKAN:
+ * - vehicles/km
+ * - occupancy fisik terkalibrasi
+ * - LOS resmi PKJI
+ *
+ * Threshold ini hanya digunakan untuk indikator visual
+ * dashboard.
+ */
+
 function congestionFromDensity(avgDensity: number): {
   label: string;
   color: "red" | "amber" | "green";
 } {
   if (avgDensity >= 130) {
-    return { label: "Tinggi", color: "red" };
+    return {
+      label: "Tinggi",
+      color: "red",
+    };
   }
 
   if (avgDensity >= 90) {
-    return { label: "Sedang", color: "amber" };
+    return {
+      label: "Sedang",
+      color: "amber",
+    };
   }
 
-  return { label: "Rendah", color: "green" };
+  return {
+    label: "Rendah",
+    color: "green",
+  };
 }
+
+/*
+ * =========================================================
+ * CONGESTION COLORS
+ * =========================================================
+ */
 
 const colorClasses: Record<
   "red" | "amber" | "green",
@@ -50,6 +86,12 @@ const colorClasses: Record<
     hex: "#2ecc71",
   },
 };
+
+/*
+ * =========================================================
+ * STAT CARD
+ * =========================================================
+ */
 
 function StatCard({
   icon,
@@ -87,88 +129,143 @@ function StatCard({
   );
 }
 
+/*
+ * =========================================================
+ * STATS ROW
+ * =========================================================
+ *
+ * Semua traffic metric berasal dari ApproachState.
+ *
+ * Contract:
+ *
+ * volume
+ * queueLengthVeh
+ * queueLengthMEst
+ * densityIndex
+ * avgSpeedKmh
+ *
+ * Tidak menggunakan mock data.
+ * Tidak membutuhkan occupancyPct dari page.tsx.
+ */
+
 export default function StatsRow({
   approaches,
-  occupancyPct,
   weather,
 }: {
   approaches: ApproachState[];
-  occupancyPct: number;
+
   weather: {
     dateLabel: string;
     condition: string;
-    tempC: number;
+    tempC: number | null;
   };
 }) {
   /*
    * =========================================================
-   * TRAFFIC METRICS
+   * TOTAL VOLUME
    * =========================================================
+   *
+   * Total kendaraan dari seluruh approach.
    */
 
-  // Total kendaraan dari seluruh approach.
   const totalVolume = approaches.reduce(
     (sum, approach) => sum + approach.volume,
     0
   );
 
   /*
-   * avgSpeedKmh boleh null karena CSV CV saat ini
-   * belum menyediakan data speed.
+   * =========================================================
+   * AVERAGE SPEED
+   * =========================================================
    *
-   * Hanya speed yang benar-benar tersedia yang dihitung.
+   * avgSpeedKmh boleh null berdasarkan contract.
+   *
+   * Karena itu hanya nilai speed yang tersedia
+   * yang ikut dihitung.
    */
+
   const speedValues = approaches
     .map((approach) => approach.avgSpeedKmh)
-    .filter((speed): speed is number => speed !== null);
+    .filter(
+      (speed): speed is number => speed !== null
+    );
 
   const avgSpeed =
     speedValues.length > 0
-      ? speedValues.reduce((sum, speed) => sum + speed, 0) /
-        speedValues.length
+      ? speedValues.reduce(
+        (sum, speed) => sum + speed,
+        0
+      ) / speedValues.length
       : null;
 
   /*
+   * =========================================================
+   * MAX QUEUE
+   * =========================================================
+   *
    * queueLengthMEst = estimasi panjang antrean dalam meter.
    */
+
   const maxQueue =
     approaches.length > 0
       ? Math.max(
-          ...approaches.map(
-            (approach) => approach.queueLengthMEst
-          )
+        ...approaches.map(
+          (approach) => approach.queueLengthMEst
         )
+      )
       : 0;
 
   /*
-   * densityIndex = proxy lane occupancy/kepadatan.
+   * =========================================================
+   * AVERAGE DENSITY INDEX
+   * =========================================================
+   *
+   * densityIndex adalah proxy lane occupancy/kepadatan.
    *
    * BUKAN vehicles/km.
    */
+
   const avgDensity =
     approaches.length > 0
       ? approaches.reduce(
-          (sum, approach) => sum + approach.densityIndex,
-          0
-        ) / approaches.length
+        (sum, approach) =>
+          sum + approach.densityIndex,
+        0
+      ) / approaches.length
       : 0;
 
-  const congestion = congestionFromDensity(avgDensity);
+  /*
+   * =========================================================
+   * CONGESTION
+   * =========================================================
+   */
+
+  const congestion =
+    congestionFromDensity(avgDensity);
+
   const c = colorClasses[congestion.color];
 
   /*
-   * Persentase visual untuk DonutRing.
+   * =========================================================
+   * VISUAL DENSITY PERCENTAGE
+   * =========================================================
    *
-   * Ini hanya indikator dashboard, bukan persentase
-   * occupancy fisik yang terkalibrasi.
+   * Ini hanya normalisasi visual untuk DonutRing.
+   *
+   * BUKAN occupancy fisik.
    */
+
   const congestionPct = Math.min(
-    Math.round((avgDensity / 180) * 100),
+    Math.max(
+      Math.round((avgDensity / 180) * 100),
+      0
+    ),
     100
   );
 
   return (
     <div className="grid grid-cols-2 gap-3 px-6 py-4 md:grid-cols-3 xl:grid-cols-6">
+
       {/* =====================================================
           TOTAL VEHICLES
           ===================================================== */}
@@ -191,7 +288,11 @@ export default function StatsRow({
             ? "N/A"
             : avgSpeed.toFixed(0)
         }
-        unit={avgSpeed === null ? undefined : "km/jam"}
+        unit={
+          avgSpeed === null
+            ? undefined
+            : "km/jam"
+        }
       />
 
       {/* =====================================================
@@ -206,14 +307,13 @@ export default function StatsRow({
       />
 
       {/* =====================================================
-          OCCUPANCY
+          DENSITY INDEX
           ===================================================== */}
 
       <StatCard
         icon={<PieChart className="h-4 w-4" />}
-        label="Occupancy"
-        value={occupancyPct.toString()}
-        unit="%"
+        label="Indeks Kepadatan"
+        value={avgDensity.toFixed(1)}
       />
 
       {/* =====================================================
@@ -231,7 +331,9 @@ export default function StatsRow({
           </div>
 
           <div className="text-sm font-medium text-text">
-            {weather.tempC}°C
+            {weather.tempC !== null
+              ? `${weather.tempC}°C`
+              : "N/A"}
 
             <span className="ml-1 text-xs font-normal text-text-muted">
               {weather.condition}

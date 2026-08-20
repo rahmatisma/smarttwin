@@ -1,63 +1,142 @@
-import { TrendingDown, TrendingUp } from "lucide-react";
-import type { SignalRecommendation } from "@/types/traffic";
+import type { Recommendation } from "@/types/traffic";
 
 export default function RecommendationPanel({
   recommendation,
 }: {
-  recommendation: SignalRecommendation;
+  recommendation?: Recommendation | null;
 }) {
-  const s = recommendation.chosenScenario;
+  /*
+   * =========================================================
+   * NO RECOMMENDATION DATA
+   * =========================================================
+   *
+   * Backend belum menyediakan recommendation.
+   *
+   * Jangan menggunakan data dummy.
+   */
+  if (!recommendation) {
+    return (
+      <div className="rounded-lg border border-border bg-surface p-4">
+        <div className="mb-3 flex items-center justify-between">
+          <h2 className="font-display text-sm font-semibold text-text">
+            Signal Recommendation
+          </h2>
+
+          <span className="text-xs text-text-muted">
+            Belum tersedia
+          </span>
+        </div>
+
+        <div className="flex min-h-32 items-center justify-center rounded-md border border-border bg-surface-2 px-4 text-center">
+          <p className="text-xs text-text-muted">
+            Rekomendasi pengaturan lampu lalu lintas
+            belum tersedia dari backend.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  /*
+   * =========================================================
+   * RECOMMENDATION DATA
+   * =========================================================
+   *
+   * Semua data di bawah berasal dari backend.
+   * Tidak ada nilai dummy.
+   */
 
   return (
     <div className="rounded-lg border border-border bg-surface p-4">
       <div className="mb-3 flex items-center justify-between">
-        <h2 className="font-display text-sm font-semibold text-text">Rekomendasi</h2>
-        <span className="rounded-full bg-accent-dim px-2 py-0.5 text-[10px] font-medium text-accent">
-          {recommendation.engine === "ppo" ? "PPO" : "Rule-based"}
+        <h2 className="font-display text-sm font-semibold text-text">
+          Signal Recommendation
+        </h2>
+
+        <span className="text-xs text-signal-green">
+          Available
         </span>
       </div>
 
-      <div className="mb-3 flex items-center gap-4">
-        <div>
-          <div className="text-xs text-text-secondary">Skor</div>
-          <div className="font-mono text-2xl font-bold tabular-nums text-signal-green">
-            {Math.round(s.avgDelayS > 0 ? 100 - s.avgDelayS : 0)}
+      <div className="space-y-3">
+        {/* Recommended Phase */}
+        <div className="rounded-md border border-border bg-surface-2 p-3">
+          <div className="text-xs text-text-muted">
+            Recommended Phase
+          </div>
+
+          <div className="mt-1 font-display text-sm font-semibold text-text">
+            {recommendation.recommendedPhase}
           </div>
         </div>
-        <div className="flex items-center gap-1 text-signal-green">
-          <TrendingUp className="h-4 w-4" />
-          <span className="font-mono text-sm tabular-nums">
-            +{recommendation.expectedImprovementPct}%
+
+        {/* Green Time */}
+        <div className="grid grid-cols-2 gap-3">
+          <div className="rounded-md border border-border bg-surface-2 p-3">
+            <div className="text-xs text-text-muted">
+              Recommended Green
+            </div>
+
+            <div className="mt-1 font-mono text-sm font-semibold text-text">
+              {recommendation.recommendedGreenSeconds}s
+            </div>
+          </div>
+
+          <div className="rounded-md border border-border bg-surface-2 p-3">
+            <div className="text-xs text-text-muted">
+              Current Green
+            </div>
+
+            <div className="mt-1 font-mono text-sm font-semibold text-text">
+              {recommendation.currentGreenSeconds}s
+            </div>
+          </div>
+        </div>
+
+        {/* Expected Improvement */}
+        <div className="rounded-md border border-border bg-surface-2 p-3">
+          <div className="text-xs text-text-muted">
+            Expected Delay Reduction
+          </div>
+
+          <div className="mt-1 font-mono text-sm font-semibold text-signal-green">
+            {recommendation.expectedDelayReductionPercent.toFixed(1)}%
+          </div>
+        </div>
+
+        {/* Confidence */}
+        <div className="rounded-md border border-border bg-surface-2 p-3">
+          <div className="text-xs text-text-muted">
+            Confidence
+          </div>
+
+          <div className="mt-1 font-mono text-sm font-semibold text-text">
+            {(recommendation.confidence * 100).toFixed(1)}%
+          </div>
+        </div>
+
+        {/* Reason */}
+        <div className="rounded-md border border-border bg-surface-2 p-3">
+          <div className="text-xs text-text-muted">
+            Reason
+          </div>
+
+          <div className="mt-1 text-xs leading-relaxed text-text-secondary">
+            {recommendation.reason}
+          </div>
+        </div>
+
+        {/* Source */}
+        <div className="flex items-center justify-between border-t border-border pt-2">
+          <span className="text-[10px] text-text-muted">
+            Source
+          </span>
+
+          <span className="text-[10px] text-text-secondary">
+            {recommendation.source}
           </span>
         </div>
-        <div className="flex items-center gap-1 text-text-secondary">
-          <TrendingDown className="h-4 w-4" />
-          <span className="font-mono text-sm tabular-nums">{s.avgDelayS}s delay</span>
-        </div>
       </div>
-
-      <div className="mb-3 space-y-1.5">
-        {s.phases.map((p) => (
-          <div key={p.phaseName} className="flex items-center gap-2">
-            <span className="w-32 shrink-0 truncate text-xs text-text-secondary">
-              {p.phaseName}
-            </span>
-            <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-surface-2">
-              <div
-                className="h-full rounded-full bg-accent"
-                style={{ width: `${(p.greenDurationS / s.cycleLengthS) * 100}%` }}
-              />
-            </div>
-            <span className="w-8 shrink-0 text-right font-mono text-xs tabular-nums text-text-muted">
-              {p.greenDurationS}s
-            </span>
-          </div>
-        ))}
-      </div>
-
-      <button className="w-full rounded-md bg-accent py-2 text-sm font-semibold text-bg transition-opacity hover:opacity-90">
-        Terapkan Rekomendasi
-      </button>
     </div>
   );
 }
