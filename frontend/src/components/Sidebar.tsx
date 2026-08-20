@@ -24,7 +24,9 @@ export default function Sidebar() {
   const pathname = usePathname();
 
   return (
-    <aside className="flex h-screen w-56 shrink-0 flex-col border-r border-border bg-surface">
+    <aside className="flex min-h-screen w-56 shrink-0 flex-col border-r border-border bg-surface">
+
+      {/* LOGO */}
       <div className="flex items-center gap-2.5 px-5 py-5">
         <div className="flex h-7 w-7 items-center justify-center rounded-md bg-signal-green/10 ring-1 ring-signal-green/30">
           <div className="h-2 w-2 rounded-full bg-signal-green" />
@@ -35,12 +37,16 @@ export default function Sidebar() {
         </span>
       </div>
 
-      <nav className="flex-1 space-y-1 px-3">
+      {/* NAVIGATION */}
+      <nav className="flex flex-1 flex-col space-y-1 px-3">
         {NAV_ITEMS.map((item) => {
           const Icon = item.icon;
 
           if (item.href) {
-            const isActive = pathname === item.href;
+            const isActive =
+              item.href === "/"
+                ? pathname === "/"
+                : pathname.startsWith(item.href);
 
             return (
               <Link
@@ -53,6 +59,7 @@ export default function Sidebar() {
                 }`}
               >
                 <Icon className="h-4 w-4 shrink-0" />
+
                 {item.label}
               </Link>
             );
@@ -65,28 +72,40 @@ export default function Sidebar() {
               className="flex w-full items-center gap-3 rounded-md px-3 py-2 text-left text-sm text-text-secondary transition-colors hover:bg-surface-2 hover:text-text"
             >
               <Icon className="h-4 w-4 shrink-0" />
+
               {item.label}
             </button>
           );
         })}
       </nav>
 
-      <div className="space-y-1 border-t border-border px-3 py-3">
-        <button
-          type="button"
-          className="flex w-full items-center gap-3 rounded-md px-3 py-2 text-left text-sm text-text-secondary transition-colors hover:bg-surface-2 hover:text-text"
+      {/* BOTTOM MENU */}
+      <div className="mt-auto space-y-1 border-t border-border px-3 py-3">
+
+        {/* ACCOUNT */}
+        <Link
+          href="/account"
+          className={`flex w-full items-center gap-3 rounded-md px-3 py-2 text-left text-sm transition-colors ${
+            pathname.startsWith("/account")
+              ? "bg-accent-dim text-accent"
+              : "text-text-secondary hover:bg-surface-2 hover:text-text"
+          }`}
         >
           <User className="h-4 w-4 shrink-0" />
-          Account
-        </button>
 
+          Account
+        </Link>
+
+        {/* HELP */}
         <button
           type="button"
           className="flex w-full items-center gap-3 rounded-md px-3 py-2 text-left text-sm text-text-secondary transition-colors hover:bg-surface-2 hover:text-text"
         >
           <HelpCircle className="h-4 w-4 shrink-0" />
+
           Help
         </button>
+
       </div>
     </aside>
   );
