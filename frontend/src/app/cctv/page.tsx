@@ -40,51 +40,102 @@ export default function CCTVPage() {
     const [showModal, setShowModal] = useState(false);
     const [search, setSearch] = useState("");
     const [form, setForm] = useState(EMPTY_FORM);
+
     const [previewUrls, setPreviewUrls] = useState<
         Record<string, string>
     >({});
 
     // =====================================================
-    // LOAD DATA
+    // LOAD DATA DARI LOCAL STORAGE
     // =====================================================
 
     useEffect(() => {
-        try {
-            const saved = localStorage.getItem(STORAGE_KEY);
+        if (typeof window === "undefined") {
+            return;
+        }
 
-            if (!saved) return;
+        try {
+            const saved =
+                window.localStorage.getItem(STORAGE_KEY);
+
+            if (!saved) {
+                return;
+            }
 
             const parsed: Camera[] = JSON.parse(saved);
 
-            // Blob URL tidak bisa bertahan setelah refresh.
-            // Jadi file video tidak dimuat kembali dari localStorage.
+            /*
+             * Blob URL dari file upload tidak bisa bertahan
+             * setelah browser refresh.
+             *
+             * Karena itu file video tidak kita restore
+             * dari localStorage.
+             */
             const validCameras = parsed.filter(
-                (camera) => camera.sourceType !== "file"
+                (camera) =>
+                    camera.sourceType !== "file"
             );
 
-            setCameras(validCameras);
+            /*
+             * Gunakan callback async supaya tidak melakukan
+             * setState langsung di body effect.
+             *
+             * Ini mencegah warning:
+             * "Calling setState synchronously within an effect"
+             */
+            const timer = window.setTimeout(() => {
+                setCameras(validCameras);
+            }, 0);
+
+            return () => {
+                window.clearTimeout(timer);
+            };
         } catch (error) {
-            console.error("Gagal membaca CCTV:", error);
-            localStorage.removeItem(STORAGE_KEY);
+            console.error(
+                "Gagal membaca CCTV:",
+                error
+            );
+
+            /*
+             * Pastikan localStorage hanya diakses
+             * melalui window.
+             */
+            window.localStorage.removeItem(
+                STORAGE_KEY
+            );
         }
     }, []);
 
     // =====================================================
-    // SAVE DATA
+    // SAVE DATA KE LOCAL STORAGE
     // =====================================================
 
     useEffect(() => {
+        if (typeof window === "undefined") {
+            return;
+        }
+
         try {
+            /*
+             * File video tidak disimpan karena source-nya
+             * berupa Blob URL yang tidak persistent.
+             *
+             * URL dan RTSP tetap disimpan.
+             */
             const camerasToSave = cameras.filter(
-                (camera) => camera.sourceType !== "file"
+                (camera) =>
+                    camera.sourceType !== "file"
             );
 
-            localStorage.setItem(
+            window.localStorage.setItem(
                 STORAGE_KEY,
                 JSON.stringify(camerasToSave)
             );
         } catch (error) {
-            console.error("Gagal menyimpan CCTV:", error);
+            console.error(
+                "Gagal menyimpan CCTV:",
+                error
+            );
         }
     }, [cameras]);
 
@@ -94,11 +145,13 @@ export default function CCTVPage() {
 
     useEffect(() => {
         return () => {
-            Object.values(previewUrls).forEach((url) => {
-                if (url.startsWith("blob:")) {
-                    URL.revokeObjectURL(url);
+            Object.values(previewUrls).forEach(
+                (url) => {
+                    if (url.startsWith("blob:")) {
+                        URL.revokeObjectURL(url);
+                    }
                 }
-            });
+            );
         };
     }, [previewUrls]);
 
@@ -107,7 +160,9 @@ export default function CCTVPage() {
     // =====================================================
 
     const filteredCameras = useMemo(() => {
-        const keyword = search.trim().toLowerCase();
+        const keyword = search
+            .trim()
+            .toLowerCase();
 
         if (!keyword) {
             return cameras;
@@ -141,17 +196,24 @@ export default function CCTVPage() {
         }
 
         if (!file.type.startsWith("video/")) {
-            alert("File yang dipilih harus berupa video.");
+            alert(
+                "File yang dipilih harus berupa video."
+            );
+
             event.target.value = "";
+
             return;
         }
 
-        // Hapus blob URL sebelumnya
+        /*
+         * Hapus blob URL sebelumnya apabila ada.
+         */
         if (form.source.startsWith("blob:")) {
             URL.revokeObjectURL(form.source);
         }
 
-        const videoUrl = URL.createObjectURL(file);
+        const videoUrl =
+            URL.createObjectURL(file);
 
         setForm((current) => ({
             ...current,
@@ -203,22 +265,35 @@ export default function CCTVPage() {
         }
 
         if (!form.source.trim()) {
-            alert("Silakan pilih video atau masukkan URL CCTV.");
+            alert(
+                "Silakan pilih video atau masukkan URL CCTV."
+            );
             return;
         }
 
+        /*
+         * crypto.randomUUID() hanya dipanggil
+         * ketika user menekan tombol Simpan,
+         * jadi sudah berada di browser.
+         */
         const id = crypto.randomUUID();
 
         const newCamera: Camera = {
             id,
             name: form.name.trim(),
+
             intersection:
                 form.intersection.trim() ||
                 "Tidak diketahui",
+
             direction: form.direction,
+
             sourceType: form.sourceType,
+
             source: form.source,
+
             fileName: form.fileName,
+
             status:
                 form.sourceType === "rtsp"
                     ? "waiting"
@@ -230,9 +305,15 @@ export default function CCTVPage() {
             ...current,
         ]);
 
-        // Kalau file berupa blob URL,
-        // simpan URL tersebut agar video tetap bisa diputar.
-        if (form.source.startsWith("blob:")) {
+        /*
+         * Kalau source berupa Blob URL,
+         * simpan di memory state previewUrls.
+         *
+         * Jangan simpan Blob URL ke localStorage.
+         */
+        if (
+            form.source.startsWith("blob:")
+        ) {
             setPreviewUrls((current) => ({
                 ...current,
                 [id]: form.source,
@@ -241,8 +322,10 @@ export default function CCTVPage() {
 
         setShowModal(false);
 
-        // Jangan revoke blob URL di sini
-        // karena masih digunakan oleh video.
+        /*
+         * Jangan revoke Blob URL di sini.
+         * Video masih menggunakannya.
+         */
         resetForm();
     }
 
@@ -253,19 +336,25 @@ export default function CCTVPage() {
     function deleteCamera(id: string) {
         const preview = previewUrls[id];
 
-        if (preview?.startsWith("blob:")) {
+        if (
+            preview &&
+            preview.startsWith("blob:")
+        ) {
             URL.revokeObjectURL(preview);
         }
 
         setPreviewUrls((current) => {
             const next = { ...current };
+
             delete next[id];
+
             return next;
         });
 
         setCameras((current) =>
             current.filter(
-                (camera) => camera.id !== id
+                (camera) =>
+                    camera.id !== id
             )
         );
     }
@@ -299,11 +388,13 @@ export default function CCTVPage() {
 
                             <div>
                                 <div className="mb-1 flex items-center gap-2">
+
                                     <span className="h-2.5 w-2.5 rounded-full bg-[#2ecc71]" />
 
                                     <h1 className="text-2xl font-semibold">
                                         CCTV Monitoring
                                     </h1>
+
                                 </div>
 
                                 <p className="text-sm text-[#748095]">
@@ -321,6 +412,7 @@ export default function CCTVPage() {
                             >
                                 + Tambah CCTV
                             </button>
+
                         </div>
 
                         {/* SEARCH */}
@@ -341,6 +433,7 @@ export default function CCTVPage() {
                             <span className="text-sm text-[#788397]">
                                 {filteredCameras.length} kamera
                             </span>
+
                         </div>
 
                         {/* CAMERA CONTENT */}
@@ -591,6 +684,7 @@ export default function CCTVPage() {
                 MODAL TAMBAH CCTV
             ================================================= */}
             {showModal && (
+
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
 
                     <div className="max-h-[92vh] w-full max-w-xl overflow-y-auto rounded-2xl border border-[#252d3a] bg-[#11161f]">
@@ -599,6 +693,7 @@ export default function CCTVPage() {
                         <div className="flex items-center justify-between border-b border-[#222a36] px-5 py-4">
 
                             <div>
+
                                 <h2 className="font-semibold">
                                     Tambah CCTV
                                 </h2>
@@ -607,6 +702,7 @@ export default function CCTVPage() {
                                     Daftarkan kamera baru ke
                                     SmartTwin.
                                 </p>
+
                             </div>
 
                             <button
@@ -704,6 +800,7 @@ export default function CCTVPage() {
                                         }
                                         className="w-full rounded-lg border border-[#29313e] bg-[#0c1118] px-3 py-2.5 text-sm text-white outline-none focus:border-[#268bc0]"
                                     >
+
                                         <option value="Utara">
                                             Utara
                                         </option>
@@ -719,6 +816,7 @@ export default function CCTVPage() {
                                         <option value="Barat">
                                             Barat
                                         </option>
+
                                     </select>
 
                                 </div>
@@ -749,6 +847,7 @@ export default function CCTVPage() {
                                         },
                                     ].map(
                                         (item) => (
+
                                             <button
                                                 key={
                                                     item.value
@@ -790,6 +889,7 @@ export default function CCTVPage() {
                                                     item.label
                                                 }
                                             </button>
+
                                         )
                                     )}
 
@@ -800,6 +900,7 @@ export default function CCTVPage() {
                             {/* FILE VIDEO */}
                             {form.sourceType ===
                             "file" && (
+
                                 <div>
 
                                     <label className="mb-2 block text-xs text-[#8390a2]">
@@ -836,6 +937,7 @@ export default function CCTVPage() {
 
                                     {/* PREVIEW VIDEO */}
                                     {form.source && (
+
                                         <div className="mt-4 overflow-hidden rounded-lg border border-[#29313e] bg-black">
 
                                             <video
@@ -850,6 +952,7 @@ export default function CCTVPage() {
                                             />
 
                                         </div>
+
                                     )}
 
                                 </div>
@@ -858,6 +961,7 @@ export default function CCTVPage() {
                             {/* URL */}
                             {form.sourceType ===
                                 "url" && (
+
                                 <div>
 
                                     <label className="mb-2 block text-xs text-[#8390a2]">
@@ -873,9 +977,10 @@ export default function CCTVPage() {
                                             setForm(
                                                 (current) => ({
                                                     ...current,
-                                                    source: event
-                                                        .target
-                                                        .value,
+                                                    source:
+                                                        event
+                                                            .target
+                                                            .value,
                                                 })
                                             )
                                         }
@@ -889,6 +994,7 @@ export default function CCTVPage() {
                             {/* RTSP */}
                             {form.sourceType ===
                                 "rtsp" && (
+
                                 <div>
 
                                     <label className="mb-2 block text-xs text-[#8390a2]">
@@ -904,9 +1010,10 @@ export default function CCTVPage() {
                                             setForm(
                                                 (current) => ({
                                                     ...current,
-                                                    source: event
-                                                        .target
-                                                        .value,
+                                                    source:
+                                                        event
+                                                            .target
+                                                            .value,
                                                 })
                                             )
                                         }

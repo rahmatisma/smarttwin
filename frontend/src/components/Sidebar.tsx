@@ -6,7 +6,6 @@ import {
   LayoutDashboard,
   Radar,
   Video,
-  Lightbulb,
   History,
   Settings,
   User,
@@ -17,7 +16,6 @@ const NAV_ITEMS = [
   { icon: LayoutDashboard, label: "Dashboard", href: "/" },
   { icon: Radar, label: "Digital Twin" },
   { icon: Video, label: "CCTV", href: "/cctv" },
-  { icon: Lightbulb, label: "Rekomendasi" },
   { icon: History, label: "History" },
   { icon: Settings, label: "Pengaturan" },
 ];
