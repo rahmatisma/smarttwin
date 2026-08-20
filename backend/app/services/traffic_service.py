@@ -1,16 +1,24 @@
+from __future__ import annotations
+
 from pathlib import Path
+from typing import Any
 
 from app.pipeline.traffic_state_builder import (
     TrafficStateBuilder,
     TrafficStateBuilderConfig,
 )
-from app.schemas.traffic import TrafficState
 
 
 class TrafficService:
     """
-    Service untuk mengambil traffic state
-    yang dihasilkan oleh TrafficStateBuilder.
+    Service untuk menyediakan TrafficState
+    kepada layer API.
+
+    Service tidak melakukan perhitungan traffic sendiri.
+
+    Semua agregasi dilakukan oleh:
+
+        TrafficStateBuilder
     """
 
     def __init__(
@@ -18,38 +26,75 @@ class TrafficService:
         csv_path: str | Path,
         window_seconds: int = 5,
     ) -> None:
+
         self.csv_path = Path(csv_path)
 
         self.builder = TrafficStateBuilder(
-            config=TrafficStateBuilderConfig(
+            TrafficStateBuilderConfig(
                 window_seconds=window_seconds
-            ),
+            )
         )
 
-    def get_latest_state(self) -> TrafficState:
+    # ========================================================
+    # BUILD ALL STATES
+    # ========================================================
+
+    def get_all_states(
+        self,
+    ) -> list[dict[str, Any]]:
         """
-        Mengambil TrafficState terbaru dari CSV CV.
+        Mengambil seluruh TrafficState
+        yang dihasilkan dari CSV.
         """
-        states = self.builder.build_from_csv(
+
+        return self.builder.build_from_csv(
             self.csv_path
         )
+
+    # ========================================================
+    # LATEST STATE
+    # ========================================================
+
+    def get_latest_state(
+        self,
+    ) -> dict[str, Any] | None:
+        """
+        Mengambil TrafficState paling terbaru.
+
+        Karena builder menghasilkan data
+        dalam urutan timestamp, state terakhir
+        adalah state terbaru.
+        """
+
+        states = self.get_all_states()
 
         if not states:
-            raise ValueError(
-                "Tidak ada TrafficState yang dihasilkan dari CSV."
-            )
+            return None
 
-        return TrafficState.model_validate(states[-1])
+        return states[-1]
 
-    def get_all_states(self) -> list[TrafficState]:
+    # ========================================================
+    # STATE BY INTERSECTION
+    # ========================================================
+
+    def get_latest_state_by_intersection(
+        self,
+        intersection_id: str,
+    ) -> dict[str, Any] | None:
         """
-        Mengambil seluruh TrafficState dari CSV.
+        Mengambil state terbaru dari intersection tertentu.
         """
-        states = self.builder.build_from_csv(
-            self.csv_path
-        )
 
-        return [
-            TrafficState.model_validate(state)
+        states = self.get_all_states()
+
+        matching_states = [
+            state
             for state in states
+            if state["intersectionId"]
+            == intersection_id
         ]
+
+        if not matching_states:
+            return None
+
+        return matching_states[-1]

@@ -6,70 +6,53 @@ from app.main import app
 client = TestClient(app)
 
 
-def test_root():
-    response = client.get("/")
+def test_get_traffic_state():
 
-    assert response.status_code == 200
-    assert response.json()["status"] == "running"
-
-
-def test_health():
-    response = client.get("/api/health")
-
-    assert response.status_code == 200
-    assert response.json()["status"] == "ok"
-
-
-def test_traffic_latest():
-    response = client.get("/api/traffic/latest")
-
-    assert response.status_code == 200
-
-    data = response.json()
-
-    assert data["success"] is True
-    assert data["data"]["intersection_id"] == "intersection_01"
-
-
-def test_signal_status():
-    response = client.get("/api/signal/status")
-
-    assert response.status_code == 200
-
-    data = response.json()
-
-    assert data["intersection_id"] == "intersection_01"
-
-
-def test_forecast():
-    response = client.post(
-        "/api/forecast",
-        json={
-            "intersection_id": "intersection_01",
-            "horizon_minutes": 5,
-        },
+    response = client.get(
+        "/api/v1/traffic/state"
     )
 
     assert response.status_code == 200
 
     data = response.json()
 
-    assert data["success"] is True
-    assert len(data["predictions"]) == 5
+    # ========================================================
+    # TRAFFIC STATE
+    # ========================================================
 
-
-def test_recommendation():
-    response = client.post(
-        "/api/recommendation",
-        json={
-            "intersection_id": "intersection_01",
-            "simulation_horizon_minutes": 15,
-        },
+    assert (
+        data["intersectionId"]
+        == "simpang4-pingit"
     )
 
-    assert response.status_code == 200
+    assert "windowStart" in data
+    assert "windowEnd" in data
+    assert "approaches" in data
 
-    data = response.json()
+    # Simpang 4
+    assert len(
+        data["approaches"]
+    ) == 4
 
-    assert data["success"] is True
-    assert "recommendation" in data
+    # ========================================================
+    # APPROACH CONTRACT
+    # ========================================================
+
+    for approach in data["approaches"]:
+
+        assert "approach" in approach
+        assert "volume" in approach
+        assert "carCount" in approach
+        assert "motorcycleCount" in approach
+        assert "busCount" in approach
+        assert "truckCount" in approach
+        assert "queueLengthVeh" in approach
+        assert "queueLengthMEst" in approach
+        assert "densityIndex" in approach
+        assert "avgSpeedKmh" in approach
+
+        # Speed memang belum tersedia.
+        assert (
+            approach["avgSpeedKmh"]
+            is None
+        )

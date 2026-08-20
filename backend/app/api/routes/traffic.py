@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
@@ -12,11 +14,15 @@ router = APIRouter(
 )
 
 
-# =========================================================
+# ============================================================
 # CSV LOCATION
-# =========================================================
+# ============================================================
 
-PROJECT_ROOT = Path(__file__).resolve().parents[4]
+PROJECT_ROOT = (
+    Path(__file__)
+    .resolve()
+    .parents[4]
+)
 
 CSV_PATH = (
     PROJECT_ROOT
@@ -26,15 +32,19 @@ CSV_PATH = (
 )
 
 
+# ============================================================
+# SERVICE
+# ============================================================
+
 traffic_service = TrafficService(
     csv_path=CSV_PATH,
     window_seconds=5,
 )
 
 
-# =========================================================
+# ============================================================
 # GET LATEST TRAFFIC STATE
-# =========================================================
+# ============================================================
 
 @router.get(
     "/state",
@@ -42,26 +52,30 @@ traffic_service = TrafficService(
 )
 def get_traffic_state() -> TrafficState:
     """
-    Mengambil TrafficState terbaru hasil
-    Traffic State Builder.
+    Mengambil TrafficState terbaru.
+
+    Flow:
+
+        CV CSV
+          ↓
+        TrafficStateBuilder
+          ↓
+        TrafficService
+          ↓
+        API
+          ↓
+        Frontend
     """
 
     try:
-        return traffic_service.get_latest_state()
 
-    except FileNotFoundError as exc:
-        raise HTTPException(
-            status_code=404,
-            detail=str(exc),
-        ) from exc
-
-    except ValueError as exc:
-        raise HTTPException(
-            status_code=422,
-            detail=str(exc),
-        ) from exc
+        state = (
+            traffic_service
+            .get_latest_state()
+        )
 
     except Exception as exc:
+
         raise HTTPException(
             status_code=500,
             detail=(
@@ -69,3 +83,14 @@ def get_traffic_state() -> TrafficState:
                 f"{exc}"
             ),
         ) from exc
+
+    if state is None:
+
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                "Traffic state belum tersedia."
+            ),
+        )
+
+    return state
