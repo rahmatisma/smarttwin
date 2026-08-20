@@ -291,4 +291,24 @@ Backend API
 Dashboard / SUMO
 ```
 
+## 8. Minimal Hasil Tes
+```text
+[] CSV berhasil dibaca
+[]timestamp berhasil diparse
+[] window 5 detik terbentuk
+[] lane → approach
+[] volume = SUM vehicle_count
+[] carCount benar
+[] motorcycleCount benar
+[] busCount benar
+[] truckCount benar
+[] queueLengthVeh benar
+[] queueLengthMEst benar
+[] densityIndex benar
+[] avgSpeedKmh = None
+[] semua north/south/east/west tersedia
+[] tidak ada nilai negatif
+[] tidak terjadi double counting
+```
+
 **Prinsip utama:** Traffic State Builder hanya bertanggung jawab mengubah data CV menjadi state lalu lintas sesuai contract. Logika API, frontend, SUMO, forecasting, dan recommendation tetap berada di layer masing-masing.
