@@ -692,29 +692,6 @@ Kalau user membuka history, database bisa mengetahui video apa saja yang pernah 
 | `completedAt`     | `timestamptz` | NULL                     | Selesai     |
 | `createdAt`       | `timestamptz` | NOT NULL                 | Dibuat      |
 
----
-
-# 2.20 `systemLogs`
-
-Untuk debugging dan audit sistem.
-
-| Column      | Type          | Constraint    | Description |
-| ----------- | ------------- | ------------- | ----------- |
-| `id`        | `bigserial`   | PK            | ID          |
-| `userId`    | `bigint`      | FK → users.id | User        |
-| `level`     | `varchar(20)` | NOT NULL      | Level log   |
-| `module`    | `varchar(50)` | NOT NULL      | Modul       |
-| `message`   | `text`        | NOT NULL      | Pesan       |
-| `metadata`  | `jsonb`       | NULL          | Metadata    |
-| `createdAt` | `timestamptz` | NOT NULL      | Waktu       |
-
-Level:
-
-```text
-info
-warning
-error
-```
 
 ---
 
