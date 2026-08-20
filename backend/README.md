@@ -108,7 +108,50 @@ Backend Traffic API
 
 ---
 
-# 4. Traffic Data — Source of Truth
+# 4. Database
+
+backend/
+│
+├── app/
+│   ├── api/
+│   ├── core/
+│   ├── db/                    ← BARU
+│   │   ├── database.py
+│   │   ├── base.py
+│   │   ├── models/
+│   │   │   ├── intersection.py
+│   │   │   ├── approach.py
+│   │   │   ├── lane.py
+│   │   │   ├── camera.py
+│   │   │   ├── video.py
+│   │   │   ├── processing_job.py
+│   │   │   ├── traffic_state.py
+│   │   │   ├── forecast.py
+│   │   │   ├── signal_status.py
+│   │   │   ├── recommendation.py
+│   │   │   └── simulation.py
+│   │   └── repositories/
+│   │       ├── traffic_repository.py
+│   │       ├── cctv_repository.py
+│   │       ├── forecast_repository.py
+│   │       ├── signal_repository.py
+│   │       ├── recommendation_repository.py
+│   │       └── simulation_repository.py
+│   │
+│   ├── pipeline/
+│   │   └── traffic_state_builder.py
+│   │
+│   ├── schemas/
+│   ├── services/
+│   └── main.py
+│
+├── migrations/
+├── tests/
+├── .env
+├── .env.example
+└── requirements.txt
+
+# 5. Traffic Data — Source of Truth
 
 ### Catatan
 
@@ -127,7 +170,7 @@ nilai null    → tampilkan "N/A"
 
 ---
 
-# 5. Endpoint
+# 6. Endpoint
 
 | Method | Endpoint              | Fungsi                |
 | ------ | --------------------- | --------------------- |
