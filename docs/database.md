@@ -1,11 +1,3 @@
-YESS, aku masih ingat dashboard-nya dari screenshot tadi. Dari tampilan itu, database-nya **nggak cukup cuma menyimpan `trafficState`**. Kita perlu menampung data simpang, lane, CCTV/video, hasil CV, traffic state, signal, forecast, recommendation, simulation, dan history.
-
-Dan karena kamu minta **PostgreSQL + semua nama camelCase + align dengan data contract**, aku sarankan struktur berikut sebagai **baseline database final SmartTwin**.
-
-Aku buat dalam format **README.md** supaya bisa langsung kamu taruh di repo.
-
----
-
 # SmartTwin Database Schema
 
 Database PostgreSQL untuk SmartTwin — Digital Twin untuk simulasi adaptif pengaturan lampu lalu lintas.
@@ -27,6 +19,7 @@ Database bertanggung jawab menyimpan:
 * simulation metrics
 * history dashboard
 * user dan pengaturan sistem
+* system logs
 
 Video CCTV **tidak disimpan langsung di PostgreSQL**. File video disimpan pada Hugging Face Hub, sedangkan PostgreSQL hanya menyimpan metadata dan URL/repository reference.
 
@@ -50,7 +43,8 @@ Intersection
  │         └── CvProcessingJob
  │
  ├── TrafficState
- │    └── TrafficApproachState
+ │    ├── TrafficApproachState
+ │    └── TrafficLaneMetric
  │
  ├── SignalPhase
  │    └── SignalStatus
@@ -73,72 +67,49 @@ Secara keseluruhan:
                            │
                     ┌──────▼───────┐
                     │ UserSetting  │
-                    └──────────────┘
+                    └──────┬───────┘
+                           │
+                           ▼
+                  ┌────────────────┐
+                  │  Intersection  │
+                  └───────┬────────┘
+                          │
+          ┌───────────────┼─────────────────────┐
+          │               │                     │
+          ▼               ▼                     ▼
+   ┌────────────┐   ┌────────────┐      ┌──────────────┐
+   │  Approach  │   │   Camera   │      │ TrafficState │
+   └─────┬──────┘   └──────┬─────┘      └──────┬───────┘
+         │                 │                   │
+         ▼                 ▼                   ├── TrafficApproachState
+      ┌──────┐       ┌────────────┐            │
+      │ Lane │       │CameraVideo │            └── TrafficLaneMetric
+      └──────┘       └──────┬─────┘
+                             │
+                             ▼
+                    ┌─────────────────┐
+                    │CvProcessingJob  │
+                    └─────────────────┘
 
 
-┌──────────────────────────────────────────────────────────────┐
-│                         INTERSECTION                         │
-└───────────────┬──────────────────────┬───────────────────────┘
-                │                      │
-                ▼                      ▼
-        ┌──────────────┐       ┌──────────────┐
-        │   Approach   │       │    Camera    │
-        └──────┬───────┘       └──────┬───────┘
-               │                      │
-               ▼                      ▼
-        ┌──────────────┐       ┌──────────────┐
-        │     Lane     │       │ CameraVideo  │
-        └──────────────┘       └──────┬───────┘
-                                      │
-                                      ▼
-                              ┌─────────────────┐
-                              │CvProcessingJob  │
-                              └────────┬────────┘
-                                       │
-                                       ▼
-                              ┌─────────────────┐
-                              │  TrafficState   │
-                              └────────┬────────┘
-                                       │
-                                       ▼
-                              ┌─────────────────────┐
-                              │TrafficApproachState │
-                              └─────────────────────┘
-
-
-┌──────────────────────┐
-│    SignalPhase       │
-└──────────┬───────────┘
-           │
-           ▼
-┌──────────────────────┐
-│    SignalStatus      │
-└──────────────────────┘
-
-
-┌──────────────────────┐
-│      Forecast        │
-└──────────┬───────────┘
-           │
-           ▼
-┌──────────────────────┐
-│ ForecastPrediction   │
-└──────────────────────┘
-
-
-┌──────────────────────┐
-│   Recommendation     │
-└──────────────────────┘
-
-
-┌──────────────────────┐
-│     Simulation       │
-└──────────┬───────────┘
-           │
-           ▼
-┌──────────────────────┐
-│  SimulationMetric    │
-└──────────────────────┘
+Intersection
+ │
+ ├── SignalPhase
+ │       │
+ │       ▼
+ │   SignalStatus
+ │
+ ├── Forecast
+ │       │
+ │       ▼
+ │   ForecastPrediction
+ │
+ ├── Recommendation
+ │
+ └── Simulation
+         │
+         ▼
+   SimulationMetric
 ```
 
 ---
@@ -170,18 +141,24 @@ viewer
 
 ---
 
-# 2.2 `userSettings`
+## 2.2 `userSettings`
 
 Menyimpan pengaturan dashboard masing-masing user.
 
-| Column                  | Type          | Constraint            | Description      |
-| ----------------------- | ------------- | --------------------- | ---------------- |
-| `id`                    | `bigserial`   | PK                    | ID setting       |
-| `userId`                | `bigint`      | FK → users.id         | Pemilik setting  |
-| `defaultIntersectionId` | `bigint`      | FK → intersections.id | Simpang default  |
-| `theme`                 | `varchar(20)` | NOT NULL              | Tema dashboard   |
-| `createdAt`             | `timestamptz` | NOT NULL              | Waktu dibuat     |
-| `updatedAt`             | `timestamptz` | NOT NULL              | Waktu diperbarui |
+| Column                  | Type          | Constraint              | Description      |
+| ----------------------- | ------------- | ----------------------- | ---------------- |
+| `id`                    | `bigserial`   | PK                      | ID setting       |
+| `userId`                | `bigint`      | FK → `users.id`         | Pemilik setting  |
+| `defaultIntersectionId` | `bigint`      | FK → `intersections.id` | Simpang default  |
+| `theme`                 | `varchar(20)` | NOT NULL                | Tema dashboard   |
+| `createdAt`             | `timestamptz` | NOT NULL                | Waktu dibuat     |
+| `updatedAt`             | `timestamptz` | NOT NULL                | Waktu diperbarui |
+
+Constraint:
+
+```text
+UNIQUE(userId)
+```
 
 Relasi:
 
@@ -191,7 +168,7 @@ users 1 ─────── 1 userSettings
 
 ---
 
-# 2.3 `intersections`
+## 2.3 `intersections`
 
 Ini adalah entity utama SmartTwin.
 
@@ -222,17 +199,17 @@ name = Simpang 4 Pingit
 
 ---
 
-# 2.4 `approaches`
+## 2.4 `approaches`
 
 Menyimpan empat lengan persimpangan.
 
-| Column           | Type           | Constraint            | Description           |
-| ---------------- | -------------- | --------------------- | --------------------- |
-| `id`             | `bigserial`    | PK                    | ID approach           |
-| `intersectionId` | `bigint`       | FK → intersections.id | Simpang               |
-| `approach`       | `varchar(10)`  | NOT NULL              | north/south/east/west |
-| `name`           | `varchar(100)` | NULL                  | Nama approach         |
-| `createdAt`      | `timestamptz`  | NOT NULL              | Waktu dibuat          |
+| Column           | Type           | Constraint              | Description           |
+| ---------------- | -------------- | ----------------------- | --------------------- |
+| `id`             | `bigserial`    | PK                      | ID approach           |
+| `intersectionId` | `bigint`       | FK → `intersections.id` | Simpang               |
+| `approach`       | `varchar(10)`  | NOT NULL                | north/south/east/west |
+| `name`           | `varchar(100)` | NULL                    | Nama approach         |
+| `createdAt`      | `timestamptz`  | NOT NULL                | Waktu dibuat          |
 
 Nilai `approach`:
 
@@ -243,6 +220,12 @@ east
 west
 ```
 
+Constraint:
+
+```text
+UNIQUE(intersectionId, approach)
+```
+
 Relasi:
 
 ```text
@@ -251,18 +234,24 @@ intersections 1 ─────── N approaches
 
 ---
 
-# 2.5 `lanes`
+## 2.5 `lanes`
 
 Menyimpan lane pada masing-masing approach.
 
-| Column       | Type          | Constraint         | Description     |
-| ------------ | ------------- | ------------------ | --------------- |
-| `id`         | `bigserial`   | PK                 | ID lane         |
-| `approachId` | `bigint`      | FK → approaches.id | Approach        |
-| `laneId`     | `varchar(50)` | NOT NULL           | ID lane         |
-| `laneNumber` | `integer`     | NULL               | Nomor lane      |
-| `direction`  | `varchar(30)` | NULL               | Arah pergerakan |
-| `createdAt`  | `timestamptz` | NOT NULL           | Waktu dibuat    |
+| Column       | Type          | Constraint           | Description     |
+| ------------ | ------------- | -------------------- | --------------- |
+| `id`         | `bigserial`   | PK                   | ID lane         |
+| `approachId` | `bigint`      | FK → `approaches.id` | Approach        |
+| `laneId`     | `varchar(50)` | NOT NULL             | ID lane         |
+| `laneNumber` | `integer`     | NULL                 | Nomor lane      |
+| `direction`  | `varchar(30)` | NULL                 | Arah pergerakan |
+| `createdAt`  | `timestamptz` | NOT NULL             | Waktu dibuat    |
+
+Constraint:
+
+```text
+UNIQUE(approachId, laneId)
+```
 
 Contoh:
 
@@ -277,22 +266,22 @@ north
 
 ---
 
-# 2.6 `cameras`
+## 2.6 `cameras`
 
 Menyimpan informasi CCTV.
 
-| Column           | Type           | Constraint            | Description      |
-| ---------------- | -------------- | --------------------- | ---------------- |
-| `id`             | `bigserial`    | PK                    | ID kamera        |
-| `intersectionId` | `bigint`       | FK → intersections.id | Simpang          |
-| `cameraId`       | `varchar(100)` | UNIQUE, NOT NULL      | ID kamera        |
-| `name`           | `varchar(150)` | NOT NULL              | Nama kamera      |
-| `approachId`     | `bigint`       | FK → approaches.id    | Approach kamera  |
-| `sourceType`     | `varchar(30)`  | NOT NULL              | Sumber kamera    |
-| `sourceUrl`      | `text`         | NULL                  | URL stream       |
-| `status`         | `varchar(30)`  | NOT NULL              | Status kamera    |
-| `createdAt`      | `timestamptz`  | NOT NULL              | Waktu dibuat     |
-| `updatedAt`      | `timestamptz`  | NOT NULL              | Waktu diperbarui |
+| Column           | Type           | Constraint              | Description      |
+| ---------------- | -------------- | ----------------------- | ---------------- |
+| `id`             | `bigserial`    | PK                      | ID kamera        |
+| `intersectionId` | `bigint`       | FK → `intersections.id` | Simpang          |
+| `cameraId`       | `varchar(100)` | UNIQUE, NOT NULL        | ID kamera        |
+| `name`           | `varchar(150)` | NOT NULL                | Nama kamera      |
+| `approachId`     | `bigint`       | FK → `approaches.id`    | Approach kamera  |
+| `sourceType`     | `varchar(30)`  | NOT NULL                | Sumber kamera    |
+| `sourceUrl`      | `text`         | NULL                    | URL stream       |
+| `status`         | `varchar(30)`  | NOT NULL                | Status kamera    |
+| `createdAt`      | `timestamptz`  | NOT NULL                | Waktu dibuat     |
+| `updatedAt`      | `timestamptz`  | NOT NULL                | Waktu diperbarui |
 
 `sourceType`:
 
@@ -302,28 +291,60 @@ uploaded
 dataset
 ```
 
+Relasi:
+
+```text
+intersections 1 ─────── N cameras
+approaches    1 ─────── N cameras
+```
+
 ---
 
-# 2.7 `cameraVideos`
+## 2.7 `cameraVideos`
 
 Ini **penting untuk halaman CCTV**.
 
 Video disimpan di Hugging Face, bukan PostgreSQL.
 
-| Column            | Type           | Constraint      | Description      |
-| ----------------- | -------------- | --------------- | ---------------- |
-| `id`              | `bigserial`    | PK              | ID video         |
-| `cameraId`        | `bigint`       | FK → cameras.id | Kamera           |
-| `videoName`       | `varchar(255)` | NOT NULL        | Nama video       |
-| `storageProvider` | `varchar(30)`  | NOT NULL        | Penyimpanan      |
-| `repositoryId`    | `varchar(255)` | NULL            | ID repository HF |
-| `filePath`        | `text`         | NULL            | Path file di HF  |
-| `fileUrl`         | `text`         | NULL            | URL video        |
-| `durationSeconds` | `integer`      | NULL            | Durasi           |
-| `fileSizeBytes`   | `bigint`       | NULL            | Ukuran file      |
-| `recordedAt`      | `timestamptz`  | NULL            | Waktu rekaman    |
-| `uploadedAt`      | `timestamptz`  | NOT NULL        | Waktu upload     |
-| `status`          | `varchar(30)`  | NOT NULL        | Status video     |
+| Column            | Type           | Constraint        | Description      |
+| ----------------- | -------------- | ----------------- | ---------------- |
+| `id`              | `bigserial`    | PK                | ID video         |
+| `cameraId`        | `bigint`       | FK → `cameras.id` | Kamera           |
+| `videoName`       | `varchar(255)` | NOT NULL          | Nama video       |
+| `videoFormat`     | `varchar(20)`  | NOT NULL          | Format video     |
+| `storageProvider` | `varchar(30)`  | NOT NULL          | Penyimpanan      |
+| `repositoryId`    | `varchar(255)` | NULL              | ID repository HF |
+| `filePath`        | `text`         | NULL              | Path file di HF  |
+| `fileUrl`         | `text`         | NULL              | URL video        |
+| `durationSeconds` | `integer`      | NULL              | Durasi           |
+| `fileSizeBytes`   | `bigint`       | NULL              | Ukuran file      |
+| `recordedAt`      | `timestamptz`  | NULL              | Waktu rekaman    |
+| `uploadedAt`      | `timestamptz`  | NOT NULL          | Waktu upload     |
+| `status`          | `varchar(30)`  | NOT NULL          | Status video     |
+
+**Perubahan penting:**
+
+Field `intersectionName` dihapus karena redundant.
+
+Relasi:
+
+```text
+Camera
+   │
+   └── CameraVideo
+```
+
+Informasi persimpangan video dapat diperoleh melalui:
+
+```text
+cameraVideos.cameraId
+        ↓
+cameras.id
+        ↓
+cameras.intersectionId
+        ↓
+intersections.id
+```
 
 Contoh:
 
@@ -331,26 +352,27 @@ Contoh:
 storageProvider = huggingface
 repositoryId = username/smarttwin-cctv
 filePath = videos/simpang4-pingit/video01.mp4
+videoFormat = mp4
 ```
 
 ---
 
-# 2.8 `cvProcessingJobs`
+## 2.8 `cvProcessingJobs`
 
 Mencatat proses YOLO + ByteTrack terhadap video.
 
-| Column         | Type           | Constraint           | Description      |
-| -------------- | -------------- | -------------------- | ---------------- |
-| `id`           | `bigserial`    | PK                   | ID job           |
-| `videoId`      | `bigint`       | FK → cameraVideos.id | Video input      |
-| `modelName`    | `varchar(100)` | NULL                 | Model CV         |
-| `modelVersion` | `varchar(50)`  | NULL                 | Versi model      |
-| `startedAt`    | `timestamptz`  | NULL                 | Waktu mulai      |
-| `completedAt`  | `timestamptz`  | NULL                 | Waktu selesai    |
-| `status`       | `varchar(30)`  | NOT NULL             | Status proses    |
-| `outputPath`   | `text`         | NULL                 | Lokasi output    |
-| `errorMessage` | `text`         | NULL                 | Error jika gagal |
-| `createdAt`    | `timestamptz`  | NOT NULL             | Waktu dibuat     |
+| Column         | Type           | Constraint             | Description      |
+| -------------- | -------------- | ---------------------- | ---------------- |
+| `id`           | `bigserial`    | PK                     | ID job           |
+| `videoId`      | `bigint`       | FK → `cameraVideos.id` | Video input      |
+| `modelName`    | `varchar(100)` | NULL                   | Model CV         |
+| `modelVersion` | `varchar(50)`  | NULL                   | Versi model      |
+| `startedAt`    | `timestamptz`  | NULL                   | Waktu mulai      |
+| `completedAt`  | `timestamptz`  | NULL                   | Waktu selesai    |
+| `status`       | `varchar(30)`  | NOT NULL               | Status proses    |
+| `outputPath`   | `text`         | NULL                   | Lokasi output    |
+| `errorMessage` | `text`         | NULL                   | Error jika gagal |
+| `createdAt`    | `timestamptz`  | NOT NULL               | Waktu dibuat     |
 
 Status:
 
@@ -361,21 +383,27 @@ completed
 failed
 ```
 
+Relasi:
+
+```text
+CameraVideo 1 ─────── N CvProcessingJob
+```
+
 ---
 
-# 2.9 `trafficStates`
+## 2.9 `trafficStates`
 
 Ini merupakan **parent entity dari TrafficState contract**.
 
-| Column            | Type          | Constraint               | Description  |
-| ----------------- | ------------- | ------------------------ | ------------ |
-| `id`              | `bigserial`   | PK                       | ID internal  |
-| `intersectionId`  | `bigint`      | FK → intersections.id    | Simpang      |
-| `windowStart`     | `timestamptz` | NOT NULL                 | Awal window  |
-| `windowEnd`       | `timestamptz` | NOT NULL                 | Akhir window |
-| `source`          | `varchar(30)` | NOT NULL                 | Sumber data  |
-| `processingJobId` | `bigint`      | FK → cvProcessingJobs.id | CV job       |
-| `createdAt`       | `timestamptz` | NOT NULL                 | Waktu dibuat |
+| Column            | Type          | Constraint                 | Description  |
+| ----------------- | ------------- | -------------------------- | ------------ |
+| `id`              | `bigserial`   | PK                         | ID internal  |
+| `intersectionId`  | `bigint`      | FK → `intersections.id`    | Simpang      |
+| `windowStart`     | `timestamptz` | NOT NULL                   | Awal window  |
+| `windowEnd`       | `timestamptz` | NOT NULL                   | Akhir window |
+| `source`          | `varchar(30)` | NOT NULL                   | Sumber data  |
+| `processingJobId` | `bigint`      | FK → `cvProcessingJobs.id` | CV job       |
+| `createdAt`       | `timestamptz` | NOT NULL                   | Waktu dibuat |
 
 Contoh:
 
@@ -384,31 +412,71 @@ windowStart = 2026-08-15T16:30:10
 windowEnd   = 2026-08-15T16:30:15
 ```
 
+Relasi:
+
+```text
+Intersection 1 ─────── N TrafficState
+
+CvProcessingJob 1 ─── N TrafficState
+```
+
 ---
 
-# 2.10 `trafficApproachStates`
+## 2.10 `trafficApproachStates`
 
 Ini bagian **paling penting** untuk menyimpan `ApproachState`.
 
-| Column            | Type               | Constraint            | Description              |
-| ----------------- | ------------------ | --------------------- | ------------------------ |
-| `id`              | `bigserial`        | PK                    | ID                       |
-| `trafficStateId`  | `bigint`           | FK → trafficStates.id | Traffic state            |
-| `approachId`      | `bigint`           | FK → approaches.id    | Approach                 |
-| `approach`        | `varchar(10)`      | NOT NULL              | north/south/east/west    |
-| `volume`          | `integer`          | NOT NULL              | Total kendaraan          |
-| `carCount`        | `integer`          | NOT NULL              | Jumlah mobil             |
-| `motorcycleCount` | `integer`          | NOT NULL              | Jumlah motor             |
-| `busCount`        | `integer`          | NOT NULL              | Jumlah bus               |
-| `truckCount`      | `integer`          | NOT NULL              | Jumlah truk              |
-| `queueLengthVeh`  | `integer`          | NOT NULL              | Jumlah kendaraan antre   |
-| `queueLengthMEst` | `double precision` | NOT NULL              | Estimasi panjang antrean |
-| `densityIndex`    | `double precision` | NOT NULL              | Proxy kepadatan          |
-| `avgSpeedKmh`     | `double precision` | NULL                  | Kecepatan rata-rata      |
+| Column            | Type               | Constraint              | Description              |
+| ----------------- | ------------------ | ----------------------- | ------------------------ |
+| `id`              | `bigserial`        | PK                      | ID                       |
+| `trafficStateId`  | `bigint`           | FK → `trafficStates.id` | Traffic state            |
+| `approachId`      | `bigint`           | FK → `approaches.id`    | Approach                 |
+| `approach`        | `varchar(10)`      | NOT NULL                | north/south/east/west    |
+| `volume`          | `integer`          | NOT NULL                | Total kendaraan          |
+| `carCount`        | `integer`          | NOT NULL                | Jumlah mobil             |
+| `motorcycleCount` | `integer`          | NOT NULL                | Jumlah motor             |
+| `busCount`        | `integer`          | NOT NULL                | Jumlah bus               |
+| `truckCount`      | `integer`          | NOT NULL                | Jumlah truk              |
+| `queueLengthVeh`  | `integer`          | NOT NULL                | Jumlah kendaraan antre   |
+| `queueLengthMEst` | `double precision` | NOT NULL                | Estimasi panjang antrean |
+| `densityIndex`    | `double precision` | NOT NULL                | Proxy kepadatan          |
+| `avgSpeedKmh`     | `double precision` | NULL                    | Kecepatan rata-rata      |
+
+Constraint:
+
+```text
+UNIQUE(trafficStateId, approachId)
+```
+
+### Kenapa `approachId` dan `approach` sama-sama ada?
+
+`approachId` digunakan untuk **relasi database**.
+
+`approach` digunakan untuk **data contract/API**.
+
+Jadi:
+
+```text
+approachId
+    ↓
+approaches
+    ↓
+approach = north
+```
+
+Backend dapat mengembalikan:
+
+```json
+{
+  "approach": "north"
+}
+```
+
+tanpa mengubah contract frontend.
 
 ### Sangat penting
 
-Field ini **harus persis**:
+Field contract harus persis:
 
 ```text
 volume
@@ -439,30 +507,28 @@ kalau speed memang belum tersedia.
 
 ---
 
-# 2.11 `trafficLaneMetrics`
+## 2.11 `trafficLaneMetrics`
 
-Nah ini **opsional tetapi aku sangat merekomendasikan untuk SmartTwin** karena data CV awal kamu masih berbentuk:
+Direkomendasikan untuk SmartTwin karena data CV awal masih berbentuk:
 
 ```text
 timestamp + approach + lane
 ```
 
-Jadi kita bisa menyimpan hasil per-lane sebelum diaggregate menjadi `TrafficApproachState`.
-
-| Column            | Type               | Constraint            | Description        |
-| ----------------- | ------------------ | --------------------- | ------------------ |
-| `id`              | `bigserial`        | PK                    | ID                 |
-| `trafficStateId`  | `bigint`           | FK → trafficStates.id | Traffic state      |
-| `laneId`          | `bigint`           | FK → lanes.id         | Lane               |
-| `timestamp`       | `timestamptz`      | NOT NULL              | Timestamp CV       |
-| `vehicleCount`    | `integer`          | NOT NULL              | Kendaraan crossing |
-| `carCount`        | `integer`          | NOT NULL              | Mobil              |
-| `motorcycleCount` | `integer`          | NOT NULL              | Motor              |
-| `busCount`        | `integer`          | NOT NULL              | Bus                |
-| `truckCount`      | `integer`          | NOT NULL              | Truk               |
-| `queueLengthVeh`  | `integer`          | NOT NULL              | Antrean lane       |
-| `queueLengthMEst` | `double precision` | NOT NULL              | Panjang antrean    |
-| `densityIndex`    | `double precision` | NOT NULL              | Density proxy      |
+| Column            | Type               | Constraint              | Description        |
+| ----------------- | ------------------ | ----------------------- | ------------------ |
+| `id`              | `bigserial`        | PK                      | ID                 |
+| `trafficStateId`  | `bigint`           | FK → `trafficStates.id` | Traffic state      |
+| `laneId`          | `bigint`           | FK → `lanes.id`         | Lane               |
+| `timestamp`       | `timestamptz`      | NOT NULL                | Timestamp CV       |
+| `vehicleCount`    | `integer`          | NOT NULL                | Kendaraan crossing |
+| `carCount`        | `integer`          | NOT NULL                | Mobil              |
+| `motorcycleCount` | `integer`          | NOT NULL                | Motor              |
+| `busCount`        | `integer`          | NOT NULL                | Bus                |
+| `truckCount`      | `integer`          | NOT NULL                | Truk               |
+| `queueLengthVeh`  | `integer`          | NOT NULL                | Antrean lane       |
+| `queueLengthMEst` | `double precision` | NOT NULL                | Panjang antrean    |
+| `densityIndex`    | `double precision` | NOT NULL                | Density proxy      |
 
 Alurnya:
 
@@ -476,26 +542,40 @@ Traffic State Builder
 trafficApproachStates
 ```
 
-Ini akan sangat membantu kalau nanti kalian mau audit kenapa suatu `TrafficState` menghasilkan angka tertentu.
+Relasi:
+
+```text
+TrafficState 1 ─────── N TrafficLaneMetric
+
+Lane 1 ─────────────── N TrafficLaneMetric
+```
+
+Ini sangat membantu jika nanti perlu melakukan audit mengapa suatu `TrafficState` menghasilkan angka tertentu.
 
 ---
 
-# 2.12 `signalPhases`
+## 2.12 `signalPhases`
 
 Menyimpan konfigurasi fase lampu.
 
-| Column             | Type           | Constraint            | Description    |
-| ------------------ | -------------- | --------------------- | -------------- |
-| `id`               | `bigserial`    | PK                    | ID fase        |
-| `intersectionId`   | `bigint`       | FK → intersections.id | Simpang        |
-| `phaseId`          | `varchar(50)`  | NOT NULL              | ID fase        |
-| `phaseName`        | `varchar(100)` | NOT NULL              | Nama fase      |
-| `sequenceOrder`    | `integer`      | NOT NULL              | Urutan         |
-| `greenSeconds`     | `integer`      | NOT NULL              | Green          |
-| `yellowSeconds`    | `integer`      | NOT NULL              | Yellow         |
-| `redSeconds`       | `integer`      | NOT NULL              | Red            |
-| `activeApproaches` | `jsonb`        | NOT NULL              | Approach aktif |
-| `isActive`         | `boolean`      | NOT NULL              | Status         |
+| Column             | Type           | Constraint              | Description    |
+| ------------------ | -------------- | ----------------------- | -------------- |
+| `id`               | `bigserial`    | PK                      | ID fase        |
+| `intersectionId`   | `bigint`       | FK → `intersections.id` | Simpang        |
+| `phaseId`          | `varchar(50)`  | NOT NULL                | ID fase        |
+| `phaseName`        | `varchar(100)` | NOT NULL                | Nama fase      |
+| `sequenceOrder`    | `integer`      | NOT NULL                | Urutan         |
+| `greenSeconds`     | `integer`      | NOT NULL                | Green          |
+| `yellowSeconds`    | `integer`      | NOT NULL                | Yellow         |
+| `redSeconds`       | `integer`      | NOT NULL                | Red            |
+| `activeApproaches` | `jsonb`        | NOT NULL                | Approach aktif |
+| `isActive`         | `boolean`      | NOT NULL                | Status         |
+
+Constraint:
+
+```text
+UNIQUE(intersectionId, phaseId)
+```
 
 Contoh:
 
@@ -503,22 +583,24 @@ Contoh:
 ["north", "south"]
 ```
 
+`activeApproaches` tetap menggunakan JSON karena satu phase dapat mengaktifkan beberapa approach.
+
 ---
 
-# 2.13 `signalStatuses`
+## 2.13 `signalStatuses`
 
 Menyimpan kondisi lampu pada waktu tertentu.
 
-| Column             | Type           | Constraint            | Description  |
-| ------------------ | -------------- | --------------------- | ------------ |
-| `id`               | `bigserial`    | PK                    | ID           |
-| `intersectionId`   | `bigint`       | FK → intersections.id | Simpang      |
-| `timestamp`        | `timestamptz`  | NOT NULL              | Waktu        |
-| `currentPhase`     | `varchar(50)`  | NOT NULL              | Fase aktif   |
-| `phaseName`        | `varchar(100)` | NOT NULL              | Nama fase    |
-| `remainingSeconds` | `integer`      | NOT NULL              | Sisa waktu   |
-| `cycleTimeSeconds` | `integer`      | NOT NULL              | Waktu siklus |
-| `source`           | `varchar(30)`  | NOT NULL              | Sumber       |
+| Column             | Type           | Constraint              | Description  |
+| ------------------ | -------------- | ----------------------- | ------------ |
+| `id`               | `bigserial`    | PK                      | ID           |
+| `intersectionId`   | `bigint`       | FK → `intersections.id` | Simpang      |
+| `timestamp`        | `timestamptz`  | NOT NULL                | Waktu        |
+| `currentPhase`     | `varchar(50)`  | NOT NULL                | Fase aktif   |
+| `phaseName`        | `varchar(100)` | NOT NULL                | Nama fase    |
+| `remainingSeconds` | `integer`      | NOT NULL                | Sisa waktu   |
+| `cycleTimeSeconds` | `integer`      | NOT NULL                | Waktu siklus |
+| `source`           | `varchar(30)`  | NOT NULL                | Sumber       |
 
 Field API tetap:
 
@@ -530,19 +612,25 @@ cycleTimeSeconds
 source
 ```
 
+Relasi:
+
+```text
+Intersection 1 ─────── N SignalStatus
+```
+
 ---
 
-# 2.14 `forecasts`
+## 2.14 `forecasts`
 
 Menyimpan metadata satu proses forecasting.
 
-| Column           | Type           | Constraint            | Description      |
-| ---------------- | -------------- | --------------------- | ---------------- |
-| `id`             | `bigserial`    | PK                    | ID               |
-| `intersectionId` | `bigint`       | FK → intersections.id | Simpang          |
-| `horizonMinutes` | `integer`      | NOT NULL              | Horizon prediksi |
-| `model`          | `varchar(100)` | NOT NULL              | Model            |
-| `createdAt`      | `timestamptz`  | NOT NULL              | Waktu prediksi   |
+| Column           | Type           | Constraint              | Description      |
+| ---------------- | -------------- | ----------------------- | ---------------- |
+| `id`             | `bigserial`    | PK                      | ID               |
+| `intersectionId` | `bigint`       | FK → `intersections.id` | Simpang          |
+| `horizonMinutes` | `integer`      | NOT NULL                | Horizon prediksi |
+| `model`          | `varchar(100)` | NOT NULL                | Model            |
+| `createdAt`      | `timestamptz`  | NOT NULL                | Waktu prediksi   |
 
 Contoh:
 
@@ -553,40 +641,46 @@ model = LSTM
 
 ---
 
-# 2.15 `forecastPredictions`
+## 2.15 `forecastPredictions`
 
 Menyimpan setiap titik prediksi.
 
-| Column                     | Type             | Constraint        | Description              |
-| -------------------------- | ---------------- | ----------------- | ------------------------ |
-| `id`                       | `bigserial`      | PK                | ID                       |
-| `forecastId`               | `bigint`         | FK → forecasts.id | Forecast                 |
-| `timestamp`                | `timestamptz`    | NOT NULL          | Waktu prediksi           |
-| `predictedVehicleCount`    | double precision | NOT NULL          | Prediksi kendaraan       |
-| `predictedQueueLengthVeh`  | double precision | NOT NULL          | Prediksi antrean         |
-| `predictedQueueLengthMEst` | double precision | NOT NULL          | Prediksi panjang antrean |
-| `predictedDensityIndex`    | double precision | NOT NULL          | Prediksi density         |
-| `predictedSpeedKmh`        | double precision | NULL              | Prediksi speed           |
+| Column                     | Type               | Constraint          | Description              |
+| -------------------------- | ------------------ | ------------------- | ------------------------ |
+| `id`                       | `bigserial`        | PK                  | ID                       |
+| `forecastId`               | `bigint`           | FK → `forecasts.id` | Forecast                 |
+| `timestamp`                | `timestamptz`      | NOT NULL            | Waktu prediksi           |
+| `predictedVehicleCount`    | `double precision` | NOT NULL            | Prediksi kendaraan       |
+| `predictedQueueLengthVeh`  | `double precision` | NOT NULL            | Prediksi antrean         |
+| `predictedQueueLengthMEst` | `double precision` | NOT NULL            | Prediksi panjang antrean |
+| `predictedDensityIndex`    | `double precision` | NOT NULL            | Prediksi density         |
+| `predictedSpeedKmh`        | `double precision` | NULL                | Prediksi speed           |
+
+Relasi:
+
+```text
+Forecast 1 ─────── N ForecastPrediction
+```
 
 ---
 
-# 2.16 `recommendations`
+## 2.16 `recommendations`
 
 Untuk halaman **Signal Recommendation**.
 
-| Column                          | Type               | Constraint            | Description                |
-| ------------------------------- | ------------------ | --------------------- | -------------------------- |
-| `id`                            | `bigserial`        | PK                    | ID                         |
-| `intersectionId`                | `bigint`           | FK → intersections.id | Simpang                    |
-| `timestamp`                     | `timestamptz`      | NOT NULL              | Waktu                      |
-| `recommendedPhase`              | `varchar(50)`      | NOT NULL              | Fase rekomendasi           |
-| `recommendedGreenSeconds`       | `integer`          | NOT NULL              | Green rekomendasi          |
-| `currentGreenSeconds`           | `integer`          | NOT NULL              | Green saat ini             |
-| `expectedDelayReductionPercent` | `double precision` | NOT NULL              | Estimasi pengurangan delay |
-| `confidence`                    | `double precision` | NOT NULL              | Confidence                 |
-| `reason`                        | `text`             | NOT NULL              | Alasan                     |
-| `source`                        | `varchar(30)`      | NOT NULL              | Sumber                     |
-| `createdAt`                     | `timestamptz`      | NOT NULL              | Waktu dibuat               |
+| Column                          | Type               | Constraint              | Description                |
+| ------------------------------- | ------------------ | ----------------------- | -------------------------- |
+| `id`                            | `bigserial`        | PK                      | ID                         |
+| `intersectionId`                | `bigint`           | FK → `intersections.id` | Simpang                    |
+| `timestamp`                     | `timestamptz`      | NOT NULL                | Waktu                      |
+| `recommendedPhase`              | `varchar(50)`      | NOT NULL                | Fase rekomendasi           |
+| `recommendedGreenSeconds`       | `integer`          | NOT NULL                | Green rekomendasi          |
+| `currentGreenSeconds`           | `integer`          | NOT NULL                | Green saat ini             |
+| `expectedDelayReductionPercent` | `double precision` | NOT NULL                | Estimasi pengurangan delay |
+| `confidence`                    | `double precision` | NOT NULL                | Confidence                 |
+| `reason`                        | `text`             | NOT NULL                | Alasan                     |
+| `source`                        | `varchar(30)`      | NOT NULL                | Sumber                     |
+| `createdAt`                     | `timestamptz`      | NOT NULL                | Waktu dibuat               |
 
 Contoh `source`:
 
@@ -604,35 +698,46 @@ database tidak perlu membuat recommendation palsu.
 
 ---
 
-# 2.17 `simulations`
+## 2.17 `simulations`
 
 Menyimpan setiap eksperimen Digital Twin / SUMO.
 
-| Column             | Type           | Constraint              | Description       |
-| ------------------ | -------------- | ----------------------- | ----------------- |
-| `id`               | `bigserial`    | PK                      | ID simulation     |
-| `intersectionId`   | `bigint`       | FK → intersections.id   | Simpang           |
-| `trafficStateId`   | `bigint`       | FK → trafficStates.id   | State input       |
-| `recommendationId` | `bigint`       | FK → recommendations.id | Recommendation    |
-| `simulationName`   | `varchar(150)` | NOT NULL                | Nama simulasi     |
-| `simulationType`   | `varchar(50)`  | NOT NULL                | Jenis simulasi    |
-| `engine`           | `varchar(50)`  | NOT NULL                | Simulation engine |
-| `status`           | `varchar(30)`  | NOT NULL                | Status            |
-| `startedAt`        | `timestamptz`  | NULL                    | Mulai             |
-| `completedAt`      | `timestamptz`  | NULL                    | Selesai           |
-| `createdAt`        | `timestamptz`  | NOT NULL                | Dibuat            |
+| Column             | Type           | Constraint                | Description       |
+| ------------------ | -------------- | ------------------------- | ----------------- |
+| `id`               | `bigserial`    | PK                        | ID simulation     |
+| `intersectionId`   | `bigint`       | FK → `intersections.id`   | Simpang           |
+| `trafficStateId`   | `bigint`       | FK → `trafficStates.id`   | State input       |
+| `recommendationId` | `bigint`       | FK → `recommendations.id` | Recommendation    |
+| `simulationName`   | `varchar(150)` | NOT NULL                  | Nama simulasi     |
+| `simulationType`   | `varchar(50)`  | NOT NULL                  | Jenis simulasi    |
+| `engine`           | `varchar(50)`  | NOT NULL                  | Simulation engine |
+| `status`           | `varchar(30)`  | NOT NULL                  | Status            |
+| `startedAt`        | `timestamptz`  | NULL                      | Mulai             |
+| `completedAt`      | `timestamptz`  | NULL                      | Selesai           |
+| `createdAt`        | `timestamptz`  | NOT NULL                  | Dibuat            |
 
 Contoh:
 
 ```text
 simulationType = baseline
 simulationType = recommended
+
 engine = SUMO
 ```
 
+Relasi:
+
+```text
+TrafficState 1 ─────── N Simulation
+
+Recommendation 1 ──── N Simulation
+```
+
+`recommendationId` dapat bernilai `NULL` untuk simulation baseline.
+
 ---
 
-# 2.18 `simulationMetrics`
+## 2.18 `simulationMetrics`
 
 Menyimpan hasil evaluasi SUMO.
 
@@ -644,26 +749,16 @@ vs
 After recommendation
 ```
 
-| Column         | Type               | Constraint          | Description |
-| -------------- | ------------------ | ------------------- | ----------- |
-| `id`           | `bigserial`        | PK                  | ID          |
-| `simulationId` | `bigint`           | FK → simulations.id | Simulasi    |
-| `metricName`   | `varchar(50)`      | NOT NULL            | Nama metric |
-| `metricValue`  | `double precision` | NOT NULL            | Nilai       |
-| `unit`         | `varchar(30)`      | NULL                | Satuan      |
-| `createdAt`    | `timestamptz`      | NOT NULL            | Waktu       |
+| Column         | Type               | Constraint            | Description |
+| -------------- | ------------------ | --------------------- | ----------- |
+| `id`           | `bigserial`        | PK                    | ID          |
+| `simulationId` | `bigint`           | FK → `simulations.id` | Simulasi    |
+| `metricName`   | `varchar(50)`      | NOT NULL              | Nama metric |
+| `metricValue`  | `double precision` | NOT NULL              | Nilai       |
+| `unit`         | `varchar(30)`      | NULL                  | Satuan      |
+| `createdAt`    | `timestamptz`      | NOT NULL              | Waktu       |
 
 Metric:
-
-```text
-delay
-queue
-throughput
-waitingTime
-emission
-```
-
-Atau kalau ingin lebih eksplisit:
 
 ```text
 averageDelaySeconds
@@ -673,25 +768,83 @@ averageWaitingTimeSeconds
 emissionGrams
 ```
 
+Relasi:
+
+```text
+Simulation 1 ─────── N SimulationMetric
+```
+
 ---
 
-# 2.19 `cctvHistory`
+## 2.19 `cctvHistory`
 
 Untuk halaman **History CCTV**.
 
-Kalau user membuka history, database bisa mengetahui video apa saja yang pernah diproses.
+Data history sebenarnya berasal dari `cvProcessingJobs`. Karena itu tabel ini **tidak menyimpan ulang detail proses**, tetapi hanya menjadi referensi history terhadap video dan processing job.
 
-| Column            | Type          | Constraint               | Description |
-| ----------------- | ------------- | ------------------------ | ----------- |
-| `id`              | `bigserial`   | PK                       | ID          |
-| `cameraId`        | `bigint`      | FK → cameras.id          | Kamera      |
-| `videoId`         | `bigint`      | FK → cameraVideos.id     | Video       |
-| `processingJobId` | `bigint`      | FK → cvProcessingJobs.id | CV job      |
-| `status`          | `varchar(30)` | NOT NULL                 | Status      |
-| `startedAt`       | `timestamptz` | NULL                     | Mulai       |
-| `completedAt`     | `timestamptz` | NULL                     | Selesai     |
-| `createdAt`       | `timestamptz` | NOT NULL                 | Dibuat      |
+| Column            | Type          | Constraint                 | Description   |
+| ----------------- | ------------- | -------------------------- | ------------- |
+| `id`              | `bigserial`   | PK                         | ID            |
+| `processingJobId` | `bigint`      | FK → `cvProcessingJobs.id` | CV job        |
+| `createdAt`       | `timestamptz` | NOT NULL                   | Waktu history |
 
+Relasi:
+
+```text
+CameraVideo
+     │
+     ▼
+CvProcessingJob
+     │
+     ▼
+CctvHistory
+```
+
+Informasi kamera dan video tidak perlu diduplikasi di `cctvHistory`, karena dapat diperoleh melalui:
+
+```text
+cctvHistory.processingJobId
+        ↓
+cvProcessingJobs.videoId
+        ↓
+cameraVideos.cameraId
+        ↓
+cameras
+```
+
+Dengan demikian tidak ada data `cameraId`, `videoId`, dan `processingJobId` yang redundant di history.
+
+---
+
+## 2.20 `systemLogs`
+
+Menyimpan log aktivitas sistem.
+
+| Column           | Type           | Constraint                    | Description     |
+| ---------------- | -------------- | ----------------------------- | --------------- |
+| `id`             | `bigserial`    | PK                            | ID log          |
+| `userId`         | `bigint`       | FK → `users.id`, NULL         | User terkait    |
+| `intersectionId` | `bigint`       | FK → `intersections.id`, NULL | Simpang terkait |
+| `level`          | `varchar(20)`  | NOT NULL                      | Level log       |
+| `action`         | `varchar(100)` | NOT NULL                      | Aktivitas       |
+| `message`        | `text`         | NOT NULL                      | Pesan log       |
+| `createdAt`      | `timestamptz`  | NOT NULL                      | Waktu log       |
+
+Level:
+
+```text
+info
+warning
+error
+```
+
+Relasi:
+
+```text
+User 1 ─────── N SystemLog
+
+Intersection 1 ─────── N SystemLog
+```
 
 ---
 
@@ -739,7 +892,7 @@ TrafficState
        │
        ├── TrafficApproachState
        │
-       └── TrafficLaneMetrics
+       └── TrafficLaneMetric
 ```
 
 Cardinality:
@@ -747,9 +900,11 @@ Cardinality:
 ```text
 TrafficState 1 ─── N TrafficApproachState
 
-TrafficState 1 ─── N TrafficLaneMetrics
+TrafficState 1 ─── N TrafficLaneMetric
 
-Lane 1 ─── N TrafficLaneMetrics
+Lane 1 ─── N TrafficLaneMetric
+
+Approach 1 ─── N TrafficApproachState
 ```
 
 Dengan begitu:
@@ -811,15 +966,47 @@ ForecastPrediction
 
 ---
 
-# 7. Full Entity Relationship
+# 7. CCTV History Relationship
+
+History CCTV tidak membuat relasi baru yang redundant.
+
+```text
+Camera
+  │
+  ▼
+CameraVideo
+  │
+  ▼
+CvProcessingJob
+  │
+  ▼
+CctvHistory
+```
+
+Sehingga halaman CCTV dapat mengambil:
+
+```text
+camera
+video
+processing status
+processing time
+output
+```
+
+tanpa menyimpan ulang data tersebut di beberapa tabel.
+
+---
+
+# 8. Full Entity Relationship
 
 ```text
 User
  │
- └── UserSetting
-        │
-        └── Intersection
-
+ ├── UserSetting
+ │       │
+ │       └── Intersection
+ │
+ └── SystemLog
 
 Intersection
  │
@@ -832,10 +1019,12 @@ Intersection
  │     └── CameraVideo
  │             │
  │             └── CvProcessingJob
+ │                     │
+ │                     └── CctvHistory
  │
  ├── TrafficState
  │     ├── TrafficApproachState
- │     └── TrafficLaneMetrics
+ │     └── TrafficLaneMetric
  │
  ├── SignalPhase
  │
@@ -846,14 +1035,16 @@ Intersection
  │
  ├── Recommendation
  │
- └── Simulation
-        │
-        └── SimulationMetric
+ ├── Simulation
+ │     │
+ │     └── SimulationMetric
+ │
+ └── SystemLog
 ```
 
 ---
 
-# 8. Dashboard → Database Mapping
+# 9. Dashboard → Database Mapping
 
 Ini penting supaya jelas **kenapa tabel-tabel tersebut ada**.
 
@@ -874,12 +1065,12 @@ Ini penting supaya jelas **kenapa tabel-tabel tersebut ada**.
 | Signal Status         | `signalStatuses`                                             |
 | Signal Recommendation | `recommendations`                                            |
 | Traffic Forecast      | `forecasts` + `forecastPredictions`                          |
-| CCTV History          | `cctvHistory`                                                |
+| CCTV History          | `cvProcessingJobs` + `cctvHistory`                           |
 | Simulation History    | `simulations` + `simulationMetrics`                          |
 
 ---
 
-# 9. Data Contract Mapping
+# 10. Data Contract Mapping
 
 Database **tidak harus bernama sama persis dengan entity API**, tetapi data yang keluar dari backend harus mengikuti contract.
 
@@ -919,7 +1110,62 @@ densityVehPerKm
 
 ---
 
-# 10. Contoh TrafficState di Database
+# 11. Entity Naming Consistency
+
+Database menggunakan nama tabel plural, sedangkan entity/API menggunakan nama singular atau contract tertentu.
+
+Pemetaan yang digunakan:
+
+| Database Table          | Entity / API Concept |
+| ----------------------- | -------------------- |
+| `users`                 | `User`               |
+| `userSettings`          | `UserSetting`        |
+| `intersections`         | `Intersection`       |
+| `approaches`            | `Approach`           |
+| `lanes`                 | `Lane`               |
+| `cameras`               | `Camera`             |
+| `cameraVideos`          | `CameraVideo`        |
+| `cvProcessingJobs`      | `CvProcessingJob`    |
+| `trafficStates`         | `TrafficState`       |
+| `trafficApproachStates` | `ApproachState`      |
+| `trafficLaneMetrics`    | `LaneMetric`         |
+| `signalPhases`          | `SignalPhase`        |
+| `signalStatuses`        | `SignalStatus`       |
+| `forecasts`             | `Forecast`           |
+| `forecastPredictions`   | `ForecastPrediction` |
+| `recommendations`       | `Recommendation`     |
+| `simulations`           | `Simulation`         |
+| `simulationMetrics`     | `SimulationMetric`   |
+| `cctvHistory`           | `CctvHistory`        |
+| `systemLogs`            | `SystemLog`          |
+
+Perbedaan seperti:
+
+```text
+trafficApproachStates
+        ↓
+ApproachState
+```
+
+adalah normal karena database table menggunakan bentuk plural, sedangkan entity API menggunakan bentuk singular.
+
+Yang harus dijaga adalah **field contract**, terutama:
+
+```text
+volume
+carCount
+motorcycleCount
+busCount
+truckCount
+queueLengthVeh
+queueLengthMEst
+densityIndex
+avgSpeedKmh
+```
+
+---
+
+# 12. Contoh TrafficState di Database
 
 Misalnya backend menghasilkan:
 
@@ -959,7 +1205,7 @@ trafficApproachStates
 
 ---
 
-# 11. Video Storage Architecture
+# 13. Video Storage Architecture
 
 Video **jangan dimasukkan ke PostgreSQL**.
 
@@ -968,7 +1214,7 @@ Gunakan:
 ```text
                 ┌──────────────────────┐
                 │      Frontend        │
-                │      CCTV Page       │
+                │      CCTV Page      │
                 └──────────┬───────────┘
                            │
                            ▼
@@ -989,6 +1235,7 @@ PostgreSQL:
 
 ```text
 videoName
+videoFormat
 repositoryId
 filePath
 fileUrl
@@ -1007,7 +1254,7 @@ Jadi database tidak menjadi gudang video 4 GB yang bikin PostgreSQL menangis. �
 
 ---
 
-# 12. Recommended PostgreSQL Index
+# 14. Recommended PostgreSQL Index
 
 Karena SmartTwin akan sering mengambil data berdasarkan simpang + waktu, index berikut penting.
 
@@ -1016,10 +1263,10 @@ trafficStates
     INDEX (intersectionId, windowStart)
 
 trafficApproachStates
-    INDEX (trafficStateId)
+    INDEX (trafficStateId, approachId)
 
 trafficLaneMetrics
-    INDEX (trafficStateId, laneId)
+    INDEX (trafficStateId, laneId, timestamp)
 
 signalStatuses
     INDEX (intersectionId, timestamp)
@@ -1041,31 +1288,40 @@ cameraVideos
 
 cvProcessingJobs
     INDEX (videoId, createdAt)
+
+cctvHistory
+    INDEX (processingJobId, createdAt)
+
+systemLogs
+    INDEX (createdAt)
 ```
 
 ---
 
-# 13. Tables yang Benar-benar Wajib untuk MVP
+# 15. Tables yang Benar-benar Wajib untuk MVP
 
 Kalau deadline kalian mepet, **jangan langsung implementasi semua 20 tabel**.
-
-Prioritas:
 
 ### Phase 1 — sekarang
 
 ```text
 intersections
+
 approaches
+
 lanes
 
 cameras
+
 cameraVideos
 
 cvProcessingJobs
 
-trafficStates
-trafficApproachStates
 trafficLaneMetrics
+
+trafficStates
+
+trafficApproachStates
 ```
 
 Ini cukup untuk:
@@ -1088,9 +1344,11 @@ Dashboard
 
 ```text
 signalPhases
+
 signalStatuses
 
 forecasts
+
 forecastPredictions
 ```
 
@@ -1100,6 +1358,7 @@ forecastPredictions
 recommendations
 
 simulations
+
 simulationMetrics
 ```
 
@@ -1107,14 +1366,17 @@ simulationMetrics
 
 ```text
 users
+
 userSettings
+
 cctvHistory
+
 systemLogs
 ```
 
 ---
 
-# 14. Final Table List
+# 16. Final Table List
 
 Jadi kalau ditanya **"database SmartTwin kita sebenarnya punya tabel apa saja?"**, jawabannya:
 
@@ -1142,10 +1404,14 @@ Jadi kalau ditanya **"database SmartTwin kita sebenarnya punya tabel apa saja?"*
 | 20 | `systemLogs`            | 🟢       | Log sistem                  |
 
 **🔴 = harus ada untuk pipeline utama**
+
 **🟡 = diperlukan ketika fitur tersebut mulai diintegrasikan**
+
 **🟢 = pendukung dashboard**
 
-### Yang paling penting untuk kondisi kalian sekarang
+---
+
+# 17. Yang Paling Penting untuk Kondisi Kalian Sekarang
 
 Jangan mulai dari `users`, `recommendations`, atau `simulationMetrics`.
 
@@ -1175,4 +1441,117 @@ Urutan pembangunan yang paling aman:
 11. Frontend Dashboard
 ```
 
-Dan **Traffic State Builder yang baru saja kalian selesaikan tetap menjadi layer yang mengubah `trafficLaneMetrics`/CSV CV → `trafficStates` + `trafficApproachStates`**. Jadi database ini tidak merusak arsitektur yang sudah kalian bangun; justru database menjadi persistence layer di antara pipeline/backend dan dashboard.
+Dan **Traffic State Builder yang sudah kalian selesaikan tetap menjadi layer yang mengubah `trafficLaneMetrics`/CSV CV → `trafficStates` + `trafficApproachStates`**.
+
+Database ini menjadi persistence layer di antara pipeline/backend dan dashboard.
+
+---
+
+# 18. Important Consistency Rules
+
+Agar implementasi PostgreSQL, FastAPI, dan frontend tidak kembali berbeda-beda, gunakan aturan berikut:
+
+### Entity relationship
+
+```text
+Intersection
+    ↓
+Approach
+    ↓
+Lane
+```
+
+```text
+Intersection
+    ↓
+Camera
+    ↓
+CameraVideo
+    ↓
+CvProcessingJob
+```
+
+```text
+TrafficState
+    ↓
+TrafficApproachState
+```
+
+```text
+TrafficState
+    ↓
+TrafficLaneMetric
+```
+
+### Foreign key
+
+Gunakan ID relasional sebagai sumber kebenaran:
+
+```text
+intersectionId
+approachId
+laneId
+cameraId
+videoId
+processingJobId
+trafficStateId
+forecastId
+recommendationId
+simulationId
+```
+
+### API contract
+
+Jangan ubah field berikut:
+
+```text
+volume
+carCount
+motorcycleCount
+busCount
+truckCount
+queueLengthVeh
+queueLengthMEst
+densityIndex
+avgSpeedKmh
+```
+
+### Jangan duplikasi data yang bisa ditelusuri melalui FK
+
+Contoh **jangan**:
+
+```text
+cameraVideos
+ ├── cameraId
+ └── intersectionName   ❌
+```
+
+Cukup:
+
+```text
+cameraVideos
+ └── cameraId
+       ↓
+    cameras
+       ↓
+ intersectionId
+       ↓
+ intersections
+```
+
+Begitu juga untuk CCTV history:
+
+```text
+cctvHistory
+ └── processingJobId
+       ↓
+ cvProcessingJobs
+       ↓
+ cameraVideos
+       ↓
+ cameras
+       ↓
+ intersections
+```
+
+Dengan struktur ini, **satu entity hanya punya satu sumber data utama**, sementara backend bebas membentuk response sesuai data contract frontend.

@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import {
   LayoutDashboard,
   Radar,
@@ -13,7 +14,7 @@ import {
 } from "lucide-react";
 
 const NAV_ITEMS = [
-  { icon: LayoutDashboard, label: "Dashboard", active: true },
+  { icon: LayoutDashboard, label: "Dashboard", href: "/" },
   { icon: Radar, label: "Digital Twin" },
   { icon: Video, label: "CCTV", href: "/cctv" },
   { icon: Lightbulb, label: "Rekomendasi" },
@@ -22,6 +23,8 @@ const NAV_ITEMS = [
 ];
 
 export default function Sidebar() {
+  const pathname = usePathname();
+
   return (
     <aside className="flex h-screen w-56 shrink-0 flex-col border-r border-border bg-surface">
       <div className="flex items-center gap-2.5 px-5 py-5">
@@ -39,11 +42,17 @@ export default function Sidebar() {
           const Icon = item.icon;
 
           if (item.href) {
+            const isActive = pathname === item.href;
+
             return (
               <Link
                 key={item.label}
                 href={item.href}
-                className="flex w-full items-center gap-3 rounded-md px-3 py-2 text-left text-sm text-text-secondary transition-colors hover:bg-surface-2 hover:text-text"
+                className={`flex w-full items-center gap-3 rounded-md px-3 py-2 text-left text-sm transition-colors ${
+                  isActive
+                    ? "bg-accent-dim text-accent"
+                    : "text-text-secondary hover:bg-surface-2 hover:text-text"
+                }`}
               >
                 <Icon className="h-4 w-4 shrink-0" />
                 {item.label}
@@ -55,11 +64,7 @@ export default function Sidebar() {
             <button
               key={item.label}
               type="button"
-              className={`flex w-full items-center gap-3 rounded-md px-3 py-2 text-left text-sm transition-colors ${
-                item.active
-                  ? "bg-accent-dim text-accent"
-                  : "text-text-secondary hover:bg-surface-2 hover:text-text"
-              }`}
+              className="flex w-full items-center gap-3 rounded-md px-3 py-2 text-left text-sm text-text-secondary transition-colors hover:bg-surface-2 hover:text-text"
             >
               <Icon className="h-4 w-4 shrink-0" />
               {item.label}
