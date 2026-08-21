@@ -35,6 +35,14 @@ didukung <video> browser.
 
 Dipanggil oleh backend/app/services/cv_trigger_service.py sebagai
 subprocess terpisah (venv cv/.venv sendiri, bukan venv backend).
+
+Setiap window 5 detik juga memanggil POST {BACKEND_URL}/api/v1/traffic/notify
+supaya dashboard ter-update SAAT ITU JUGA lewat WebSocket backend --
+BUKAN Supabase Realtime (terbukti tidak mem-broadcast event di
+project ini walau publication/RLS sudah benar) dan BUKAN polling.
+Kalau backend sedang tidak jalan, panggilan ini gagal diam-diam --
+data di Supabase tetap tersimpan, cuma dashboard tidak ter-update
+otomatis sampai halaman di-refresh manual.
 """
 
 from __future__ import annotations
@@ -49,6 +57,7 @@ from datetime import datetime, timedelta, timezone
 
 import cv2
 import imageio_ffmpeg
+import requests
 import ultralytics
 from ultralytics import YOLO
 
@@ -82,6 +91,26 @@ WINDOW_SECONDS = 5
 CONFIDENCE = 0.35
 
 BOX_COLOR = (0, 255, 0)
+
+BACKEND_URL = os.environ.get("BACKEND_URL", "http://127.0.0.1:8001")
+
+
+def notify_backend(payload: dict) -> None:
+    """
+    Best-effort: dashboard update lewat jalur ini bukan hal yang
+    boleh menggagalkan job CV kalau backend kebetulan mati/lambat.
+    Data traffic-nya sendiri sudah aman di Supabase sebelum fungsi
+    ini dipanggil.
+    """
+
+    try:
+        requests.post(
+            f"{BACKEND_URL}/api/v1/traffic/notify",
+            json=payload,
+            timeout=2,
+        )
+    except requests.RequestException:
+        pass
 
 
 def parse_args() -> argparse.Namespace:
@@ -202,6 +231,18 @@ class WindowAccumulator:
             approach=self.approach,
             approach_id=self.approach_id,
             metrics=metrics,
+        )
+
+        # Data sudah aman di Supabase di atas -- notify ini cuma
+        # supaya dashboard yang lagi terbuka ikut update SAAT INI
+        # JUGA, bukan lain kali di-refresh manual.
+        notify_backend(
+            {
+                "approach": self.approach,
+                "windowStart": window_start.isoformat(),
+                "windowEnd": window_end.isoformat(),
+                **metrics,
+            }
         )
 
         print(

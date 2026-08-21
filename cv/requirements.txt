@@ -31,6 +31,12 @@ supabase>=2.11.0
 huggingface-hub>=0.27.1
 imageio-ffmpeg>=0.5.1
 
+# Dipakai process_uploaded_video.py buat push notifikasi ke backend
+# (POST /api/v1/traffic/notify) tiap window traffic selesai ditulis
+# ke Supabase, supaya dashboard update lewat WebSocket -- pengganti
+# Supabase Realtime yang tidak berfungsi di project ini.
+requests>=2.32.0
+
 # Catatan bobot model:
 # yolo26s.pt (20,4 MB) TIDAK ikut di repo — cv/models/ di-gitignore.
 # Ambil sekali per laptop, salah satu cara:

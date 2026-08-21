@@ -35,6 +35,12 @@ CV_VENV_PYTHON = CV_DIR / ".venv" / "Scripts" / "python.exe"
 MODEL_NAME = "YOLO26s-ByteTrack"
 MODEL_VERSION = "ultralytics-track"
 
+# URL backend ini sendiri, diteruskan ke subprocess CV supaya dia bisa
+# POST /api/v1/traffic/notify tiap window selesai -- lihat
+# app/services/ws_manager.py soal kenapa ini menggantikan Supabase
+# Realtime (terbukti tidak mem-broadcast event di project ini).
+BACKEND_SELF_URL = "http://127.0.0.1:8001"
+
 
 def _create_processing_job(video_id: int) -> int:
     supabase = get_supabase()
@@ -126,6 +132,7 @@ def trigger_cv_processing(
                 "SUPABASE_SERVICE_ROLE_KEY": settings.supabase_service_role_key,
                 "HF_TOKEN": settings.hf_token,
                 "HF_REPO_ID": settings.hf_repo_id,
+                "BACKEND_URL": BACKEND_SELF_URL,
                 # PATH dkk tetap diwariskan lewat env=None secara default;
                 # di sini env DIGANTI total jadi harus disalin manual.
                 **_inherit_essential_env(),

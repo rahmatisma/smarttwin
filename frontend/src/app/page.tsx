@@ -13,8 +13,6 @@ import ForecastChart from "@/components/ForecastChart";
 
 import { useTrafficSimulation } from "@/hooks/useTrafficSimulaton";
 
-import { supabase } from "@/lib/supabaseClient";
-
 import {
   DEFAULT_INTERSECTION_ID,
   fetchTrafficState,
@@ -220,6 +218,11 @@ function DashboardSkeleton() {
   );
 }
 
+const API_BASE_URL =
+  process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
+
+const WS_URL = `${API_BASE_URL.replace(/^http/, "ws")}/api/v1/traffic/ws`;
+
 export default function DashboardPage() {
 
   /*
@@ -332,25 +335,43 @@ export default function DashboardPage() {
     loadDashboardData();
 
     /*
-     * Realtime: begitu process_uploaded_video.py (cv/) meng-upsert
-     * baris trafficApproachStates baru, tarik ulang trafficState
-     * terbaru supaya angka di dashboard berubah tanpa refresh
-     * manual. Butuh trafficStates/trafficApproachStates didaftarkan
-     * ke publication supabase_realtime lebih dulu (lihat docs).
+     * Realtime lewat WebSocket backend sendiri, BUKAN Supabase
+     * Realtime -- sudah dibuktikan langsung (termasuk pakai
+     * service_role key yang bypass RLS) bahwa Supabase Realtime
+     * tidak mem-broadcast postgres_changes sama sekali di project
+     * ini walau publication/RLS/status service semuanya benar.
+     *
+     * Jalur ini event-driven, bukan polling: cv/process_uploaded_video.py
+     * mem-POST /api/v1/traffic/notify PERSIS setelah satu window
+     * berhasil ditulis ke Supabase, backend langsung meneruskannya ke
+     * sini lewat WebSocket. Reconnect otomatis kalau backend sempat
+     * restart selagi dashboard terbuka.
      */
-    const channel = supabase
-      .channel("traffic-state-changes")
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "trafficApproachStates" },
-        () => {
-          fetchTrafficState(DEFAULT_INTERSECTION_ID).then(setTrafficState);
-        }
-      )
-      .subscribe();
+    let socket: WebSocket | null = null;
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    let cancelled = false;
+
+    function connect() {
+      if (cancelled) return;
+
+      socket = new WebSocket(WS_URL);
+
+      socket.onmessage = () => {
+        fetchTrafficState(DEFAULT_INTERSECTION_ID).then(setTrafficState);
+      };
+
+      socket.onclose = () => {
+        if (cancelled) return;
+        reconnectTimer = setTimeout(connect, 3000);
+      };
+    }
+
+    connect();
 
     return () => {
-      supabase.removeChannel(channel);
+      cancelled = true;
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      socket?.close();
     };
 
   }, []);
