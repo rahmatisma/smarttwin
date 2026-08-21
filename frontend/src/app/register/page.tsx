@@ -66,7 +66,7 @@ export default function RegisterPage() {
             return;
         }
 
-        router.replace("/");
+        router.replace("/dashboard");
         router.refresh();
     }
 

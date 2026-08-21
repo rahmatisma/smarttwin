@@ -97,7 +97,7 @@ export default function SettingsPage() {
     };
 
     return (
-        <div className="flex h-screen overflow-hidden bg-background text-text">
+        <div className="settings-page flex h-screen overflow-hidden bg-background text-text">
             <Sidebar />
 
             <div className="min-w-0 flex-1 overflow-y-auto">

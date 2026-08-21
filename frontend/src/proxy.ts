@@ -3,9 +3,8 @@
 // Gerbang autentikasi SmartTwin (Next.js 16 "proxy" convention,
 // pengganti middleware.ts).
 //
-// - Belum login  -> semua halaman dialihkan ke /login
-//                   (termasuk "/" saat pertama kali masuk).
-// - Sudah login   -> /login dan /register dialihkan ke "/".
+// - Belum login  -> semua halaman privat dialihkan ke /login.
+// - Sudah login  -> root dan halaman auth dialihkan ke /dashboard.
 
 import { NextResponse, type NextRequest } from "next/server";
 
@@ -14,16 +13,15 @@ import { createMiddlewareClient } from "@/lib/supabase/middlewareClient";
 const PUBLIC_ONLY_ROUTES = ["/login", "/register"];
 
 export async function proxy(request: NextRequest) {
+  const { pathname } = request.nextUrl;
   const { supabase, getResponse } = createMiddlewareClient(request);
 
   const {
     data: { user },
   } = await supabase.auth.getUser();
 
-  const { pathname } = request.nextUrl;
-
-  const isPublicOnlyRoute = PUBLIC_ONLY_ROUTES.some((route) =>
-    pathname.startsWith(route)
+  const isPublicOnlyRoute = PUBLIC_ONLY_ROUTES.some(
+    (route) => pathname === route || pathname.startsWith(`${route}/`)
   );
 
   if (!user && pathname.startsWith("/api")) {
@@ -35,12 +33,18 @@ export async function proxy(request: NextRequest) {
     return NextResponse.redirect(loginUrl);
   }
 
-  if (user && isPublicOnlyRoute) {
-    const homeUrl = new URL("/", request.url);
-    return NextResponse.redirect(homeUrl);
+  if (user && (pathname === "/" || isPublicOnlyRoute)) {
+    const dashboardUrl = new URL("/dashboard", request.url);
+    return NextResponse.redirect(dashboardUrl);
   }
 
-  return getResponse();
+  const response = getResponse();
+
+  if (user && !isPublicOnlyRoute) {
+    response.headers.set("Cache-Control", "private, no-store, max-age=0");
+  }
+
+  return response;
 }
 
 export const config = {

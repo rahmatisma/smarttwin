@@ -3,9 +3,7 @@
 // Supabase client untuk browser (Client Components).
 //
 // Menggunakan anon/publishable key (aman di browser).
-// Dibuat lewat @supabase/ssr supaya session auth (cookie)
-// konsisten dengan middleware.ts dan bisa dibaca ulang saat
-// navigasi / refresh.
+// Session dipertahankan agar login tetap berlaku setelah refresh browser.
 //
 // Akses data dibatasi lewat RLS: SELECT-only untuk role anon,
 // lihat migration "anon_read_policies_for_frontend" di Supabase.

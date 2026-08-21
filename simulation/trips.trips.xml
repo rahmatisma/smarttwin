@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<!-- generated on 2026-08-21 17:09:08.692341 by Eclipse SUMO randomTrips.py v1.27.1
+<configuration>
+    <net-file value="network/simpang4_pingit.net.xml.gz"/>
+    <route-file value="outputs/demo_bus.rou.xml"/>
+    <prefix value="b"/>
+    <vehicle-class value="bus"/>
+    <end value="600.0"/>
+    <period value="60.0"/>
+</configuration>
+-->
+
+<routes xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://sumo.dlr.de/xsd/routes_file.xsd">
+    <vType id="b_bus" vClass="bus"/>
+    <trip id="b0" depart="0.00" from="153857907#0" to="153857907#0" type="b_bus"/>
+    <trip id="b1" depart="60.00" from="590064461#0" to="25006154#2" type="b_bus"/>
+    <trip id="b2" depart="120.00" from="590386082#0" to="153857851#2" type="b_bus"/>
+    <trip id="b3" depart="180.00" from="153857851#4" to="201299423#2" type="b_bus"/>
+    <trip id="b4" depart="240.00" from="134603786#0" to="153857851#4" type="b_bus"/>
+    <trip id="b5" depart="300.00" from="484349908#0" to="25006154#0" type="b_bus"/>
+    <trip id="b6" depart="360.00" from="153857851#4" to="25006154#0" type="b_bus"/>
+    <trip id="b7" depart="420.00" from="590064461#2" to="25006154#2" type="b_bus"/>
+    <trip id="b8" depart="480.00" from="590386082#1" to="201299423#0" type="b_bus"/>
+    <trip id="b9" depart="540.00" from="134603786#2" to="153857851#2" type="b_bus"/>
+</routes>
