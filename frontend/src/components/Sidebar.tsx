@@ -17,7 +17,7 @@ const NAV_ITEMS = [
   { icon: Radar, label: "Digital Twin" },
   { icon: Video, label: "CCTV", href: "/cctv" },
   { icon: History, label: "History" },
-  { icon: Settings, label: "Pengaturan" },
+  { icon: Settings, label: "Pengaturan", href: "/settings" },
 ];
 
 export default function Sidebar() {
