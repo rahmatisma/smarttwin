@@ -1,33 +1,43 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
 
 from app.pipeline.traffic_state_builder import (
     TrafficStateBuilder,
     TrafficStateBuilderConfig,
+    get_default_csv_path,
 )
+from app.schemas.traffic import TrafficState
 
 
 class TrafficService:
     """
-    Service untuk menyediakan TrafficState
-    kepada layer API.
+    Service untuk menyediakan TrafficState kepada API.
 
-    Service tidak melakukan perhitungan traffic sendiri.
+    Alur:
 
-    Semua agregasi dilakukan oleh:
-
+        CSV asli
+           ↓
         TrafficStateBuilder
+           ↓
+        TrafficState[]
+           ↓
+        TrafficService
+           ↓
+        API
     """
 
     def __init__(
         self,
-        csv_path: str | Path,
+        csv_path: str | Path | None = None,
         window_seconds: int = 5,
     ) -> None:
 
-        self.csv_path = Path(csv_path)
+        self.csv_path = (
+            Path(csv_path)
+            if csv_path is not None
+            else get_default_csv_path()
+        )
 
         self.builder = TrafficStateBuilder(
             TrafficStateBuilderConfig(
@@ -39,12 +49,10 @@ class TrafficService:
     # BUILD ALL STATES
     # ========================================================
 
-    def get_all_states(
-        self,
-    ) -> list[dict[str, Any]]:
+    def get_all_states(self) -> list[TrafficState]:
         """
-        Mengambil seluruh TrafficState
-        yang dihasilkan dari CSV.
+        Membaca CSV asli dan menghasilkan seluruh
+        TrafficState.
         """
 
         return self.builder.build_from_csv(
@@ -52,18 +60,14 @@ class TrafficService:
         )
 
     # ========================================================
-    # LATEST STATE
+    # GET LATEST STATE
     # ========================================================
 
-    def get_latest_state(
-        self,
-    ) -> dict[str, Any] | None:
+    def get_latest_state(self) -> TrafficState | None:
         """
-        Mengambil TrafficState paling terbaru.
+        Mengambil TrafficState paling baru dari CSV.
 
-        Karena builder menghasilkan data
-        dalam urutan timestamp, state terakhir
-        adalah state terbaru.
+        Jika CSV kosong, return None.
         """
 
         states = self.get_all_states()
@@ -74,27 +78,52 @@ class TrafficService:
         return states[-1]
 
     # ========================================================
-    # STATE BY INTERSECTION
+    # GET STATE BY INDEX
     # ========================================================
 
-    def get_latest_state_by_intersection(
+    def get_state(
         self,
-        intersection_id: str,
-    ) -> dict[str, Any] | None:
+        index: int,
+    ) -> TrafficState:
         """
-        Mengambil state terbaru dari intersection tertentu.
+        Mengambil satu TrafficState berdasarkan index.
+
+        Contoh:
+
+            index = 0
+            → state pertama
+
+            index = 10
+            → state ke-11
         """
 
         states = self.get_all_states()
 
-        matching_states = [
+        if index < 0 or index >= len(states):
+            raise IndexError(
+                f"TrafficState index {index} "
+                f"berada di luar range 0-{len(states) - 1}."
+            )
+
+        return states[index]
+
+    # ========================================================
+    # GET STATES BY INTERSECTION
+    # ========================================================
+
+    def get_states_by_intersection(
+        self,
+        intersection_id: str,
+    ) -> list[TrafficState]:
+        """
+        Mengambil TrafficState berdasarkan intersectionId.
+        """
+
+        states = self.get_all_states()
+
+        return [
             state
             for state in states
-            if state["intersectionId"]
+            if state.intersectionId
             == intersection_id
         ]
-
-        if not matching_states:
-            return None
-
-        return matching_states[-1]

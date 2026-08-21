@@ -292,23 +292,101 @@ Dashboard / SUMO
 ```
 
 ## 8. Minimal Hasil Tes
-```text
-[] CSV berhasil dibaca
-[]timestamp berhasil diparse
-[] window 5 detik terbentuk
-[] lane → approach
-[] volume = SUM vehicle_count
-[] carCount benar
-[] motorcycleCount benar
-[] busCount benar
-[] truckCount benar
-[] queueLengthVeh benar
-[] queueLengthMEst benar
-[] densityIndex benar
-[] avgSpeedKmh = None
-[] semua north/south/east/west tersedia
-[] tidak ada nilai negatif
-[] tidak terjadi double counting
-```
+
+### Input & Preprocessing
+[x] CSV berhasil dibaca
+[x] timestamp berhasil diparse
+[x] window 5 detik terbentuk
+
+### Lane → Approach
+[x] lane → approach
+[x] volume = SUM vehicle_count
+[x] carCount benar
+[x] motorcycleCount benar
+[x] busCount benar
+[x] truckCount benar
+
+### Queue & Density
+[x] queueLengthVeh benar
+[x] queueLengthMEst benar
+[x] densityIndex benar
+
+### Contract
+[x] avgSpeedKmh = None
+[x] semua north/south/east/west tersedia
+
+### Validation
+[x] tidak ada nilai negatif
+[x] tidak terjadi double counting pada proses agregasi builder
+
+### Integration
+[x] TrafficStateBuilder → TrafficService
+[x] TrafficState → SUMO Adapter
+[x] API
+[x] seluruh test backend PASS
+
+### Final Test
+[x] 24 tests passed
+
+
+lane
+ └── berada di dalam approach
+
+queueLengthVeh
+ └── CSV = per lane
+ └── builder = SUM semua lane
+ └── hasil = queueLengthVeh per approach
+
+queueLengthMEst
+ └── CSV = per lane
+ └── builder = SUM semua lane
+ └── hasil = queueLengthMEst per approach
+
+vehicleCount
+ └── berasal dari counting line CV
+ └── bukan jumlah kendaraan yang terlihat pada satu frame
+ └── diagregasikan ke window 5 detik
+
+densityIndex
+ └── tersedia per lane
+ └── builder = rata-rata antar lane
+ └── hasil = densityIndex per approach
+
+avgSpeedKmh
+ └── belum tersedia
+ └── tetap None
+
+ Command pengujian
+1. Test khusus Traffic State Builder
+
+Jalankan:
+python -m pytest tests/test_traffic_state_builder.py -q
+
+Expected:
+12 passed
+
+Ini yang paling penting untuk checklist Traffic State Builder.
+
+2. Test Traffic Service
+python -m pytest tests/test_traffic_service.py -q
+
+Expected:
+10 passed
+
+3. Test SUMO Adapter
+python -m pytest tests/test_sumo_adapter.py -q
+
+Expected:
+1 passed
+
+4. Test seluruh backend
+Ini yang paling terakhir kamu jalankan:
+
+python -m pytest -q
+
+Expected kondisi sekarang
+24 passed, 1 warning
+
+Warning Starlette/httpx tadi bukan failure.
 
 **Prinsip utama:** Traffic State Builder hanya bertanggung jawab mengubah data CV menjadi state lalu lintas sesuai contract. Logika API, frontend, SUMO, forecasting, dan recommendation tetap berada di layer masing-masing.
