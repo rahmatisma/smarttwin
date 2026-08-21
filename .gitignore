@@ -6,6 +6,9 @@ __pycache__/
 venv/
 cv/venv/
 forecasting/.venv/
+.env
+.env.*
+!.env.example
 
 # pip cache — jangan pernah di-commit, ini cache lokal
 pip-cache/
