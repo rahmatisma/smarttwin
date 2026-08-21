@@ -8,6 +8,14 @@ class Settings(BaseSettings):
 
     cors_origins: str = "http://localhost:3000"
 
+    # Supabase (service_role — server-only, bypass RLS)
+    supabase_url: str = ""
+    supabase_service_role_key: str = ""
+
+    # Hugging Face Hub (storage video CCTV, lihat docs/database.md #13)
+    hf_token: str = ""
+    hf_repo_id: str = "rahmatisma/smarttwin-cctv"
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

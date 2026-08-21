@@ -1,6 +1,7 @@
 "use client";
 
-import Link from "next/link";
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import {
     User,
     Mail,
@@ -12,8 +13,48 @@ import {
 } from "lucide-react";
 
 import Sidebar from "@/components/Sidebar";
+import { supabase } from "@/lib/supabaseClient";
 
 export default function AccountPage() {
+    const router = useRouter();
+
+    const [name, setName] = useState<string>("");
+    const [email, setEmail] = useState<string>("");
+    const [loggingOut, setLoggingOut] = useState(false);
+
+    useEffect(() => {
+        supabase.auth.getUser().then(({ data }) => {
+            const user = data.user;
+
+            if (!user) {
+                return;
+            }
+
+            setEmail(user.email ?? "");
+            setName(
+                (user.user_metadata?.name as string | undefined) ??
+                    user.email ??
+                    ""
+            );
+        });
+    }, []);
+
+    async function handleLogout() {
+        setLoggingOut(true);
+
+        await supabase.auth.signOut();
+
+        router.replace("/login");
+        router.refresh();
+    }
+
+    const initials = name
+        .split(" ")
+        .filter(Boolean)
+        .slice(0, 2)
+        .map((part) => part[0]?.toUpperCase())
+        .join("") || "SM";
+
     return (
         <div className="flex h-screen overflow-hidden bg-background text-text">
 
@@ -57,18 +98,18 @@ export default function AccountPage() {
                                 {/* AVATAR */}
                                 <div className="flex h-20 w-20 shrink-0 items-center justify-center rounded-full bg-accent-dim ring-1 ring-accent/30">
                                     <span className="font-display text-2xl font-semibold text-accent">
-                                        SM
+                                        {initials}
                                     </span>
                                 </div>
 
                                 {/* USER INFO */}
                                 <div className="flex-1">
                                     <h2 className="font-display text-lg font-semibold text-text">
-                                        Santi Melvira
+                                        {name || "Memuat..."}
                                     </h2>
 
                                     <p className="mt-1 text-sm text-text-muted">
-                                        santi@example.com
+                                        {email || "-"}
                                     </p>
 
                                     <div className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-signal-green/10 px-2.5 py-1 text-[11px] text-signal-green">
@@ -114,7 +155,7 @@ export default function AccountPage() {
                                         </div>
 
                                         <p className="mt-2 text-sm text-text">
-                                            Santi Melvira
+                                            {name || "-"}
                                         </p>
                                     </div>
 
@@ -129,7 +170,7 @@ export default function AccountPage() {
                                         </div>
 
                                         <p className="mt-2 text-sm text-text">
-                                            santi@example.com
+                                            {email || "-"}
                                         </p>
                                     </div>
 
@@ -248,25 +289,19 @@ export default function AccountPage() {
 
                                 <button
                                     type="button"
-                                    className="flex items-center justify-center gap-2 rounded-lg border border-red-400/30 px-4 py-2 text-xs text-red-300 transition hover:bg-red-400/10"
+                                    onClick={handleLogout}
+                                    disabled={loggingOut}
+                                    className="flex items-center justify-center gap-2 rounded-lg border border-red-400/30 px-4 py-2 text-xs text-red-300 transition hover:bg-red-400/10 disabled:opacity-60"
                                 >
                                     <LogOut className="h-3.5 w-3.5" />
 
-                                    Logout
+                                    {loggingOut ? "Logging out..." : "Logout"}
                                 </button>
 
                             </div>
                         </div>
 
-                        {/* LOGIN LINK — sementara untuk testing */}
-                        <div className="mt-5 pb-6 text-center">
-                            <Link
-                                href="/login"
-                                className="text-xs text-text-muted transition hover:text-accent"
-                            >
-                                Buka halaman Login →
-                            </Link>
-                        </div>
+                        <div className="pb-6" />
 
                     </div>
 
