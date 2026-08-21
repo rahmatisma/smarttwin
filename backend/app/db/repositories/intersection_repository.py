@@ -1,33 +1,23 @@
 from __future__ import annotations
 
-from sqlalchemy import select
-from sqlalchemy.orm import Session
+from supabase import Client
 
-from app.db.models import (
-    Approach,
-    Intersection,
-    Lane,
-)
+from app.services.supabase_client import get_supabase
 
 
 class IntersectionRepository:
 
-    def __init__(self, db: Session):
-        self.db = db
+    def __init__(self, supabase: Client | None = None):
+        self.supabase = supabase or get_supabase()
 
     def get_by_intersection_id(
         self,
         intersection_id: str,
-    ) -> Intersection | None:
-
-        statement = select(Intersection).where(
-            Intersection.intersectionId
-            == intersection_id
-        )
-
-        return self.db.execute(
-            statement
-        ).scalar_one_or_none()
+    ) -> dict | None:
+        result = self.supabase.table("intersections").select("*").eq(
+            "intersectionId", intersection_id
+        ).maybe_single().execute()
+        return result.data if result is not None else None
 
     def create_intersection(
         self,
@@ -36,22 +26,16 @@ class IntersectionRepository:
         latitude: float | None = None,
         longitude: float | None = None,
         description: str | None = None,
-    ) -> Intersection:
-
-        intersection = Intersection(
-            intersectionId=intersection_id,
-            name=name,
-            latitude=latitude,
-            longitude=longitude,
-            description=description,
-            isActive=True,
-        )
-
-        self.db.add(intersection)
-        self.db.commit()
-        self.db.refresh(intersection)
-
-        return intersection
+    ) -> dict:
+        result = self.supabase.table("intersections").insert({
+            "intersectionId": intersection_id,
+            "name": name,
+            "latitude": latitude,
+            "longitude": longitude,
+            "description": description,
+            "isActive": True,
+        }).execute()
+        return result.data[0]
 
     def create_approach(
         self,
@@ -59,21 +43,15 @@ class IntersectionRepository:
         approach: str,
         name: str | None = None,
         sort_order: int = 0,
-    ) -> Approach:
-
-        item = Approach(
-            intersectionId=intersection_db_id,
-            approach=approach,
-            name=name,
-            sortOrder=sort_order,
-            isActive=True,
-        )
-
-        self.db.add(item)
-        self.db.commit()
-        self.db.refresh(item)
-
-        return item
+    ) -> dict:
+        result = self.supabase.table("approaches").insert({
+            "intersectionId": intersection_db_id,
+            "approach": approach,
+            "name": name,
+            "sortOrder": sort_order,
+            "isActive": True,
+        }).execute()
+        return result.data[0]
 
     def create_lane(
         self,
@@ -81,18 +59,12 @@ class IntersectionRepository:
         lane_id: str,
         lane_name: str | None = None,
         lane_index: int | None = None,
-    ) -> Lane:
-
-        lane = Lane(
-            approachId=approach_db_id,
-            laneId=lane_id,
-            laneName=lane_name,
-            laneIndex=lane_index,
-            isActive=True,
-        )
-
-        self.db.add(lane)
-        self.db.commit()
-        self.db.refresh(lane)
-
-        return lane
+    ) -> dict:
+        result = self.supabase.table("lanes").insert({
+            "approachId": approach_db_id,
+            "laneId": lane_id,
+            "laneName": lane_name,
+            "laneIndex": lane_index,
+            "isActive": True,
+        }).execute()
+        return result.data[0]

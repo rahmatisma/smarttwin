@@ -1,42 +1,47 @@
-from sqlalchemy import inspect
-
-from app.db.database import engine
+from app.services.supabase_client import get_supabase
 
 
 EXPECTED_TABLES = {
-    "intersections",
     "approaches",
-    "lanes",
+    "cameraVideos",
     "cameras",
-    "videoUploads",
-    "trafficStates",
-    "approachStates",
-    "signalStatuses",
-    "forecasts",
+    "cctvHistory",
+    "cvProcessingJobs",
     "forecastPredictions",
+    "forecasts",
+    "intersections",
+    "lanes",
     "recommendations",
-    "simulationRuns",
+    "signalPhases",
+    "signalStatuses",
     "simulationMetrics",
+    "simulations",
+    "systemLogs",
+    "trafficApproachStates",
+    "trafficLaneMetrics",
+    "trafficStates",
+    "userSettings",
+    "users",
 }
 
 
 def test_database_tables_exist():
     """
-    Memastikan semua tabel utama SmartTwin
-    sudah tersedia di PostgreSQL Supabase.
+    Memastikan tabel utama SmartTwin tersedia
+    di Supabase.
     """
 
-    inspector = inspect(engine)
+    supabase = get_supabase()
 
-    tables = set(
-        inspector.get_table_names()
-    )
+    missing_tables = []
 
-    missing_tables = (
-        EXPECTED_TABLES - tables
-    )
+    for table_name in EXPECTED_TABLES:
+        try:
+            supabase.table(table_name).select("*").limit(1).execute()
+        except Exception:
+            missing_tables.append(table_name)
 
     assert not missing_tables, (
-        "Tabel berikut belum tersedia: "
+        "Tabel berikut tidak dapat diakses di Supabase: "
         f"{sorted(missing_tables)}"
     )

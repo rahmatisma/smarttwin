@@ -1,57 +1,45 @@
 from functools import lru_cache
 
-from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    """
-    Application configuration.
-
-    Semua konfigurasi dibaca dari environment variable
-    atau file .env.
-    """
-
-    # ========================================================
+    # ============================================================
     # APPLICATION
-    # ========================================================
+    # ============================================================
 
     app_name: str = "SmartTwin Backend"
-
     app_version: str = "0.1.0"
-
     debug: bool = True
 
     cors_origins: str = "http://localhost:3000"
 
-    # ========================================================
-    # DATABASE
-    # ========================================================
-
-    database_url: str = Field(
-        ...,
-        description="PostgreSQL connection string",
-    )
-
-    # ========================================================
+    # ============================================================
     # SUPABASE
-    # ========================================================
+    # ============================================================
 
-    supabase_url: str = ""
+    # URL project Supabase
+    supabase_url: str
 
-    supabase_service_role_key: str = ""
+    # Service role key.
+    # SERVER-ONLY — jangan pernah dikirim ke frontend.
+    supabase_service_role_key: str
 
-    # ========================================================
+    # ============================================================
     # HUGGING FACE
-    # ========================================================
+    # ============================================================
 
-    hf_token: str = ""
+    # Token Hugging Face
+    hf_token: str
 
-    hf_repo_id: str = ""
+    # Repository tempat video CCTV disimpan
+    # Contoh:
+    # rahmatisma/smarttwin-cctv
+    hf_repo_id: str
 
-    # ========================================================
-    # PYDANTIC SETTINGS
-    # ========================================================
+    # ============================================================
+    # ENVIRONMENT CONFIG
+    # ============================================================
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -59,6 +47,26 @@ class Settings(BaseSettings):
         case_sensitive=False,
         extra="ignore",
     )
+
+    @property
+    def cors_origins_list(self) -> list[str]:
+        """
+        Mengubah:
+
+            http://localhost:3000,http://127.0.0.1:3000
+
+        menjadi:
+
+            [
+                "http://localhost:3000",
+                "http://127.0.0.1:3000"
+            ]
+        """
+        return [
+            origin.strip()
+            for origin in self.cors_origins.split(",")
+            if origin.strip()
+        ]
 
 
 @lru_cache

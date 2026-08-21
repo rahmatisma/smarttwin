@@ -1,15 +1,12 @@
+import base64
+import json
 from datetime import datetime
 
-from sqlalchemy import select
+import pytest
 
-from app.db.database import SessionLocal
-from app.db.models import (
-    ApproachStateModel,
-    TrafficStateModel,
-)
-from app.repositories.traffic_state_repository import (
-    TrafficStateRepository,
-)
+from app.db.repositories.traffic_state_repository import TrafficStateRepository
+from app.core.config import settings
+from app.services.supabase_client import get_supabase
 from app.schemas.traffic import (
     ApproachState,
     TrafficState,
@@ -17,11 +14,20 @@ from app.schemas.traffic import (
 
 
 def test_save_traffic_state():
-
-    db = SessionLocal()
-
     try:
-        state = TrafficState(
+        payload = settings.supabase_service_role_key.split(".")[1]
+        payload_data = json.loads(
+            base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4))
+        )
+    except (IndexError, ValueError, json.JSONDecodeError):
+        pytest.skip("SUPABASE_SERVICE_ROLE_KEY bukan JWT yang valid")
+
+    if payload_data.get("role") != "service_role":
+        pytest.skip(
+            "Test write membutuhkan SUPABASE_SERVICE_ROLE_KEY dengan role service_role"
+        )
+
+    state = TrafficState(
             intersectionId="simpang4-pingit",
             windowStart=datetime(
                 2026,
@@ -91,36 +97,10 @@ def test_save_traffic_state():
             ],
         )
 
-        repository = TrafficStateRepository(db)
+    saved = TrafficStateRepository().save_state(state)
+    assert saved["id"] is not None
 
-        saved = repository.save_state(
-            state
-        )
-
-        assert saved.id is not None
-
-        # Verify parent
-        parent = db.execute(
-            select(TrafficStateModel).where(
-                TrafficStateModel.id
-                == saved.id
-            )
-        ).scalar_one()
-
-        assert (
-            parent.intersectionId
-            is not None
-        )
-
-        # Verify children
-        children = db.execute(
-            select(ApproachStateModel).where(
-                ApproachStateModel.trafficStateId
-                == saved.id
-            )
-        ).scalars().all()
-
-        assert len(children) == 4
-
-    finally:
-        db.close()
+    children = get_supabase().table("trafficApproachStates").select("id").eq(
+        "trafficStateId", saved["id"]
+    ).execute()
+    assert len(children.data or []) == 4

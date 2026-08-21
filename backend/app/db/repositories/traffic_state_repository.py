@@ -1,143 +1,74 @@
 from __future__ import annotations
 
-from sqlalchemy import select
-from sqlalchemy.orm import Session
+from supabase import Client
 
-from app.db.models import (
-    Approach,
-    ApproachStateModel,
-    Intersection,
-    TrafficStateModel,
-)
 from app.schemas.traffic import TrafficState
+from app.services.supabase_client import get_supabase
 
 
 class TrafficStateRepository:
 
-    def __init__(self, db: Session):
-        self.db = db
+    def __init__(self, supabase: Client | None = None):
+        self.supabase = supabase or get_supabase()
 
     def save_state(
         self,
         state: TrafficState,
-    ) -> TrafficStateModel:
-
-        # ====================================================
-        # FIND INTERSECTION
-        # ====================================================
-
-        intersection_statement = select(
-            Intersection
-        ).where(
-            Intersection.intersectionId
-            == state.intersectionId
+    ) -> dict:
+        intersection_result = (
+            self.supabase.table("intersections")
+            .select("id")
+            .eq("intersectionId", state.intersectionId)
+            .maybe_single()
+            .execute()
         )
-
-        intersection = self.db.execute(
-            intersection_statement
-        ).scalar_one_or_none()
-
-        if intersection is None:
+        if intersection_result is None or not intersection_result.data:
             raise ValueError(
-                "Intersection tidak ditemukan: "
-                f"{state.intersectionId}"
+                f"Intersection tidak ditemukan: {state.intersectionId}"
             )
+        intersection_id = intersection_result.data["id"]
 
-        # ====================================================
-        # PREVENT DUPLICATE TRAFFIC STATE
-        # ====================================================
-
-        existing_statement = select(
-            TrafficStateModel
-        ).where(
-            TrafficStateModel.intersectionId
-            == intersection.id,
-            TrafficStateModel.windowStart
-            == state.windowStart,
-            TrafficStateModel.windowEnd
-            == state.windowEnd,
+        existing_result = (
+            self.supabase.table("trafficStates")
+            .select("id")
+            .eq("intersectionId", intersection_id)
+            .eq("windowStart", state.windowStart.isoformat())
+            .eq("windowEnd", state.windowEnd.isoformat())
+            .maybe_single()
+            .execute()
         )
+        if existing_result is not None and existing_result.data:
+            traffic_state_id = existing_result.data["id"]
+        else:
+            inserted = self.supabase.table("trafficStates").insert({
+                "intersectionId": intersection_id,
+                "windowStart": state.windowStart.isoformat(),
+                "windowEnd": state.windowEnd.isoformat(),
+                "source": "backend",
+            }).execute()
+            traffic_state_id = inserted.data[0]["id"]
 
-        existing = self.db.execute(
-            existing_statement
-        ).scalar_one_or_none()
+        approach_rows = self.supabase.table("approaches").select("id, approach").eq(
+            "intersectionId", intersection_id
+        ).execute()
+        approach_ids = {row["approach"]: row["id"] for row in (approach_rows.data or [])}
 
-        if existing is not None:
-            return existing
-
-        # ====================================================
-        # CREATE TRAFFIC STATE
-        # ====================================================
-
-        traffic_state = TrafficStateModel(
-            intersectionId=intersection.id,
-            windowStart=state.windowStart,
-            windowEnd=state.windowEnd,
-        )
-
-        self.db.add(traffic_state)
-
-        self.db.flush()
-
-        # ====================================================
-        # APPROACH STATES
-        # ====================================================
-
+        payload = []
         for approach_state in state.approaches:
-
-            approach_statement = select(
-                Approach
-            ).where(
-                Approach.intersectionId
-                == intersection.id,
-                Approach.approach
-                == approach_state.approach,
-            )
-
-            approach = self.db.execute(
-                approach_statement
-            ).scalar_one_or_none()
-
-            if approach is None:
+            approach_id = approach_ids.get(approach_state.approach)
+            if approach_id is None:
                 raise ValueError(
-                    "Approach tidak ditemukan: "
-                    f"{approach_state.approach}"
+                    f"Approach tidak ditemukan: {approach_state.approach}"
                 )
+            payload.append({
+                "trafficStateId": traffic_state_id,
+                "approachId": approach_id,
+                **approach_state.model_dump(exclude={"approach"}),
+            })
 
-            db_approach_state = (
-                ApproachStateModel(
-                    trafficStateId=traffic_state.id,
-                    approachId=approach.id,
-                    volume=approach_state.volume,
-                    carCount=approach_state.carCount,
-                    motorcycleCount=(
-                        approach_state.motorcycleCount
-                    ),
-                    busCount=approach_state.busCount,
-                    truckCount=approach_state.truckCount,
-                    queueLengthVeh=(
-                        approach_state.queueLengthVeh
-                    ),
-                    queueLengthMEst=(
-                        approach_state.queueLengthMEst
-                    ),
-                    densityIndex=(
-                        approach_state.densityIndex
-                    ),
-                    avgSpeedKmh=(
-                        approach_state.avgSpeedKmh
-                    ),
-                )
-            )
+        if payload:
+            self.supabase.table("trafficApproachStates").upsert(
+                payload, on_conflict="trafficStateId,approachId"
+            ).execute()
 
-            self.db.add(
-                db_approach_state
-            )
-
-        self.db.commit()
-
-        self.db.refresh(
-            traffic_state
-        )
-
-        return traffic_state
+        return {"id": traffic_state_id, "intersectionId": intersection_id}

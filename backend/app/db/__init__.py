@@ -1,8 +1,7 @@
-from app.db.database import Base, SessionLocal, engine, get_db
+from app.db.database import get_db
+from app.services.supabase_client import get_supabase
 
 __all__ = [
-    "Base",
-    "SessionLocal",
-    "engine",
     "get_db",
+    "get_supabase",
 ]

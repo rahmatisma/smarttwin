@@ -1,57 +1,18 @@
 from collections.abc import Generator
 
-from sqlalchemy import create_engine
-from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
+from supabase import Client
 
 from app.core.config import settings
+from app.services.supabase_client import get_supabase
 
 
-# ============================================================
-# DATABASE ENGINE
-# ============================================================
-
-engine = create_engine(
-    settings.database_url,
-    pool_pre_ping=True,
-    future=True,
-)
-
-
-# ============================================================
-# SESSION
-# ============================================================
-
-SessionLocal = sessionmaker(
-    bind=engine,
-    autoflush=False,
-    autocommit=False,
-    expire_on_commit=False,
-)
-
-
-# ============================================================
-# BASE MODEL
-# ============================================================
-
-class Base(DeclarativeBase):
-    pass
-
-
-# ============================================================
-# DATABASE DEPENDENCY
-# ============================================================
-
-def get_db() -> Generator[Session, None, None]:
+def get_db() -> Generator[Client, None, None]:
     """
     Dependency untuk FastAPI.
 
-    Setiap request mendapatkan satu database session.
-    Session selalu ditutup setelah request selesai.
+    Dependency kompatibilitas untuk route lama.
+
+    Supabase client bersifat stateless dan di-cache oleh
+    get_supabase(), jadi tidak perlu membuka atau menutup session.
     """
-
-    db = SessionLocal()
-
-    try:
-        yield db
-    finally:
-        db.close()
+    yield get_supabase()
