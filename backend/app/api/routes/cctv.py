@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import tempfile
+from pathlib import Path
+
 import httpx
 from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, UploadFile
 from fastapi.concurrency import run_in_threadpool
@@ -13,6 +16,11 @@ router = APIRouter(
     prefix="/api/v1/cctv",
     tags=["CCTV"],
 )
+
+# Ukuran chunk saat menulis upload ke disk. Nilai kecil-sedang supaya
+# tidak pernah menahan lebih dari ini di RAM sekaligus, walau file-nya
+# berukuran GB-an.
+CHUNK_SIZE = 8 * 1024 * 1024  # 8 MB
 
 
 # ============================================================
@@ -30,8 +38,15 @@ async def upload_cctv_video(
     """
     Upload video CCTV.
 
+    File di-stream langsung ke disk (bukan ditahan penuh di RAM --
+    penting untuk video berukuran GB-an) baru kemudian:
+
     File asli -> Hugging Face Hub (dataset repo, private)
     Metadata  -> Supabase (cameras, cameraVideos)
+
+    TODO: file sementara di disk belum dihapus otomatis setelah CV
+    processing selesai (lihat cv_trigger_service.py) -- pembersihan
+    berkala belum diimplementasikan.
     """
 
     if not file.content_type or not file.content_type.startswith("video/"):
@@ -40,9 +55,19 @@ async def upload_cctv_video(
             detail="File yang diupload harus berupa video.",
         )
 
-    file_bytes = await file.read()
+    suffix = Path(file.filename or "video.mp4").suffix or ".mp4"
+    temp_file = tempfile.NamedTemporaryFile(suffix=suffix, delete=False)
+    file_size = 0
 
-    if not file_bytes:
+    try:
+        while chunk := await file.read(CHUNK_SIZE):
+            temp_file.write(chunk)
+            file_size += len(chunk)
+    finally:
+        temp_file.close()
+
+    if file_size == 0:
+        Path(temp_file.name).unlink(missing_ok=True)
         raise HTTPException(status_code=400, detail="File video kosong.")
 
     try:
@@ -52,14 +77,16 @@ async def upload_cctv_video(
             approach=approach,
             name=name,
             filename=file.filename or "video.mp4",
-            file_bytes=file_bytes,
+            file_path=temp_file.name,
+            file_size=file_size,
         )
     except CctvServiceError as exc:
+        Path(temp_file.name).unlink(missing_ok=True)
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     background_tasks.add_task(
         trigger_cv_processing,
-        file_bytes=file_bytes,
+        file_path=temp_file.name,
         approach=approach,
         camera_id=result.camera_id,
         video_id=result.video_id,

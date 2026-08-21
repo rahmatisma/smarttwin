@@ -78,7 +78,8 @@ def upload_camera_video(
     approach: str,
     name: str,
     filename: str,
-    file_bytes: bytes,
+    file_path: str,
+    file_size: int,
 ) -> UploadedCamera:
     if approach not in APPROACHES:
         raise CctvServiceError(f"Approach tidak valid: {approach}")
@@ -112,7 +113,7 @@ def upload_camera_video(
     camera_row = camera_insert.data[0]
 
     hf_result = upload_video(
-        file_bytes=file_bytes,
+        file_path=file_path,
         filename=f"{camera_id}_{filename}",
         intersection_id=intersection_id,
     )
@@ -130,7 +131,7 @@ def upload_camera_video(
                 "repositoryId": hf_result.repository_id,
                 "filePath": hf_result.file_path,
                 "fileUrl": None,
-                "fileSizeBytes": len(file_bytes),
+                "fileSizeBytes": file_size,
                 "status": "uploaded",
             }
         )

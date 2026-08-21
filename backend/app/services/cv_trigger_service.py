@@ -9,18 +9,22 @@ lewat interpreter python di cv/.venv, bukan diimpor langsung.
 Alur:
     upload_cctv_video() (route) sukses
         -> trigger_cv_processing() (BackgroundTasks, tidak diblokir)
-            -> tulis file_bytes ke file sementara
+            -> pakai file_path yang sudah ditulis route ke disk saat
+               streaming upload (tidak menulis ulang/duplikasi)
             -> insert baris cvProcessingJobs (status=running)
             -> spawn subprocess cv/process_uploaded_video.py
                (subprocess sendiri yang mengisi Supabase per window
                dan menutup job-nya di akhir, lihat cv/supabase_writer.py)
+
+Catatan: file_path TIDAK dihapus di sini karena subprocess CV masih
+membacanya secara async setelah fungsi ini selesai. Pembersihan
+file sementara belum diimplementasikan (sama seperti versi
+sebelumnya) -- lihat TODO di app/api/routes/cctv.py.
 """
 
 from __future__ import annotations
 
 import subprocess
-import sys
-import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -83,7 +87,7 @@ def _get_intersection_row_id(intersection_id: str) -> int:
 
 def trigger_cv_processing(
     *,
-    file_bytes: bytes,
+    file_path: str,
     approach: str,
     camera_id: int,
     video_id: int,
@@ -108,17 +112,11 @@ def trigger_cv_processing(
         intersection_row_id = _get_intersection_row_id(intersection_id)
         job_id = _create_processing_job(video_id)
 
-        temp_file = tempfile.NamedTemporaryFile(
-            suffix=".mp4", delete=False
-        )
-        temp_file.write(file_bytes)
-        temp_file.close()
-
         subprocess.Popen(
             [
                 str(CV_VENV_PYTHON),
                 str(CV_SCRIPT),
-                "--video", temp_file.name,
+                "--video", file_path,
                 "--approach", approach,
                 "--camera-id", str(camera_id),
                 "--video-id", str(video_id),
