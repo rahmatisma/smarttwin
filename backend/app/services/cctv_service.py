@@ -44,7 +44,9 @@ def _get_intersection_row_id(intersection_id: str) -> int:
         .execute()
     )
 
-    if not result.data:
+    # .maybe_single() balikin None (bukan objek dengan .data=None) kalau
+    # tidak ada baris yang cocok -- bukan cuma .data yang None.
+    if result is None or not result.data:
         raise CctvServiceError(
             f"Intersection '{intersection_id}' tidak ditemukan."
         )
@@ -64,7 +66,7 @@ def _get_approach_row_id(intersection_row_id: int, approach: str) -> int:
         .execute()
     )
 
-    if not result.data:
+    if result is None or not result.data:
         raise CctvServiceError(f"Approach '{approach}' tidak ditemukan.")
 
     return result.data["id"]
@@ -163,7 +165,7 @@ def get_video_hf_location(video_id: int) -> tuple[str, str]:
         .execute()
     )
 
-    if not result.data or result.data.get("storageProvider") != "huggingface":
+    if result is None or not result.data or result.data.get("storageProvider") != "huggingface":
         raise CctvServiceError("Video tidak ditemukan di Hugging Face.")
 
     return result.data["repositoryId"], result.data["filePath"]

@@ -13,6 +13,8 @@ import ForecastChart from "@/components/ForecastChart";
 
 import { useTrafficSimulation } from "@/hooks/useTrafficSimulaton";
 
+import { supabase } from "@/lib/supabaseClient";
+
 import {
   DEFAULT_INTERSECTION_ID,
   fetchTrafficState,
@@ -328,6 +330,28 @@ export default function DashboardPage() {
     }
 
     loadDashboardData();
+
+    /*
+     * Realtime: begitu process_uploaded_video.py (cv/) meng-upsert
+     * baris trafficApproachStates baru, tarik ulang trafficState
+     * terbaru supaya angka di dashboard berubah tanpa refresh
+     * manual. Butuh trafficStates/trafficApproachStates didaftarkan
+     * ke publication supabase_realtime lebih dulu (lihat docs).
+     */
+    const channel = supabase
+      .channel("traffic-state-changes")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "trafficApproachStates" },
+        () => {
+          fetchTrafficState(DEFAULT_INTERSECTION_ID).then(setTrafficState);
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
 
   }, []);
 

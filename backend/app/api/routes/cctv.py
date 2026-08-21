@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import httpx
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import StreamingResponse
 
 from app.core.config import settings
 from app.services.cctv_service import CctvServiceError, get_video_hf_location, upload_camera_video
+from app.services.cv_trigger_service import trigger_cv_processing
 
 router = APIRouter(
     prefix="/api/v1/cctv",
@@ -20,6 +21,7 @@ router = APIRouter(
 
 @router.post("/upload")
 async def upload_cctv_video(
+    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     name: str = Form(...),
     approach: str = Form(...),
@@ -54,6 +56,15 @@ async def upload_cctv_video(
         )
     except CctvServiceError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    background_tasks.add_task(
+        trigger_cv_processing,
+        file_bytes=file_bytes,
+        approach=approach,
+        camera_id=result.camera_id,
+        video_id=result.video_id,
+        intersection_id=intersection_id,
+    )
 
     return {
         "cameraId": result.camera_id,

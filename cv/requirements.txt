@@ -16,6 +16,21 @@ lap>=0.5.12
 # SEBELUM ultralytics, sesuai panduan resmi PyTorch (pytorch.org/get-started) —
 # ultralytics bakal pakai versi torch yang udah keinstall, gak override otomatis.
 
+# Dipakai process_uploaded_video.py buat nulis hasil deteksi video upload
+# langsung ke Supabase (trafficStates/trafficApproachStates), bukan ke CSV.
+# Versi disamakan dengan backend/requirements.txt.
+supabase>=2.11.0
+
+# Dipakai process_uploaded_video.py buat render video hasil deteksi (kotak
+# bounding box dibakar ke frame) supaya bisa diputar di halaman CCTV.
+# BUKAN cv2.VideoWriter: encoder H.264 bawaan OpenCV di Windows butuh DLL
+# openh264 terpisah yang gagal dimuat plugin FFmpeg internal OpenCV (sudah
+# dicoba, macet di loader Windows). imageio-ffmpeg bawa binary ffmpeg
+# sendiri lewat pip, jadi selalu bisa encode H.264 (avc1/yuv420p) yang
+# didukung <video> di browser, tanpa install apa pun di sistem.
+huggingface-hub>=0.27.1
+imageio-ffmpeg>=0.5.1
+
 # Catatan bobot model:
 # yolo26s.pt (20,4 MB) TIDAK ikut di repo — cv/models/ di-gitignore.
 # Ambil sekali per laptop, salah satu cara:
