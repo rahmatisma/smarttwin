@@ -50,12 +50,16 @@ def ensure_dataset_repo() -> None:
 
 def upload_video(
     *,
-    file_bytes: bytes,
+    file_path: str,
     filename: str,
     intersection_id: str,
 ) -> HfUploadResult:
     """
     Upload satu file video ke dataset repo.
+
+    file_path: path ke file di disk lokal (bukan bytes di memori) --
+    huggingface_hub men-stream langsung dari disk, jadi tidak perlu
+    menahan seluruh file di RAM.
 
     Path di repo: videos/{intersection_id}/{filename}
     """
@@ -67,7 +71,7 @@ def upload_video(
     path_in_repo = f"videos/{intersection_id}/{filename}"
 
     api.upload_file(
-        path_or_fileobj=file_bytes,
+        path_or_fileobj=file_path,
         path_in_repo=path_in_repo,
         repo_id=settings.hf_repo_id,
         repo_type="dataset",

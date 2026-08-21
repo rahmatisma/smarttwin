@@ -29,7 +29,7 @@ class Settings(BaseSettings):
     # ========================================================
 
     database_url: str = Field(
-        ...,
+        default="",
         description="PostgreSQL connection string",
     )
 

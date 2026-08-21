@@ -69,10 +69,18 @@ function resolveVideoSrc(source: string): string {
  * fetch() tidak expose progress upload, jadi pakai XHR
  * supaya xhr.upload.onprogress bisa dipantau untuk file
  * video CCTV yang bisa berukuran besar (GB-an).
+ *
+ * PENTING: xhr.upload.onprogress cuma ngukur fase browser -> backend
+ * (localhost, biasanya cepat/instan). xhr.upload.onload menandai fase
+ * itu SELESAI -- tapi response HTTP-nya (xhr.onload) baru datang
+ * setelah backend selesai upload ulang ke Hugging Face, yang bisa
+ * jauh lebih lama untuk video besar. Tanpa membedakan dua fase ini,
+ * UI kelihatan "macet di 100%" padahal backend masih kerja.
  */
 function uploadCctvFileWithProgress(
     body: FormData,
-    onProgress: (percent: number) => void
+    onProgress: (percent: number) => void,
+    onSendComplete: () => void
 ): Promise<{ ok: boolean; status: number; payload: Record<string, unknown> }> {
     return new Promise((resolve, reject) => {
         const xhr = new XMLHttpRequest();
@@ -83,6 +91,10 @@ function uploadCctvFileWithProgress(
             if (event.lengthComputable) {
                 onProgress(Math.round((event.loaded / event.total) * 100));
             }
+        };
+
+        xhr.upload.onload = () => {
+            onSendComplete();
         };
 
         xhr.onload = () => {
@@ -103,6 +115,21 @@ function uploadCctvFileWithProgress(
     });
 }
 
+/*
+ * Satu upload video yang sedang berjalan di background -- lepas
+ * dari modal. Ditampilkan sebagai kartu tersendiri di grid CCTV
+ * (di depan kartu kamera asli) supaya user bisa nutup modal dan
+ * lanjut kerja lain, tapi tetap kelihatan progresnya.
+ */
+type UploadTask = {
+    id: string;
+    fileName: string;
+    approach: Approach;
+    status: "sending" | "processing" | "error";
+    progress: number;
+    error?: string;
+};
+
 export default function CCTVPage() {
     const [cameras, setCameras] = useState<Camera[]>([]);
     const [loading, setLoading] = useState(true);
@@ -112,13 +139,20 @@ export default function CCTVPage() {
     const [saving, setSaving] = useState(false);
     const [deletingId, setDeletingId] = useState<string | null>(null);
     const [formError, setFormError] = useState<string | null>(null);
-    const [uploadProgress, setUploadProgress] = useState<number | null>(null);
 
     /*
      * File asli untuk diupload ke backend saat submit. Blob URL
      * di form.source hanya dipakai untuk preview di dalam modal.
      */
     const [fileObject, setFileObject] = useState<File | null>(null);
+
+    /*
+     * Upload video yang sedang berjalan di background, lepas dari
+     * modal (lihat komentar UploadTask di atas). Modal bisa ditutup
+     * kapan pun setelah submit -- upload tetap lanjut, progresnya
+     * muncul sebagai kartu di grid.
+     */
+    const [uploadTasks, setUploadTasks] = useState<UploadTask[]>([]);
 
     // =====================================================
     // LOAD DATA DARI SUPABASE
@@ -232,7 +266,6 @@ export default function CCTVPage() {
         setForm(EMPTY_FORM);
         setFileObject(null);
         setFormError(null);
-        setUploadProgress(null);
     }
 
     function closeModal() {
@@ -241,14 +274,91 @@ export default function CCTVPage() {
     }
 
     // =====================================================
+    // UPLOAD VIDEO DI BACKGROUND
+    // =====================================================
+    //
+    // Sengaja TIDAK di-await oleh saveCamera -- dipanggil lalu
+    // dilepas begitu saja (fire-and-forget dari sisi modal), supaya
+    // modal bisa langsung ditutup sementara upload jalan sendiri.
+    // Progresnya dilacak lewat state uploadTasks, dibaca oleh kartu
+    // di grid, bukan oleh modal.
+
+    async function startFileUpload(
+        file: File,
+        name: string,
+        approach: Approach
+    ) {
+        const taskId = crypto.randomUUID();
+
+        setUploadTasks((current) => [
+            ...current,
+            {
+                id: taskId,
+                fileName: name,
+                approach,
+                status: "sending",
+                progress: 0,
+            },
+        ]);
+
+        const updateTask = (patch: Partial<UploadTask>) => {
+            setUploadTasks((current) =>
+                current.map((task) =>
+                    task.id === taskId ? { ...task, ...patch } : task
+                )
+            );
+        };
+
+        try {
+            const body = new FormData();
+            body.append("file", file);
+            body.append("name", name);
+            body.append("approach", approach);
+            body.append("intersection_id", DEFAULT_INTERSECTION_ID);
+
+            const { ok, payload } = await uploadCctvFileWithProgress(
+                body,
+                (percent) => updateTask({ progress: percent }),
+                () => updateTask({ status: "processing" })
+            );
+
+            if (!ok) {
+                throw new Error(
+                    (payload.detail as string) ?? "Gagal mengupload video."
+                );
+            }
+
+            // Sukses -> hapus kartu task, kamera aslinya muncul lewat loadCameras().
+            setUploadTasks((current) =>
+                current.filter((task) => task.id !== taskId)
+            );
+
+            await loadCameras();
+        } catch (error) {
+            updateTask({
+                status: "error",
+                error:
+                    error instanceof Error
+                        ? error.message
+                        : "Gagal mengupload video.",
+            });
+        }
+    }
+
+    function dismissUploadTask(taskId: string) {
+        setUploadTasks((current) =>
+            current.filter((task) => task.id !== taskId)
+        );
+    }
+
+    // =====================================================
     // SAVE CAMERA
     // =====================================================
     //
-    // file        -> POST backend FastAPI (upload asli ke Hugging
-    //                Face + metadata ke Supabase, lihat
-    //                backend/app/api/routes/cctv.py)
+    // file        -> startFileUpload() di background (lihat di atas),
+    //                modal langsung ditutup tanpa menunggu selesai
     // url / rtsp  -> POST /api/cameras (Next.js, metadata saja,
-    //                tidak ada file untuk disimpan)
+    //                instan, tidak ada file untuk diupload)
 
     async function saveCamera(event: FormEvent<HTMLFormElement>) {
         event.preventDefault();
@@ -268,45 +378,34 @@ export default function CCTVPage() {
             return;
         }
 
-        setSaving(true);
         setFormError(null);
-        setUploadProgress(form.sourceType === "file" ? 0 : null);
+
+        if (form.sourceType === "file" && fileObject) {
+            void startFileUpload(fileObject, form.name.trim(), form.approach);
+
+            setShowModal(false);
+            resetForm();
+            return;
+        }
+
+        setSaving(true);
 
         try {
-            if (form.sourceType === "file" && fileObject) {
-                const body = new FormData();
-                body.append("file", fileObject);
-                body.append("name", form.name.trim());
-                body.append("approach", form.approach);
-                body.append("intersection_id", DEFAULT_INTERSECTION_ID);
+            const response = await fetch("/api/cameras", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    name: form.name.trim(),
+                    approach: form.approach,
+                    sourceType: form.sourceType,
+                    source: form.source,
+                }),
+            });
 
-                const { ok, payload } = await uploadCctvFileWithProgress(
-                    body,
-                    setUploadProgress
-                );
+            const payload = await response.json();
 
-                if (!ok) {
-                    throw new Error(
-                        (payload.detail as string) ?? "Gagal mengupload video."
-                    );
-                }
-            } else {
-                const response = await fetch("/api/cameras", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                        name: form.name.trim(),
-                        approach: form.approach,
-                        sourceType: form.sourceType,
-                        source: form.source,
-                    }),
-                });
-
-                const payload = await response.json();
-
-                if (!response.ok) {
-                    throw new Error(payload.error ?? "Gagal menyimpan CCTV.");
-                }
+            if (!response.ok) {
+                throw new Error(payload.error ?? "Gagal menyimpan CCTV.");
             }
 
             await loadCameras();
@@ -321,7 +420,6 @@ export default function CCTVPage() {
             );
         } finally {
             setSaving(false);
-            setUploadProgress(null);
         }
     }
 
@@ -431,7 +529,9 @@ export default function CCTVPage() {
                         </div>
 
                         {/* CAMERA CONTENT */}
-                        {!loading && filteredCameras.length === 0 ? (
+                        {!loading &&
+                        filteredCameras.length === 0 &&
+                        uploadTasks.length === 0 ? (
 
                             /* EMPTY STATE */
                             <div className="rounded-xl border border-dashed border-[#2b3340] bg-[#11161f] px-6 py-20 text-center">
@@ -464,6 +564,117 @@ export default function CCTVPage() {
 
                             /* CAMERA GRID */
                             <div className="grid grid-cols-1 gap-5 xl:grid-cols-2">
+
+                                {/* KARTU UPLOAD SEDANG BERJALAN */}
+                                {uploadTasks.map((task) => (
+
+                                    <div
+                                        key={task.id}
+                                        className="overflow-hidden rounded-xl border border-[#268bc0]/40 bg-[#11161f]"
+                                    >
+
+                                        <div className="relative flex aspect-video flex-col items-center justify-center bg-black px-8 text-center">
+
+                                            {task.status === "error" ? (
+                                                <>
+                                                    <div className="text-4xl">
+                                                        ⚠️
+                                                    </div>
+                                                    <p className="mt-3 text-sm font-medium text-red-300">
+                                                        Upload gagal
+                                                    </p>
+                                                    <p className="mt-2 max-w-md text-xs leading-5 text-[#a3a9b3]">
+                                                        {task.error}
+                                                    </p>
+                                                </>
+                                            ) : (
+                                                <>
+                                                    <span className="h-8 w-8 animate-spin rounded-full border-2 border-[#1b7ea9] border-t-transparent" />
+                                                    <p className="mt-3 text-sm font-medium">
+                                                        {task.status ===
+                                                        "sending"
+                                                            ? `Mengirim... ${task.progress}%`
+                                                            : "Menyimpan ke Hugging Face..."}
+                                                    </p>
+                                                    {task.status ===
+                                                        "processing" && (
+                                                        <p className="mt-2 max-w-md text-xs leading-5 text-[#6f7a8c]">
+                                                            Video besar bisa
+                                                            makan waktu
+                                                            beberapa menit —
+                                                            halaman ini boleh
+                                                            kamu tinggal.
+                                                        </p>
+                                                    )}
+                                                </>
+                                            )}
+
+                                        </div>
+
+                                        {/* PROGRESS BAR */}
+                                        {task.status !== "error" && (
+                                            <div className="h-1 w-full overflow-hidden bg-[#0c1118]">
+                                                <div
+                                                    className={
+                                                        task.status ===
+                                                        "sending"
+                                                            ? "h-full rounded-full bg-[#1b7ea9] transition-all"
+                                                            : "h-full w-1/3 animate-[pulse_1.2s_ease-in-out_infinite] rounded-full bg-[#1b7ea9]"
+                                                    }
+                                                    style={
+                                                        task.status ===
+                                                        "sending"
+                                                            ? {
+                                                                  width: `${task.progress}%`,
+                                                              }
+                                                            : undefined
+                                                    }
+                                                />
+                                            </div>
+                                        )}
+
+                                        <div className="p-4">
+
+                                            <div className="flex items-start justify-between gap-4">
+
+                                                <div className="min-w-0">
+                                                    <h2 className="truncate font-semibold">
+                                                        {task.fileName}
+                                                    </h2>
+
+                                                    <p className="mt-1 text-xs text-[#7b8698]">
+                                                        {DEFAULT_INTERSECTION_ID}
+                                                        {" · "}
+                                                        {
+                                                            APPROACH_LABELS[
+                                                                task.approach
+                                                            ]
+                                                        }
+                                                    </p>
+                                                </div>
+
+                                                {task.status ===
+                                                    "error" && (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() =>
+                                                            dismissUploadTask(
+                                                                task.id
+                                                            )
+                                                        }
+                                                        className="shrink-0 rounded-md border border-[#303846] px-3 py-2 text-xs text-[#9aa5b5] transition hover:border-red-400/50 hover:text-red-300"
+                                                    >
+                                                        Tutup
+                                                    </button>
+                                                )}
+
+                                            </div>
+
+                                        </div>
+
+                                    </div>
+
+                                ))}
 
                                 {filteredCameras.map((camera) => {
 
@@ -983,20 +1194,15 @@ export default function CCTVPage() {
                                 </div>
                             )}
 
-                            {/* PROGRESS UPLOAD */}
-                            {uploadProgress !== null && (
-                                <div>
-                                    <div className="mb-1.5 flex items-center justify-between text-xs text-[#8390a2]">
-                                        <span>Mengupload video...</span>
-                                        <span>{uploadProgress}%</span>
-                                    </div>
-                                    <div className="h-2 w-full overflow-hidden rounded-full bg-[#0c1118]">
-                                        <div
-                                            className="h-full rounded-full bg-[#1b7ea9] transition-all"
-                                            style={{ width: `${uploadProgress}%` }}
-                                        />
-                                    </div>
-                                </div>
+                            {form.sourceType === "file" && (
+                                <p className="text-[11px] leading-4 text-[#647083]">
+                                    Begitu disimpan, modal ini langsung
+                                    tertutup dan upload jalan di
+                                    background — progresnya muncul
+                                    sebagai kartu di grid CCTV, kamu
+                                    bebas buka modal ini lagi buat
+                                    upload video lain sambil menunggu.
+                                </p>
                             )}
 
                             {/* ERROR */}
@@ -1023,9 +1229,9 @@ export default function CCTVPage() {
                                     className="rounded-lg bg-[#1b7ea9] px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-[#2090bd] disabled:opacity-60"
                                 >
                                     {saving
-                                        ? uploadProgress !== null
-                                            ? `Mengupload... ${uploadProgress}%`
-                                            : "Menyimpan..."
+                                        ? "Menyimpan..."
+                                        : form.sourceType === "file"
+                                        ? "Mulai Upload"
                                         : "Simpan CCTV"}
                                 </button>
 
