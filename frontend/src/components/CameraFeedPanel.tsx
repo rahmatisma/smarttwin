@@ -18,6 +18,11 @@ import type {
   VehicleClass,
 } from "@/types/traffic";
 
+import {
+  fetchCameras,
+  DEFAULT_INTERSECTION_ID,
+} from "@/lib/supabaseData";
+
 // =====================================================
 // TYPES
 // =====================================================
@@ -43,15 +48,16 @@ type Camera = {
   status: "online" | "waiting";
 };
 
-// =====================================================
-// CONSTANTS
-// =====================================================
+const API_BASE_URL =
+  process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
 
-const STORAGE_KEY =
-  "smarttwin.cctv.cameras";
+function resolveVideoSrc(source: string): string {
+  if (source.startsWith("/api/")) {
+    return `${API_BASE_URL}${source}`;
+  }
 
-const CCTV_UPDATE_EVENT =
-  "smarttwin:cctv-updated";
+  return source;
+}
 
 // =====================================================
 // ICONS
@@ -93,42 +99,26 @@ const LABELS: Record<
 };
 
 // =====================================================
-// LOAD CCTV
+// LOAD CCTV DARI SUPABASE
 // =====================================================
 
-function loadCameras(): Camera[] {
-  // Server / SSR
-  if (
-    typeof window === "undefined"
-  ) {
-    return [];
-  }
-
+async function loadCameras(): Promise<Camera[]> {
   try {
-    const saved =
-      window.localStorage.getItem(
-        STORAGE_KEY
-      );
+    const rows = await fetchCameras(DEFAULT_INTERSECTION_ID);
 
-    if (!saved) {
-      return [];
-    }
-
-    const parsed: Camera[] =
-      JSON.parse(saved);
-
-    if (!Array.isArray(parsed)) {
-      return [];
-    }
-
-    // Maksimal 4 CCTV
-    return parsed.slice(0, 4);
-
+    return rows.slice(0, 4).map((row) => ({
+      id: String(row.id),
+      name: row.name,
+      intersection: DEFAULT_INTERSECTION_ID,
+      direction: row.approach ?? "Tidak diketahui",
+      sourceType:
+        row.sourceType === "uploaded" ? "file" : "url",
+      source: row.videoUrl ?? "",
+      fileName: row.videoName ?? undefined,
+      status: row.status === "active" ? "online" : "waiting",
+    }));
   } catch (error) {
-    console.error(
-      "Gagal membaca data CCTV:",
-      error
-    );
+    console.error("Gagal mengambil cameras dari Supabase:", error);
 
     return [];
   }
@@ -151,77 +141,20 @@ export default function CameraFeedPanel({
   // ===================================================
 
   const [cameras, setCameras] =
-    useState<Camera[]>(loadCameras);
-
-  // ===================================================
-  // UPDATE CAMERA
-  // ===================================================
+    useState<Camera[]>([]);
 
   useEffect(() => {
+    let cancelled = false;
 
-    if (
-      typeof window === "undefined"
-    ) {
-      return;
-    }
-
-    // -----------------------------------------------
-    // Ketika CCTV berubah dari tab/window lain
-    // -----------------------------------------------
-
-    const handleStorageChange = (
-      event: StorageEvent
-    ) => {
-
-      if (
-        event.key !== STORAGE_KEY
-      ) {
-        return;
+    loadCameras().then((result) => {
+      if (!cancelled) {
+        setCameras(result);
       }
-
-      setCameras(
-        loadCameras()
-      );
-    };
-
-    // -----------------------------------------------
-    // Ketika CCTV berubah dari halaman yang sama
-    // -----------------------------------------------
-
-    const handleCCTVUpdate = () => {
-      setCameras(
-        loadCameras()
-      );
-    };
-
-    window.addEventListener(
-      "storage",
-      handleStorageChange
-    );
-
-    window.addEventListener(
-      CCTV_UPDATE_EVENT,
-      handleCCTVUpdate
-    );
-
-    // -----------------------------------------------
-    // CLEANUP
-    // -----------------------------------------------
+    });
 
     return () => {
-
-      window.removeEventListener(
-        "storage",
-        handleStorageChange
-      );
-
-      window.removeEventListener(
-        CCTV_UPDATE_EVENT,
-        handleCCTVUpdate
-      );
-
+      cancelled = true;
     };
-
   }, []);
 
   // ===================================================
@@ -296,7 +229,7 @@ export default function CameraFeedPanel({
                   ------------------------------------- */
 
                   <video
-                    src={camera.source}
+                    src={resolveVideoSrc(camera.source)}
                     muted
                     controls
                     playsInline

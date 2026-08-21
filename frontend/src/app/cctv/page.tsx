@@ -3,6 +3,7 @@
 import {
     ChangeEvent,
     FormEvent,
+    useCallback,
     useEffect,
     useMemo,
     useState,
@@ -11,158 +12,122 @@ import {
 import Sidebar from "@/components/Sidebar";
 import Header from "@/components/Header";
 
+import { fetchCameras, DEFAULT_INTERSECTION_ID } from "@/lib/supabaseData";
+
 type SourceType = "file" | "url" | "rtsp";
+type Approach = "north" | "south" | "east" | "west";
 
 type Camera = {
     id: string;
     name: string;
     intersection: string;
-    direction: string;
+    approach: Approach;
     sourceType: SourceType;
     source: string;
     fileName?: string;
     status: "online" | "waiting";
 };
 
-const STORAGE_KEY = "smarttwin.cctv.cameras";
+const APPROACH_LABELS: Record<Approach, string> = {
+    north: "Utara",
+    south: "Selatan",
+    east: "Timur",
+    west: "Barat",
+};
+
+const API_BASE_URL =
+    process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
 
 const EMPTY_FORM = {
     name: "",
-    intersection: "simpang4-pingit",
-    direction: "Utara",
+    approach: "north" as Approach,
     sourceType: "file" as SourceType,
     source: "",
     fileName: "",
 };
 
+/*
+ * "uploaded" (docs/database.md) -> tampilan frontend.
+ * File video sungguhan disimpan di Hugging Face Hub lewat
+ * backend FastAPI (POST /api/v1/cctv/upload), diputar balik
+ * lewat proxy stream backend.
+ */
+function toFrontendSourceType(dbSourceType: string): SourceType {
+    if (dbSourceType === "uploaded") return "file";
+    return "url";
+}
+
+function resolveVideoSrc(source: string): string {
+    if (source.startsWith("/api/")) {
+        return `${API_BASE_URL}${source}`;
+    }
+
+    return source;
+}
+
 export default function CCTVPage() {
     const [cameras, setCameras] = useState<Camera[]>([]);
+    const [loading, setLoading] = useState(true);
     const [showModal, setShowModal] = useState(false);
     const [search, setSearch] = useState("");
     const [form, setForm] = useState(EMPTY_FORM);
+    const [saving, setSaving] = useState(false);
+    const [deletingId, setDeletingId] = useState<string | null>(null);
+    const [formError, setFormError] = useState<string | null>(null);
 
-    const [previewUrls, setPreviewUrls] = useState<
-        Record<string, string>
-    >({});
+    /*
+     * File asli untuk diupload ke backend saat submit. Blob URL
+     * di form.source hanya dipakai untuk preview di dalam modal.
+     */
+    const [fileObject, setFileObject] = useState<File | null>(null);
 
     // =====================================================
-    // LOAD DATA DARI LOCAL STORAGE
+    // LOAD DATA DARI SUPABASE
     // =====================================================
 
-    useEffect(() => {
-        if (typeof window === "undefined") {
-            return;
-        }
-
+    const loadCameras = useCallback(async () => {
         try {
-            const saved =
-                window.localStorage.getItem(STORAGE_KEY);
+            const rows = await fetchCameras(DEFAULT_INTERSECTION_ID);
 
-            if (!saved) {
-                return;
-            }
-
-            const parsed: Camera[] = JSON.parse(saved);
-
-            /*
-             * Blob URL dari file upload tidak bisa bertahan
-             * setelah browser refresh.
-             *
-             * Karena itu file video tidak kita restore
-             * dari localStorage.
-             */
-            const validCameras = parsed.filter(
-                (camera) =>
-                    camera.sourceType !== "file"
+            setCameras(
+                rows.map((row) => ({
+                    id: String(row.id),
+                    name: row.name,
+                    intersection: DEFAULT_INTERSECTION_ID,
+                    approach: (row.approach as Approach) ?? "north",
+                    sourceType: toFrontendSourceType(row.sourceType),
+                    source: row.videoUrl ?? "",
+                    fileName: row.videoName ?? undefined,
+                    status: row.status === "active" ? "online" : "waiting",
+                }))
             );
-
-            /*
-             * Gunakan callback async supaya tidak melakukan
-             * setState langsung di body effect.
-             *
-             * Ini mencegah warning:
-             * "Calling setState synchronously within an effect"
-             */
-            const timer = window.setTimeout(() => {
-                setCameras(validCameras);
-            }, 0);
-
-            return () => {
-                window.clearTimeout(timer);
-            };
         } catch (error) {
-            console.error(
-                "Gagal membaca CCTV:",
-                error
-            );
-
-            /*
-             * Pastikan localStorage hanya diakses
-             * melalui window.
-             */
-            window.localStorage.removeItem(
-                STORAGE_KEY
-            );
+            console.error("Gagal mengambil cameras dari Supabase:", error);
+        } finally {
+            setLoading(false);
         }
     }, []);
 
-    // =====================================================
-    // SAVE DATA KE LOCAL STORAGE
-    // =====================================================
-
     useEffect(() => {
-        if (typeof window === "undefined") {
-            return;
-        }
+        let cancelled = false;
 
-        try {
-            /*
-             * File video tidak disimpan karena source-nya
-             * berupa Blob URL yang tidak persistent.
-             *
-             * URL dan RTSP tetap disimpan.
-             */
-            const camerasToSave = cameras.filter(
-                (camera) =>
-                    camera.sourceType !== "file"
-            );
+        (async () => {
+            if (!cancelled) {
+                await loadCameras();
+            }
+        })();
 
-            window.localStorage.setItem(
-                STORAGE_KEY,
-                JSON.stringify(camerasToSave)
-            );
-        } catch (error) {
-            console.error(
-                "Gagal menyimpan CCTV:",
-                error
-            );
-        }
-    }, [cameras]);
-
-    // =====================================================
-    // CLEANUP BLOB URL
-    // =====================================================
-
-    useEffect(() => {
         return () => {
-            Object.values(previewUrls).forEach(
-                (url) => {
-                    if (url.startsWith("blob:")) {
-                        URL.revokeObjectURL(url);
-                    }
-                }
-            );
+            cancelled = true;
         };
-    }, [previewUrls]);
+    }, [loadCameras]);
 
     // =====================================================
     // SEARCH
     // =====================================================
 
     const filteredCameras = useMemo(() => {
-        const keyword = search
-            .trim()
-            .toLowerCase();
+        const keyword = search.trim().toLowerCase();
 
         if (!keyword) {
             return cameras;
@@ -172,7 +137,7 @@ export default function CCTVPage() {
             const data = [
                 camera.name,
                 camera.intersection,
-                camera.direction,
+                APPROACH_LABELS[camera.approach],
                 camera.sourceType,
             ]
                 .join(" ")
@@ -186,9 +151,7 @@ export default function CCTVPage() {
     // FILE UPLOAD
     // =====================================================
 
-    function handleFileChange(
-        event: ChangeEvent<HTMLInputElement>
-    ) {
+    function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
         const file = event.target.files?.[0];
 
         if (!file) {
@@ -196,24 +159,20 @@ export default function CCTVPage() {
         }
 
         if (!file.type.startsWith("video/")) {
-            alert(
-                "File yang dipilih harus berupa video."
-            );
+            alert("File yang dipilih harus berupa video.");
 
             event.target.value = "";
 
             return;
         }
 
-        /*
-         * Hapus blob URL sebelumnya apabila ada.
-         */
         if (form.source.startsWith("blob:")) {
             URL.revokeObjectURL(form.source);
         }
 
-        const videoUrl =
-            URL.createObjectURL(file);
+        const videoUrl = URL.createObjectURL(file);
+
+        setFileObject(file);
 
         setForm((current) => ({
             ...current,
@@ -223,29 +182,20 @@ export default function CCTVPage() {
     }
 
     // =====================================================
-    // RESET FORM
+    // RESET / CLOSE MODAL
     // =====================================================
 
     function resetForm() {
-        setForm({
-            name: "",
-            intersection: "simpang4-pingit",
-            direction: "Utara",
-            sourceType: "file",
-            source: "",
-            fileName: "",
-        });
-    }
-
-    // =====================================================
-    // CLOSE MODAL
-    // =====================================================
-
-    function closeModal() {
         if (form.source.startsWith("blob:")) {
             URL.revokeObjectURL(form.source);
         }
 
+        setForm(EMPTY_FORM);
+        setFileObject(null);
+        setFormError(null);
+    }
+
+    function closeModal() {
         resetForm();
         setShowModal(false);
     }
@@ -253,110 +203,118 @@ export default function CCTVPage() {
     // =====================================================
     // SAVE CAMERA
     // =====================================================
+    //
+    // file        -> POST backend FastAPI (upload asli ke Hugging
+    //                Face + metadata ke Supabase, lihat
+    //                backend/app/api/routes/cctv.py)
+    // url / rtsp  -> POST /api/cameras (Next.js, metadata saja,
+    //                tidak ada file untuk disimpan)
 
-    function saveCamera(
-        event: FormEvent<HTMLFormElement>
-    ) {
+    async function saveCamera(event: FormEvent<HTMLFormElement>) {
         event.preventDefault();
 
         if (!form.name.trim()) {
-            alert("Nama CCTV wajib diisi.");
+            setFormError("Nama CCTV wajib diisi.");
             return;
         }
 
-        if (!form.source.trim()) {
-            alert(
-                "Silakan pilih video atau masukkan URL CCTV."
+        if (form.sourceType !== "file" && !form.source.trim()) {
+            setFormError("Silakan masukkan URL CCTV.");
+            return;
+        }
+
+        if (form.sourceType === "file" && !fileObject) {
+            setFormError("Silakan pilih video.");
+            return;
+        }
+
+        setSaving(true);
+        setFormError(null);
+
+        try {
+            if (form.sourceType === "file" && fileObject) {
+                const body = new FormData();
+                body.append("file", fileObject);
+                body.append("name", form.name.trim());
+                body.append("approach", form.approach);
+                body.append("intersection_id", DEFAULT_INTERSECTION_ID);
+
+                const response = await fetch(
+                    `${API_BASE_URL}/api/v1/cctv/upload`,
+                    {
+                        method: "POST",
+                        body,
+                    }
+                );
+
+                const payload = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(
+                        payload.detail ?? "Gagal mengupload video."
+                    );
+                }
+            } else {
+                const response = await fetch("/api/cameras", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        name: form.name.trim(),
+                        approach: form.approach,
+                        sourceType: form.sourceType,
+                        source: form.source,
+                    }),
+                });
+
+                const payload = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(payload.error ?? "Gagal menyimpan CCTV.");
+                }
+            }
+
+            await loadCameras();
+
+            setShowModal(false);
+            resetForm();
+        } catch (error) {
+            setFormError(
+                error instanceof Error
+                    ? error.message
+                    : "Gagal menyimpan CCTV."
             );
-            return;
+        } finally {
+            setSaving(false);
         }
-
-        /*
-         * crypto.randomUUID() hanya dipanggil
-         * ketika user menekan tombol Simpan,
-         * jadi sudah berada di browser.
-         */
-        const id = crypto.randomUUID();
-
-        const newCamera: Camera = {
-            id,
-            name: form.name.trim(),
-
-            intersection:
-                form.intersection.trim() ||
-                "Tidak diketahui",
-
-            direction: form.direction,
-
-            sourceType: form.sourceType,
-
-            source: form.source,
-
-            fileName: form.fileName,
-
-            status:
-                form.sourceType === "rtsp"
-                    ? "waiting"
-                    : "online",
-        };
-
-        setCameras((current) => [
-            newCamera,
-            ...current,
-        ]);
-
-        /*
-         * Kalau source berupa Blob URL,
-         * simpan di memory state previewUrls.
-         *
-         * Jangan simpan Blob URL ke localStorage.
-         */
-        if (
-            form.source.startsWith("blob:")
-        ) {
-            setPreviewUrls((current) => ({
-                ...current,
-                [id]: form.source,
-            }));
-        }
-
-        setShowModal(false);
-
-        /*
-         * Jangan revoke Blob URL di sini.
-         * Video masih menggunakannya.
-         */
-        resetForm();
     }
 
     // =====================================================
-    // DELETE CAMERA
+    // DELETE CAMERA -> DELETE /api/cameras/[id]
     // =====================================================
 
-    function deleteCamera(id: string) {
-        const preview = previewUrls[id];
+    async function deleteCamera(id: string) {
+        setDeletingId(id);
 
-        if (
-            preview &&
-            preview.startsWith("blob:")
-        ) {
-            URL.revokeObjectURL(preview);
+        try {
+            const response = await fetch(`/api/cameras/${id}`, {
+                method: "DELETE",
+            });
+
+            if (!response.ok) {
+                const payload = await response.json();
+                throw new Error(payload.error ?? "Gagal menghapus CCTV.");
+            }
+
+            await loadCameras();
+        } catch (error) {
+            alert(
+                error instanceof Error
+                    ? error.message
+                    : "Gagal menghapus CCTV."
+            );
+        } finally {
+            setDeletingId(null);
         }
-
-        setPreviewUrls((current) => {
-            const next = { ...current };
-
-            delete next[id];
-
-            return next;
-        });
-
-        setCameras((current) =>
-            current.filter(
-                (camera) =>
-                    camera.id !== id
-            )
-        );
     }
 
     // =====================================================
@@ -400,14 +358,13 @@ export default function CCTVPage() {
                                 <p className="text-sm text-[#748095]">
                                     Tambahkan dan pantau sumber CCTV
                                     pada setiap arah persimpangan.
+                                    Data tersimpan di Supabase.
                                 </p>
                             </div>
 
                             <button
                                 type="button"
-                                onClick={() =>
-                                    setShowModal(true)
-                                }
+                                onClick={() => setShowModal(true)}
                                 className="rounded-lg bg-[#173747] px-4 py-2.5 text-sm font-semibold text-[#38bdf8] transition hover:bg-[#1d4659]"
                             >
                                 + Tambah CCTV
@@ -422,22 +379,22 @@ export default function CCTVPage() {
                                 type="text"
                                 value={search}
                                 onChange={(event) =>
-                                    setSearch(
-                                        event.target.value
-                                    )
+                                    setSearch(event.target.value)
                                 }
                                 placeholder="Cari CCTV, persimpangan, atau arah..."
                                 className="w-full max-w-xl rounded-lg border border-[#29313e] bg-[#0c1118] px-3 py-2.5 text-sm text-white outline-none placeholder:text-[#596375] focus:border-[#268bc0]"
                             />
 
                             <span className="text-sm text-[#788397]">
-                                {filteredCameras.length} kamera
+                                {loading
+                                    ? "Memuat..."
+                                    : `${filteredCameras.length} kamera`}
                             </span>
 
                         </div>
 
                         {/* CAMERA CONTENT */}
-                        {filteredCameras.length === 0 ? (
+                        {!loading && filteredCameras.length === 0 ? (
 
                             /* EMPTY STATE */
                             <div className="rounded-xl border border-dashed border-[#2b3340] bg-[#11161f] px-6 py-20 text-center">
@@ -458,9 +415,7 @@ export default function CCTVPage() {
 
                                 <button
                                     type="button"
-                                    onClick={() =>
-                                        setShowModal(true)
-                                    }
+                                    onClick={() => setShowModal(true)}
                                     className="mt-5 rounded-lg bg-[#173747] px-4 py-2.5 text-sm font-semibold text-[#38bdf8] transition hover:bg-[#1d4659]"
                                 >
                                     Tambahkan CCTV pertama
@@ -473,204 +428,211 @@ export default function CCTVPage() {
                             /* CAMERA GRID */
                             <div className="grid grid-cols-1 gap-5 xl:grid-cols-2">
 
-                                {filteredCameras.map(
-                                    (camera) => {
+                                {filteredCameras.map((camera) => {
 
-                                        const videoSource =
-                                            previewUrls[
-                                                camera.id
-                                            ] ||
-                                            camera.source;
+                                    const videoSource = resolveVideoSrc(
+                                        camera.source
+                                    );
 
-                                        return (
-                                            <div
-                                                key={
-                                                    camera.id
-                                                }
-                                                className="overflow-hidden rounded-xl border border-[#202735] bg-[#11161f]"
-                                            >
+                                    return (
+                                        <div
+                                            key={camera.id}
+                                            className="overflow-hidden rounded-xl border border-[#202735] bg-[#11161f]"
+                                        >
 
-                                                {/* VIDEO */}
-                                                <div className="relative aspect-video bg-black">
+                                            {/* VIDEO */}
+                                            <div className="relative aspect-video bg-black">
 
-                                                    {camera.sourceType ===
-                                                    "rtsp" ? (
+                                                {!videoSource ? (
 
-                                                        <div className="flex h-full flex-col items-center justify-center px-8 text-center">
+                                                    <div className="flex h-full flex-col items-center justify-center px-8 text-center">
 
-                                                            <div className="text-4xl">
-                                                                📡
-                                                            </div>
-
-                                                            <p className="mt-3 text-sm font-medium">
-                                                                RTSP Camera
-                                                            </p>
-
-                                                            <p className="mt-2 max-w-md text-xs leading-5 text-[#6f7a8c]">
-                                                                RTSP tidak
-                                                                dapat
-                                                                diputar
-                                                                langsung
-                                                                oleh
-                                                                browser.
-                                                                Gunakan
-                                                                backend
-                                                                untuk
-                                                                mengubahnya
-                                                                menjadi
-                                                                HLS atau
-                                                                WebRTC.
-                                                            </p>
-
+                                                        <div className="text-4xl">
+                                                            🎥
                                                         </div>
 
-                                                    ) : (
-
-                                                        <video
-                                                            key={
-                                                                videoSource
-                                                            }
-                                                            src={
-                                                                videoSource
-                                                            }
-                                                            controls
-                                                            muted
-                                                            playsInline
-                                                            preload="metadata"
-                                                            className="h-full w-full object-cover"
-                                                            onError={(
-                                                                event
-                                                            ) => {
-                                                                console.error(
-                                                                    "Video gagal diputar:",
-                                                                    event
-                                                                        .currentTarget
-                                                                        .error
-                                                                );
-                                                            }}
-                                                        />
-
-                                                    )}
-
-                                                    {/* STATUS */}
-                                                    <div className="absolute left-3 top-3 flex items-center gap-2 rounded-full bg-black/70 px-2.5 py-1 text-xs backdrop-blur">
-
-                                                        <span
-                                                            className={`h-2 w-2 rounded-full ${
-                                                                camera.status ===
-                                                                "online"
-                                                                    ? "bg-[#2ecc71]"
-                                                                    : "bg-[#f5a623]"
-                                                            }`}
-                                                        />
-
-                                                        {camera.status ===
-                                                        "online"
-                                                            ? "ONLINE"
-                                                            : "WAITING"}
+                                                        <p className="mt-3 text-sm font-medium">
+                                                            {camera.fileName ||
+                                                                "Video belum tersedia"}
+                                                        </p>
 
                                                     </div>
 
-                                                    {/* SOURCE TYPE */}
-                                                    <div className="absolute right-3 top-3 rounded bg-black/70 px-2.5 py-1 text-[11px] uppercase tracking-wide text-[#c4ccd8] backdrop-blur">
-                                                        {
-                                                            camera.sourceType
-                                                        }
+                                                ) : videoSource.startsWith(
+                                                      "rtsp"
+                                                  ) ? (
+
+                                                    <div className="flex h-full flex-col items-center justify-center px-8 text-center">
+
+                                                        <div className="text-4xl">
+                                                            📡
+                                                        </div>
+
+                                                        <p className="mt-3 text-sm font-medium">
+                                                            RTSP Camera
+                                                        </p>
+
+                                                        <p className="mt-2 max-w-md text-xs leading-5 text-[#6f7a8c]">
+                                                            RTSP tidak dapat
+                                                            diputar langsung
+                                                            oleh browser.
+                                                            Gunakan backend
+                                                            untuk mengubahnya
+                                                            menjadi HLS atau
+                                                            WebRTC.
+                                                        </p>
+
+                                                    </div>
+
+                                                ) : (
+
+                                                    <video
+                                                        key={videoSource}
+                                                        src={videoSource}
+                                                        controls
+                                                        muted
+                                                        playsInline
+                                                        preload="metadata"
+                                                        className="h-full w-full object-cover"
+                                                        onError={(event) => {
+                                                            console.error(
+                                                                "Video gagal diputar:",
+                                                                event
+                                                                    .currentTarget
+                                                                    .error
+                                                            );
+                                                        }}
+                                                    />
+
+                                                )}
+
+                                                {/* STATUS */}
+                                                <div className="absolute left-3 top-3 flex items-center gap-2 rounded-full bg-black/70 px-2.5 py-1 text-xs backdrop-blur">
+
+                                                    <span
+                                                        className={`h-2 w-2 rounded-full ${
+                                                            camera.status ===
+                                                            "online"
+                                                                ? "bg-[#2ecc71]"
+                                                                : "bg-[#f5a623]"
+                                                        }`}
+                                                    />
+
+                                                    {camera.status ===
+                                                    "online"
+                                                        ? "ONLINE"
+                                                        : "WAITING"}
+
+                                                </div>
+
+                                                {/* SOURCE TYPE */}
+                                                <div className="absolute right-3 top-3 rounded bg-black/70 px-2.5 py-1 text-[11px] uppercase tracking-wide text-[#c4ccd8] backdrop-blur">
+                                                    {camera.sourceType}
+                                                </div>
+
+                                            </div>
+
+                                            {/* CAMERA INFO */}
+                                            <div className="p-4">
+
+                                                <div className="flex items-start justify-between gap-4">
+
+                                                    <div className="min-w-0">
+
+                                                        <h2 className="font-semibold">
+                                                            {camera.name}
+                                                        </h2>
+
+                                                        <p className="mt-1 text-xs text-[#7b8698]">
+                                                            {
+                                                                camera.intersection
+                                                            }
+                                                            {" · "}
+                                                            {
+                                                                APPROACH_LABELS[
+                                                                    camera
+                                                                        .approach
+                                                                ]
+                                                            }
+                                                        </p>
+
+                                                        {camera.fileName && (
+                                                            <p className="mt-2 truncate text-xs text-[#566175]">
+                                                                {
+                                                                    camera.fileName
+                                                                }
+                                                            </p>
+                                                        )}
+
                                                     </div>
 
                                                 </div>
 
-                                                {/* CAMERA INFO */}
-                                                <div className="p-4">
+                                                {/* CAMERA DATA */}
+                                                <div className="mt-4 grid grid-cols-2 gap-3">
 
-                                                    <div className="flex items-start justify-between gap-4">
+                                                    <div className="rounded-lg bg-[#0c1118] p-3">
 
-                                                        <div className="min-w-0">
+                                                        <p className="text-[11px] text-[#667284]">
+                                                            Persimpangan
+                                                        </p>
 
-                                                            <h2 className="font-semibold">
-                                                                {
-                                                                    camera.name
-                                                                }
-                                                            </h2>
-
-                                                            <p className="mt-1 text-xs text-[#7b8698]">
-                                                                {
-                                                                    camera.intersection
-                                                                }
-                                                                {" · "}
-                                                                {
-                                                                    camera.direction
-                                                                }
-                                                            </p>
-
-                                                            {camera.fileName && (
-                                                                <p className="mt-2 truncate text-xs text-[#566175]">
-                                                                    {
-                                                                        camera.fileName
-                                                                    }
-                                                                </p>
-                                                            )}
-
-                                                        </div>
-
-                                                    </div>
-
-                                                    {/* CAMERA DATA */}
-                                                    <div className="mt-4 grid grid-cols-2 gap-3">
-
-                                                        <div className="rounded-lg bg-[#0c1118] p-3">
-
-                                                            <p className="text-[11px] text-[#667284]">
-                                                                Persimpangan
-                                                            </p>
-
-                                                            <p className="mt-1 text-sm text-[#dce3ec]">
-                                                                {
-                                                                    camera.intersection
-                                                                }
-                                                            </p>
-
-                                                        </div>
-
-                                                        <div className="rounded-lg bg-[#0c1118] p-3">
-
-                                                            <p className="text-[11px] text-[#667284]">
-                                                                Arah
-                                                            </p>
-
-                                                            <p className="mt-1 text-sm text-[#dce3ec]">
-                                                                {
-                                                                    camera.direction
-                                                                }
-                                                            </p>
-
-                                                        </div>
-
-                                                    </div>
-
-                                                    {/* DELETE */}
-                                                    <div className="mt-4 flex justify-end">
-
-                                                        <button
-                                                            type="button"
-                                                            onClick={() =>
-                                                                deleteCamera(
-                                                                    camera.id
-                                                                )
+                                                        <p className="mt-1 text-sm text-[#dce3ec]">
+                                                            {
+                                                                camera.intersection
                                                             }
-                                                            className="rounded-md border border-[#303846] px-3 py-2 text-xs text-[#9aa5b5] transition hover:border-red-400/50 hover:text-red-300"
-                                                        >
-                                                            Hapus
-                                                        </button>
+                                                        </p>
 
                                                     </div>
+
+                                                    <div className="rounded-lg bg-[#0c1118] p-3">
+
+                                                        <p className="text-[11px] text-[#667284]">
+                                                            Arah
+                                                        </p>
+
+                                                        <p className="mt-1 text-sm text-[#dce3ec]">
+                                                            {
+                                                                APPROACH_LABELS[
+                                                                    camera
+                                                                        .approach
+                                                                ]
+                                                            }
+                                                        </p>
+
+                                                    </div>
+
+                                                </div>
+
+                                                {/* DELETE */}
+                                                <div className="mt-4 flex justify-end">
+
+                                                    <button
+                                                        type="button"
+                                                        onClick={() =>
+                                                            deleteCamera(
+                                                                camera.id
+                                                            )
+                                                        }
+                                                        disabled={
+                                                            deletingId ===
+                                                            camera.id
+                                                        }
+                                                        className="rounded-md border border-[#303846] px-3 py-2 text-xs text-[#9aa5b5] transition hover:border-red-400/50 hover:text-red-300 disabled:opacity-50"
+                                                    >
+                                                        {deletingId ===
+                                                        camera.id
+                                                            ? "Menghapus..."
+                                                            : "Hapus"}
+                                                    </button>
 
                                                 </div>
 
                                             </div>
-                                        );
-                                    }
-                                )}
+
+                                        </div>
+                                    );
+                                })}
 
                             </div>
                         )}
@@ -732,14 +694,10 @@ export default function CCTVPage() {
                                     type="text"
                                     value={form.name}
                                     onChange={(event) =>
-                                        setForm(
-                                            (current) => ({
-                                                ...current,
-                                                name: event
-                                                    .target
-                                                    .value,
-                                            })
-                                        )
+                                        setForm((current) => ({
+                                            ...current,
+                                            name: event.target.value,
+                                        }))
                                     }
                                     placeholder="CCTV Utara"
                                     className="w-full rounded-lg border border-[#29313e] bg-[#0c1118] px-3 py-2.5 text-sm text-white outline-none focus:border-[#268bc0]"
@@ -758,21 +716,9 @@ export default function CCTVPage() {
 
                                     <input
                                         type="text"
-                                        value={
-                                            form.intersection
-                                        }
-                                        onChange={(event) =>
-                                            setForm(
-                                                (current) => ({
-                                                    ...current,
-                                                    intersection:
-                                                        event
-                                                            .target
-                                                            .value,
-                                                })
-                                            )
-                                        }
-                                        className="w-full rounded-lg border border-[#29313e] bg-[#0c1118] px-3 py-2.5 text-sm text-white outline-none focus:border-[#268bc0]"
+                                        value={DEFAULT_INTERSECTION_ID}
+                                        readOnly
+                                        className="w-full cursor-not-allowed rounded-lg border border-[#29313e] bg-[#0c1118] px-3 py-2.5 text-sm text-[#8390a2] outline-none"
                                     />
 
                                 </div>
@@ -784,38 +730,33 @@ export default function CCTVPage() {
                                     </label>
 
                                     <select
-                                        value={
-                                            form.direction
-                                        }
+                                        value={form.approach}
                                         onChange={(event) =>
-                                            setForm(
-                                                (current) => ({
-                                                    ...current,
-                                                    direction:
-                                                        event
-                                                            .target
-                                                            .value,
-                                                })
-                                            )
+                                            setForm((current) => ({
+                                                ...current,
+                                                approach: event.target
+                                                    .value as Approach,
+                                            }))
                                         }
                                         className="w-full rounded-lg border border-[#29313e] bg-[#0c1118] px-3 py-2.5 text-sm text-white outline-none focus:border-[#268bc0]"
                                     >
 
-                                        <option value="Utara">
-                                            Utara
-                                        </option>
-
-                                        <option value="Selatan">
-                                            Selatan
-                                        </option>
-
-                                        <option value="Timur">
-                                            Timur
-                                        </option>
-
-                                        <option value="Barat">
-                                            Barat
-                                        </option>
+                                        {(
+                                            Object.keys(
+                                                APPROACH_LABELS
+                                            ) as Approach[]
+                                        ).map((approach) => (
+                                            <option
+                                                key={approach}
+                                                value={approach}
+                                            >
+                                                {
+                                                    APPROACH_LABELS[
+                                                        approach
+                                                    ]
+                                                }
+                                            </option>
+                                        ))}
 
                                     </select>
 
@@ -845,61 +786,48 @@ export default function CCTVPage() {
                                             value: "rtsp" as SourceType,
                                             label: "RTSP",
                                         },
-                                    ].map(
-                                        (item) => (
+                                    ].map((item) => (
 
-                                            <button
-                                                key={
-                                                    item.value
-                                                }
-                                                type="button"
-                                                onClick={() => {
+                                        <button
+                                            key={item.value}
+                                            type="button"
+                                            onClick={() => {
 
-                                                    if (
-                                                        form.source.startsWith(
-                                                            "blob:"
-                                                        )
-                                                    ) {
-                                                        URL.revokeObjectURL(
-                                                            form.source
-                                                        );
-                                                    }
-
-                                                    setForm(
-                                                        (
-                                                            current
-                                                        ) => ({
-                                                            ...current,
-                                                            sourceType:
-                                                                item.value,
-                                                            source: "",
-                                                            fileName:
-                                                                "",
-                                                        })
+                                                if (
+                                                    form.source.startsWith(
+                                                        "blob:"
+                                                    )
+                                                ) {
+                                                    URL.revokeObjectURL(
+                                                        form.source
                                                     );
-                                                }}
-                                                className={`rounded-lg border px-3 py-2.5 text-xs transition ${
-                                                    form.sourceType ===
-                                                    item.value
-                                                        ? "border-[#268bc0] bg-[#173747] text-[#52c7ff]"
-                                                        : "border-[#29313e] bg-[#0c1118] text-[#8792a3]"
-                                                }`}
-                                            >
-                                                {
-                                                    item.label
                                                 }
-                                            </button>
 
-                                        )
-                                    )}
+                                                setForm((current) => ({
+                                                    ...current,
+                                                    sourceType: item.value,
+                                                    source: "",
+                                                    fileName: "",
+                                                }));
+                                            }}
+                                            className={`rounded-lg border px-3 py-2.5 text-xs transition ${
+                                                form.sourceType ===
+                                                item.value
+                                                    ? "border-[#268bc0] bg-[#173747] text-[#52c7ff]"
+                                                    : "border-[#29313e] bg-[#0c1118] text-[#8792a3]"
+                                            }`}
+                                        >
+                                            {item.label}
+                                        </button>
+
+                                    ))}
 
                                 </div>
 
                             </div>
 
                             {/* FILE VIDEO */}
-                            {form.sourceType ===
-                            "file" && (
+                            {form.sourceType === "file" && (
 
                                 <div>
 
@@ -921,15 +849,17 @@ export default function CCTVPage() {
                                         <span className="mt-1 text-xs text-[#647083]">
                                             MP4, WebM, MOV,
                                             dan format video
-                                            browser lainnya
+                                            browser lainnya.
+                                            Video diupload ke
+                                            Hugging Face Hub,
+                                            metadata disimpan
+                                            di Supabase.
                                         </span>
 
                                         <input
                                             type="file"
                                             accept="video/*"
-                                            onChange={
-                                                handleFileChange
-                                            }
+                                            onChange={handleFileChange}
                                             className="hidden"
                                         />
 
@@ -941,9 +871,7 @@ export default function CCTVPage() {
                                         <div className="mt-4 overflow-hidden rounded-lg border border-[#29313e] bg-black">
 
                                             <video
-                                                src={
-                                                    form.source
-                                                }
+                                                src={form.source}
                                                 controls
                                                 muted
                                                 playsInline
@@ -959,8 +887,7 @@ export default function CCTVPage() {
                             )}
 
                             {/* URL */}
-                            {form.sourceType ===
-                                "url" && (
+                            {form.sourceType === "url" && (
 
                                 <div>
 
@@ -970,19 +897,12 @@ export default function CCTVPage() {
 
                                     <input
                                         type="text"
-                                        value={
-                                            form.source
-                                        }
+                                        value={form.source}
                                         onChange={(event) =>
-                                            setForm(
-                                                (current) => ({
-                                                    ...current,
-                                                    source:
-                                                        event
-                                                            .target
-                                                            .value,
-                                                })
-                                            )
+                                            setForm((current) => ({
+                                                ...current,
+                                                source: event.target.value,
+                                            }))
                                         }
                                         placeholder="https://example.com/live/stream.m3u8"
                                         className="w-full rounded-lg border border-[#29313e] bg-[#0c1118] px-3 py-2.5 text-sm text-white outline-none focus:border-[#268bc0]"
@@ -992,8 +912,7 @@ export default function CCTVPage() {
                             )}
 
                             {/* RTSP */}
-                            {form.sourceType ===
-                                "rtsp" && (
+                            {form.sourceType === "rtsp" && (
 
                                 <div>
 
@@ -1003,19 +922,12 @@ export default function CCTVPage() {
 
                                     <input
                                         type="text"
-                                        value={
-                                            form.source
-                                        }
+                                        value={form.source}
                                         onChange={(event) =>
-                                            setForm(
-                                                (current) => ({
-                                                    ...current,
-                                                    source:
-                                                        event
-                                                            .target
-                                                            .value,
-                                                })
-                                            )
+                                            setForm((current) => ({
+                                                ...current,
+                                                source: event.target.value,
+                                            }))
                                         }
                                         placeholder="rtsp://192.168.1.10:554/stream"
                                         className="w-full rounded-lg border border-[#29313e] bg-[#0c1118] px-3 py-2.5 text-sm text-white outline-none focus:border-[#268bc0]"
@@ -1034,6 +946,13 @@ export default function CCTVPage() {
                                 </div>
                             )}
 
+                            {/* ERROR */}
+                            {formError && (
+                                <p className="text-xs text-red-400">
+                                    {formError}
+                                </p>
+                            )}
+
                             {/* BUTTON */}
                             <div className="flex justify-end gap-2 border-t border-[#222a36] pt-4">
 
@@ -1047,9 +966,10 @@ export default function CCTVPage() {
 
                                 <button
                                     type="submit"
-                                    className="rounded-lg bg-[#1b7ea9] px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-[#2090bd]"
+                                    disabled={saving}
+                                    className="rounded-lg bg-[#1b7ea9] px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-[#2090bd] disabled:opacity-60"
                                 >
-                                    Simpan CCTV
+                                    {saving ? "Menyimpan..." : "Simpan CCTV"}
                                 </button>
 
                             </div>

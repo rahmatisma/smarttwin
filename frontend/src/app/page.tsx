@@ -13,20 +13,22 @@ import ForecastChart from "@/components/ForecastChart";
 
 import { useTrafficSimulation } from "@/hooks/useTrafficSimulaton";
 
+import {
+  DEFAULT_INTERSECTION_ID,
+  fetchTrafficState,
+  fetchSignalStatus,
+  fetchRecommendation,
+  fetchForecast,
+  fetchCameras,
+} from "@/lib/supabaseData";
+
 import type {
   TrafficState,
+  SignalStatus,
+  Recommendation,
+  ForecastResponse,
   VehicleClassCount,
 } from "@/types/traffic";
-
-/*
- * =========================================================
- * BACKEND API
- * =========================================================
- */
-
-const API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_URL ??
-  "http://127.0.0.1:8000";
 
 /*
  * =========================================================
@@ -220,20 +222,34 @@ export default function DashboardPage() {
 
   /*
    * =========================================================
-   * SIGNAL SIMULATION
+   * SIGNAL SIMULATION (fallback)
    * =========================================================
+   *
+   * Dipakai hanya kalau signalStatuses di Supabase kosong.
    */
 
-  const signal = useTrafficSimulation();
+  const simulatedSignal = useTrafficSimulation();
 
   /*
    * =========================================================
-   * TRAFFIC STATE
+   * STATE
    * =========================================================
    */
 
   const [trafficState, setTrafficState] =
     useState<TrafficState | null>(null);
+
+  const [signalStatus, setSignalStatus] =
+    useState<SignalStatus | null>(null);
+
+  const [recommendation, setRecommendation] =
+    useState<Recommendation | null>(null);
+
+  const [forecast, setForecast] =
+    useState<ForecastResponse | null>(null);
+
+  const [cameraStatus, setCameraStatus] =
+    useState<{ label: string; online: boolean }[]>([]);
 
   const [loading, setLoading] =
     useState(true);
@@ -243,61 +259,64 @@ export default function DashboardPage() {
 
   /*
    * =========================================================
-   * FETCH TRAFFIC STATE
+   * FETCH DARI SUPABASE
    * =========================================================
    *
-   * CSV / State Builder
-   *        ↓
-   * FastAPI
-   *        ↓
-   * /api/v1/traffic/state
+   * trafficStates + trafficApproachStates
+   * signalStatuses
+   * recommendations
+   * forecasts + forecastPredictions
+   * cameras
    *        ↓
    * Dashboard
-   *
-   * Tidak menggunakan mockData.
    */
 
   useEffect(() => {
 
-    async function loadTrafficState() {
+    async function loadDashboardData() {
 
       try {
 
         setLoading(true);
         setError(null);
 
-        const response = await fetch(
-          `${API_BASE_URL}/api/v1/traffic/state`,
-          {
-            method: "GET",
-            cache: "no-store",
-          }
+        const [
+          trafficStateResult,
+          signalStatusResult,
+          recommendationResult,
+          forecastResult,
+          camerasResult,
+        ] = await Promise.all([
+          fetchTrafficState(DEFAULT_INTERSECTION_ID),
+          fetchSignalStatus(DEFAULT_INTERSECTION_ID),
+          fetchRecommendation(DEFAULT_INTERSECTION_ID),
+          fetchForecast(DEFAULT_INTERSECTION_ID),
+          fetchCameras(DEFAULT_INTERSECTION_ID),
+        ]);
+
+        setTrafficState(trafficStateResult);
+        setSignalStatus(signalStatusResult);
+        setRecommendation(recommendationResult);
+        setForecast(forecastResult);
+
+        setCameraStatus(
+          camerasResult.map((camera) => ({
+            label: camera.name,
+            online: camera.status === "active",
+          }))
         );
-
-        if (!response.ok) {
-
-          throw new Error(
-            `HTTP ${response.status}: ${response.statusText}`
-          );
-
-        }
-
-        const data: TrafficState =
-          await response.json();
-
-        setTrafficState(data);
 
       } catch (err) {
 
         console.error(
-          "Gagal mengambil traffic state:",
+          "Gagal mengambil data dashboard dari Supabase:",
           err
         );
 
         setError(
           err instanceof Error
             ? err.message
-            : "Gagal mengambil data traffic."
+            : "Gagal mengambil data dari Supabase."
         );
 
       } finally {
@@ -307,9 +326,11 @@ export default function DashboardPage() {
       }
     }
 
-    loadTrafficState();
+    loadDashboardData();
 
   }, []);
+
+  const signal = signalStatus ?? simulatedSignal;
 
   /*
    * =========================================================
@@ -355,9 +376,9 @@ export default function DashboardPage() {
               </div>
 
               <div className="mt-4 text-xs text-text-muted">
-                Pastikan backend FastAPI sedang
-                berjalan dan endpoint
-                /api/v1/traffic/state tersedia.
+                Pastikan koneksi ke Supabase aktif dan
+                tabel trafficStates/trafficApproachStates
+                sudah terisi untuk simpang4-pingit.
               </div>
 
             </div>
@@ -502,7 +523,7 @@ export default function DashboardPage() {
 
               <CameraFeedPanel
                 counts={vehicleClassCounts}
-                cameraStatus={[]}
+                cameraStatus={cameraStatus}
               />
 
               {/* SIGNAL STATUS */}
@@ -524,13 +545,13 @@ export default function DashboardPage() {
             {/* RECOMMENDATION */}
 
             <RecommendationPanel
-              recommendation={null}
+              recommendation={recommendation}
             />
 
             {/* FORECAST */}
 
             <ForecastChart
-              data={null}
+              data={forecast}
             />
 
           </div>

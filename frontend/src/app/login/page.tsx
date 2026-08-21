@@ -1,17 +1,47 @@
 "use client";
 
+import { useState } from "react";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Lock, Mail } from "lucide-react";
 
+import { supabase } from "@/lib/supabaseClient";
+
 export default function LoginPage() {
-    function handleSubmit(
+    const router = useRouter();
+
+    const [email, setEmail] = useState("");
+    const [password, setPassword] = useState("");
+    const [loading, setLoading] = useState(false);
+    const [error, setError] = useState<string | null>(null);
+
+    async function handleSubmit(
         event: React.FormEvent<HTMLFormElement>
     ) {
         event.preventDefault();
 
-        alert(
-            "Login sementara. Nanti akan dihubungkan ke backend."
-        );
+        setLoading(true);
+        setError(null);
+
+        const { error: signInError } =
+            await supabase.auth.signInWithPassword({
+                email,
+                password,
+            });
+
+        setLoading(false);
+
+        if (signInError) {
+            setError(
+                signInError.message === "Invalid login credentials"
+                    ? "Email atau password salah."
+                    : signInError.message
+            );
+            return;
+        }
+
+        router.replace("/");
+        router.refresh();
     }
 
     return (
@@ -67,6 +97,10 @@ export default function LoginPage() {
 
                                 <input
                                     type="email"
+                                    value={email}
+                                    onChange={(event) =>
+                                        setEmail(event.target.value)
+                                    }
                                     placeholder="nama@email.com"
                                     required
                                     className="w-full rounded-lg border border-border bg-surface-2 py-2.5 pl-10 pr-3 text-sm text-text outline-none placeholder:text-text-muted focus:border-accent"
@@ -84,13 +118,6 @@ export default function LoginPage() {
                                     Password
                                 </label>
 
-                                <button
-                                    type="button"
-                                    className="text-[11px] text-accent hover:text-text"
-                                >
-                                    Lupa password?
-                                </button>
-
                             </div>
 
                             <div className="relative">
@@ -99,6 +126,10 @@ export default function LoginPage() {
 
                                 <input
                                     type="password"
+                                    value={password}
+                                    onChange={(event) =>
+                                        setPassword(event.target.value)
+                                    }
                                     placeholder="••••••••"
                                     required
                                     className="w-full rounded-lg border border-border bg-surface-2 py-2.5 pl-10 pr-3 text-sm text-text outline-none placeholder:text-text-muted focus:border-accent"
@@ -108,12 +139,20 @@ export default function LoginPage() {
 
                         </div>
 
+                        {/* ERROR */}
+                        {error && (
+                            <p className="text-xs text-red-400">
+                                {error}
+                            </p>
+                        )}
+
                         {/* LOGIN */}
                         <button
                             type="submit"
-                            className="w-full rounded-lg bg-accent px-4 py-2.5 text-sm font-semibold text-background transition hover:opacity-90"
+                            disabled={loading}
+                            className="w-full rounded-lg bg-accent px-4 py-2.5 text-sm font-semibold text-background transition hover:opacity-90 disabled:opacity-60"
                         >
-                            Sign In
+                            {loading ? "Signing in..." : "Sign In"}
                         </button>
 
                     </form>

@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.routes.traffic import router as traffic_router
+from app.api.routes.cctv import router as cctv_router
 
 
 app = FastAPI(
@@ -32,6 +33,10 @@ app.add_middleware(
 
 app.include_router(
     traffic_router
+)
+
+app.include_router(
+    cctv_router
 )
 
 

@@ -1,5 +1,7 @@
 "use client";
 
+import { useState } from "react";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
 import {
     User,
@@ -7,15 +9,65 @@ import {
     Lock,
 } from "lucide-react";
 
+import { supabase } from "@/lib/supabaseClient";
+
 export default function RegisterPage() {
-    function handleSubmit(
+    const router = useRouter();
+
+    const [name, setName] = useState("");
+    const [email, setEmail] = useState("");
+    const [password, setPassword] = useState("");
+    const [confirmPassword, setConfirmPassword] = useState("");
+
+    const [loading, setLoading] = useState(false);
+    const [error, setError] = useState<string | null>(null);
+    const [info, setInfo] = useState<string | null>(null);
+
+    async function handleSubmit(
         event: React.FormEvent<HTMLFormElement>
     ) {
         event.preventDefault();
 
-        alert(
-            "Register sementara. Nanti akan dihubungkan ke backend."
-        );
+        setError(null);
+        setInfo(null);
+
+        if (password !== confirmPassword) {
+            setError("Password dan konfirmasi password tidak sama.");
+            return;
+        }
+
+        setLoading(true);
+
+        const { data, error: signUpError } = await supabase.auth.signUp({
+            email,
+            password,
+            options: {
+                data: {
+                    name,
+                },
+            },
+        });
+
+        setLoading(false);
+
+        if (signUpError) {
+            setError(signUpError.message);
+            return;
+        }
+
+        /*
+         * Kalau project Supabase mewajibkan konfirmasi email,
+         * signUp tidak langsung mengembalikan session.
+         */
+        if (!data.session) {
+            setInfo(
+                "Akun berhasil dibuat. Silakan cek email untuk konfirmasi sebelum masuk."
+            );
+            return;
+        }
+
+        router.replace("/");
+        router.refresh();
     }
 
     return (
@@ -71,6 +123,10 @@ export default function RegisterPage() {
 
                                 <input
                                     type="text"
+                                    value={name}
+                                    onChange={(event) =>
+                                        setName(event.target.value)
+                                    }
                                     placeholder="Nama lengkap"
                                     required
                                     className="w-full rounded-lg border border-border bg-surface-2 py-2.5 pl-10 pr-3 text-sm text-text outline-none placeholder:text-text-muted focus:border-accent"
@@ -92,6 +148,10 @@ export default function RegisterPage() {
 
                                 <input
                                     type="email"
+                                    value={email}
+                                    onChange={(event) =>
+                                        setEmail(event.target.value)
+                                    }
                                     placeholder="nama@email.com"
                                     required
                                     className="w-full rounded-lg border border-border bg-surface-2 py-2.5 pl-10 pr-3 text-sm text-text outline-none placeholder:text-text-muted focus:border-accent"
@@ -113,6 +173,10 @@ export default function RegisterPage() {
 
                                 <input
                                     type="password"
+                                    value={password}
+                                    onChange={(event) =>
+                                        setPassword(event.target.value)
+                                    }
                                     placeholder="Minimal 8 karakter"
                                     minLength={8}
                                     required
@@ -136,6 +200,10 @@ export default function RegisterPage() {
 
                                 <input
                                     type="password"
+                                    value={confirmPassword}
+                                    onChange={(event) =>
+                                        setConfirmPassword(event.target.value)
+                                    }
                                     placeholder="Ulangi password"
                                     minLength={8}
                                     required
@@ -146,12 +214,26 @@ export default function RegisterPage() {
 
                         </div>
 
+                        {/* ERROR / INFO */}
+                        {error && (
+                            <p className="text-xs text-red-400">
+                                {error}
+                            </p>
+                        )}
+
+                        {info && (
+                            <p className="text-xs text-signal-green">
+                                {info}
+                            </p>
+                        )}
+
                         {/* REGISTER */}
                         <button
                             type="submit"
-                            className="w-full rounded-lg bg-accent px-4 py-2.5 text-sm font-semibold text-background transition hover:opacity-90"
+                            disabled={loading}
+                            className="w-full rounded-lg bg-accent px-4 py-2.5 text-sm font-semibold text-background transition hover:opacity-90 disabled:opacity-60"
                         >
-                            Create Account
+                            {loading ? "Creating account..." : "Create Account"}
                         </button>
 
                     </form>
