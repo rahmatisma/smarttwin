@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 import pandas as pd
+
+from app.schemas.traffic import ApproachState, TrafficState
 
 
 # ============================================================
@@ -73,20 +74,36 @@ class TrafficStateBuilderConfig:
 
 class TrafficStateBuilder:
     """
-    Mengubah data CV per timestamp + approach + lane
-    menjadi TrafficState per time window.
+    Mengubah data CV dari CSV menjadi TrafficState.
+
+    Input:
+        CSV hasil Computer Vision.
+
+    Format data CV:
+        timestamp
+        intersection_id
+        approach
+        lane_id
+        vehicle_count
+        car_count
+        motorcycle_count
+        bus_count
+        truck_count
+        queue_length_veh
+        queue_length_m_est
+        density_index
 
     Alur:
 
         CSV
          ↓
-        timestamp
+        Load + Validate
          ↓
-        time window
+        Time Window
          ↓
-        lane
+        Lane Data
          ↓
-        approach
+        Approach Aggregation
          ↓
         TrafficState
     """
@@ -95,7 +112,6 @@ class TrafficStateBuilder:
         self,
         config: TrafficStateBuilderConfig | None = None,
     ) -> None:
-
         self.config = (
             config
             if config is not None
@@ -111,7 +127,11 @@ class TrafficStateBuilder:
         csv_path: str | Path,
     ) -> pd.DataFrame:
         """
-        Membaca CSV hasil Computer Vision.
+        Membaca CSV asli hasil Computer Vision.
+
+        Tidak membuat dummy data.
+
+        CSV harus memiliki seluruh REQUIRED_COLUMNS.
         """
 
         csv_path = Path(csv_path)
@@ -137,6 +157,11 @@ class TrafficStateBuilder:
             raise ValueError(
                 "Kolom CSV tidak lengkap. "
                 f"Kolom yang hilang: {missing_columns}"
+            )
+
+        if df.empty:
+            raise ValueError(
+                "CSV traffic kosong."
             )
 
         # ----------------------------------------------------
@@ -177,6 +202,20 @@ class TrafficStateBuilder:
         )
 
         # ----------------------------------------------------
+        # Validasi string penting
+        # ----------------------------------------------------
+
+        if (df["intersection_id"] == "").any():
+            raise ValueError(
+                "Terdapat intersection_id kosong."
+            )
+
+        if (df["lane_id"] == "").any():
+            raise ValueError(
+                "Terdapat lane_id kosong."
+            )
+
+        # ----------------------------------------------------
         # Validasi approach
         # ----------------------------------------------------
 
@@ -188,7 +227,9 @@ class TrafficStateBuilder:
         if invalid_approaches:
             raise ValueError(
                 "Approach tidak valid: "
-                f"{invalid_approaches}"
+                f"{invalid_approaches}. "
+                f"Approach yang diperbolehkan: "
+                f"{EXPECTED_APPROACHES}"
             )
 
         # ----------------------------------------------------
@@ -202,10 +243,42 @@ class TrafficStateBuilder:
             )
 
         if df[list(NUMERIC_COLUMNS)].isna().any().any():
+            invalid_columns = [
+                column
+                for column in NUMERIC_COLUMNS
+                if df[column].isna().any()
+            ]
+
             raise ValueError(
                 "Terdapat nilai numerik yang tidak valid "
-                "atau kosong pada CSV."
+                f"atau kosong pada kolom: {invalid_columns}"
             )
+
+        # ----------------------------------------------------
+        # Validasi integer metrics
+        #
+        # Count kendaraan dan queue kendaraan harus berupa
+        # bilangan bulat.
+        # ----------------------------------------------------
+
+        integer_columns = (
+            "vehicle_count",
+            "car_count",
+            "motorcycle_count",
+            "bus_count",
+            "truck_count",
+            "queue_length_veh",
+        )
+
+        for column in integer_columns:
+            if (
+                df[column] % 1 != 0
+            ).any():
+                raise ValueError(
+                    f"Kolom {column} harus berupa bilangan bulat."
+                )
+
+            df[column] = df[column].astype(int)
 
         # ----------------------------------------------------
         # Validasi nilai negatif
@@ -218,6 +291,42 @@ class TrafficStateBuilder:
         if negative_mask.any():
             raise ValueError(
                 "Terdapat nilai negatif pada metric traffic."
+            )
+
+        # ----------------------------------------------------
+        # Validasi klasifikasi kendaraan
+        #
+        # vehicle_count harus konsisten dengan:
+        #
+        # car + motorcycle + bus + truck
+        #
+        # Karena semua berasal dari counting line.
+        # ----------------------------------------------------
+
+        classification_total = (
+            df["car_count"]
+            + df["motorcycle_count"]
+            + df["bus_count"]
+            + df["truck_count"]
+        )
+
+        inconsistent_mask = (
+            df["vehicle_count"]
+            != classification_total
+        )
+
+        if inconsistent_mask.any():
+            first_invalid = df.loc[
+                inconsistent_mask
+            ].iloc[0]
+
+            raise ValueError(
+                "vehicle_count tidak konsisten dengan "
+                "jumlah klasifikasi kendaraan pada "
+                "setidaknya satu row. "
+                f"Timestamp: {first_invalid['timestamp']}, "
+                f"approach: {first_invalid['approach']}, "
+                f"lane: {first_invalid['lane_id']}"
             )
 
         # ----------------------------------------------------
@@ -246,11 +355,14 @@ class TrafficStateBuilder:
         """
         Menentukan time window untuk setiap row.
 
-        Contoh window 5 detik:
+        Dengan window 5 detik:
 
-        16:30:10 - 16:30:15
-        16:30:15 - 16:30:20
-        16:30:20 - 16:30:25
+            16:30:10 -> 16:30:15
+            16:30:15 -> 16:30:20
+            16:30:20 -> 16:30:25
+
+        Karena data CV berasal per detik, beberapa timestamp
+        akan masuk ke window yang sama.
         """
 
         result = df.copy()
@@ -278,53 +390,66 @@ class TrafficStateBuilder:
     def _aggregate_approach(
         self,
         group: pd.DataFrame,
-    ) -> dict[str, Any]:
+    ) -> ApproachState:
         """
         Menggabungkan data beberapa lane menjadi
         satu ApproachState.
 
-        Contoh:
+        Struktur:
 
-            south
+            north
             ├── lane_1
             ├── lane_2
             └── lane_3
 
-        menjadi:
+                    ↓
 
-            south
-            └── ApproachState
+            ApproachState(north)
 
-        ------------------------------------------------------
+        ======================================================
         ATURAN AGREGASI
-        ------------------------------------------------------
+        ======================================================
 
         volume
-            = jumlah vehicle_count antar lane
+            = total vehicle_count dalam window
+              untuk seluruh lane.
 
         carCount
-            = jumlah car_count antar lane
+            = total car_count.
 
         motorcycleCount
-            = jumlah motorcycle_count antar lane
+            = total motorcycle_count.
 
         busCount
-            = jumlah bus_count antar lane
+            = total bus_count.
 
         truckCount
-            = jumlah truck_count antar lane
+            = total truck_count.
 
         queueLengthVeh
-            = jumlah queue_length_veh antar lane
+            = total queue_length_veh antar lane.
+
+            IMPORTANT:
+            Saat ini queue_length_veh dianggap
+            merupakan queue PER LANE.
 
         queueLengthMEst
-            = jumlah queue_length_m_est antar lane
+            = total queue_length_m_est antar lane.
+
+            IMPORTANT:
+            Saat ini queue_length_m_est dianggap
+            merupakan queue PER LANE.
 
         densityIndex
-            = rata-rata density_index antar lane
+            = rata-rata density_index antar lane.
+
+            densityIndex adalah proxy lane occupancy,
+            bukan kendaraan/km.
 
         avgSpeedKmh
-            = None karena CSV belum memiliki speed.
+            = None.
+
+            CSV tidak menyediakan speed.
         """
 
         approach = str(
@@ -333,6 +458,15 @@ class TrafficStateBuilder:
 
         # ----------------------------------------------------
         # Volume
+        #
+        # vehicle_count = kendaraan yang MEMOTONG
+        # counting line.
+        #
+        # BUKAN jumlah seluruh kendaraan yang terlihat
+        # pada frame.
+        #
+        # Data CV dicatat per detik sehingga seluruh
+        # counting event dalam window dijumlahkan.
         # ----------------------------------------------------
 
         volume = int(
@@ -362,17 +496,19 @@ class TrafficStateBuilder:
         # ----------------------------------------------------
         # Queue
         #
-        # IMPORTANT:
+        # Queue diasumsikan PER LANE.
         #
-        # Untuk sementara kita menganggap nilai queue
-        # pada CSV adalah queue PER LANE.
+        # Contoh:
         #
-        # Jadi ketika lane digabung menjadi approach,
-        # queue dijumlahkan.
+        # lane_1 = 3 kendaraan
+        # lane_2 = 2 kendaraan
+        # lane_3 = 4 kendaraan
         #
-        # Jika nanti tim CV mengonfirmasi bahwa queue
-        # sebenarnya sudah merupakan total approach,
-        # BAGIAN INI HARUS DIUBAH agar tidak double counting.
+        # approach queue = 3 + 2 + 4 = 9 kendaraan
+        #
+        # Jika nanti tim CV mengubah definisi queue menjadi
+        # TOTAL APPROACH, bagian ini HARUS diubah agar
+        # tidak terjadi double counting.
         # ----------------------------------------------------
 
         queue_length_veh = int(
@@ -386,13 +522,14 @@ class TrafficStateBuilder:
         # ----------------------------------------------------
         # Density
         #
-        # densityIndex adalah proxy lane occupancy.
+        # density_index tersedia per lane.
         #
-        # Bukan vehicles/km.
+        # Kita gunakan mean antar lane agar nilai approach
+        # tidak otomatis membesar hanya karena approach
+        # mempunyai lebih banyak lane.
         #
-        # Karena nilainya tersedia per lane, kita gunakan
-        # rata-rata antar lane agar skala tidak otomatis
-        # membesar hanya karena jumlah lane bertambah.
+        # Ini adalah proxy occupancy/density.
+        # BUKAN vehicles/km.
         # ----------------------------------------------------
 
         density_index = float(
@@ -402,28 +539,27 @@ class TrafficStateBuilder:
         # ----------------------------------------------------
         # Speed
         #
-        # CSV tidak memiliki data speed.
+        # Tidak ada data speed pada CSV.
         #
-        # Jangan isi 0.
-        # Jangan membuat nilai sendiri.
+        # None berarti data belum tersedia.
         #
-        # None = data belum tersedia.
+        # JANGAN menggunakan 0.0.
         # ----------------------------------------------------
 
         avg_speed_kmh = None
 
-        return {
-            "approach": approach,
-            "volume": volume,
-            "carCount": car_count,
-            "motorcycleCount": motorcycle_count,
-            "busCount": bus_count,
-            "truckCount": truck_count,
-            "queueLengthVeh": queue_length_veh,
-            "queueLengthMEst": queue_length_m_est,
-            "densityIndex": density_index,
-            "avgSpeedKmh": avg_speed_kmh,
-        }
+        return ApproachState(
+            approach=approach,
+            volume=volume,
+            carCount=car_count,
+            motorcycleCount=motorcycle_count,
+            busCount=bus_count,
+            truckCount=truck_count,
+            queueLengthVeh=queue_length_veh,
+            queueLengthMEst=queue_length_m_est,
+            densityIndex=density_index,
+            avgSpeedKmh=avg_speed_kmh,
+        )
 
     # ========================================================
     # BUILD TRAFFIC STATE
@@ -432,9 +568,10 @@ class TrafficStateBuilder:
     def build_from_dataframe(
         self,
         df: pd.DataFrame,
-    ) -> list[dict[str, Any]]:
+    ) -> list[TrafficState]:
         """
-        Menghasilkan list TrafficState dari DataFrame.
+        Menghasilkan list TrafficState dari DataFrame
+        yang sudah divalidasi.
         """
 
         if df.empty:
@@ -442,14 +579,14 @@ class TrafficStateBuilder:
 
         df = self._assign_windows(df)
 
-        states: list[dict[str, Any]] = []
+        states: list[TrafficState] = []
 
         # ----------------------------------------------------
-        # Group:
+        # Group berdasarkan:
         #
         # intersection
         # +
-        # window
+        # time window
         # ----------------------------------------------------
 
         grouped = df.groupby(
@@ -467,13 +604,18 @@ class TrafficStateBuilder:
             window_end,
         ), window_group in grouped:
 
-            approaches: list[dict[str, Any]] = []
+            approaches: list[ApproachState] = []
 
             # ------------------------------------------------
-            # Pastikan output selalu memiliki 4 approach.
+            # Pastikan output selalu mempunyai 4 approach:
             #
-            # Kalau sebuah approach tidak punya kendaraan,
-            # nilainya tetap 0.
+            # north
+            # south
+            # east
+            # west
+            #
+            # Jika tidak ada data kendaraan pada approach,
+            # metric kendaraan dan queue menjadi 0.
             # ------------------------------------------------
 
             for approach_name in EXPECTED_APPROACHES:
@@ -485,18 +627,18 @@ class TrafficStateBuilder:
 
                 if approach_group.empty:
 
-                    approach_state = {
-                        "approach": approach_name,
-                        "volume": 0,
-                        "carCount": 0,
-                        "motorcycleCount": 0,
-                        "busCount": 0,
-                        "truckCount": 0,
-                        "queueLengthVeh": 0,
-                        "queueLengthMEst": 0.0,
-                        "densityIndex": 0.0,
-                        "avgSpeedKmh": None,
-                    }
+                    approach_state = ApproachState(
+                        approach=approach_name,
+                        volume=0,
+                        carCount=0,
+                        motorcycleCount=0,
+                        busCount=0,
+                        truckCount=0,
+                        queueLengthVeh=0,
+                        queueLengthMEst=0.0,
+                        densityIndex=0.0,
+                        avgSpeedKmh=None,
+                    )
 
                 else:
 
@@ -514,20 +656,18 @@ class TrafficStateBuilder:
             # TrafficState
             # ------------------------------------------------
 
-            state = {
-                "intersectionId": str(
+            state = TrafficState(
+                intersectionId=str(
                     intersection_id
                 ),
-                "windowStart": (
-                    pd.Timestamp(window_start)
-                    .isoformat()
-                ),
-                "windowEnd": (
-                    pd.Timestamp(window_end)
-                    .isoformat()
-                ),
-                "approaches": approaches,
-            }
+                windowStart=pd.Timestamp(
+                    window_start
+                ).to_pydatetime(),
+                windowEnd=pd.Timestamp(
+                    window_end
+                ).to_pydatetime(),
+                approaches=approaches,
+            )
 
             states.append(state)
 
@@ -540,15 +680,17 @@ class TrafficStateBuilder:
     def build_from_csv(
         self,
         csv_path: str | Path,
-    ) -> list[dict[str, Any]]:
+    ) -> list[TrafficState]:
         """
-        Shortcut:
+        Pipeline lengkap:
 
-        CSV
-        ↓
-        DataFrame
-        ↓
-        TrafficState[]
+            CSV
+             ↓
+            load_csv()
+             ↓
+            build_from_dataframe()
+             ↓
+            TrafficState[]
         """
 
         df = self.load_csv(csv_path)
@@ -557,10 +699,23 @@ class TrafficStateBuilder:
 
 
 # ============================================================
-# CLI / MANUAL TEST
+# DEFAULT CSV PATH
 # ============================================================
 
-def main() -> None:
+def get_default_csv_path() -> Path:
+    """
+    Mengambil lokasi CSV asli berdasarkan struktur project:
+
+    smarttwin/
+    ├── backend/
+    │   └── app/
+    │       └── pipeline/
+    │           └── traffic_state_builder.py
+    │
+    └── cv/
+        └── output/
+            └── smarttwin_traffic_data.csv
+    """
 
     project_root = (
         Path(__file__)
@@ -568,12 +723,27 @@ def main() -> None:
         .parents[3]
     )
 
-    csv_path = (
+    return (
         project_root
         / "cv"
         / "output"
         / "smarttwin_traffic_data.csv"
     )
+
+
+# ============================================================
+# CLI / MANUAL TEST
+# ============================================================
+
+def main() -> None:
+    """
+    Menjalankan Traffic State Builder menggunakan
+    CSV ASLI project.
+
+    Tidak menggunakan dummy data.
+    """
+
+    csv_path = get_default_csv_path()
 
     builder = TrafficStateBuilder(
         TrafficStateBuilderConfig(
@@ -598,7 +768,9 @@ def main() -> None:
 
         print(
             json.dumps(
-                states[0],
+                states[0].model_dump(
+                    mode="json"
+                ),
                 indent=2,
             )
         )

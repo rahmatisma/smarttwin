@@ -1,14 +1,21 @@
+from __future__ import annotations
+
 from pathlib import Path
 
-from app.pipeline.traffic_state_builder import (
-    TrafficStateBuilder,
-    TrafficStateBuilderConfig,
+from app.schemas.traffic import (
+    ApproachState,
+    TrafficState,
 )
+from app.services.traffic_service import TrafficService
 
 
-def test_build_traffic_state_from_csv():
+# ============================================================
+# CSV PATH
+# ============================================================
+
+def get_csv_path() -> Path:
     """
-    End-to-end test untuk Traffic State Builder.
+    Mengambil CSV asli hasil Computer Vision.
 
     Struktur project:
 
@@ -16,239 +23,649 @@ def test_build_traffic_state_from_csv():
     ├── backend/
     │   ├── app/
     │   └── tests/
-    │       └── test_traffic_state_builder.py
+    │       └── test_traffic_service.py
     │
     └── cv/
         └── output/
             └── smarttwin_traffic_data.csv
 
-    Builder membaca CSV CV lalu menghasilkan
-    TrafficState dalam bentuk dictionary.
+    Dari:
+        backend/tests/
+
+    naik:
+        tests -> backend -> smarttwin
+
+    lalu:
+        cv/output/
     """
 
-    # =========================================================
-    # CSV PATH
-    # =========================================================
+    project_root = (
+        Path(__file__)
+        .resolve()
+        .parents[2]
+    )
 
-    project_root = Path(__file__).resolve().parents[2]
-
-    csv_path = (
+    return (
         project_root
         / "cv"
         / "output"
         / "smarttwin_traffic_data.csv"
     )
 
+
+# ============================================================
+# TEST 1
+# ============================================================
+
+def test_csv_exists():
+    """
+    Memastikan CSV asli Computer Vision tersedia.
+
+    Test ini sengaja tidak membuat dummy data.
+
+    Traffic Service harus menggunakan:
+        cv/output/smarttwin_traffic_data.csv
+    """
+
+    csv_path = get_csv_path()
+
     assert csv_path.exists(), (
         f"CSV traffic tidak ditemukan: {csv_path}"
     )
 
-    # =========================================================
-    # BUILD
-    # =========================================================
 
-    builder = TrafficStateBuilder(
-        TrafficStateBuilderConfig(
-            window_seconds=5
-        )
+# ============================================================
+# TEST 2
+# ============================================================
+
+def test_get_latest_state():
+    """
+    Memastikan TrafficService dapat mengambil state
+    terbaru dari CSV asli.
+
+    Alur:
+
+        CSV
+          ↓
+        TrafficStateBuilder
+          ↓
+        TrafficService
+          ↓
+        TrafficState
+    """
+
+    csv_path = get_csv_path()
+
+    assert csv_path.exists(), (
+        f"CSV traffic tidak ditemukan: {csv_path}"
     )
 
-    states = builder.build_from_csv(csv_path)
+    service = TrafficService(
+        csv_path=csv_path,
+        window_seconds=5,
+    )
 
-    # Harus menghasilkan TrafficState.
-    assert len(states) > 0
+    state = service.get_latest_state()
 
-    # Builder saat ini mengembalikan dictionary.
-    state = states[0]
+    # --------------------------------------------------------
+    # State harus tersedia.
+    # --------------------------------------------------------
 
-    assert isinstance(state, dict)
+    assert state is not None
 
-    # =========================================================
-    # TRAFFIC STATE
-    # =========================================================
+    # --------------------------------------------------------
+    # Return value harus object TrafficState.
+    #
+    # BUKAN dictionary.
+    # --------------------------------------------------------
 
-    assert state["intersectionId"] == "simpang4-pingit"
+    assert isinstance(
+        state,
+        TrafficState,
+    )
 
-    assert "windowStart" in state
-    assert "windowEnd" in state
-    assert "approaches" in state
+    # --------------------------------------------------------
+    # Intersection
+    # --------------------------------------------------------
 
-    assert state["windowStart"] is not None
-    assert state["windowEnd"] is not None
+    assert state.intersectionId == (
+        "simpang4-pingit"
+    )
 
-    # Simpang 4 harus memiliki 4 approach.
-    assert len(state["approaches"]) == 4
+    # --------------------------------------------------------
+    # Window
+    # --------------------------------------------------------
 
-    approaches = {
-        approach["approach"]
-        for approach in state["approaches"]
+    assert (
+        state.windowStart
+        < state.windowEnd
+    )
+
+    # --------------------------------------------------------
+    # Harus mempunyai 4 approach.
+    # --------------------------------------------------------
+
+    assert len(state.approaches) == 4
+
+    approach_names = {
+        approach.approach
+        for approach in state.approaches
     }
 
-    assert approaches == {
+    assert approach_names == {
         "north",
         "south",
         "east",
         "west",
     }
 
-    # =========================================================
-    # APPROACH STATE
-    # =========================================================
 
-    for approach in state["approaches"]:
+# ============================================================
+# TEST 3
+# ============================================================
 
-        # -----------------------------------------------------
-        # Field wajib sesuai data contract.
-        # -----------------------------------------------------
+def test_latest_state_contains_valid_approach_state():
+    """
+    Memastikan setiap approach yang dikembalikan oleh
+    TrafficService benar-benar merupakan ApproachState
+    sesuai contract terbaru.
+    """
 
-        assert "approach" in approach
-        assert "volume" in approach
+    csv_path = get_csv_path()
 
-        assert "carCount" in approach
-        assert "motorcycleCount" in approach
-        assert "busCount" in approach
-        assert "truckCount" in approach
+    service = TrafficService(
+        csv_path=csv_path,
+        window_seconds=5,
+    )
 
-        assert "queueLengthVeh" in approach
-        assert "queueLengthMEst" in approach
+    state = service.get_latest_state()
 
-        assert "densityIndex" in approach
-        assert "avgSpeedKmh" in approach
+    assert state is not None
+    assert isinstance(state, TrafficState)
 
-        # -----------------------------------------------------
-        # Nilai tidak boleh negatif.
-        # -----------------------------------------------------
+    for approach in state.approaches:
 
-        assert approach["volume"] >= 0
-
-        assert approach["carCount"] >= 0
-        assert approach["motorcycleCount"] >= 0
-        assert approach["busCount"] >= 0
-        assert approach["truckCount"] >= 0
-
-        assert approach["queueLengthVeh"] >= 0
-        assert approach["queueLengthMEst"] >= 0
-
-        assert approach["densityIndex"] >= 0
-
-        # -----------------------------------------------------
-        # Volume harus sama dengan total vehicle class.
-        #
-        # volume =
-        # car + motorcycle + bus + truck
-        # -----------------------------------------------------
-
-        expected_volume = (
-            approach["carCount"]
-            + approach["motorcycleCount"]
-            + approach["busCount"]
-            + approach["truckCount"]
+        assert isinstance(
+            approach,
+            ApproachState,
         )
 
-        assert approach["volume"] == expected_volume
+        # ----------------------------------------------------
+        # Approach name
+        # ----------------------------------------------------
 
-        # -----------------------------------------------------
-        # Speed belum tersedia dari CSV CV.
-        #
-        # Jadi harus None/null.
-        #
-        # JANGAN diganti menjadi 0.
-        # -----------------------------------------------------
-
-        assert approach["avgSpeedKmh"] is None
-
-
-def test_traffic_state_has_expected_contract_fields():
-    """
-    Memastikan setiap TrafficState menggunakan
-    nama field sesuai data contract.
-    """
-
-    project_root = Path(__file__).resolve().parents[2]
-
-    csv_path = (
-        project_root
-        / "cv"
-        / "output"
-        / "smarttwin_traffic_data.csv"
-    )
-
-    builder = TrafficStateBuilder(
-        TrafficStateBuilderConfig(
-            window_seconds=5
-        )
-    )
-
-    states = builder.build_from_csv(csv_path)
-
-    assert len(states) > 0
-
-    state = states[0]
-
-    # Field TrafficState yang diperbolehkan.
-    expected_state_fields = {
-        "intersectionId",
-        "windowStart",
-        "windowEnd",
-        "approaches",
-    }
-
-    assert set(state.keys()) == expected_state_fields
-
-
-def test_approach_state_has_expected_contract_fields():
-    """
-    Memastikan ApproachState tidak kembali menggunakan
-    nama field lama seperti:
-
-    queueLengthM
-    densityVehPerKm
-
-    dan sudah menggunakan field baru:
-
-    queueLengthVeh
-    queueLengthMEst
-    densityIndex
-    """
-
-    project_root = Path(__file__).resolve().parents[2]
-
-    csv_path = (
-        project_root
-        / "cv"
-        / "output"
-        / "smarttwin_traffic_data.csv"
-    )
-
-    builder = TrafficStateBuilder(
-        TrafficStateBuilderConfig(
-            window_seconds=5
-        )
-    )
-
-    states = builder.build_from_csv(csv_path)
-
-    assert len(states) > 0
-
-    state = states[0]
-
-    for approach in state["approaches"]:
-
-        expected_fields = {
-            "approach",
-            "volume",
-            "carCount",
-            "motorcycleCount",
-            "busCount",
-            "truckCount",
-            "queueLengthVeh",
-            "queueLengthMEst",
-            "densityIndex",
-            "avgSpeedKmh",
+        assert approach.approach in {
+            "north",
+            "south",
+            "east",
+            "west",
         }
 
-        assert set(approach.keys()) == expected_fields
+        # ----------------------------------------------------
+        # Semua metric tidak boleh negatif.
+        # ----------------------------------------------------
 
-        # Pastikan field lama sudah tidak muncul.
-        assert "queueLengthM" not in approach
-        assert "densityVehPerKm" not in approach
+        assert approach.volume >= 0
+
+        assert approach.carCount >= 0
+
+        assert approach.motorcycleCount >= 0
+
+        assert approach.busCount >= 0
+
+        assert approach.truckCount >= 0
+
+        assert approach.queueLengthVeh >= 0
+
+        assert approach.queueLengthMEst >= 0
+
+        assert approach.densityIndex >= 0
+
+        # ----------------------------------------------------
+        # Speed belum tersedia dari CSV.
+        #
+        # HARUS None.
+        #
+        # Jangan diubah menjadi 0.
+        # ----------------------------------------------------
+
+        assert approach.avgSpeedKmh is None
+
+
+# ============================================================
+# TEST 4
+# ============================================================
+
+def test_latest_state_vehicle_classification_consistent():
+    """
+    Memastikan volume konsisten dengan klasifikasi kendaraan.
+
+    Contract:
+
+        volume
+        =
+        carCount
+        + motorcycleCount
+        + busCount
+        + truckCount
+
+    Catatan:
+
+    vehicle_count pada CSV berasal dari kendaraan yang
+    melewati counting line, bukan sekadar kendaraan yang
+    terlihat pada frame.
+
+    Traffic State Builder kemudian mengagregasikan nilai
+    tersebut dari lane -> approach.
+    """
+
+    csv_path = get_csv_path()
+
+    service = TrafficService(
+        csv_path=csv_path,
+        window_seconds=5,
+    )
+
+    state = service.get_latest_state()
+
+    assert state is not None
+
+    for approach in state.approaches:
+
+        classification_total = (
+            approach.carCount
+            + approach.motorcycleCount
+            + approach.busCount
+            + approach.truckCount
+        )
+
+        assert (
+            approach.volume
+            == classification_total
+        )
+
+
+# ============================================================
+# TEST 5
+# ============================================================
+
+def test_latest_state_queue_values_valid():
+    """
+    Memastikan queue pada state terbaru valid.
+
+    Berdasarkan keputusan tim saat ini:
+
+        queue_length_veh
+            = queue per lane
+
+        queue_length_m_est
+            = queue length meter per lane
+
+    Traffic State Builder menjumlahkan nilai antar-lane
+    menjadi nilai queue pada approach.
+
+    Contoh:
+
+        north
+        ├── lane_1 → queue 2 veh
+        ├── lane_2 → queue 3 veh
+        └── lane_3 → queue 1 veh
+
+        hasil approach:
+
+        queueLengthVeh = 6
+    """
+
+    csv_path = get_csv_path()
+
+    service = TrafficService(
+        csv_path=csv_path,
+        window_seconds=5,
+    )
+
+    state = service.get_latest_state()
+
+    assert state is not None
+
+    for approach in state.approaches:
+
+        assert (
+            approach.queueLengthVeh >= 0
+        )
+
+        assert (
+            approach.queueLengthMEst >= 0
+        )
+
+
+# ============================================================
+# TEST 6
+# ============================================================
+
+def test_latest_state_density_valid():
+    """
+    Memastikan densityIndex valid.
+
+    densityIndex merupakan proxy lane occupancy,
+    bukan kendaraan/km.
+
+    Pada level approach, builder menggunakan agregasi
+    dari nilai density per lane.
+    """
+
+    csv_path = get_csv_path()
+
+    service = TrafficService(
+        csv_path=csv_path,
+        window_seconds=5,
+    )
+
+    state = service.get_latest_state()
+
+    assert state is not None
+
+    for approach in state.approaches:
+
+        assert (
+            approach.densityIndex >= 0
+        )
+
+
+# ============================================================
+# TEST 7
+# ============================================================
+
+def test_latest_state_speed_is_none():
+    """
+    Memastikan avgSpeedKmh tetap None.
+
+    CSV Computer Vision saat ini tidak mempunyai
+    data kecepatan.
+
+    None berarti:
+
+        "data speed belum tersedia"
+
+    dan BUKAN:
+
+        0 km/h
+    """
+
+    csv_path = get_csv_path()
+
+    service = TrafficService(
+        csv_path=csv_path,
+        window_seconds=5,
+    )
+
+    state = service.get_latest_state()
+
+    assert state is not None
+
+    for approach in state.approaches:
+
+        assert approach.avgSpeedKmh is None
+
+
+# ============================================================
+# TEST 8
+# ============================================================
+
+def test_latest_state_window_is_five_seconds():
+    """
+    Memastikan TrafficService menggunakan window 5 detik.
+    """
+
+    csv_path = get_csv_path()
+
+    service = TrafficService(
+        csv_path=csv_path,
+        window_seconds=5,
+    )
+
+    state = service.get_latest_state()
+
+    assert state is not None
+
+    duration = (
+        state.windowEnd
+        - state.windowStart
+    )
+
+    assert duration.total_seconds() == 5
+
+
+# ============================================================
+# TEST 9
+# ============================================================
+
+def test_latest_state_has_all_four_approaches():
+    """
+    TrafficState harus selalu mempunyai:
+
+        north
+        south
+        east
+        west
+
+    Walaupun salah satu approach pada window tersebut
+    tidak memiliki kendaraan yang terdeteksi.
+    """
+
+    csv_path = get_csv_path()
+
+    service = TrafficService(
+        csv_path=csv_path,
+        window_seconds=5,
+    )
+
+    state = service.get_latest_state()
+
+    assert state is not None
+
+    expected = {
+        "north",
+        "south",
+        "east",
+        "west",
+    }
+
+    actual = {
+        approach.approach
+        for approach in state.approaches
+    }
+
+    assert actual == expected
+
+
+# ============================================================
+# TEST 10
+# ============================================================
+
+def test_latest_state_window_is_valid():
+    """
+    Memastikan window state terbaru mempunyai
+    timestamp yang valid.
+    """
+
+    csv_path = get_csv_path()
+
+    service = TrafficService(
+        csv_path=csv_path,
+        window_seconds=5,
+    )
+
+    state = service.get_latest_state()
+
+    assert state is not None
+
+    assert state.windowStart is not None
+
+    assert state.windowEnd is not None
+
+    assert (
+        state.windowStart
+        < state.windowEnd
+    )
+
+
+# ============================================================
+# TEST 11
+# ============================================================
+
+def test_latest_state_is_latest_window():
+    """
+    Memastikan get_latest_state() benar-benar mengambil
+    TrafficState terakhir berdasarkan windowStart.
+
+    Ini penting karena CSV berisi banyak time window.
+    """
+
+    csv_path = get_csv_path()
+
+    service = TrafficService(
+        csv_path=csv_path,
+        window_seconds=5,
+    )
+
+    state = service.get_latest_state()
+
+    assert state is not None
+
+    # Ambil seluruh state dari builder/service.
+    states = service.builder.build_from_csv(
+        csv_path
+    )
+
+    assert len(states) > 0
+
+    expected_latest = states[-1]
+
+    assert state.windowStart == (
+        expected_latest.windowStart
+    )
+
+    assert state.windowEnd == (
+        expected_latest.windowEnd
+    )
+
+
+# ============================================================
+# TEST 12
+# ============================================================
+
+def test_latest_state_schema_matches_contract():
+    """
+    Validasi ringkas terhadap struktur contract terbaru.
+
+    TrafficState:
+
+        intersectionId
+        windowStart
+        windowEnd
+        approaches
+
+    ApproachState:
+
+        approach
+        volume
+        carCount
+        motorcycleCount
+        busCount
+        truckCount
+        queueLengthVeh
+        queueLengthMEst
+        densityIndex
+        avgSpeedKmh
+    """
+
+    csv_path = get_csv_path()
+
+    service = TrafficService(
+        csv_path=csv_path,
+        window_seconds=5,
+    )
+
+    state = service.get_latest_state()
+
+    assert state is not None
+
+    # --------------------------------------------------------
+    # TrafficState
+    # --------------------------------------------------------
+
+    assert hasattr(
+        state,
+        "intersectionId",
+    )
+
+    assert hasattr(
+        state,
+        "windowStart",
+    )
+
+    assert hasattr(
+        state,
+        "windowEnd",
+    )
+
+    assert hasattr(
+        state,
+        "approaches",
+    )
+
+    # --------------------------------------------------------
+    # ApproachState
+    # --------------------------------------------------------
+
+    for approach in state.approaches:
+
+        assert hasattr(
+            approach,
+            "approach",
+        )
+
+        assert hasattr(
+            approach,
+            "volume",
+        )
+
+        assert hasattr(
+            approach,
+            "carCount",
+        )
+
+        assert hasattr(
+            approach,
+            "motorcycleCount",
+        )
+
+        assert hasattr(
+            approach,
+            "busCount",
+        )
+
+        assert hasattr(
+            approach,
+            "truckCount",
+        )
+
+        assert hasattr(
+            approach,
+            "queueLengthVeh",
+        )
+
+        assert hasattr(
+            approach,
+            "queueLengthMEst",
+        )
+
+        assert hasattr(
+            approach,
+            "densityIndex",
+        )
+
+        assert hasattr(
+            approach,
+            "avgSpeedKmh",
+        )
