@@ -65,6 +65,44 @@ function resolveVideoSrc(source: string): string {
     return source;
 }
 
+/*
+ * fetch() tidak expose progress upload, jadi pakai XHR
+ * supaya xhr.upload.onprogress bisa dipantau untuk file
+ * video CCTV yang bisa berukuran besar (GB-an).
+ */
+function uploadCctvFileWithProgress(
+    body: FormData,
+    onProgress: (percent: number) => void
+): Promise<{ ok: boolean; status: number; payload: Record<string, unknown> }> {
+    return new Promise((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+
+        xhr.open("POST", `${API_BASE_URL}/api/v1/cctv/upload`);
+
+        xhr.upload.onprogress = (event) => {
+            if (event.lengthComputable) {
+                onProgress(Math.round((event.loaded / event.total) * 100));
+            }
+        };
+
+        xhr.onload = () => {
+            let payload: Record<string, unknown> = {};
+
+            try {
+                payload = JSON.parse(xhr.responseText);
+            } catch {
+                // respons non-JSON, biarkan payload kosong
+            }
+
+            resolve({ ok: xhr.status >= 200 && xhr.status < 300, status: xhr.status, payload });
+        };
+
+        xhr.onerror = () => reject(new Error("Gagal mengupload video."));
+
+        xhr.send(body);
+    });
+}
+
 export default function CCTVPage() {
     const [cameras, setCameras] = useState<Camera[]>([]);
     const [loading, setLoading] = useState(true);
@@ -74,6 +112,7 @@ export default function CCTVPage() {
     const [saving, setSaving] = useState(false);
     const [deletingId, setDeletingId] = useState<string | null>(null);
     const [formError, setFormError] = useState<string | null>(null);
+    const [uploadProgress, setUploadProgress] = useState<number | null>(null);
 
     /*
      * File asli untuk diupload ke backend saat submit. Blob URL
@@ -193,6 +232,7 @@ export default function CCTVPage() {
         setForm(EMPTY_FORM);
         setFileObject(null);
         setFormError(null);
+        setUploadProgress(null);
     }
 
     function closeModal() {
@@ -230,6 +270,7 @@ export default function CCTVPage() {
 
         setSaving(true);
         setFormError(null);
+        setUploadProgress(form.sourceType === "file" ? 0 : null);
 
         try {
             if (form.sourceType === "file" && fileObject) {
@@ -239,19 +280,14 @@ export default function CCTVPage() {
                 body.append("approach", form.approach);
                 body.append("intersection_id", DEFAULT_INTERSECTION_ID);
 
-                const response = await fetch(
-                    `${API_BASE_URL}/api/v1/cctv/upload`,
-                    {
-                        method: "POST",
-                        body,
-                    }
+                const { ok, payload } = await uploadCctvFileWithProgress(
+                    body,
+                    setUploadProgress
                 );
 
-                const payload = await response.json();
-
-                if (!response.ok) {
+                if (!ok) {
                     throw new Error(
-                        payload.detail ?? "Gagal mengupload video."
+                        (payload.detail as string) ?? "Gagal mengupload video."
                     );
                 }
             } else {
@@ -285,6 +321,7 @@ export default function CCTVPage() {
             );
         } finally {
             setSaving(false);
+            setUploadProgress(null);
         }
     }
 
@@ -946,6 +983,22 @@ export default function CCTVPage() {
                                 </div>
                             )}
 
+                            {/* PROGRESS UPLOAD */}
+                            {uploadProgress !== null && (
+                                <div>
+                                    <div className="mb-1.5 flex items-center justify-between text-xs text-[#8390a2]">
+                                        <span>Mengupload video...</span>
+                                        <span>{uploadProgress}%</span>
+                                    </div>
+                                    <div className="h-2 w-full overflow-hidden rounded-full bg-[#0c1118]">
+                                        <div
+                                            className="h-full rounded-full bg-[#1b7ea9] transition-all"
+                                            style={{ width: `${uploadProgress}%` }}
+                                        />
+                                    </div>
+                                </div>
+                            )}
+
                             {/* ERROR */}
                             {formError && (
                                 <p className="text-xs text-red-400">
@@ -969,7 +1022,11 @@ export default function CCTVPage() {
                                     disabled={saving}
                                     className="rounded-lg bg-[#1b7ea9] px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-[#2090bd] disabled:opacity-60"
                                 >
-                                    {saving ? "Menyimpan..." : "Simpan CCTV"}
+                                    {saving
+                                        ? uploadProgress !== null
+                                            ? `Mengupload... ${uploadProgress}%`
+                                            : "Menyimpan..."
+                                        : "Simpan CCTV"}
                                 </button>
 
                             </div>

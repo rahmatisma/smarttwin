@@ -249,7 +249,7 @@ export default function DashboardPage() {
     useState<ForecastResponse | null>(null);
 
   const [cameraStatus, setCameraStatus] =
-    useState<{ label: string; online: boolean }[]>([]);
+    useState<{ id: string; label: string; online: boolean }[]>([]);
 
   const [loading, setLoading] =
     useState(true);
@@ -301,6 +301,7 @@ export default function DashboardPage() {
 
         setCameraStatus(
           camerasResult.map((camera) => ({
+            id: String(camera.id),
             label: camera.name,
             online: camera.status === "active",
           }))

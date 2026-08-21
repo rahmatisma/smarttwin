@@ -28,6 +28,7 @@ import {
 // =====================================================
 
 type CameraStatus = {
+  id: string;
   label: string;
   online: boolean;
 };
@@ -222,6 +223,22 @@ export default function CameraFeedPanel({
 
                   </div>
 
+                ) : !camera.source ? (
+
+                  /* -------------------------------------
+                     BELUM ADA VIDEO
+                  ------------------------------------- */
+
+                  <div className="flex h-full flex-col items-center justify-center bg-surface-2 px-3 text-center">
+
+                    <Video className="mb-1 h-5 w-5 text-text-muted" />
+
+                    <span className="text-[9px] text-text-muted">
+                      Video belum tersedia
+                    </span>
+
+                  </div>
+
                 ) : (
 
                   /* -------------------------------------
@@ -400,7 +417,7 @@ export default function CameraFeedPanel({
           cameraStatus.map((cam) => (
 
             <div
-              key={cam.label}
+              key={cam.id}
               className="flex items-center gap-1.5 text-[10px]"
             >
 

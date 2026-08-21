@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import httpx
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import StreamingResponse
 
 from app.core.config import settings
@@ -43,7 +44,8 @@ async def upload_cctv_video(
         raise HTTPException(status_code=400, detail="File video kosong.")
 
     try:
-        result = upload_camera_video(
+        result = await run_in_threadpool(
+            upload_camera_video,
             intersection_id=intersection_id,
             approach=approach,
             name=name,

@@ -36,6 +36,12 @@ export async function DELETE(
 
   const videoIds = (videos ?? []).map((video) => video.id);
 
+  // Kode Postgres untuk foreign_key_violation -> kamera/video ini
+  // masih dipakai data lain (mis. trafficStates dummy/seed) yang
+  // tidak ikut dihapus di sini. Tampilkan pesan yang jelas alih-alih
+  // raw SQL error ke frontend.
+  const FK_VIOLATION = "23503";
+
   if (videoIds.length > 0) {
     const { data: jobs, error: jobsLookupError } = await supabaseAdmin
       .from("cvProcessingJobs")
@@ -52,11 +58,52 @@ export async function DELETE(
     const jobIds = (jobs ?? []).map((job) => job.id);
 
     if (jobIds.length > 0) {
-      await supabaseAdmin.from("cctvHistory").delete().in("processingJobId", jobIds);
-      await supabaseAdmin.from("cvProcessingJobs").delete().in("id", jobIds);
+      const { error: historyDeleteError } = await supabaseAdmin
+        .from("cctvHistory")
+        .delete()
+        .in("processingJobId", jobIds);
+
+      if (historyDeleteError) {
+        return NextResponse.json(
+          { error: historyDeleteError.message },
+          { status: 500 }
+        );
+      }
+
+      const { error: jobsDeleteError } = await supabaseAdmin
+        .from("cvProcessingJobs")
+        .delete()
+        .in("id", jobIds);
+
+      if (jobsDeleteError) {
+        if (jobsDeleteError.code === FK_VIOLATION) {
+          return NextResponse.json(
+            {
+              error:
+                "Kamera ini tidak bisa dihapus karena masih terhubung dengan data traffic historis (trafficStates). Biasanya ini kamera/video seed awal, bukan hasil upload.",
+            },
+            { status: 409 }
+          );
+        }
+
+        return NextResponse.json(
+          { error: jobsDeleteError.message },
+          { status: 500 }
+        );
+      }
     }
 
-    await supabaseAdmin.from("cameraVideos").delete().in("id", videoIds);
+    const { error: videosDeleteError } = await supabaseAdmin
+      .from("cameraVideos")
+      .delete()
+      .in("id", videoIds);
+
+    if (videosDeleteError) {
+      return NextResponse.json(
+        { error: videosDeleteError.message },
+        { status: 500 }
+      );
+    }
   }
 
   const { error: cameraDeleteError } = await supabaseAdmin
@@ -65,6 +112,16 @@ export async function DELETE(
     .eq("id", cameraId);
 
   if (cameraDeleteError) {
+    if (cameraDeleteError.code === FK_VIOLATION) {
+      return NextResponse.json(
+        {
+          error:
+            "Kamera ini tidak bisa dihapus karena masih terhubung dengan data lain (video/traffic historis).",
+        },
+        { status: 409 }
+      );
+    }
+
     return NextResponse.json(
       { error: cameraDeleteError.message },
       { status: 500 }
