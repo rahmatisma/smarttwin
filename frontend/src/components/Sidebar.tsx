@@ -10,7 +10,6 @@ import {
   History,
   Settings,
   User,
-  HelpCircle,
   Menu,
   X,
 } from "lucide-react";
@@ -145,22 +144,6 @@ export default function Sidebar() {
           )}
         </Link>
 
-        {/* HELP */}
-        <button
-          type="button"
-          title={isCollapsed ? "Help" : undefined}
-          className={`flex w-full items-center rounded-md py-2 text-left text-sm text-text-secondary transition-all duration-200 hover:bg-surface-2 hover:text-text ${
-            isCollapsed
-              ? "justify-center px-2"
-              : "gap-3 px-3"
-          }`}
-        >
-          <HelpCircle className="h-4 w-4 shrink-0" />
-
-          {!isCollapsed && (
-            <span className="truncate">Help</span>
-          )}
-        </button>
       </div>
     </aside>
   );

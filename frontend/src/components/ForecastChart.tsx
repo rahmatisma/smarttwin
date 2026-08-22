@@ -42,7 +42,7 @@ export default function ForecastChart({
 }) {
   if (!data || !data.predictions || data.predictions.length === 0) {
     return (
-      <div className="rounded-lg border border-border bg-surface p-4">
+      <div className="flex flex-col rounded-lg border border-border bg-surface p-4">
         <div className="mb-3 flex items-center justify-between">
           <h2 className="font-display text-sm font-semibold text-text">
             Traffic Forecast
@@ -53,7 +53,7 @@ export default function ForecastChart({
           </span>
         </div>
 
-        <div className="flex h-40 items-center justify-center">
+        <div className="flex min-h-[160px] flex-1 items-center justify-center">
           <span className="text-xs text-text-muted">
             Data forecast belum tersedia dari backend
           </span>
@@ -64,8 +64,13 @@ export default function ForecastChart({
 
   const series = formatForecastData(data);
 
+  const maxVehicle = Math.max(...series.map((s) => s.predictedVehicleCount));
+  const peakTime = series.find((s) => s.predictedVehicleCount === maxVehicle)?.horizonMinutes ?? 0;
+  const maxQueue = Math.max(...series.map((s) => s.predictedQueueLengthMEst));
+  const avgDensity = series.reduce((sum, s) => sum + s.predictedDensityIndex, 0) / (series.length || 1);
+
   return (
-    <div className="rounded-lg border border-border bg-surface p-4">
+    <div className="flex flex-col rounded-lg border border-border bg-surface p-4">
       <div className="mb-3 flex items-center justify-between">
         <h2 className="font-display text-sm font-semibold text-text">
           Traffic Forecast
@@ -76,7 +81,7 @@ export default function ForecastChart({
         </span>
       </div>
 
-      <div className="h-40 w-full">
+      <div className="min-h-[160px] w-full flex-1">
         <ResponsiveContainer width="100%" height="100%">
           <AreaChart
             data={series}
@@ -160,6 +165,27 @@ export default function ForecastChart({
             />
           </AreaChart>
         </ResponsiveContainer>
+      </div>
+
+      {/* ADDITIONAL DETAILS TO FILL SPACE */}
+      <div className="mt-4 shrink-0">
+        <div className="rounded-md border border-border bg-surface-2 p-3 text-xs">
+          <div className="mb-2 font-medium text-text">Ringkasan Prediksi</div>
+          <div className="flex flex-col gap-2">
+            <div className="flex items-center justify-between text-text-secondary">
+              <span>Puncak Volume</span>
+              <span className="font-mono text-text">{maxVehicle} <span className="text-text-muted">(+{peakTime}m)</span></span>
+            </div>
+            <div className="flex items-center justify-between text-text-secondary">
+              <span>Antrean Terpanjang</span>
+              <span className="font-mono text-text">{maxQueue.toFixed(1)}m</span>
+            </div>
+            <div className="flex items-center justify-between text-text-secondary">
+              <span>Rata-rata Kepadatan</span>
+              <span className="font-mono text-text">{avgDensity.toFixed(1)}</span>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   );

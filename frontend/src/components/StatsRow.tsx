@@ -4,6 +4,11 @@ import {
   Milestone,
   PieChart,
   CloudSun,
+  Sun,
+  Cloud,
+  CloudRain,
+  CloudLightning,
+  CloudFog,
 } from "lucide-react";
 
 import type { ApproachState } from "@/types/traffic";
@@ -48,6 +53,23 @@ function congestionFromDensity(avgDensity: number): {
     label: "Rendah",
     color: "green",
   };
+}
+
+/*
+ * =========================================================
+ * WEATHER ICON CLASSIFICATION
+ * =========================================================
+ */
+
+function getWeatherIcon(condition: string) {
+  const c = condition.toLowerCase();
+  if (c.includes("petir")) return <CloudLightning className="h-4 w-4" />;
+  if (c.includes("hujan")) return <CloudRain className="h-4 w-4" />;
+  if (c.includes("kabut") || c.includes("asap")) return <CloudFog className="h-4 w-4" />;
+  if (c.includes("cerah berawan")) return <CloudSun className="h-4 w-4" />;
+  if (c.includes("berawan")) return <Cloud className="h-4 w-4" />;
+  if (c.includes("cerah")) return <Sun className="h-4 w-4" />;
+  return <CloudSun className="h-4 w-4" />;
 }
 
 /*
@@ -322,7 +344,7 @@ export default function StatsRow({
 
       <div className="flex flex-1 items-center gap-3 rounded-lg border border-border bg-surface px-4 py-3">
         <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-surface-2 text-text-secondary">
-          <CloudSun className="h-4 w-4" />
+          {getWeatherIcon(weather.condition)}
         </div>
 
         <div className="min-w-0">
@@ -339,6 +361,10 @@ export default function StatsRow({
               {weather.condition}
             </span>
           </div>
+
+          <div className="text-[10px] text-text-muted opacity-70">
+            Sumber: BMKG
+          </div>
         </div>
       </div>
 
@@ -347,7 +373,7 @@ export default function StatsRow({
           ===================================================== */}
 
       <div
-        className={`flex flex-1 items-center gap-3 rounded-lg border border-border ${c.bg} px-4 py-3 ring-1 ${c.ring}`}
+        className="flex flex-1 items-center gap-3 rounded-lg border border-border bg-surface px-4 py-3"
       >
         <div className="relative shrink-0">
           <DonutRing

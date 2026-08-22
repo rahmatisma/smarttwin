@@ -2,14 +2,22 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Search, Bell, MapPin } from "lucide-react";
+import { Bell, MapPin } from "lucide-react";
+import {
+  INTERSECTION_OPTIONS,
+  type IntersectionSelection,
+} from "@/lib/intersections";
 
 export default function Header({
   locationName,
   coords,
+  selectedIntersection,
+  onIntersectionChange,
 }: {
   locationName: string;
   coords: string;
+  selectedIntersection?: IntersectionSelection;
+  onIntersectionChange?: (selection: IntersectionSelection) => void;
 }) {
   const router = useRouter();
   const [time, setTime] = useState<string>("");
@@ -37,9 +45,29 @@ export default function Header({
         <span className="text-text-muted">· {coords}</span>
       </div>
 
-      <div className="hidden max-w-md flex-1 items-center gap-2 rounded-md border border-border bg-surface px-3 py-2 text-sm text-text-muted md:flex">
-        <Search className="h-4 w-4" />
-        <span>Cari persimpangan…</span>
+      <div className="hidden max-w-md flex-1 md:flex">
+        {selectedIntersection && onIntersectionChange ? (
+          <select
+            value={selectedIntersection}
+            onChange={(event) =>
+              onIntersectionChange(
+                event.target.value as IntersectionSelection
+              )
+            }
+            className="w-full rounded-md border border-border bg-surface px-3 py-2 text-sm text-text outline-none focus:border-accent"
+            aria-label="Pilih persimpangan"
+          >
+            {INTERSECTION_OPTIONS.map((option) => (
+              <option key={option.id} value={option.id}>
+                {option.name}
+              </option>
+            ))}
+          </select>
+        ) : (
+          <div className="w-full rounded-md border border-border bg-surface px-3 py-2 text-sm text-text-muted">
+            Pilih persimpangan...
+          </div>
+        )}
       </div>
 
       <div className="flex items-center gap-4">

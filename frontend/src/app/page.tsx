@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 
 import Sidebar from "@/components/Sidebar";
 import Header from "@/components/Header";
@@ -19,8 +19,14 @@ import {
   fetchSignalStatus,
   fetchRecommendation,
   fetchForecast,
-  fetchCameras,
+  fetchIntersectionCoords,
 } from "@/lib/supabaseData";
+
+import {
+  ALL_INTERSECTIONS,
+  getIntersectionName,
+  type IntersectionSelection,
+} from "@/lib/intersections";
 
 import type {
   TrafficState,
@@ -28,7 +34,191 @@ import type {
   Recommendation,
   ForecastResponse,
   VehicleClassCount,
+  ApproachState,
+  ForecastPrediction,
+  Approach,
 } from "@/types/traffic";
+
+/*
+ * =========================================================
+ * AGGREGATION HELPERS
+ * =========================================================
+ */
+
+function getAggregatedSignal(signals: SignalStatus[]): SignalStatus {
+  const activeSignals = signals.filter(Boolean);
+  if (activeSignals.length === 0) {
+    return {
+      intersectionId: "Semua Simpang",
+      timestamp: new Date().toISOString(),
+      currentPhase: "ALL",
+      phaseName: "Semua Fase",
+      remainingSeconds: 0,
+      cycleTimeSeconds: 0,
+      source: "mock",
+    };
+  }
+  const latestTimestamp = new Date(
+    Math.max(...activeSignals.map((s) => new Date(s.timestamp).getTime()))
+  ).toISOString();
+  const avgRemaining = Math.round(
+    activeSignals.reduce((sum, s) => sum + s.remainingSeconds, 0) /
+      activeSignals.length
+  );
+  const avgCycle = Math.round(
+    activeSignals.reduce((sum, s) => sum + s.cycleTimeSeconds, 0) /
+      activeSignals.length
+  );
+  const anySynced = activeSignals.some((s) => s.source !== "mock");
+
+  return {
+    intersectionId: "Semua Simpang",
+    timestamp: latestTimestamp,
+    currentPhase: "ALL",
+    phaseName: "Semua Fase",
+    remainingSeconds: avgRemaining,
+    cycleTimeSeconds: avgCycle,
+    source: anySynced ? "synced" : "mock",
+  };
+}
+
+function getAggregatedRecommendation(
+  recs: Recommendation[]
+): Recommendation | null {
+  const activeRecs = recs.filter(Boolean);
+  if (activeRecs.length === 0) return null;
+  const avgImprovement =
+    activeRecs.reduce(
+      (sum, r) => sum + r.expectedDelayReductionPercent,
+      0
+    ) / activeRecs.length;
+  const avgConfidence =
+    activeRecs.reduce((sum, r) => sum + r.confidence, 0) / activeRecs.length;
+
+  return {
+    intersectionId: "Semua Simpang",
+    timestamp: new Date().toISOString(),
+    recommendedPhase: "N/A",
+    recommendedGreenSeconds: 0,
+    currentGreenSeconds: 0,
+    expectedDelayReductionPercent: avgImprovement,
+    confidence: avgConfidence,
+    reason:
+      "Pilih salah satu persimpangan spesifik pada menu di atas untuk melihat detail rekomendasi optimasi fase lampu lalu lintas.",
+    source: "SmartTwin AI",
+  };
+}
+
+function getAggregatedForecast(
+  forecasts: ForecastResponse[]
+): ForecastResponse | null {
+  const activeForecasts = forecasts.filter(
+    (f) => f && f.predictions && f.predictions.length > 0
+  );
+  if (activeForecasts.length === 0) return null;
+
+  const numPredictions = Math.min(
+    ...activeForecasts.map((f) => f.predictions.length)
+  );
+  const aggregatedPredictions: ForecastPrediction[] = [];
+
+  for (let i = 0; i < numPredictions; i++) {
+    const timestamp = activeForecasts[0].predictions[i].timestamp;
+    const sumCount = activeForecasts.reduce(
+      (sum, f) => sum + f.predictions[i].predictedVehicleCount,
+      0
+    );
+    const sumQueueVeh = activeForecasts.reduce(
+      (sum, f) => sum + f.predictions[i].predictedQueueLengthVeh,
+      0
+    );
+    const sumQueueM = activeForecasts.reduce(
+      (sum, f) => sum + f.predictions[i].predictedQueueLengthMEst,
+      0
+    );
+    const avgDensity =
+      activeForecasts.reduce(
+        (sum, f) => sum + f.predictions[i].predictedDensityIndex,
+        0
+      ) / activeForecasts.length;
+    const speeds = activeForecasts
+      .map((f) => f.predictions[i].predictedSpeedKmh)
+      .filter((s): s is number => s !== null);
+    const avgSpeed =
+      speeds.length > 0
+        ? speeds.reduce((sum, s) => sum + s, 0) / speeds.length
+        : null;
+
+    aggregatedPredictions.push({
+      timestamp,
+      predictedVehicleCount: sumCount,
+      predictedQueueLengthVeh: sumQueueVeh,
+      predictedQueueLengthMEst: sumQueueM,
+      predictedDensityIndex: avgDensity,
+      predictedSpeedKmh: avgSpeed,
+    });
+  }
+
+  return {
+    intersectionId: "Semua Simpang",
+    horizonMinutes: activeForecasts[0].horizonMinutes,
+    model: "Aggregated LSTM",
+    predictions: aggregatedPredictions,
+  };
+}
+
+function getAggregatedApproachesByDirection(
+  approaches: ApproachState[]
+): ApproachState[] {
+  const directions: Approach[] = ["north", "south", "east", "west"];
+  return directions.map((dir) => {
+    const dirApproaches = approaches.filter((a) => a.approach === dir);
+    if (dirApproaches.length === 0) {
+      return {
+        approach: dir,
+        volume: 0,
+        carCount: 0,
+        motorcycleCount: 0,
+        busCount: 0,
+        truckCount: 0,
+        queueLengthVeh: 0,
+        queueLengthMEst: 0,
+        densityIndex: 0,
+        avgSpeedKmh: null,
+      };
+    }
+    const speeds = dirApproaches
+      .map((a) => a.avgSpeedKmh)
+      .filter((s): s is number => s !== null);
+
+    return {
+      approach: dir,
+      volume: dirApproaches.reduce((sum, a) => sum + a.volume, 0),
+      carCount: dirApproaches.reduce((sum, a) => sum + a.carCount, 0),
+      motorcycleCount: dirApproaches.reduce(
+        (sum, a) => sum + a.motorcycleCount,
+        0
+      ),
+      busCount: dirApproaches.reduce((sum, a) => sum + a.busCount, 0),
+      truckCount: dirApproaches.reduce((sum, a) => sum + a.truckCount, 0),
+      queueLengthVeh: dirApproaches.reduce(
+        (sum, a) => sum + a.queueLengthVeh,
+        0
+      ),
+      queueLengthMEst: dirApproaches.reduce(
+        (sum, a) => sum + a.queueLengthMEst,
+        0
+      ),
+      densityIndex:
+        dirApproaches.reduce((sum, a) => sum + a.densityIndex, 0) /
+        dirApproaches.length,
+      avgSpeedKmh:
+        speeds.length > 0
+          ? speeds.reduce((sum, s) => sum + s, 0) / speeds.length
+          : null,
+    };
+  });
+}
 
 /*
  * =========================================================
@@ -241,20 +431,23 @@ export default function DashboardPage() {
    * =========================================================
    */
 
-  const [trafficState, setTrafficState] =
-    useState<TrafficState | null>(null);
+  const [selectedIntersection, setSelectedIntersection] =
+    useState<IntersectionSelection>("all");
 
-  const [signalStatus, setSignalStatus] =
-    useState<SignalStatus | null>(null);
+  const [allTrafficStates, setAllTrafficStates] =
+    useState<Record<string, TrafficState | null>>({});
 
-  const [recommendation, setRecommendation] =
-    useState<Recommendation | null>(null);
+  const [allSignalStatuses, setAllSignalStatuses] =
+    useState<Record<string, SignalStatus | null>>({});
 
-  const [forecast, setForecast] =
-    useState<ForecastResponse | null>(null);
+  const [allRecommendations, setAllRecommendations] =
+    useState<Record<string, Recommendation | null>>({});
 
-  const [cameraStatus, setCameraStatus] =
-    useState<{ id: string; label: string; online: boolean }[]>([]);
+  const [allForecasts, setAllForecasts] =
+    useState<Record<string, ForecastResponse | null>>({});
+
+  const [allCoords, setAllCoords] =
+    useState<Record<string, { latitude: number | null; longitude: number | null } | null>>({});
 
   const [loading, setLoading] =
     useState(true);
@@ -262,18 +455,45 @@ export default function DashboardPage() {
   const [error, setError] =
     useState<string | null>(null);
 
+  const [weatherData, setWeatherData] = useState<{
+    condition: string;
+    tempC: number | null;
+  }>({
+    condition: "Data tidak tersedia",
+    tempC: null,
+  });
+
+  useEffect(() => {
+    async function fetchWeather() {
+      try {
+        const response = await fetch("https://api.bmkg.go.id/publik/prakiraan-cuaca?adm4=34.71.13.1001");
+        if (!response.ok) return;
+
+        const json = await response.json();
+        // Mengambil prakiraan cuaca paling awal untuk hari ini
+        const cuacaLokal = json.data?.[0]?.cuaca?.[0]?.[0];
+
+        if (cuacaLokal) {
+          setWeatherData({
+            condition: cuacaLokal.weather_desc ?? "Data tidak tersedia",
+            tempC: cuacaLokal.t ?? null,
+          });
+        }
+      } catch (err) {
+        console.error("Gagal mengambil data BMKG:", err);
+      }
+    }
+
+    fetchWeather();
+    // Refresh tiap 1 jam
+    const intervalId = setInterval(fetchWeather, 3600000);
+    return () => clearInterval(intervalId);
+  }, []);
+
   /*
    * =========================================================
    * FETCH DARI SUPABASE
    * =========================================================
-   *
-   * trafficStates + trafficApproachStates
-   * signalStatuses
-   * recommendations
-   * forecasts + forecastPredictions
-   * cameras
-   *        ↓
-   * Dashboard
    */
 
   useEffect(() => {
@@ -285,32 +505,63 @@ export default function DashboardPage() {
         setLoading(true);
         setError(null);
 
-        const [
-          trafficStateResult,
-          signalStatusResult,
-          recommendationResult,
-          forecastResult,
-          camerasResult,
-        ] = await Promise.all([
-          fetchTrafficState(DEFAULT_INTERSECTION_ID),
-          fetchSignalStatus(DEFAULT_INTERSECTION_ID),
-          fetchRecommendation(DEFAULT_INTERSECTION_ID),
-          fetchForecast(DEFAULT_INTERSECTION_ID),
-          fetchCameras(DEFAULT_INTERSECTION_ID),
-        ]);
-
-        setTrafficState(trafficStateResult);
-        setSignalStatus(signalStatusResult);
-        setRecommendation(recommendationResult);
-        setForecast(forecastResult);
-
-        setCameraStatus(
-          camerasResult.map((camera) => ({
-            id: String(camera.id),
-            label: camera.name,
-            online: camera.status === "active",
-          }))
+        const results = await Promise.all(
+          ALL_INTERSECTIONS.map(async (inter) => {
+            try {
+                const [
+                  trafficState,
+                  signalStatus,
+                  recommendation,
+                  forecast,
+                  coords,
+                ] = await Promise.all([
+                  fetchTrafficState(inter.databaseId),
+                  fetchSignalStatus(inter.databaseId),
+                  fetchRecommendation(inter.databaseId),
+                  fetchForecast(inter.databaseId),
+                  fetchIntersectionCoords(inter.databaseId),
+                ]);
+                return {
+                  id: inter.id,
+                  trafficState,
+                  signalStatus,
+                  recommendation,
+                  forecast,
+                  coords,
+                };
+            } catch (err) {
+              console.error(`Gagal mengambil data untuk ${inter.name}:`, err);
+              return {
+                id: inter.id,
+                trafficState: null,
+                signalStatus: null,
+                recommendation: null,
+                forecast: null,
+                coords: null,
+              };
+            }
+          })
         );
+
+        const newTrafficStates: Record<string, TrafficState | null> = {};
+        const newSignalStatuses: Record<string, SignalStatus | null> = {};
+        const newRecommendations: Record<string, Recommendation | null> = {};
+        const newForecasts: Record<string, ForecastResponse | null> = {};
+        const newCoords: Record<string, { latitude: number | null; longitude: number | null } | null> = {};
+
+        results.forEach((res) => {
+          newTrafficStates[res.id] = res.trafficState;
+          newSignalStatuses[res.id] = res.signalStatus;
+          newRecommendations[res.id] = res.recommendation;
+          newForecasts[res.id] = res.forecast;
+          newCoords[res.id] = res.coords;
+        });
+
+        setAllTrafficStates(newTrafficStates);
+        setAllSignalStatuses(newSignalStatuses);
+        setAllRecommendations(newRecommendations);
+        setAllForecasts(newForecasts);
+        setAllCoords(newCoords);
 
       } catch (err) {
 
@@ -334,22 +585,78 @@ export default function DashboardPage() {
 
     loadDashboardData();
 
-    /*
-     * Realtime lewat WebSocket backend sendiri, BUKAN Supabase
-     * Realtime -- sudah dibuktikan langsung (termasuk pakai
-     * service_role key yang bypass RLS) bahwa Supabase Realtime
-     * tidak mem-broadcast postgres_changes sama sekali di project
-     * ini walau publication/RLS/status service semuanya benar.
-     *
-     * Jalur ini event-driven, bukan polling: cv/process_uploaded_video.py
-     * mem-POST /api/v1/traffic/notify PERSIS setelah satu window
-     * berhasil ditulis ke Supabase, backend langsung meneruskannya ke
-     * sini lewat WebSocket. Reconnect otomatis kalau backend sempat
-     * restart selagi dashboard terbuka.
-     */
     let socket: WebSocket | null = null;
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
     let cancelled = false;
+
+    async function refetchAllData() {
+      if (cancelled) return;
+      try {
+        const results = await Promise.all(
+          ALL_INTERSECTIONS.map(async (inter) => {
+            try {
+              const [
+                trafficState,
+                signalStatus,
+                recommendation,
+                forecast,
+              ] = await Promise.all([
+                fetchTrafficState(inter.databaseId),
+                fetchSignalStatus(inter.databaseId),
+                fetchRecommendation(inter.databaseId),
+                fetchForecast(inter.databaseId),
+              ]);
+              return {
+                id: inter.id,
+                trafficState,
+                signalStatus,
+                recommendation,
+                forecast,
+              };
+            } catch (err) {
+              console.error(`Gagal mengambil data untuk ${inter.name}:`, err);
+              return null;
+            }
+          })
+        );
+
+        if (cancelled) return;
+
+        setAllTrafficStates((prev) => {
+          const next = { ...prev };
+          results.forEach((res) => {
+            if (res) next[res.id] = res.trafficState;
+          });
+          return next;
+        });
+
+        setAllSignalStatuses((prev) => {
+          const next = { ...prev };
+          results.forEach((res) => {
+            if (res) next[res.id] = res.signalStatus;
+          });
+          return next;
+        });
+
+        setAllRecommendations((prev) => {
+          const next = { ...prev };
+          results.forEach((res) => {
+            if (res) next[res.id] = res.recommendation;
+          });
+          return next;
+        });
+
+        setAllForecasts((prev) => {
+          const next = { ...prev };
+          results.forEach((res) => {
+            if (res) next[res.id] = res.forecast;
+          });
+          return next;
+        });
+      } catch (err) {
+        console.error("Gagal melakukan update realtime:", err);
+      }
+    }
 
     function connect() {
       if (cancelled) return;
@@ -357,7 +664,7 @@ export default function DashboardPage() {
       socket = new WebSocket(WS_URL);
 
       socket.onmessage = () => {
-        fetchTrafficState(DEFAULT_INTERSECTION_ID).then(setTrafficState);
+        refetchAllData();
       };
 
       socket.onclose = () => {
@@ -376,7 +683,86 @@ export default function DashboardPage() {
 
   }, []);
 
-  const signal = signalStatus ?? simulatedSignal;
+  /*
+   * =========================================================
+   * MEMOIZED AGGREGATED / FILTERED DATA
+   * =========================================================
+   */
+
+  const activeTrafficState = useMemo(() => {
+    if (selectedIntersection !== "all") {
+      return allTrafficStates[selectedIntersection] ?? {
+        intersectionId: selectedIntersection,
+        windowStart: new Date().toISOString(),
+        windowEnd: new Date().toISOString(),
+        approaches: [],
+      };
+    }
+
+    const states = ALL_INTERSECTIONS.map(
+      (inter) => allTrafficStates[inter.id]
+    ).filter((s): s is TrafficState => s != null);
+
+    if (states.length === 0) {
+      return {
+        intersectionId: "Semua Simpang",
+        windowStart: new Date().toISOString(),
+        windowEnd: new Date().toISOString(),
+        approaches: [],
+      };
+    }
+
+    const combinedApproaches = states.flatMap((s) => s.approaches);
+
+    return {
+      intersectionId: "Semua Simpang",
+      windowStart: states[0].windowStart,
+      windowEnd: states[0].windowEnd,
+      approaches: combinedApproaches,
+    };
+  }, [selectedIntersection, allTrafficStates]);
+
+  const activeSignal = useMemo(() => {
+    if (selectedIntersection !== "all") {
+      return allSignalStatuses[selectedIntersection] ?? simulatedSignal;
+    }
+
+    const signals = ALL_INTERSECTIONS.map(
+      (inter) => allSignalStatuses[inter.id]
+    ).filter((s): s is SignalStatus => s != null);
+
+    return getAggregatedSignal(signals.length > 0 ? signals : [simulatedSignal]);
+  }, [selectedIntersection, allSignalStatuses, simulatedSignal]);
+
+  const activeRecommendation = useMemo(() => {
+    if (selectedIntersection !== "all") {
+      return allRecommendations[selectedIntersection] ?? null;
+    }
+
+    const recs = ALL_INTERSECTIONS.map(
+      (inter) => allRecommendations[inter.id]
+    ).filter((r): r is Recommendation => r != null);
+
+    return getAggregatedRecommendation(recs);
+  }, [selectedIntersection, allRecommendations]);
+
+  const activeForecast = useMemo(() => {
+    if (selectedIntersection !== "all") {
+      return allForecasts[selectedIntersection] ?? null;
+    }
+
+    const fcst = ALL_INTERSECTIONS.map(
+      (inter) => allForecasts[inter.id]
+    ).filter((f): f is ForecastResponse => f != null);
+
+    return getAggregatedForecast(fcst);
+  }, [selectedIntersection, allForecasts]);
+
+  const digitalTwinApproaches = useMemo(() => {
+    if (!activeTrafficState) return [];
+    if (selectedIntersection !== "all") return activeTrafficState.approaches;
+    return getAggregatedApproachesByDirection(activeTrafficState.approaches);
+  }, [selectedIntersection, activeTrafficState]);
 
   /*
    * =========================================================
@@ -390,11 +776,13 @@ export default function DashboardPage() {
 
   /*
    * =========================================================
-   * ERROR
+   * ERROR / EMPTY STATE CHECK
    * =========================================================
    */
 
-  if (error || !trafficState) {
+  const hasLoadedAnyData = Object.values(allTrafficStates).some((state) => state !== null);
+
+  if (error || !hasLoadedAnyData) {
 
     return (
       <div className="flex min-h-screen bg-bg">
@@ -404,7 +792,7 @@ export default function DashboardPage() {
         <div className="flex min-w-0 flex-1 flex-col">
 
           <Header
-            locationName="simpang4-pingit"
+            locationName="Semua Simpang"
             coords="Koordinat belum tersedia"
           />
 
@@ -418,7 +806,7 @@ export default function DashboardPage() {
 
               <div className="mt-2 text-xs text-text-secondary">
                 {error ??
-                  "Traffic state tidak tersedia."}
+                  "Traffic state tidak tersedia untuk persimpangan yang dipilih."}
               </div>
 
               <div className="mt-4 text-xs text-text-muted">
@@ -448,7 +836,7 @@ export default function DashboardPage() {
     {
       vehicleClass: "motorcycle",
 
-      count: trafficState.approaches.reduce(
+      count: activeTrafficState.approaches.reduce(
         (sum, approach) =>
           sum + approach.motorcycleCount,
         0
@@ -458,7 +846,7 @@ export default function DashboardPage() {
     {
       vehicleClass: "car",
 
-      count: trafficState.approaches.reduce(
+      count: activeTrafficState.approaches.reduce(
         (sum, approach) =>
           sum + approach.carCount,
         0
@@ -468,7 +856,7 @@ export default function DashboardPage() {
     {
       vehicleClass: "bus",
 
-      count: trafficState.approaches.reduce(
+      count: activeTrafficState.approaches.reduce(
         (sum, approach) =>
           sum + approach.busCount,
         0
@@ -478,7 +866,7 @@ export default function DashboardPage() {
     {
       vehicleClass: "truck",
 
-      count: trafficState.approaches.reduce(
+      count: activeTrafficState.approaches.reduce(
         (sum, approach) =>
           sum + approach.truckCount,
         0
@@ -489,29 +877,14 @@ export default function DashboardPage() {
 
   /*
    * =========================================================
-   * INTERSECTION
-   * =========================================================
-   */
-
-  const intersectionName =
-    trafficState.intersectionId;
-
-  /*
-   * =========================================================
    * WEATHER
    * =========================================================
    */
 
   const weather = {
-
-    dateLabel: new Date(
-      trafficState.windowEnd
-    ).toLocaleDateString("id-ID"),
-
-    condition: "Data tidak tersedia",
-
-    tempC: null,
-
+    dateLabel: new Date(activeTrafficState.windowEnd).toLocaleDateString("id-ID"),
+    condition: weatherData.condition,
+    tempC: weatherData.tempC,
   };
 
   /*
@@ -533,8 +906,16 @@ export default function DashboardPage() {
             =================================================== */}
 
         <Header
-          locationName={intersectionName}
-          coords="Koordinat belum tersedia"
+          selectedIntersection={selectedIntersection}
+          onIntersectionChange={setSelectedIntersection}
+          locationName="simpang4-pingit"
+          coords={(() => {
+            const c = allCoords["intersection4"];
+            if (c?.latitude && c?.longitude) {
+              return `${c.latitude}, ${c.longitude}`;
+            }
+            return "Koordinat belum tersedia";
+          })()}
         />
 
         {/* ===================================================
@@ -542,7 +923,7 @@ export default function DashboardPage() {
             =================================================== */}
 
         <StatsRow
-          approaches={trafficState.approaches}
+          approaches={activeTrafficState.approaches}
           weather={weather}
         />
 
@@ -557,8 +938,8 @@ export default function DashboardPage() {
             {/* DIGITAL TWIN */}
 
             <DigitalTwinPanel
-              approaches={trafficState.approaches}
-              signal={signal}
+              approaches={digitalTwinApproaches}
+              signal={activeSignal}
             />
 
             {/* RIGHT COLUMN */}
@@ -569,13 +950,14 @@ export default function DashboardPage() {
 
               <CameraFeedPanel
                 counts={vehicleClassCounts}
-                cameraStatus={cameraStatus}
+                selectedIntersection={selectedIntersection}
+                onIntersectionChange={setSelectedIntersection}
               />
 
               {/* SIGNAL STATUS */}
 
               <SignalStatusPanel
-                signal={signal}
+                signal={activeSignal}
               />
 
             </div>
@@ -591,13 +973,13 @@ export default function DashboardPage() {
             {/* RECOMMENDATION */}
 
             <RecommendationPanel
-              recommendation={recommendation}
+              recommendation={activeRecommendation}
             />
 
             {/* FORECAST */}
 
             <ForecastChart
-              data={forecast}
+              data={activeForecast}
             />
 
           </div>

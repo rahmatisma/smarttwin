@@ -115,16 +115,7 @@ export default function RecommendationPanel({
           </div>
         </div>
 
-        {/* Reason */}
-        <div className="rounded-md border border-border bg-surface-2 p-3">
-          <div className="text-xs text-text-muted">
-            Reason
-          </div>
 
-          <div className="mt-1 text-xs leading-relaxed text-text-secondary">
-            {recommendation.reason}
-          </div>
-        </div>
 
         {/* Source */}
         <div className="flex items-center justify-between border-t border-border pt-2">

@@ -38,6 +38,22 @@ async function getIntersectionRowId(
   return data?.id ?? null;
 }
 
+export async function fetchIntersectionCoords(
+  intersectionId: string
+): Promise<{ latitude: number | null; longitude: number | null } | null> {
+  const { data, error } = await supabase
+    .from("intersections")
+    .select("latitude, longitude")
+    .eq("intersectionId", intersectionId)
+    .maybeSingle();
+
+  if (error) {
+    console.error(`Gagal mengambil koordinat: ${error.message}`);
+    return null;
+  }
+  return data;
+}
+
 /* =========================================================
  * TRAFFIC STATE
  * ========================================================= */

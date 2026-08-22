@@ -3,6 +3,9 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.routes.traffic import router as traffic_router
 from app.api.routes.cctv import close_hf_client, router as cctv_router
+from app.api.routes.signal import router as signal_router
+from app.api.routes.forecast import router as forecast_router
+from app.api.routes.recommendation import router as recommendation_router
 
 
 app = FastAPI(
@@ -37,6 +40,20 @@ app.include_router(
 
 app.include_router(
     cctv_router
+)
+
+app.include_router(
+    signal_router,
+    prefix="/api/v1",
+)
+
+app.include_router(
+    forecast_router
+)
+
+app.include_router(
+    recommendation_router,
+    prefix="/api/v1",
 )
 
 

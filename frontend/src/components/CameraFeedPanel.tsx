@@ -22,6 +22,12 @@ import {
   fetchCameras,
   DEFAULT_INTERSECTION_ID,
 } from "@/lib/supabaseData";
+import {
+  ALL_INTERSECTIONS,
+  getIntersectionDatabaseIds,
+  INTERSECTION_OPTIONS,
+  type IntersectionSelection,
+} from "@/lib/intersections";
 
 // =====================================================
 // TYPES
@@ -103,14 +109,16 @@ const LABELS: Record<
 // LOAD CCTV DARI SUPABASE
 // =====================================================
 
-async function loadCameras(): Promise<Camera[]> {
+async function loadCamerasForIntersection(
+  intersectionDbId: string
+): Promise<Camera[]> {
   try {
-    const rows = await fetchCameras(DEFAULT_INTERSECTION_ID);
+    const rows = await fetchCameras(intersectionDbId);
 
-    return rows.slice(0, 4).map((row) => ({
+    return rows.map((row) => ({
       id: String(row.id),
       name: row.name,
-      intersection: DEFAULT_INTERSECTION_ID,
+      intersection: intersectionDbId,
       direction: row.approach ?? "Tidak diketahui",
       sourceType:
         row.sourceType === "uploaded" ? "file" : "url",
@@ -119,7 +127,10 @@ async function loadCameras(): Promise<Camera[]> {
       status: row.status === "active" ? "online" : "waiting",
     }));
   } catch (error) {
-    console.error("Gagal mengambil cameras dari Supabase:", error);
+    console.error(
+      `Gagal mengambil cameras dari Supabase untuk ${intersectionDbId}:`,
+      error
+    );
 
     return [];
   }
@@ -132,9 +143,13 @@ async function loadCameras(): Promise<Camera[]> {
 export default function CameraFeedPanel({
   counts,
   cameraStatus = [],
+  selectedIntersection = "all",
+  onIntersectionChange,
 }: {
   counts: VehicleClassCount[];
   cameraStatus?: CameraStatus[];
+  selectedIntersection?: IntersectionSelection;
+  onIntersectionChange?: (selection: IntersectionSelection) => void;
 }) {
 
   // ===================================================
@@ -147,16 +162,35 @@ export default function CameraFeedPanel({
   useEffect(() => {
     let cancelled = false;
 
-    loadCameras().then((result) => {
-      if (!cancelled) {
-        setCameras(result);
+    // Load semua kamera dari semua kemungkinan ID simpang di database
+    Promise.all(
+      ALL_INTERSECTIONS.map((inter) => loadCamerasForIntersection(inter.databaseId))
+    ).then((results) => {
+      if (cancelled) return;
+      
+      const allCams = results.flat();
+
+      if (selectedIntersection === "all") {
+        setCameras(allCams);
+      } else {
+        const config = ALL_INTERSECTIONS.find((i) => i.id === selectedIntersection);
+        if (config) {
+          // Ambil bagian "CCTV X" saja untuk pencarian (misal dari "CCTV 4 (Jl Pangeran Diponegoro)")
+          const shortName = config.cameraName.split(" (")[0].toLowerCase();
+          const filtered = allCams.filter((cam) =>
+            cam.name.toLowerCase().includes(shortName)
+          );
+          setCameras(filtered);
+        } else {
+          setCameras([]);
+        }
       }
     });
 
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [selectedIntersection]);
 
   // ===================================================
   // RETURN
@@ -175,9 +209,29 @@ export default function CameraFeedPanel({
           Camera Feed
         </h2>
 
-        <span className="text-xs text-text-muted">
-          {cameras.length}/4 CAMERA
-        </span>
+        <div className="flex items-center gap-2">
+          {onIntersectionChange && (
+            <select
+              value={selectedIntersection}
+              onChange={(event) =>
+                onIntersectionChange(
+                  event.target.value as IntersectionSelection
+                )
+              }
+              className="max-w-32 rounded border border-border bg-surface-2 px-1.5 py-1 text-[10px] text-text outline-none"
+              aria-label="Filter kamera berdasarkan persimpangan"
+            >
+              {INTERSECTION_OPTIONS.map((option) => (
+                <option key={option.id} value={option.id}>
+                  {option.name}
+                </option>
+              ))}
+            </select>
+          )}
+          <span className="text-xs text-text-muted">
+            {cameras.length}/{selectedIntersection === "all" ? 4 : 1} CAMERA
+          </span>
+        </div>
 
       </div>
 
@@ -185,7 +239,7 @@ export default function CameraFeedPanel({
           CAMERA GRID
       ================================================= */}
 
-      <div className="grid grid-cols-2 gap-2">
+      <div className={`grid gap-2 ${cameras.length === 1 ? "grid-cols-1" : "grid-cols-2"}`}>
 
         {cameras.length > 0 ? (
 
@@ -412,9 +466,9 @@ export default function CameraFeedPanel({
 
       <div className="mt-3 space-y-1 border-t border-border pt-2">
 
-        {cameraStatus.length > 0 ? (
+        {cameras.length > 0 ? (
 
-          cameraStatus.map((cam) => (
+          cameras.map((cam) => (
 
             <div
               key={cam.id}
@@ -422,12 +476,12 @@ export default function CameraFeedPanel({
             >
 
               <span className="truncate text-text-secondary">
-                {cam.label}
+                {cam.name}
               </span>
 
               <span
                 className={`ml-auto h-1.5 w-1.5 shrink-0 rounded-full ${
-                  cam.online
+                  cam.status === "online"
                     ? "bg-signal-green"
                     : "bg-signal-red"
                 }`}
