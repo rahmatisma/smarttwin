@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { Search, Bell, MapPin } from "lucide-react";
 
 export default function Header({
@@ -10,6 +11,7 @@ export default function Header({
   locationName: string;
   coords: string;
 }) {
+  const router = useRouter();
   const [time, setTime] = useState<string>("");
 
   useEffect(() => {
@@ -45,8 +47,11 @@ export default function Header({
           {time || "--:--:--"}
         </span>
         <button
+          type="button"
+          onClick={() => router.push("/settings?section=notifications")}
           className="relative flex h-8 w-8 items-center justify-center rounded-md border border-border text-text-secondary hover:text-text"
           aria-label="Notifikasi"
+          title="Notifikasi"
         >
           <Bell className="h-4 w-4" />
           <span className="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-signal-amber" />

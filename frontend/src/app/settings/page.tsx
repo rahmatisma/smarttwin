@@ -1,21 +1,16 @@
 "use client";
 
 import { useState } from "react";
+import { useSearchParams } from "next/navigation";
 import {
     User,
     Bell,
-    TrafficCone,
-    Camera,
-    Brain,
     Palette,
     Shield,
 } from "lucide-react";
 
 import ProfileSettings from "@/components/settings/ProfileSettings";
 import NotificationSettings from "@/components/settings/NotificationSettings";
-import TrafficSettings from "@/components/settings/TrafficSettings";
-import CCTVSettings from "@/components/settings/CCTVSettings";
-import AISettings from "@/components/settings/AISettings";
 import AppearanceSettings from "@/components/settings/AppearanceSettings";
 import SecuritySettings from "@/components/settings/SecuritySetttings";
 import Sidebar from "@/components/Sidebar";
@@ -34,24 +29,6 @@ const menuItems = [
         icon: Bell,
     },
     {
-        id: "traffic",
-        label: "Traffic Monitoring",
-        description: "Configure traffic monitoring",
-        icon: TrafficCone,
-    },
-    {
-        id: "cctv",
-        label: "CCTV",
-        description: "Manage CCTV preferences",
-        icon: Camera,
-    },
-    {
-        id: "ai",
-        label: "AI & Prediction",
-        description: "Configure AI and forecasting",
-        icon: Brain,
-    },
-    {
         id: "appearance",
         label: "Appearance",
         description: "Customize application appearance",
@@ -66,7 +43,14 @@ const menuItems = [
 ];
 
 export default function SettingsPage() {
-    const [activeMenu, setActiveMenu] = useState("profile");
+    const searchParams = useSearchParams();
+    const requestedSection = searchParams.get("section");
+    const initialSection = menuItems.some(
+        (item) => item.id === requestedSection
+    )
+        ? requestedSection
+        : "profile";
+    const [activeMenu, setActiveMenu] = useState(initialSection);
 
     const renderContent = () => {
         switch (activeMenu) {
@@ -75,15 +59,6 @@ export default function SettingsPage() {
 
             case "notifications":
                 return <NotificationSettings />;
-
-            case "traffic":
-                return <TrafficSettings />;
-
-            case "cctv":
-                return <CCTVSettings />;
-
-            case "ai":
-                return <AISettings />;
 
             case "appearance":
                 return <AppearanceSettings />;
@@ -107,7 +82,7 @@ export default function SettingsPage() {
                         {/* Header */}
                         <div className="mb-8">
                             <h1 className="text-3xl font-bold text-slate-900 dark:text-white">
-                                Settings
+                                Pengaturan
                             </h1>
 
                             <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
@@ -116,10 +91,11 @@ export default function SettingsPage() {
                         </div>
 
                         {/* Settings Layout */}
-                        <div className="grid grid-cols-1 gap-6 lg:grid-cols-[280px_1fr]">
+                        <div className="grid grid-cols-1 items-stretch gap-6 lg:grid-cols-[280px_minmax(0,1fr)]">
 
                             {/* Sidebar */}
-                            <aside className="h-fit rounded-2xl border border-slate-200 bg-white p-3 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+                            <div className="self-stretch lg:sticky lg:top-6">
+                                <aside className="h-full rounded-2xl border border-slate-200 bg-white p-3 dark:border-slate-800 dark:bg-slate-900">
 
                                 <div className="space-y-1">
                                     {menuItems.map((item) => {
@@ -157,10 +133,11 @@ export default function SettingsPage() {
                                         );
                                     })}
                                 </div>
-                            </aside>
+                                </aside>
+                            </div>
 
                             {/* Content */}
-                            <section>
+                            <section className="lg:pl-2">
                                 {renderContent()}
                             </section>
 

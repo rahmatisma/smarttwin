@@ -1,12 +1,109 @@
 "use client";
 
-import { useState } from "react";
+import {
+    startTransition,
+    useEffect,
+    useState,
+} from "react";
 import { Sun, Moon, Monitor, Languages, Layout } from "lucide-react";
+import { APPEARANCE_EVENT } from "@/components/LanguageProvider";
+
+const STORAGE_KEY = "smarttwin.appearance.settings";
+const DEFAULT_SETTINGS = {
+    theme: "system",
+    language: "id",
+    compactMode: false,
+} as const;
+
+type AppearanceSettingsData = {
+    theme: "light" | "dark" | "system";
+    language: "id" | "en";
+    compactMode: boolean;
+};
+
+function readSettings(): AppearanceSettingsData {
+    try {
+        const stored = localStorage.getItem(STORAGE_KEY);
+        const parsed: unknown = stored ? JSON.parse(stored) : null;
+
+        if (typeof parsed !== "object" || parsed === null) {
+            return { ...DEFAULT_SETTINGS };
+        }
+
+        const values = parsed as Record<string, unknown>;
+
+        return {
+            theme:
+                values.theme === "light" ||
+                values.theme === "dark" ||
+                values.theme === "system"
+                    ? values.theme
+                    : DEFAULT_SETTINGS.theme,
+            language:
+                values.language === "en" || values.language === "id"
+                    ? values.language
+                    : DEFAULT_SETTINGS.language,
+            compactMode:
+                typeof values.compactMode === "boolean"
+                    ? values.compactMode
+                    : DEFAULT_SETTINGS.compactMode,
+        };
+    } catch {
+        return { ...DEFAULT_SETTINGS };
+    }
+}
+
+function applySettings(settings: AppearanceSettingsData) {
+    const root = document.documentElement;
+    const prefersDark = window.matchMedia(
+        "(prefers-color-scheme: dark)"
+    ).matches;
+    const isDark =
+        settings.theme === "dark" ||
+        (settings.theme === "system" && prefersDark);
+
+    root.dataset.theme = isDark ? "dark" : "light";
+    root.lang = settings.language;
+    document.body.classList.toggle(
+        "compact-mode",
+        settings.compactMode
+    );
+}
 
 export default function AppearanceSettings() {
-    const [theme, setTheme] = useState("system");
-    const [language, setLanguage] = useState("id");
-    const [compactMode, setCompactMode] = useState(false);
+    const [settings, setSettings] = useState<AppearanceSettingsData>(
+        DEFAULT_SETTINGS
+    );
+    const [saved, setSaved] = useState(false);
+
+    useEffect(() => {
+        startTransition(() => {
+            const loadedSettings = readSettings();
+            setSettings(loadedSettings);
+            applySettings(loadedSettings);
+        });
+    }, []);
+
+    useEffect(() => {
+        applySettings(settings);
+    }, [settings]);
+
+    function updateSetting<K extends keyof AppearanceSettingsData>(
+        key: K,
+        value: AppearanceSettingsData[K]
+    ) {
+        setSettings((current) => ({
+            ...current,
+            [key]: value,
+        }));
+        setSaved(false);
+    }
+
+    function handleSave() {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
+        window.dispatchEvent(new CustomEvent(APPEARANCE_EVENT));
+        setSaved(true);
+    }
 
     return (
         <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
@@ -35,24 +132,24 @@ export default function AppearanceSettings() {
                         icon={<Sun size={20} />}
                         label="Light"
                         value="light"
-                        selected={theme === "light"}
-                        onClick={() => setTheme("light")}
+                        selected={settings.theme === "light"}
+                        onClick={() => updateSetting("theme", "light")}
                     />
 
                     <ThemeOption
                         icon={<Moon size={20} />}
                         label="Dark"
                         value="dark"
-                        selected={theme === "dark"}
-                        onClick={() => setTheme("dark")}
+                        selected={settings.theme === "dark"}
+                        onClick={() => updateSetting("theme", "dark")}
                     />
 
                     <ThemeOption
                         icon={<Monitor size={20} />}
                         label="System"
                         value="system"
-                        selected={theme === "system"}
-                        onClick={() => setTheme("system")}
+                        selected={settings.theme === "system"}
+                        onClick={() => updateSetting("theme", "system")}
                     />
                 </div>
             </div>
@@ -65,8 +162,13 @@ export default function AppearanceSettings() {
                 </label>
 
                 <select
-                    value={language}
-                    onChange={(e) => setLanguage(e.target.value)}
+                    value={settings.language}
+                    onChange={(e) =>
+                        updateSetting(
+                            "language",
+                            e.target.value as AppearanceSettingsData["language"]
+                        )
+                    }
                     className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                 >
                     <option value="id">Bahasa Indonesia</option>
@@ -95,16 +197,21 @@ export default function AppearanceSettings() {
                     </div>
 
                     <button
-                        onClick={() => setCompactMode(!compactMode)}
+                        onClick={() =>
+                            updateSetting(
+                                "compactMode",
+                                !settings.compactMode
+                            )
+                        }
                         className={`relative h-6 w-11 rounded-full transition ${
-                            compactMode
+                            settings.compactMode
                                 ? "bg-slate-900 dark:bg-white"
                                 : "bg-slate-300 dark:bg-slate-700"
                         }`}
                     >
                         <span
                             className={`absolute top-1 h-4 w-4 rounded-full transition ${
-                                compactMode ? "left-6" : "left-1"
+                                settings.compactMode ? "left-6" : "left-1"
                             } bg-white dark:bg-slate-900`}
                         />
                     </button>
@@ -112,8 +219,12 @@ export default function AppearanceSettings() {
             </div>
 
             <div className="mt-8 flex justify-end">
-                <button className="rounded-xl bg-slate-900 px-5 py-3 text-sm font-medium text-white hover:bg-slate-800 dark:bg-white dark:text-slate-900 dark:hover:bg-slate-200">
-                    Save Changes
+                <button
+                    type="button"
+                    onClick={handleSave}
+                    className="rounded-xl bg-slate-900 px-5 py-3 text-sm font-medium text-white hover:bg-slate-800 dark:bg-white dark:text-slate-900 dark:hover:bg-slate-200"
+                >
+                    {saved ? "Changes Saved" : "Save Changes"}
                 </button>
             </div>
         </div>

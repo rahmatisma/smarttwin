@@ -20,6 +20,11 @@
   --color-accent: #38bdf8;
   --color-accent-dim: #0f2733;
 
+  --color-canvas: #171b1d;
+  --color-road: #292e31;
+  --color-road-center: #303638;
+  --color-canvas-grid: rgba(148, 163, 184, 0.2);
+
   --font-display: var(--font-space-grotesk);
   --font-sans: var(--font-inter);
   --font-mono: var(--font-jetbrains-mono);
@@ -28,6 +33,46 @@
 body {
   background: var(--color-bg);
   color: var(--color-text);
+}
+
+:root[data-theme="light"] {
+  --color-bg: #f5f7fa;
+  --color-surface: #ffffff;
+  --color-surface-2: #eef2f6;
+  --color-border: #d8dee8;
+  --color-text: #17202b;
+  --color-text-secondary: #526071;
+  --color-text-muted: #788596;
+  --color-accent-dim: #dff3fc;
+  --color-canvas: #dfe5e8;
+  --color-road: #3f464a;
+  --color-road-center: #454d51;
+  --color-canvas-grid: rgba(71, 85, 105, 0.2);
+}
+
+body {
+  transition: background-color 180ms ease, color 180ms ease;
+}
+
+.compact-mode .settings-page main {
+  padding-top: 1rem;
+  padding-bottom: 1rem;
+}
+
+.compact-mode .settings-page .mb-8 {
+  margin-bottom: 1.25rem;
+}
+
+.compact-mode .settings-page .gap-6 {
+  gap: 1rem;
+}
+
+.compact-mode .settings-page .p-6 {
+  padding: 1rem;
+}
+
+.compact-mode .settings-page .p-4 {
+  padding: 0.75rem;
 }
 
 .lane-divider {

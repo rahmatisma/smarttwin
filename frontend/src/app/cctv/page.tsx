@@ -468,7 +468,7 @@ export default function CCTVPage() {
     // =====================================================
 
     return (
-        <div className="flex min-h-screen bg-[#090d13] text-white">
+        <div className="cctv-page flex min-h-screen bg-bg text-text">
 
             {/* SIDEBAR */}
             <Sidebar />
@@ -493,7 +493,7 @@ export default function CCTVPage() {
                             <div>
                                 <div className="mb-1 flex items-center gap-2">
 
-                                    <span className="h-2.5 w-2.5 rounded-full bg-[#2ecc71]" />
+                                    <span className="h-2.5 w-2.5 rounded-full bg-signal-green" />
 
                                     <h1 className="text-2xl font-semibold">
                                         CCTV Monitoring
@@ -501,7 +501,7 @@ export default function CCTVPage() {
 
                                 </div>
 
-                                <p className="text-sm text-[#748095]">
+                                <p className="text-sm text-text-muted">
                                     Tambahkan dan pantau sumber CCTV
                                     pada setiap arah persimpangan.
                                     Data tersimpan di Supabase.
@@ -511,7 +511,7 @@ export default function CCTVPage() {
                             <button
                                 type="button"
                                 onClick={() => setShowModal(true)}
-                                className="rounded-lg bg-[#173747] px-4 py-2.5 text-sm font-semibold text-[#38bdf8] transition hover:bg-[#1d4659]"
+                                className="rounded-lg bg-accent-dim px-4 py-2.5 text-sm font-semibold text-accent transition hover:bg-surface-2"
                             >
                                 + Tambah CCTV
                             </button>
@@ -519,7 +519,7 @@ export default function CCTVPage() {
                         </div>
 
                         {/* SEARCH */}
-                        <div className="mb-6 flex flex-col gap-3 rounded-xl border border-[#202735] bg-[#11161f] p-4 md:flex-row md:items-center md:justify-between">
+                        <div className="mb-6 flex flex-col gap-3 rounded-xl border border-border bg-surface p-4 md:flex-row md:items-center md:justify-between">
 
                             <input
                                 type="text"
@@ -528,10 +528,10 @@ export default function CCTVPage() {
                                     setSearch(event.target.value)
                                 }
                                 placeholder="Cari CCTV, persimpangan, atau arah..."
-                                className="w-full max-w-xl rounded-lg border border-[#29313e] bg-[#0c1118] px-3 py-2.5 text-sm text-white outline-none placeholder:text-[#596375] focus:border-[#268bc0]"
+                                className="w-full max-w-xl rounded-lg border border-border bg-surface-2 px-3 py-2.5 text-sm text-text outline-none placeholder:text-text-muted focus:border-accent"
                             />
 
-                            <span className="text-sm text-[#788397]">
+                            <span className="text-sm text-text-muted">
                                 {loading
                                     ? "Memuat..."
                                     : `${filteredCameras.length} kamera`}
@@ -545,9 +545,9 @@ export default function CCTVPage() {
                         uploadTasks.length === 0 ? (
 
                             /* EMPTY STATE */
-                            <div className="rounded-xl border border-dashed border-[#2b3340] bg-[#11161f] px-6 py-20 text-center">
+                            <div className="rounded-xl border border-dashed border-border bg-surface px-6 py-20 text-center">
 
-                                <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-xl bg-[#171e29] text-3xl">
+                                <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-xl bg-surface-2 text-3xl">
                                     📹
                                 </div>
 
@@ -555,7 +555,7 @@ export default function CCTVPage() {
                                     Belum ada CCTV
                                 </h2>
 
-                                <p className="mx-auto mt-2 max-w-lg text-sm leading-6 text-[#748095]">
+                                <p className="mx-auto mt-2 max-w-lg text-sm leading-6 text-text-muted">
                                     Tambahkan video rekaman,
                                     URL HTTP/HLS, atau RTSP
                                     untuk mulai memantau CCTV.
@@ -564,7 +564,7 @@ export default function CCTVPage() {
                                 <button
                                     type="button"
                                     onClick={() => setShowModal(true)}
-                                    className="mt-5 rounded-lg bg-[#173747] px-4 py-2.5 text-sm font-semibold text-[#38bdf8] transition hover:bg-[#1d4659]"
+                                    className="mt-5 rounded-lg bg-accent-dim px-4 py-2.5 text-sm font-semibold text-accent transition hover:bg-surface-2"
                                 >
                                     Tambahkan CCTV pertama
                                 </button>
@@ -581,7 +581,7 @@ export default function CCTVPage() {
 
                                     <div
                                         key={task.id}
-                                        className="overflow-hidden rounded-xl border border-[#268bc0]/40 bg-[#11161f]"
+                                        className="overflow-hidden rounded-xl border border-accent/40 bg-surface"
                                     >
 
                                         <div className="relative flex aspect-video flex-col items-center justify-center bg-black px-8 text-center">
@@ -594,13 +594,13 @@ export default function CCTVPage() {
                                                     <p className="mt-3 text-sm font-medium text-red-300">
                                                         Upload gagal
                                                     </p>
-                                                    <p className="mt-2 max-w-md text-xs leading-5 text-[#a3a9b3]">
+                                                    <p className="mt-2 max-w-md text-xs leading-5 text-text-secondary">
                                                         {task.error}
                                                     </p>
                                                 </>
                                             ) : (
                                                 <>
-                                                    <span className="h-8 w-8 animate-spin rounded-full border-2 border-[#1b7ea9] border-t-transparent" />
+                                                    <span className="h-8 w-8 animate-spin rounded-full border-2 border-accent border-t-transparent" />
                                                     <p className="mt-3 text-sm font-medium">
                                                         {task.status ===
                                                         "sending"
@@ -609,7 +609,7 @@ export default function CCTVPage() {
                                                     </p>
                                                     {task.status ===
                                                         "processing" && (
-                                                        <p className="mt-2 max-w-md text-xs leading-5 text-[#6f7a8c]">
+                                                        <p className="mt-2 max-w-md text-xs leading-5 text-text-muted">
                                                             Video besar bisa
                                                             makan waktu
                                                             beberapa menit —
@@ -624,13 +624,13 @@ export default function CCTVPage() {
 
                                         {/* PROGRESS BAR */}
                                         {task.status !== "error" && (
-                                            <div className="h-1 w-full overflow-hidden bg-[#0c1118]">
+                                            <div className="h-1 w-full overflow-hidden bg-surface-2">
                                                 <div
                                                     className={
                                                         task.status ===
                                                         "sending"
-                                                            ? "h-full rounded-full bg-[#1b7ea9] transition-all"
-                                                            : "h-full w-1/3 animate-[pulse_1.2s_ease-in-out_infinite] rounded-full bg-[#1b7ea9]"
+                                                            ? "h-full rounded-full bg-accent transition-all"
+                                                            : "h-full w-1/3 animate-[pulse_1.2s_ease-in-out_infinite] rounded-full bg-accent"
                                                     }
                                                     style={
                                                         task.status ===
@@ -653,7 +653,7 @@ export default function CCTVPage() {
                                                         {task.fileName}
                                                     </h2>
 
-                                                    <p className="mt-1 text-xs text-[#7b8698]">
+                                                    <p className="mt-1 text-xs text-text-muted">
                                                         {DEFAULT_INTERSECTION_ID}
                                                         {" · "}
                                                         {
@@ -673,7 +673,7 @@ export default function CCTVPage() {
                                                                 task.id
                                                             )
                                                         }
-                                                        className="shrink-0 rounded-md border border-[#303846] px-3 py-2 text-xs text-[#9aa5b5] transition hover:border-red-400/50 hover:text-red-300"
+                                                        className="shrink-0 rounded-md border border-border px-3 py-2 text-xs text-text-secondary transition hover:border-red-400/50 hover:text-red-300"
                                                     >
                                                         Tutup
                                                     </button>
@@ -696,7 +696,7 @@ export default function CCTVPage() {
                                     return (
                                         <div
                                             key={camera.id}
-                                            className="overflow-hidden rounded-xl border border-[#202735] bg-[#11161f]"
+                                                        className="overflow-hidden rounded-xl border border-border bg-surface"
                                         >
 
                                             {/* VIDEO */}
@@ -731,7 +731,7 @@ export default function CCTVPage() {
                                                             RTSP Camera
                                                         </p>
 
-                                                        <p className="mt-2 max-w-md text-xs leading-5 text-[#6f7a8c]">
+                                                        <p className="mt-2 max-w-md text-xs leading-5 text-text-muted">
                                                             RTSP tidak dapat
                                                             diputar langsung
                                                             oleh browser.
@@ -772,8 +772,8 @@ export default function CCTVPage() {
                                                         className={`h-2 w-2 rounded-full ${
                                                             camera.status ===
                                                             "online"
-                                                                ? "bg-[#2ecc71]"
-                                                                : "bg-[#f5a623]"
+                                                                ? "bg-signal-green"
+                                                                : "bg-signal-amber"
                                                         }`}
                                                     />
 
@@ -785,7 +785,7 @@ export default function CCTVPage() {
                                                 </div>
 
                                                 {/* SOURCE TYPE */}
-                                                <div className="absolute right-3 top-3 rounded bg-black/70 px-2.5 py-1 text-[11px] uppercase tracking-wide text-[#c4ccd8] backdrop-blur">
+                                                <div className="absolute right-3 top-3 rounded bg-black/70 px-2.5 py-1 text-[11px] uppercase tracking-wide text-white/80 backdrop-blur">
                                                     {camera.sourceType}
                                                 </div>
 
@@ -802,7 +802,7 @@ export default function CCTVPage() {
                                                             {camera.name}
                                                         </h2>
 
-                                                        <p className="mt-1 text-xs text-[#7b8698]">
+                                                        <p className="mt-1 text-xs text-text-muted">
                                                             {
                                                                 camera.intersection
                                                             }
@@ -816,7 +816,7 @@ export default function CCTVPage() {
                                                         </p>
 
                                                         {camera.fileName && (
-                                                            <p className="mt-2 truncate text-xs text-[#566175]">
+                                                            <p className="mt-2 truncate text-xs text-text-muted">
                                                                 {
                                                                     camera.fileName
                                                                 }
@@ -830,13 +830,13 @@ export default function CCTVPage() {
                                                 {/* CAMERA DATA */}
                                                 <div className="mt-4 grid grid-cols-2 gap-3">
 
-                                                    <div className="rounded-lg bg-[#0c1118] p-3">
+                                                    <div className="rounded-lg bg-surface-2 p-3">
 
-                                                        <p className="text-[11px] text-[#667284]">
+                                                        <p className="text-[11px] text-text-muted">
                                                             Persimpangan
                                                         </p>
 
-                                                        <p className="mt-1 text-sm text-[#dce3ec]">
+                                                        <p className="mt-1 text-sm text-text">
                                                             {
                                                                 camera.intersection
                                                             }
@@ -844,13 +844,13 @@ export default function CCTVPage() {
 
                                                     </div>
 
-                                                    <div className="rounded-lg bg-[#0c1118] p-3">
+                                                    <div className="rounded-lg bg-surface-2 p-3">
 
-                                                        <p className="text-[11px] text-[#667284]">
+                                                        <p className="text-[11px] text-text-muted">
                                                             Arah
                                                         </p>
 
-                                                        <p className="mt-1 text-sm text-[#dce3ec]">
+                                                        <p className="mt-1 text-sm text-text">
                                                             {
                                                                 APPROACH_LABELS[
                                                                     camera
@@ -877,7 +877,7 @@ export default function CCTVPage() {
                                                             deletingId ===
                                                             camera.id
                                                         }
-                                                        className="rounded-md border border-[#303846] px-3 py-2 text-xs text-[#9aa5b5] transition hover:border-red-400/50 hover:text-red-300 disabled:opacity-50"
+                                                        className="rounded-md border border-border px-3 py-2 text-xs text-text-secondary transition hover:border-red-400/50 hover:text-red-300 disabled:opacity-50"
                                                     >
                                                         {deletingId ===
                                                         camera.id
@@ -908,10 +908,10 @@ export default function CCTVPage() {
 
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
 
-                    <div className="max-h-[92vh] w-full max-w-xl overflow-y-auto rounded-2xl border border-[#252d3a] bg-[#11161f]">
+                    <div className="max-h-[92vh] w-full max-w-xl overflow-y-auto rounded-2xl border border-border bg-surface">
 
                         {/* MODAL HEADER */}
-                        <div className="flex items-center justify-between border-b border-[#222a36] px-5 py-4">
+                        <div className="flex items-center justify-between border-b border-border px-5 py-4">
 
                             <div>
 
@@ -919,7 +919,7 @@ export default function CCTVPage() {
                                     Tambah CCTV
                                 </h2>
 
-                                <p className="mt-1 text-xs text-[#707b8d]">
+                                <p className="mt-1 text-xs text-text-muted">
                                     Daftarkan kamera baru ke
                                     SmartTwin.
                                 </p>
@@ -929,7 +929,7 @@ export default function CCTVPage() {
                             <button
                                 type="button"
                                 onClick={closeModal}
-                                className="text-xl text-[#7e8898] hover:text-white"
+                                className="text-xl text-text-muted hover:text-text"
                             >
                                 ×
                             </button>
@@ -945,7 +945,7 @@ export default function CCTVPage() {
                             {/* NAMA CCTV */}
                             <div>
 
-                                <label className="mb-2 block text-xs text-[#8390a2]">
+                                <label className="mb-2 block text-xs text-text-secondary">
                                     Nama CCTV
                                 </label>
 
@@ -959,7 +959,7 @@ export default function CCTVPage() {
                                         }))
                                     }
                                     placeholder="CCTV Utara"
-                                    className="w-full rounded-lg border border-[#29313e] bg-[#0c1118] px-3 py-2.5 text-sm text-white outline-none focus:border-[#268bc0]"
+                                    className="w-full rounded-lg border border-border bg-surface-2 px-3 py-2.5 text-sm text-text outline-none focus:border-accent"
                                 />
 
                             </div>
@@ -969,7 +969,7 @@ export default function CCTVPage() {
 
                                 <div>
 
-                                    <label className="mb-2 block text-xs text-[#8390a2]">
+                                    <label className="mb-2 block text-xs text-text-secondary">
                                         Persimpangan
                                     </label>
 
@@ -977,14 +977,14 @@ export default function CCTVPage() {
                                         type="text"
                                         value={DEFAULT_INTERSECTION_ID}
                                         readOnly
-                                        className="w-full cursor-not-allowed rounded-lg border border-[#29313e] bg-[#0c1118] px-3 py-2.5 text-sm text-[#8390a2] outline-none"
+                                        className="w-full cursor-not-allowed rounded-lg border border-border bg-surface-2 px-3 py-2.5 text-sm text-text-muted outline-none"
                                     />
 
                                 </div>
 
                                 <div>
 
-                                    <label className="mb-2 block text-xs text-[#8390a2]">
+                                    <label className="mb-2 block text-xs text-text-secondary">
                                         Arah Kamera
                                     </label>
 
@@ -997,7 +997,7 @@ export default function CCTVPage() {
                                                     .value as Approach,
                                             }))
                                         }
-                                        className="w-full rounded-lg border border-[#29313e] bg-[#0c1118] px-3 py-2.5 text-sm text-white outline-none focus:border-[#268bc0]"
+                                        className="w-full rounded-lg border border-border bg-surface-2 px-3 py-2.5 text-sm text-text outline-none focus:border-accent"
                                     >
 
                                         {(
@@ -1026,7 +1026,7 @@ export default function CCTVPage() {
                             {/* JENIS SUMBER */}
                             <div>
 
-                                <label className="mb-2 block text-xs text-[#8390a2]">
+                                <label className="mb-2 block text-xs text-text-secondary">
                                     Jenis Sumber
                                 </label>
 
@@ -1072,8 +1072,8 @@ export default function CCTVPage() {
                                             className={`rounded-lg border px-3 py-2.5 text-xs transition ${
                                                 form.sourceType ===
                                                 item.value
-                                                    ? "border-[#268bc0] bg-[#173747] text-[#52c7ff]"
-                                                    : "border-[#29313e] bg-[#0c1118] text-[#8792a3]"
+                                                    ? "border-accent bg-accent-dim text-accent"
+                                                    : "border-border bg-surface-2 text-text-secondary"
                                             }`}
                                         >
                                             {item.label}
@@ -1090,22 +1090,22 @@ export default function CCTVPage() {
 
                                 <div>
 
-                                    <label className="mb-2 block text-xs text-[#8390a2]">
+                                    <label className="mb-2 block text-xs text-text-secondary">
                                         File Video
                                     </label>
 
-                                    <label className="flex cursor-pointer flex-col items-center justify-center rounded-lg border border-dashed border-[#344050] bg-[#0c1118] px-4 py-8 text-center transition hover:border-[#268bc0]">
+                                    <label className="flex cursor-pointer flex-col items-center justify-center rounded-lg border border-dashed border-border bg-surface-2 px-4 py-8 text-center transition hover:border-accent">
 
                                         <span className="text-3xl">
                                             🎥
                                         </span>
 
-                                        <span className="mt-3 text-sm text-[#d5dce6]">
+                                        <span className="mt-3 text-sm text-text">
                                             {form.fileName ||
                                                 "Pilih video CCTV"}
                                         </span>
 
-                                        <span className="mt-1 text-xs text-[#647083]">
+                                        <span className="mt-1 text-xs text-text-muted">
                                             MP4, WebM, MOV,
                                             dan format video
                                             browser lainnya.
@@ -1127,7 +1127,7 @@ export default function CCTVPage() {
                                     {/* PREVIEW VIDEO */}
                                     {form.source && (
 
-                                        <div className="mt-4 overflow-hidden rounded-lg border border-[#29313e] bg-black">
+                                        <div className="mt-4 overflow-hidden rounded-lg border border-border bg-black">
 
                                             <video
                                                 src={form.source}
@@ -1150,7 +1150,7 @@ export default function CCTVPage() {
 
                                 <div>
 
-                                    <label className="mb-2 block text-xs text-[#8390a2]">
+                                    <label className="mb-2 block text-xs text-text-secondary">
                                         Stream URL
                                     </label>
 
@@ -1164,7 +1164,7 @@ export default function CCTVPage() {
                                             }))
                                         }
                                         placeholder="https://example.com/live/stream.m3u8"
-                                        className="w-full rounded-lg border border-[#29313e] bg-[#0c1118] px-3 py-2.5 text-sm text-white outline-none focus:border-[#268bc0]"
+                                        className="w-full rounded-lg border border-border bg-surface-2 px-3 py-2.5 text-sm text-text outline-none focus:border-accent"
                                     />
 
                                 </div>
@@ -1175,7 +1175,7 @@ export default function CCTVPage() {
 
                                 <div>
 
-                                    <label className="mb-2 block text-xs text-[#8390a2]">
+                                    <label className="mb-2 block text-xs text-text-secondary">
                                         RTSP URL
                                     </label>
 
@@ -1189,10 +1189,10 @@ export default function CCTVPage() {
                                             }))
                                         }
                                         placeholder="rtsp://192.168.1.10:554/stream"
-                                        className="w-full rounded-lg border border-[#29313e] bg-[#0c1118] px-3 py-2.5 text-sm text-white outline-none focus:border-[#268bc0]"
+                                        className="w-full rounded-lg border border-border bg-surface-2 px-3 py-2.5 text-sm text-text outline-none focus:border-accent"
                                     />
 
-                                    <p className="mt-2 text-xs leading-5 text-[#687486]">
+                                    <p className="mt-2 text-xs leading-5 text-text-muted">
                                         RTSP tidak dapat
                                         diputar langsung
                                         oleh browser.
@@ -1206,7 +1206,7 @@ export default function CCTVPage() {
                             )}
 
                             {form.sourceType === "file" && (
-                                <p className="text-[11px] leading-4 text-[#647083]">
+                                <p className="text-[11px] leading-4 text-text-muted">
                                     Begitu disimpan, modal ini langsung
                                     tertutup dan upload jalan di
                                     background — progresnya muncul
@@ -1224,12 +1224,12 @@ export default function CCTVPage() {
                             )}
 
                             {/* BUTTON */}
-                            <div className="flex justify-end gap-2 border-t border-[#222a36] pt-4">
+                            <div className="flex justify-end gap-2 border-t border-border pt-4">
 
                                 <button
                                     type="button"
                                     onClick={closeModal}
-                                    className="rounded-lg border border-[#2c3442] px-4 py-2.5 text-sm text-[#9aa5b5] transition hover:bg-[#171e29]"
+                                    className="rounded-lg border border-border px-4 py-2.5 text-sm text-text-secondary transition hover:bg-surface-2"
                                 >
                                     Batal
                                 </button>
@@ -1237,7 +1237,7 @@ export default function CCTVPage() {
                                 <button
                                     type="submit"
                                     disabled={saving}
-                                    className="rounded-lg bg-[#1b7ea9] px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-[#2090bd] disabled:opacity-60"
+                                    className="rounded-lg bg-accent px-4 py-2.5 text-sm font-semibold text-bg transition hover:opacity-90 disabled:opacity-60"
                                 >
                                     {saving
                                         ? "Menyimpan..."
@@ -1261,7 +1261,7 @@ export default function CCTVPage() {
 
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
 
-                    <div className="w-full max-w-md rounded-2xl border border-[#252d3a] bg-[#11161f]">
+                    <div className="w-full max-w-md rounded-2xl border border-border bg-surface">
 
                         <div className="p-5">
 
@@ -1276,7 +1276,7 @@ export default function CCTVPage() {
                                         Hapus &quot;{confirmDeleteCamera.name}&quot;?
                                     </h2>
 
-                                    <p className="mt-2 text-xs leading-5 text-[#9aa5b5]">
+                                    <p className="mt-2 text-xs leading-5 text-text-secondary">
                                         Ini akan menghapus kamera ini
                                         beserta <strong>seluruh video</strong> dan{" "}
                                         <strong>
@@ -1302,7 +1302,7 @@ export default function CCTVPage() {
                                         deletingId ===
                                         confirmDeleteCamera.id
                                     }
-                                    className="rounded-lg border border-[#2c3442] px-4 py-2.5 text-sm text-[#9aa5b5] transition hover:bg-[#171e29] disabled:opacity-50"
+                                    className="rounded-lg border border-border px-4 py-2.5 text-sm text-text-secondary transition hover:bg-surface-2 disabled:opacity-50"
                                 >
                                     Batal
                                 </button>

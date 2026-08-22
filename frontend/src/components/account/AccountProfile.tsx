@@ -6,16 +6,19 @@ import {
     Lock,
     Pencil,
 } from "lucide-react";
+import Image from "next/image";
 
 interface AccountProfileProps {
     name: string;
     email: string;
+    avatarUrl?: string;
     onEditProfile: () => void;
 }
 
 export default function AccountProfile({
     name,
     email,
+    avatarUrl,
     onEditProfile,
 }: AccountProfileProps) {
 
@@ -36,9 +39,20 @@ export default function AccountProfile({
 
                 <div className="flex h-20 w-20 shrink-0 items-center justify-center rounded-full bg-accent-dim ring-1 ring-accent/30">
 
-                    <span className="font-display text-2xl font-semibold text-accent">
-                        {initials}
-                    </span>
+                    {avatarUrl ? (
+                        <Image
+                            src={avatarUrl}
+                            alt="Foto profil"
+                            width={80}
+                            height={80}
+                            unoptimized
+                            className="h-full w-full rounded-full object-cover"
+                        />
+                    ) : (
+                        <span className="font-display text-2xl font-semibold text-accent">
+                            {initials}
+                        </span>
+                    )}
 
                 </div>
 

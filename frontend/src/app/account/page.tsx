@@ -3,29 +3,21 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
-    Lock,
     LogOut,
-    ChevronRight,
 } from "lucide-react";
 
 import Sidebar from "@/components/Sidebar";
 import AccountProfile from "@/components/account/AccountProfile";
-import EditProfileModal from "@/components/account/EditProfileModal";
-import ChangePasswordModal from "@/components/account/ChangePasswordModal";
 import { supabase } from "@/lib/supabaseClient";
+
+const LOCAL_AVATAR_PREFIX = "smarttwin.profile.avatar.";
 
 export default function AccountPage() {
     const router = useRouter();
 
     const [name, setName] = useState("");
     const [email, setEmail] = useState("");
-
-    const [showEditProfile, setShowEditProfile] =
-        useState(false);
-
-    const [showChangePassword, setShowChangePassword] =
-        useState(false);
-
+    const [avatarUrl, setAvatarUrl] = useState("");
     const [loggingOut, setLoggingOut] = useState(false);
 
     useEffect(() => {
@@ -52,6 +44,22 @@ export default function AccountPage() {
 
             setName(userName);
             setEmail(user.email ?? "");
+            try {
+                const metadataAvatar =
+                    typeof user.user_metadata?.avatar_url === "string"
+                        ? user.user_metadata.avatar_url
+                        : "";
+
+                setAvatarUrl(
+                    metadataAvatar ||
+                        localStorage.getItem(
+                            `${LOCAL_AVATAR_PREFIX}${user.id}`
+                        ) ||
+                        ""
+                );
+            } catch {
+                setAvatarUrl("");
+            }
         }
 
         loadUser();
@@ -91,7 +99,7 @@ export default function AccountPage() {
                             </div>
 
                             <p className="mt-1 text-sm text-text-muted">
-                                Kelola informasi akun dan keamanan SmartTwin.
+                                Informasi akun dan sesi SmartTwin.
                             </p>
                         </div>
 
@@ -100,59 +108,9 @@ export default function AccountPage() {
                         <AccountProfile
                             name={name}
                             email={email}
-                            onEditProfile={() =>
-                                setShowEditProfile(true)
-                            }
+                            avatarUrl={avatarUrl}
+                            onEditProfile={() => router.push("/settings")}
                         />
-
-                        {/* SECURITY */}
-
-                        <div className="mb-5 rounded-xl border border-border bg-surface">
-
-                            <div className="border-b border-border p-5">
-
-                                <h2 className="font-display text-sm font-semibold">
-                                    Security
-                                </h2>
-
-                                <p className="mt-1 text-xs text-text-muted">
-                                    Kelola keamanan akun kamu.
-                                </p>
-
-                            </div>
-
-                            <div className="flex items-center gap-4 p-5">
-
-                                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-surface-2">
-                                    <Lock className="h-4 w-4 text-text-secondary" />
-                                </div>
-
-                                <div className="flex-1">
-
-                                    <p className="text-sm font-medium">
-                                        Password
-                                    </p>
-
-                                    <p className="mt-1 text-xs text-text-muted">
-                                        Ubah password untuk menjaga keamanan akun.
-                                    </p>
-
-                                </div>
-
-                                <button
-                                    type="button"
-                                    onClick={() =>
-                                        setShowChangePassword(true)
-                                    }
-                                    className="flex items-center gap-1 text-xs text-accent hover:text-text"
-                                >
-                                    Ubah Password
-                                    <ChevronRight className="h-3.5 w-3.5" />
-                                </button>
-
-                            </div>
-
-                        </div>
 
                         {/* SESSION */}
 
@@ -210,29 +168,6 @@ export default function AccountPage() {
                 </main>
 
             </div>
-
-            {/* EDIT PROFILE */}
-
-            <EditProfileModal
-                key={showEditProfile ? `profile-${name}` : "profile-closed"}
-                open={showEditProfile}
-                name={name}
-                email={email}
-                onClose={() => setShowEditProfile(false)}
-                onSaved={(updatedName) => {
-                    setName(updatedName);
-                }}
-            />
-
-            {/* CHANGE PASSWORD */}
-
-            <ChangePasswordModal
-                open={showChangePassword}
-                email={email}
-                onClose={() =>
-                    setShowChangePassword(false)
-                }
-            />
 
         </div>
     );

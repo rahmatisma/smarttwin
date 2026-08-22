@@ -17,9 +17,9 @@ import {
 
 const NAV_ITEMS = [
   { icon: LayoutDashboard, label: "Dashboard", href: "/dashboard" },
-  { icon: Radar, label: "Digital Twin" },
+  { icon: Radar, label: "Digital Twin", href: "/digitaltwin" },
   { icon: Video, label: "CCTV", href: "/cctv" },
-  { icon: History, label: "History" },
+  { icon: History, label: "History",  href: "/history" },
   { icon: Settings, label: "Pengaturan", href: "/settings" },
 ];
 
