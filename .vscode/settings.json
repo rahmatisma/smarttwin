@@ -1,0 +1,19 @@
+{
+  "files.watcherExclude": {
+    "cv/videos/**": true,
+    "cv/output/**": true,
+    "cv/_arsip/**": true,
+    "backend/cache/**": true,
+    "**/.venv/**": true,
+    "**/node_modules/**": true
+  },
+  "search.exclude": {
+    "cv/videos/**": true,
+    "cv/output/**": true,
+    "cv/_arsip/**": true,
+    "backend/cache/**": true
+  },
+  "files.exclude": {
+    "**/__pycache__": true
+  }
+}
