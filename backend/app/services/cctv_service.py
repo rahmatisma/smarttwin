@@ -94,6 +94,21 @@ def upload_camera_video(
 
     camera_id = f"cam-{uuid.uuid4()}"
 
+    # Upload ke Hugging Face DULU, baru insert baris `cameras` ke
+    # Supabase setelah videonya beneran aman di HF.
+    #
+    # Sebelumnya urutannya kebalik (insert cameras -> upload HF), jadi
+    # kalau upload HF gagal (network dsb, ini sering terjadi di
+    # koneksi lambat), baris kamera SUDAH TERLANJUR ada di database
+    # tanpa video sama sekali -- muncul lagi di UI walau sudah dihapus
+    # user, karena retry upload berikutnya bikin baris BARU lagi
+    # dengan nama yang sama, bukan baris yang sama "hidup lagi".
+    hf_result = upload_video(
+        file_path=file_path,
+        filename=f"{camera_id}_{filename}",
+        intersection_id=intersection_id,
+    )
+
     camera_insert = (
         supabase.table("cameras")
         .insert(
@@ -111,12 +126,6 @@ def upload_camera_video(
     )
 
     camera_row = camera_insert.data[0]
-
-    hf_result = upload_video(
-        file_path=file_path,
-        filename=f"{camera_id}_{filename}",
-        intersection_id=intersection_id,
-    )
 
     video_format = filename.rsplit(".", 1)[-1].lower() if "." in filename else "mp4"
 
