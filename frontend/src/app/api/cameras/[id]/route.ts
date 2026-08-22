@@ -1,8 +1,24 @@
 // src/app/api/cameras/[id]/route.ts
 //
-// DELETE kamera + data turunannya (cameraVideos, cvProcessingJobs,
-// cctvHistory) lewat service_role, karena RLS anon tidak
-// mengizinkan delete langsung dari browser.
+// DELETE kamera + SELURUH data turunannya lewat service_role, karena
+// RLS anon tidak mengizinkan delete langsung dari browser.
+//
+// Rantai FK yang harus dihapus urut dari anak ke induk (lihat
+// docs/database.md):
+//
+//   trafficLaneMetrics    -> trafficStates
+//   trafficApproachStates -> trafficStates
+//   simulationMetrics     -> simulations
+//   simulations           -> trafficStates (trafficStateId)
+//   trafficStates         -> cvProcessingJobs (processingJobId)
+//   cctvHistory           -> cvProcessingJobs
+//   cvProcessingJobs      -> cameraVideos (videoId)
+//   cameraVideos          -> cameras (cameraId)
+//
+// Frontend sudah minta konfirmasi eksplisit ("yakin mau hapus?")
+// sebelum memanggil endpoint ini, jadi di sini tidak ada lagi guard
+// yang menolak penghapusan -- begitu dikonfirmasi, SEMUA data
+// historis (termasuk trafficStates) ikut terhapus permanen.
 
 import { NextResponse } from "next/server";
 
@@ -36,12 +52,6 @@ export async function DELETE(
 
   const videoIds = (videos ?? []).map((video) => video.id);
 
-  // Kode Postgres untuk foreign_key_violation -> kamera/video ini
-  // masih dipakai data lain (mis. trafficStates dummy/seed) yang
-  // tidak ikut dihapus di sini. Tampilkan pesan yang jelas alih-alih
-  // raw SQL error ke frontend.
-  const FK_VIOLATION = "23503";
-
   if (videoIds.length > 0) {
     const { data: jobs, error: jobsLookupError } = await supabaseAdmin
       .from("cvProcessingJobs")
@@ -58,6 +68,99 @@ export async function DELETE(
     const jobIds = (jobs ?? []).map((job) => job.id);
 
     if (jobIds.length > 0) {
+      const { data: states, error: statesLookupError } = await supabaseAdmin
+        .from("trafficStates")
+        .select("id")
+        .in("processingJobId", jobIds);
+
+      if (statesLookupError) {
+        return NextResponse.json(
+          { error: statesLookupError.message },
+          { status: 500 }
+        );
+      }
+
+      const stateIds = (states ?? []).map((state) => state.id);
+
+      if (stateIds.length > 0) {
+        const { error: laneMetricsDeleteError } = await supabaseAdmin
+          .from("trafficLaneMetrics")
+          .delete()
+          .in("trafficStateId", stateIds);
+
+        if (laneMetricsDeleteError) {
+          return NextResponse.json(
+            { error: laneMetricsDeleteError.message },
+            { status: 500 }
+          );
+        }
+
+        const { error: approachStatesDeleteError } = await supabaseAdmin
+          .from("trafficApproachStates")
+          .delete()
+          .in("trafficStateId", stateIds);
+
+        if (approachStatesDeleteError) {
+          return NextResponse.json(
+            { error: approachStatesDeleteError.message },
+            { status: 500 }
+          );
+        }
+
+        const { data: simulations, error: simulationsLookupError } =
+          await supabaseAdmin
+            .from("simulations")
+            .select("id")
+            .in("trafficStateId", stateIds);
+
+        if (simulationsLookupError) {
+          return NextResponse.json(
+            { error: simulationsLookupError.message },
+            { status: 500 }
+          );
+        }
+
+        const simulationIds = (simulations ?? []).map((sim) => sim.id);
+
+        if (simulationIds.length > 0) {
+          const { error: simulationMetricsDeleteError } = await supabaseAdmin
+            .from("simulationMetrics")
+            .delete()
+            .in("simulationId", simulationIds);
+
+          if (simulationMetricsDeleteError) {
+            return NextResponse.json(
+              { error: simulationMetricsDeleteError.message },
+              { status: 500 }
+            );
+          }
+
+          const { error: simulationsDeleteError } = await supabaseAdmin
+            .from("simulations")
+            .delete()
+            .in("id", simulationIds);
+
+          if (simulationsDeleteError) {
+            return NextResponse.json(
+              { error: simulationsDeleteError.message },
+              { status: 500 }
+            );
+          }
+        }
+
+        const { error: statesDeleteError } = await supabaseAdmin
+          .from("trafficStates")
+          .delete()
+          .in("id", stateIds);
+
+        if (statesDeleteError) {
+          return NextResponse.json(
+            { error: statesDeleteError.message },
+            { status: 500 }
+          );
+        }
+      }
+
       const { error: historyDeleteError } = await supabaseAdmin
         .from("cctvHistory")
         .delete()
@@ -76,16 +179,6 @@ export async function DELETE(
         .in("id", jobIds);
 
       if (jobsDeleteError) {
-        if (jobsDeleteError.code === FK_VIOLATION) {
-          return NextResponse.json(
-            {
-              error:
-                "Kamera ini tidak bisa dihapus karena masih terhubung dengan data traffic historis (trafficStates). Biasanya ini kamera/video seed awal, bukan hasil upload.",
-            },
-            { status: 409 }
-          );
-        }
-
         return NextResponse.json(
           { error: jobsDeleteError.message },
           { status: 500 }
@@ -112,16 +205,6 @@ export async function DELETE(
     .eq("id", cameraId);
 
   if (cameraDeleteError) {
-    if (cameraDeleteError.code === FK_VIOLATION) {
-      return NextResponse.json(
-        {
-          error:
-            "Kamera ini tidak bisa dihapus karena masih terhubung dengan data lain (video/traffic historis).",
-        },
-        { status: 409 }
-      );
-    }
-
     return NextResponse.json(
       { error: cameraDeleteError.message },
       { status: 500 }

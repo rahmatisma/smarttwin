@@ -154,6 +154,16 @@ export default function CCTVPage() {
      */
     const [uploadTasks, setUploadTasks] = useState<UploadTask[]>([]);
 
+    /*
+     * Kamera yang lagi ditanya konfirmasi hapus. null = tidak ada
+     * modal konfirmasi yang terbuka. Menghapus SEKARANG beneran
+     * cascade ke semua data terkait (video, CV job, trafficStates) --
+     * lihat src/app/api/cameras/[id]/route.ts -- jadi konfirmasi ini
+     * satu-satunya pengaman sebelum data hilang permanen.
+     */
+    const [confirmDeleteCamera, setConfirmDeleteCamera] =
+        useState<Camera | null>(null);
+
     // =====================================================
     // LOAD DATA DARI SUPABASE
     // =====================================================
@@ -449,6 +459,7 @@ export default function CCTVPage() {
             );
         } finally {
             setDeletingId(null);
+            setConfirmDeleteCamera(null);
         }
     }
 
@@ -858,8 +869,8 @@ export default function CCTVPage() {
                                                     <button
                                                         type="button"
                                                         onClick={() =>
-                                                            deleteCamera(
-                                                                camera.id
+                                                            setConfirmDeleteCamera(
+                                                                camera
                                                             )
                                                         }
                                                         disabled={
@@ -1238,6 +1249,86 @@ export default function CCTVPage() {
                             </div>
 
                         </form>
+
+                    </div>
+                </div>
+            )}
+
+            {/* =================================================
+                MODAL KONFIRMASI HAPUS CCTV
+            ================================================= */}
+            {confirmDeleteCamera && (
+
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
+
+                    <div className="w-full max-w-md rounded-2xl border border-[#252d3a] bg-[#11161f]">
+
+                        <div className="p-5">
+
+                            <div className="flex items-start gap-3">
+
+                                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-red-500/10 text-xl">
+                                    ⚠️
+                                </div>
+
+                                <div>
+                                    <h2 className="font-semibold">
+                                        Hapus &quot;{confirmDeleteCamera.name}&quot;?
+                                    </h2>
+
+                                    <p className="mt-2 text-xs leading-5 text-[#9aa5b5]">
+                                        Ini akan menghapus kamera ini
+                                        beserta <strong>seluruh video</strong> dan{" "}
+                                        <strong>
+                                            semua data traffic historis
+                                        </strong>{" "}
+                                        (hitungan kendaraan, antrean,
+                                        density) yang pernah terekam
+                                        dari kamera ini. Tindakan ini{" "}
+                                        <strong>tidak bisa dibatalkan</strong>.
+                                    </p>
+                                </div>
+
+                            </div>
+
+                            <div className="mt-5 flex justify-end gap-2">
+
+                                <button
+                                    type="button"
+                                    onClick={() =>
+                                        setConfirmDeleteCamera(null)
+                                    }
+                                    disabled={
+                                        deletingId ===
+                                        confirmDeleteCamera.id
+                                    }
+                                    className="rounded-lg border border-[#2c3442] px-4 py-2.5 text-sm text-[#9aa5b5] transition hover:bg-[#171e29] disabled:opacity-50"
+                                >
+                                    Batal
+                                </button>
+
+                                <button
+                                    type="button"
+                                    onClick={() =>
+                                        deleteCamera(
+                                            confirmDeleteCamera.id
+                                        )
+                                    }
+                                    disabled={
+                                        deletingId ===
+                                        confirmDeleteCamera.id
+                                    }
+                                    className="rounded-lg bg-red-500/90 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-red-500 disabled:opacity-60"
+                                >
+                                    {deletingId ===
+                                    confirmDeleteCamera.id
+                                        ? "Menghapus..."
+                                        : "Ya, Hapus"}
+                                </button>
+
+                            </div>
+
+                        </div>
 
                     </div>
                 </div>
