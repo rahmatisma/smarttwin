@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from enum import Enum
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 # ============================================================
@@ -11,12 +11,7 @@ from pydantic import BaseModel, Field
 # ============================================================
 
 class Approach(str, Enum):
-    """
-    Empat lengan/approach pada simpang.
-
-    Enum ini dipertahankan karena beberapa bagian backend,
-    termasuk SUMO adapter dan test lama, masih menggunakannya.
-    """
+    """Empat lengan simpang yang dipakai lintas modul backend."""
 
     NORTH = "north"
     SOUTH = "south"
@@ -30,114 +25,50 @@ class Approach(str, Enum):
 
 class ApproachState(BaseModel):
     """
-    Kondisi lalu lintas pada satu approach/lengan simpang
-    dalam satu time window.
+    Kondisi traffic pada satu approach dalam satu traffic window.
 
-    Satu approach dapat memiliki beberapa lane.
-
-    Contoh:
-
-        south
-        ├── lane_1
-        ├── lane_2
-        └── lane_3
-
-    Traffic State Builder akan menggabungkan data dari
-    beberapa lane menjadi satu ApproachState.
+    Contract:
+        CV -> Traffic State Builder -> Backend -> Frontend
     """
 
-    # --------------------------------------------------------
-    # APPROACH
-    # --------------------------------------------------------
+    model_config = ConfigDict(populate_by_name=True)
 
     approach: str
 
-    # --------------------------------------------------------
-    # VOLUME
-    # --------------------------------------------------------
+    volume: int = Field(ge=0)
 
-    volume: int = Field(
-        default=0,
-        ge=0,
-    )
-
-    # --------------------------------------------------------
-    # VEHICLE CLASSIFICATION
-    # --------------------------------------------------------
-
-    # Default = 0 supaya ApproachState juga dapat dibuat
-    # oleh modul lain seperti SUMO tanpa harus mengetahui
-    # klasifikasi kendaraan dari Computer Vision.
-
-    carCount: int = Field(
-        default=0,
-        ge=0,
-    )
-
+    carCount: int = Field(default=0, alias="carCount", ge=0)
     motorcycleCount: int = Field(
         default=0,
+        alias="motorcycleCount",
         ge=0,
     )
-
-    busCount: int = Field(
-        default=0,
-        ge=0,
-    )
-
-    truckCount: int = Field(
-        default=0,
-        ge=0,
-    )
-
-    # --------------------------------------------------------
-    # QUEUE
-    # --------------------------------------------------------
+    busCount: int = Field(default=0, alias="busCount", ge=0)
+    truckCount: int = Field(default=0, alias="truckCount", ge=0)
 
     queueLengthVeh: int = Field(
         default=0,
+        alias="queueLengthVeh",
         ge=0,
     )
 
     queueLengthMEst: float = Field(
         default=0.0,
-        ge=0,
+        alias="queueLengthMEst",
+        ge=0.0,
     )
-
-    # --------------------------------------------------------
-    # DENSITY
-    # --------------------------------------------------------
 
     densityIndex: float = Field(
         default=0.0,
-        ge=0,
+        alias="densityIndex",
+        ge=0.0,
     )
-
-    # --------------------------------------------------------
-    # SPEED
-    # --------------------------------------------------------
 
     avgSpeedKmh: float | None = Field(
         default=None,
-        ge=0,
+        alias="avgSpeedKmh",
+        ge=0.0,
     )
-
-
-# ============================================================
-# BACKWARD COMPATIBILITY
-# ============================================================
-
-# Beberapa file lama masih menggunakan:
-#
-#     from app.schemas.traffic import Approach
-#
-# Approach sekarang berupa Enum di atas.
-#
-# Contract tetap menggunakan:
-#
-#     approach: "north"
-#     approach: "south"
-#     approach: "east"
-#     approach: "west"
 
 
 # ============================================================
@@ -146,14 +77,60 @@ class ApproachState(BaseModel):
 
 class TrafficState(BaseModel):
     """
-    Snapshot kondisi lalu lintas satu simpang
-    pada satu time window.
+    Snapshot kondisi lalu lintas pada satu intersection
+    dalam satu time window.
     """
 
-    intersectionId: str
+    model_config = ConfigDict(
+        populate_by_name=True,
+        from_attributes=True,
+    )
 
-    windowStart: datetime
+    intersectionId: str = Field(alias="intersectionId")
 
-    windowEnd: datetime
+    windowStart: datetime = Field(alias="windowStart")
+    windowEnd: datetime = Field(alias="windowEnd")
 
     approaches: list[ApproachState]
+
+
+# ============================================================
+# CREATE TRAFFIC STATE REQUEST
+# ============================================================
+
+class TrafficStateCreateRequest(TrafficState):
+    """
+    Request body untuk:
+
+        POST /api/traffic/state
+
+    source:
+        Sumber traffic state, misalnya:
+        - cv
+        - uploaded_video
+        - camera
+        - simulation
+    """
+
+    source: str = "cv"
+
+    processing_job_id: int | None = Field(
+        default=None,
+        alias="processingJobId",
+    )
+
+
+# ============================================================
+# RESPONSE
+# ============================================================
+
+class TrafficStateResponse(TrafficState):
+    """
+    Response setelah TrafficState berhasil disimpan.
+    """
+
+    traffic_state_id: int = Field(alias="trafficStateId")
+
+    source: str
+
+    created_at: datetime = Field(alias="createdAt")

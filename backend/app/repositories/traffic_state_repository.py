@@ -63,7 +63,10 @@ class TrafficStateRepository:
             payload.append({
                 "trafficStateId": traffic_state_id,
                 "approachId": approach_id,
-                **approach_state.model_dump(exclude={"approach"}),
+                **approach_state.model_dump(
+                    by_alias=True,
+                    exclude={"approach"},
+                ),
             })
 
         if payload:

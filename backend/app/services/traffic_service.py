@@ -1,129 +1,175 @@
 from __future__ import annotations
 
-from pathlib import Path
+from typing import Any
 
-from app.pipeline.traffic_state_builder import (
-    TrafficStateBuilder,
-    TrafficStateBuilderConfig,
-    get_default_csv_path,
+from app.services.traffic_repository import (
+    TrafficRepository,
+    TrafficRepositoryError,
 )
-from app.schemas.traffic import TrafficState
+
+
+class TrafficServiceError(Exception):
+    """
+    Error khusus untuk traffic service.
+    """
+
+    pass
 
 
 class TrafficService:
     """
-    Service untuk menyediakan TrafficState kepada API.
+    Business logic untuk membaca traffic data.
 
-    Alur:
+    Service ini menjadi penghubung antara:
 
-        CSV asli
-           ↓
-        TrafficStateBuilder
-           ↓
-        TrafficState[]
-           ↓
-        TrafficService
-           ↓
         API
+         ↓
+        TrafficService
+         ↓
+        TrafficRepository
+         ↓
+        Supabase
     """
 
     def __init__(
         self,
-        csv_path: str | Path | None = None,
-        window_seconds: int = 5,
+        repository: TrafficRepository | None = None,
     ) -> None:
-
-        self.csv_path = (
-            Path(csv_path)
-            if csv_path is not None
-            else get_default_csv_path()
-        )
-
-        self.builder = TrafficStateBuilder(
-            TrafficStateBuilderConfig(
-                window_seconds=window_seconds
-            )
+        self.repository = (
+            repository
+            if repository is not None
+            else TrafficRepository()
         )
 
     # ========================================================
-    # BUILD ALL STATES
+    # GET INTERSECTION DATABASE ID
     # ========================================================
 
-    def get_all_states(self) -> list[TrafficState]:
-        """
-        Membaca CSV asli dan menghasilkan seluruh
-        TrafficState.
-        """
-
-        return self.builder.build_from_csv(
-            self.csv_path
-        )
-
-    # ========================================================
-    # GET LATEST STATE
-    # ========================================================
-
-    def get_latest_state(self) -> TrafficState | None:
-        """
-        Mengambil TrafficState paling baru dari CSV.
-
-        Jika CSV kosong, return None.
-        """
-
-        states = self.get_all_states()
-
-        if not states:
-            return None
-
-        return states[-1]
-
-    # ========================================================
-    # GET STATE BY INDEX
-    # ========================================================
-
-    def get_state(
-        self,
-        index: int,
-    ) -> TrafficState:
-        """
-        Mengambil satu TrafficState berdasarkan index.
-
-        Contoh:
-
-            index = 0
-            → state pertama
-
-            index = 10
-            → state ke-11
-        """
-
-        states = self.get_all_states()
-
-        if index < 0 or index >= len(states):
-            raise IndexError(
-                f"TrafficState index {index} "
-                f"berada di luar range 0-{len(states) - 1}."
-            )
-
-        return states[index]
-
-    # ========================================================
-    # GET STATES BY INTERSECTION
-    # ========================================================
-
-    def get_states_by_intersection(
+    def get_intersection_row_id(
         self,
         intersection_id: str,
-    ) -> list[TrafficState]:
+    ) -> int:
         """
-        Mengambil TrafficState berdasarkan intersectionId.
+        Mengubah business ID intersection
+        menjadi database primary key.
         """
 
-        states = self.get_all_states()
+        try:
+            return self.repository.get_intersection_row_id(
+                intersection_id
+            )
 
-        return [
-            state
-            for state in states
-            if state.intersectionId
-            == intersection_id
-        ]
+        except TrafficRepositoryError as exc:
+            raise TrafficServiceError(
+                str(exc)
+            ) from exc
+
+    # ========================================================
+    # GET LATEST TRAFFIC
+    # ========================================================
+
+    def get_latest_traffic(
+        self,
+        *,
+        intersection_id: str,
+        limit: int = 20,
+    ) -> list[dict[str, Any]]:
+        """
+        Mengambil traffic state terbaru
+        beserta approach states.
+        """
+
+        if not intersection_id.strip():
+            raise TrafficServiceError(
+                "intersection_id tidak boleh kosong."
+            )
+
+        if limit <= 0:
+            raise TrafficServiceError(
+                "limit harus lebih besar dari 0."
+            )
+
+        if limit > 100:
+            raise TrafficServiceError(
+                "limit maksimal adalah 100."
+            )
+
+        try:
+            intersection_row_id = (
+                self.repository.get_intersection_row_id(
+                    intersection_id
+                )
+            )
+
+            return (
+                self.repository
+                .get_latest_complete_traffic_states(
+                    intersection_row_id=intersection_row_id,
+                    limit=limit,
+                )
+            )
+
+        except TrafficRepositoryError as exc:
+            raise TrafficServiceError(
+                str(exc)
+            ) from exc
+
+    # ========================================================
+    # GET ONE TRAFFIC STATE
+    # ========================================================
+
+    def get_traffic_state(
+        self,
+        *,
+        intersection_id: str,
+        traffic_state_id: int,
+    ) -> dict[str, Any] | None:
+        """
+        Mengambil satu traffic state lengkap.
+        """
+
+        if not intersection_id.strip():
+            raise TrafficServiceError(
+                "intersection_id tidak boleh kosong."
+            )
+
+        if traffic_state_id <= 0:
+            raise TrafficServiceError(
+                "traffic_state_id tidak valid."
+            )
+
+        try:
+            intersection_row_id = (
+                self.repository.get_intersection_row_id(
+                    intersection_id
+                )
+            )
+
+            traffic_state = (
+                self.repository
+                .get_traffic_state_with_approaches(
+                    traffic_state_id=traffic_state_id
+                )
+            )
+
+            if traffic_state is None:
+                return None
+
+            database_intersection_id = int(
+                traffic_state["trafficState"][
+                    "intersectionId"
+                ]
+            )
+
+            if (
+                database_intersection_id
+                != intersection_row_id
+            ):
+                return None
+
+            return traffic_state
+
+        except TrafficRepositoryError as exc:
+            raise TrafficServiceError(
+                str(exc)
+            ) from exc

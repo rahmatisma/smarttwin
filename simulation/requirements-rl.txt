@@ -1,3 +1,0 @@
-# Starting point buat track RL — Yuli silakan sesuaikan sesuai spek server kampus.
-stable-baselines3
-sumo-rl
