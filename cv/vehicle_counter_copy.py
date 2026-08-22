@@ -107,6 +107,24 @@ CSV_PATH = os.path.join(
     "percobaan_logic_simpang.csv"
 )
 
+# CSV terpisah untuk hasil crossing-line (lihat CROSSING_LINES) --
+# beda metrik dari zona (ALIRAN, bukan KEHADIRAN), jadi disengaja
+# tidak dicampur satu file dengan CSV_PATH.
+CROSSING_CSV_PATH = os.path.join(
+    OUTPUT_DIR,
+    "crossing_simpang.csv"
+)
+
+# CSV terpisah lagi untuk SNAPSHOT per detik -- bacaan mentah frame
+# TERAKHIR yang diproses tiap detik, TIDAK dirata-rata seperti
+# CSV_PATH. Dibuat buat tampilan yang terasa "hidup" (angka naik-
+# turun tiap detik mengikuti kendaraan masuk/keluar zona), beda
+# tujuan dari CSV_PATH yang buat angka analitis stabil.
+SNAPSHOT_CSV_PATH = os.path.join(
+    OUTPUT_DIR,
+    "snapshot_zona.csv"
+)
+
 
 # ============================================================
 # JENDELA WAKTU
@@ -164,18 +182,26 @@ ZONA_KEPADATAN = {
         #               (terlihat sebagai titik merah pada bukti),
         #               dan separuh kiri pita malah menutup aspal
         #               kosong lajur berlawanan.
-        #   v4 SEKARANG — pita dilebarkan ke bawah-kanan sampai
+        #   v4          [(0.00,0.80),(0.84,0.13),(0.90,0.21),(0.38,1.00)]
+        #               Pita dilebarkan ke bawah-kanan sampai
         #               memeluk seluruh lajur menuju stop line,
         #               termasuk deretan motor di tepi kerb.
         #               Dibaca dari coretan dua garis biru pada
         #               frame 22 Agustus 2026 (17:41), sejajar
         #               sumbu jalan dan menyempit ke titik hilang
         #               di kanan atas.
+        #   v5          [(0.00,0.75),(0.65,0.00),(1.00,0.15),(0.20,1.00)]
+        #               Parallelogram diagonal mengikuti area antara
+        #               dua garis merah pada frame, sejajar
+        #               perspektif jalan.
+        #   v6 SEKARANG — dikalibrasi langsung lewat klik interaktif
+        #               (cv/kalibrasi_zona.py --kamera CCTV_1),
+        #               bukan tebak-tebakan rasio manual lagi.
         "polygon": [
-            (0.00, 0.80),
-            (0.84, 0.13),
-            (0.90, 0.21),
-            (0.38, 1.00),
+            (0.14, 0.70),
+            (0.58, 1.00),
+            (0.84, 0.10),
+            (0.78, 0.08),
         ],
         "nama_lengan": "selatan",
     },
@@ -191,22 +217,19 @@ ZONA_KEPADATAN = {
         #   v1 (kotak)  [(0.20,0.15),(0.80,0.15),(0.80,0.75),(0.20,0.75)]
         #   v2 (kotak)  tepi atas dinaikkan ke 0.30 supaya tidak
         #               memakan atap/baliho di atas cakrawala
-        #   v3 SEKARANG — baji mengikuti coretan biru: sisi kiri
-        #                 menyusuri mulut koridor Magelang, sisi
-        #                 kanan melengkung mengikuti arus yang
-        #                 membelok ke timur. Bentuk ini memeluk
-        #                 badan simpang dan mulut lengan, dan
-        #                 membuang aspal kosong di kuadran
-        #                 kanan-bawah yang tidak pernah dilewati.
+        #   v3          [(0.29,0.21),(0.37,0.21),(0.50,0.35),(0.62,0.43),
+        #                (0.73,0.47),(0.60,0.52),(0.45,0.58),(0.39,0.60)]
+        #                Baji mengikuti coretan biru: sisi kiri
+        #                menyusuri mulut koridor Magelang, sisi kanan
+        #                melengkung mengikuti arus yang membelok ke
+        #                timur.
+        #   v4 SEKARANG — dikalibrasi langsung lewat klik interaktif
+        #                (cv/kalibrasi_zona.py --kamera CCTV_2).
         "polygon": [
-            (0.29, 0.21),
-            (0.37, 0.21),
-            (0.50, 0.35),
-            (0.62, 0.43),
-            (0.73, 0.47),
-            (0.60, 0.52),
-            (0.45, 0.58),
-            (0.39, 0.60),
+            (0.30, 0.23),
+            (0.36, 0.49),
+            (0.61, 0.47),
+            (0.38, 0.22),
         ],
         "nama_lengan": "simpang_tengah",
     },
@@ -223,18 +246,63 @@ ZONA_KEPADATAN = {
         #   v1 (kotak)  [(0.00,0.25),(1.00,0.25),(1.00,0.60),(0.00,0.60)]
         #   v2 (miring) tepi atas dimiringkan supaya tidak memakan
         #               pekarangan berpagar berisi kendaraan parkir
-        #   v3 SEKARANG — pita sejajar sumbu jalan, dibaca dari
-        #                 coretan dua garis biru. Menipis di kiri
-        #                 (jauh) dan menebal di kanan (dekat
-        #                 kamera), sesuai perspektif lajur berlebar
-        #                 tetap.
+        #   v3          [(0.19,0.29),(0.92,0.55),(0.89,0.78),(0.09,0.35)]
+        #               Pita sejajar sumbu jalan, dibaca dari coretan
+        #               dua garis biru. Menipis di kiri (jauh) dan
+        #               menebal di kanan (dekat kamera), sesuai
+        #               perspektif lajur berlebar tetap.
+        #   v4 SEKARANG — dikalibrasi langsung lewat klik interaktif
+        #               (cv/kalibrasi_zona.py --kamera CCTV_3).
         "polygon": [
-            (0.19, 0.29),
-            (0.92, 0.55),
-            (0.89, 0.78),
-            (0.09, 0.35),
+            (0.11, 0.36),
+            (0.84, 0.75),
+            (0.96, 0.54),
+            (0.21, 0.32),
         ],
         "nama_lengan": "barat",
+    },
+
+    "CCTV_4": {
+        # Jl. P. Diponegoro.
+        #
+        # Riwayat:
+        #   v1 SEKARANG — dikalibrasi langsung lewat klik interaktif
+        #               (cv/kalibrasi_zona.py --kamera CCTV_4).
+        "polygon": [
+            (0.79, 0.28),
+            (0.56, 0.44),
+            (0.72, 0.49),
+            (0.84, 0.30),
+        ],
+        "nama_lengan": "timur",
+    },
+}
+
+
+# ============================================================
+# GARIS CROSSING (kalibrasi cv/kalibrasi_crossing.py)
+# ============================================================
+#
+# BELUM DIPAKAI logika apa pun di file ini -- vehicle_counter_copy.py
+# masih murni zona (ZONA_KEPADATAN di atas). Disimpan di sini sebagai
+# hasil kalibrasi mentah untuk fitur counting berbasis crossing-line
+# per lengan yang direncanakan menyusul, supaya tidak perlu kalibrasi
+# ulang nanti.
+#
+# CCTV_2 dapat DUA garis (bukan satu) karena framenya memotret dua
+# lengan sekaligus -- Jl. Magelang dan Jl. P. Diponegoro -- persis
+# skenario yang dijelaskan di docstring kalibrasi_crossing.py.
+
+CROSSING_LINES = {
+    "CCTV_1": {
+        "x1": 0.49, "y1": 1.00, "x2": 0.14, "y2": 0.67,
+    },
+    "CCTV_2": {
+        "MAGELANG": {"x1": 0.31, "y1": 0.53, "x2": 0.63, "y2": 0.49},
+        "DIPONEGORO": {"x1": 0.86, "y1": 0.70, "x2": 0.75, "y2": 0.46},
+    },
+    "CCTV_3": {
+        "x1": 0.86, "y1": 0.78, "x2": 0.98, "y2": 0.53,
     },
 }
 
@@ -305,6 +373,23 @@ def point_in_polygon(px, py, polygon):
     return inside
 
 
+def sisi_garis(px, py, p1, p2):
+    """
+    Sisi titik (px, py) relatif garis p1->p2, lewat tanda cross
+    product (x2-x1)(py-y1) - (y2-y1)(px-x1). Positif di satu sisi,
+    negatif di sisi lain, 0 kalau persis di garis.
+
+    px/py dan p1/p2 sama-sama RASIO 0.0-1.0, konsisten dengan
+    point_in_polygon(). Dipakai hitung_crossing() untuk mendeteksi
+    kendaraan yang berpindah sisi antar-frame -- itu tandanya
+    melintasi garis.
+    """
+    x1, y1 = p1
+    x2, y2 = p2
+
+    return (x2 - x1) * (py - y1) - (y2 - y1) * (px - x1)
+
+
 def mapping_class(class_id):
     """
     Id kelas YOLO -> nama kolom CSV. None kalau bukan kendaraan
@@ -341,6 +426,13 @@ def hitung_kendaraan_di_zona(
         "bus": 0,
         "titik_dalam": [],
         "titik_luar": [],
+        # Kotak (bbox) mentah dalam PIKSEL, bukan rasio -- dipakai
+        # popup live (gambar_live), beda dari titik_dalam/titik_luar
+        # yang dalam rasio buat gambar_bukti. Sengaja dihasilkan dari
+        # klasifikasi inside/outside yang SAMA persis dengan yang
+        # menentukan angka CSV, bukan dihitung ulang terpisah.
+        "kotak_dalam": [],
+        "kotak_luar": [],
     }
 
     for det in detections:
@@ -364,14 +456,128 @@ def hitung_kendaraan_di_zona(
         if nama_kelas is None:
             continue
 
+        kotak = (x1, y1, x2, y2, nama_kelas)
+
         if point_in_polygon(cx, cy, zona_polygon):
             hasil["total"] += 1
             hasil[nama_kelas] += 1
             hasil["titik_dalam"].append((cx, cy))
+            hasil["kotak_dalam"].append(kotak)
         else:
             hasil["titik_luar"].append((cx, cy))
+            hasil["kotak_luar"].append(kotak)
 
     return hasil
+
+
+def garis_untuk_kamera(nama_kamera, lengan_default):
+    """
+    Normalisasi CROSSING_LINES[nama_kamera] jadi list seragam
+    {"label", "p1", "p2"}.
+
+    Sumbernya bisa dua bentuk (lihat komentar CROSSING_LINES): SATU
+    garis flat (dict x1/y1/x2/y2 langsung -- kamera satu lengan,
+    mis. CCTV_1) atau BEBERAPA garis bernama (dict label -> garis --
+    kamera yang framenya memotret >1 lengan, mis. CCTV_2 dengan
+    MAGELANG dan DIPONEGORO). Kamera flat tidak punya label eksplisit
+    di CROSSING_LINES, jadi dipakai nama lengan zona-nya sebagai
+    ganti.
+
+    Balikan [] kalau kamera ini tidak ada di CROSSING_LINES sama
+    sekali (mis. CCTV_4, belum dikalibrasi) -- caller cukup tidak
+    dapat garis apa pun, bukan error.
+    """
+    raw = CROSSING_LINES.get(nama_kamera)
+
+    if raw is None:
+        return []
+
+    if "x1" in raw:
+        return [{
+            "label": lengan_default,
+            "p1": (raw["x1"], raw["y1"]),
+            "p2": (raw["x2"], raw["y2"]),
+        }]
+
+    return [
+        {
+            "label": label,
+            "p1": (garis["x1"], garis["y1"]),
+            "p2": (garis["x2"], garis["y2"]),
+        }
+        for label, garis in raw.items()
+    ]
+
+
+def hitung_crossing(state, detections):
+    """
+    Deteksi kendaraan yang melintasi salah satu garis crossing milik
+    kamera ini di frame ini, dibandingkan posisi track_id yang sama
+    di frame SEBELUMNYA (state.prev_pos) -- bukan posisi sesaat,
+    supaya "melintas" berarti benar-benar berpindah sisi garis.
+
+    Anti double-count: sekali track_id tercatat melintasi satu
+    garis, track_id itu ditandai di state.sudah_dihitung[label] dan
+    tidak akan dihitung lagi di garis yang sama walau dia bolak-balik
+    dekat garis di frame-frame berikutnya.
+
+    Hasil crossing diakumulasi ke DUA tempat sekaligus:
+    state.crossing_akumulasi[label] (direset tiap jendela 5 detik,
+    lihat tulis_baris_csv_crossing) dan state.crossing_total[label]
+    (tidak pernah direset, dipakai gambar_live() buat panel "total
+    sejauh ini"). state.prev_pos diperbarui di akhir supaya SEMUA
+    garis membandingkan terhadap posisi frame-sebelumnya yang sama,
+    bukan posisi yang sudah dimutakhirkan garis lain duluan.
+    """
+    if not state.garis_list:
+        return
+
+    posisi_baru = {}
+
+    for x1, y1, x2, y2, class_id, track_id in detections:
+        if track_id is None:
+            # ByteTrack belum sempat kasih id -- tidak ada riwayat
+            # buat dibandingkan, lewati.
+            continue
+
+        nama_kelas = mapping_class(class_id)
+
+        if nama_kelas is None:
+            continue
+
+        cx = ((x1 + x2) / 2) / state.width
+        cy = y2 / state.height
+        posisi_baru[track_id] = (cx, cy)
+
+        pos_lama = state.prev_pos.get(track_id)
+
+        if pos_lama is None:
+            # Track baru muncul frame ini -- belum ada posisi
+            # sebelumnya buat dibandingkan.
+            continue
+
+        for garis in state.garis_list:
+            label = garis["label"]
+
+            if track_id in state.sudah_dihitung[label]:
+                continue
+
+            sisi_lama = sisi_garis(*pos_lama, garis["p1"], garis["p2"])
+            sisi_baru = sisi_garis(cx, cy, garis["p1"], garis["p2"])
+
+            # Tanda berlawanan (dan sama-sama bukan nol) berarti
+            # berpindah sisi -- itu crossing.
+            if sisi_lama * sisi_baru < 0:
+                for akum in (
+                    state.crossing_akumulasi[label],
+                    state.crossing_total[label],
+                ):
+                    akum["total"] += 1
+                    akum[nama_kelas] += 1
+
+                state.sudah_dihitung[label].add(track_id)
+
+    state.prev_pos = posisi_baru
 
 
 # ============================================================
@@ -455,6 +661,153 @@ def gambar_bukti(
     return path_keluar
 
 
+NAMA_JUDUL_PANEL = "=== SMARTTWIN ZONA MONITOR ==="
+NAMA_KELAS_TAMPILAN = ("motor", "mobil", "truk", "bus")
+
+
+def gambar_live(
+    frame, zona_polygon, hasil, nama_kamera, nama_lengan, idx,
+    garis_list=None, crossing_total=None,
+):
+    """
+    Gambar overlay buat popup window real-time (cv2.imshow), TIDAK
+    disimpan ke disk -- beda tujuan dari gambar_bukti() yang
+    menyimpan satu file bukti statis.
+
+    Kotak bbox diambil dari hasil["kotak_dalam"]/["kotak_luar"]
+    (piksel, hasil klasifikasi yang SAMA dengan yang dipakai
+    menghitung angka CSV), jadi apa yang kelihatan di layar dijamin
+    sinkron dengan angka yang ditulis.
+
+    garis_list/crossing_total (dari KameraState.garis_list dan
+    .crossing_total) opsional -- default None/[] kalau kamera ini
+    tidak punya garis crossing terkalibrasi (mis. CCTV_4), supaya
+    fungsi ini tetap aman dipanggil tanpa argumen itu.
+
+    Mengembalikan frame BARU (frame asli tidak diubah), supaya frame
+    yang sama masih bisa dipakai gambar_bukti() setelahnya kalau
+    posisinya kebetulan sama.
+    """
+    garis_list = garis_list or []
+    crossing_total = crossing_total or {}
+
+    h, w = frame.shape[:2]
+    kanvas = frame.copy()
+
+    # --------------------------------------------------------
+    # 1. Garis polygon zona -- BIRU, thickness 2
+    # --------------------------------------------------------
+    titik_poly = np.array(
+        [[int(x * w), int(y * h)] for x, y in zona_polygon],
+        dtype=np.int32,
+    )
+    cv2.polylines(kanvas, [titik_poly], True, (255, 0, 0), 2)
+
+    # --------------------------------------------------------
+    # 1b. Garis crossing -- ORANYE, thickness 2, label + jumlah
+    #     kumulatif (seumur run, bukan per-jendela) di tengah garis
+    # --------------------------------------------------------
+    for garis in garis_list:
+        p1 = (int(garis["p1"][0] * w), int(garis["p1"][1] * h))
+        p2 = (int(garis["p2"][0] * w), int(garis["p2"][1] * h))
+        cv2.line(kanvas, p1, p2, (0, 165, 255), 2)
+
+        label = garis["label"]
+        jumlah = crossing_total.get(label, {}).get("total", 0)
+        tengah = ((p1[0] + p2[0]) // 2, (p1[1] + p2[1]) // 2)
+
+        cv2.putText(
+            kanvas, f"{label}: {jumlah}", tengah,
+            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 165, 255), 2,
+        )
+
+    # --------------------------------------------------------
+    # 2. Bounding box tiap kendaraan -- HIJAU di dalam, MERAH
+    #    di luar zona
+    # --------------------------------------------------------
+    for x1, y1, x2, y2, nama_kelas in hasil["kotak_dalam"]:
+        cv2.rectangle(
+            kanvas, (int(x1), int(y1)), (int(x2), int(y2)),
+            (0, 255, 0), 2,
+        )
+        cv2.putText(
+            kanvas, nama_kelas, (int(x1), max(15, int(y1) - 6)),
+            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2,
+        )
+
+    for x1, y1, x2, y2, nama_kelas in hasil["kotak_luar"]:
+        cv2.rectangle(
+            kanvas, (int(x1), int(y1)), (int(x2), int(y2)),
+            (0, 0, 255), 2,
+        )
+
+    # --------------------------------------------------------
+    # 3. Panel info -- kiri atas, background hitam semi-transparan
+    # --------------------------------------------------------
+    baris_panel = [
+        NAMA_JUDUL_PANEL,
+        f"Kamera  : {nama_kamera} ({nama_lengan})",
+        f"Frame   : {idx}",
+        "-" * 30,
+        "DALAM ZONA:",
+        f"  Total  : {hasil['total']}",
+        f"  Motor  : {hasil['motor']}",
+        f"  Mobil  : {hasil['mobil']}",
+        f"  Truk   : {hasil['truk']}",
+        f"  Bus    : {hasil['bus']}",
+    ]
+
+    if garis_list:
+        baris_panel.append("-" * 30)
+        baris_panel.append("CROSSING (total sejauh ini):")
+        for garis in garis_list:
+            label = garis["label"]
+            jumlah = crossing_total.get(label, {}).get("total", 0)
+            baris_panel.append(f"  {label}: {jumlah}")
+
+    baris_panel.append("-" * 30)
+    baris_panel.append("Tekan Q untuk keluar")
+
+    tinggi_baris = 18
+    panel_lebar = 280
+    panel_tinggi = tinggi_baris * len(baris_panel) + 20
+
+    overlay = kanvas.copy()
+    cv2.rectangle(
+        overlay, (10, 10), (10 + panel_lebar, 10 + panel_tinggi),
+        (0, 0, 0), -1,
+    )
+    cv2.addWeighted(overlay, 0.6, kanvas, 0.4, 0, kanvas)
+
+    y = 10 + tinggi_baris
+    for teks in baris_panel:
+        cv2.putText(
+            kanvas, teks, (18, y),
+            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1,
+        )
+        y += tinggi_baris
+
+    # --------------------------------------------------------
+    # 4. Counter besar di tengah atas -- KUNING, buat presentasi
+    # --------------------------------------------------------
+    teks_total = f"TOTAL: {hasil['total']} kendaraan"
+    (teks_w, _), _ = cv2.getTextSize(
+        teks_total, cv2.FONT_HERSHEY_SIMPLEX, 1.0, 2
+    )
+    x_tengah = max(0, (w - teks_w) // 2)
+
+    cv2.putText(
+        kanvas, teks_total, (x_tengah, 40),
+        cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 0, 0), 4,
+    )
+    cv2.putText(
+        kanvas, teks_total, (x_tengah, 40),
+        cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 255, 255), 2,
+    )
+
+    return kanvas
+
+
 # ============================================================
 # EKSTRAKSI DETEKSI
 # ============================================================
@@ -496,195 +849,487 @@ def ekstrak_deteksi(result):
 
 
 # ============================================================
-# PROSES SATU KAMERA
+# STATE SATU KAMERA (dipakai jalankan_gabungan)
 # ============================================================
+#
+# Dulu ada proses_kamera() yang memproses satu video sampai habis
+# baru pindah ke kamera berikutnya -- window popup-nya jadi
+# bergantian, bukan bareng. Diganti KameraState + proses_tick()
+# supaya semua kamera bisa dibaca selang-seling (round-robin), tiap
+# kamera tetap tampil di window cv2.imshow sendiri-sendiri, tanpa
+# threading (satu frame per kamera per putaran, bergiliran).
 
-def proses_kamera(
-    nama_kamera,
-    zona,
-    durasi_detik,
-    langkah,
-    frame_visual,
-    imgsz,
-    penulis_csv,
-):
-    """
-    Proses satu video, tulis satu baris CSV per jendela 5 detik.
 
-    Balikannya daftar total_di_zona tiap jendela, untuk statistik.
-    """
-    video_path = os.path.join(VIDEO_DIR, f"{nama_kamera}.mp4")
+class KameraState:
+    """Menampung semua state yang dulu jadi variabel lokal di
+    proses_kamera(): posisi baca video, jendela CSV yang lagi
+    diakumulasi, model YOLO/ByteTrack milik kamera ini sendiri, dan
+    frame terakhir yang siap ditampilkan di window kamera ini."""
 
-    if not os.path.exists(video_path):
-        print(f"[LEWAT] {video_path} tidak ada.")
-        return []
+    def __init__(self, nama_kamera, zona, durasi_detik, imgsz):
+        self.nama_kamera = nama_kamera
+        self.poligon = zona["polygon"]
+        self.lengan = zona["nama_lengan"]
+        self.imgsz = imgsz
 
-    cap = cv2.VideoCapture(video_path)
-
-    if not cap.isOpened():
-        print(f"[LEWAT] {video_path} gagal dibuka.")
-        return []
-
-    fps = cap.get(cv2.CAP_PROP_FPS)
-    if fps <= 0:
-        fps = 25
-
-    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-
-    # Jam dinding dari posisi frame. GAGAL KERAS kalau videonya
-    # tidak tercatat di sync_report.json — sama seperti file asli,
-    # supaya jam laptop tidak pernah menyamar jadi jam rekaman.
-    peta = muat_peta_jam(video_path, fps)
-
-    # Model dibuat baru per kamera: state ByteTrack tidak boleh
-    # bocor antar-video.
-    model = YOLO(MODEL_PATH)
-
-    poligon = zona["polygon"]
-    lengan = zona["nama_lengan"]
-
-    print(
-        f"\n[{nama_kamera}] {width}x{height} @ {fps:.2f} fps "
-        f"-> lengan '{lengan}', {len(poligon)} titik zona, "
-        f"imgsz={imgsz}"
-    )
-
-    idx = -1
-    window_aktif = None
-    akumulasi = []
-    frame_terakhir = 0
-    totals = []
-    path_bukti = None
-    n_proses = 0
-
-    batas_frame = int(durasi_detik * fps)
-
-    def tutup_window():
-        """Tulis satu baris CSV dari jendela yang baru selesai."""
-        if not akumulasi:
-            return
-
-        n = len(akumulasi)
-
-        rata = {
-            k: sum(a[k] for a in akumulasi) / n
-            for k in ("total", "motor", "mobil", "truk", "bus")
+        self.tersedia = False
+        self.selesai = False
+        self.cap = None
+        self.model = None
+        self.peta = None
+        self.tampil_frame = None
+        self.hasil_terakhir = {
+            "total": 0, "motor": 0, "mobil": 0, "truk": 0, "bus": 0,
+            "kotak_dalam": [], "kotak_luar": [],
         }
 
-        penulis_csv.writerow({
-            "timestamp": peta.waktu(window_aktif).strftime(
-                "%Y-%m-%d %H:%M:%S"
-            ),
-            "kamera": nama_kamera,
-            "lengan": lengan,
-            "total_di_zona": round(rata["total"], 2),
-            "motor_di_zona": round(rata["motor"], 2),
-            "mobil_di_zona": round(rata["mobil"], 2),
-            "truk_di_zona": round(rata["truk"], 2),
-            "bus_di_zona": round(rata["bus"], 2),
-            "frame_number": frame_terakhir,
-        })
+        video_path = os.path.join(VIDEO_DIR, f"{nama_kamera}.mp4")
 
-        totals.append(rata["total"])
+        if not os.path.exists(video_path):
+            print(f"[LEWAT] {video_path} tidak ada.")
+            self.selesai = True
+            return
 
-    while True:
-        ok, frame = cap.read()
+        cap = cv2.VideoCapture(video_path)
 
-        if not ok:
-            break
+        if not cap.isOpened():
+            print(f"[LEWAT] {video_path} gagal dibuka.")
+            self.selesai = True
+            return
 
-        idx += 1
+        self.cap = cap
+        self.fps = cap.get(cv2.CAP_PROP_FPS) or 25
+        self.width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        self.height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 
-        if idx >= batas_frame:
-            break
+        # Jam dinding dari posisi frame. GAGAL KERAS kalau videonya
+        # tidak tercatat di sync_report.json — supaya jam laptop
+        # tidak pernah menyamar jadi jam rekaman.
+        self.peta = muat_peta_jam(video_path, self.fps)
 
-        if idx % langkah != 0:
-            continue
+        # Model per kamera sendiri-sendiri: state ByteTrack tidak
+        # boleh bocor antar-video.
+        self.model = YOLO(MODEL_PATH)
 
-        detik = peta.detik_dinding(idx)
+        self.batas_frame = int(durasi_detik * self.fps)
+        self.idx = -1
+        self.window_aktif = None
+        self.akumulasi = []
+        self.frame_terakhir = 0
+        self.totals = []
+        self.path_bukti = None
+        self.n_proses = 0
 
-        # Frame di luar peta keping: lebih baik dilewati daripada
-        # ditulis dengan jam karangan.
-        if detik is None:
-            continue
+        # Snapshot per detik: bacaan mentah frame TERAKHIR yang
+        # diproses dalam detik itu, TIDAK dirata-rata -- beda
+        # jendela (per detik) dan beda semantik (sesaat, bukan rata-
+        # rata) dari window_aktif/akumulasi di atas yang buat
+        # CSV_PATH. Lihat tulis_baris_csv_snapshot().
+        self.detik_snapshot_aktif = None
+        self.snapshot_hasil_aktif = None
+        self.snapshot_frame_aktif = None
 
-        awal_window = int(detik // WINDOW_DETIK) * WINDOW_DETIK
+        # Crossing-line: garis_list [] kalau kamera ini belum
+        # dikalibrasi di CROSSING_LINES (mis. CCTV_4) -- semua fungsi
+        # crossing gracefully no-op dalam kasus itu.
+        self.garis_list = garis_untuk_kamera(nama_kamera, self.lengan)
+        self.prev_pos = {}
+        self.sudah_dihitung = {g["label"]: set() for g in self.garis_list}
+        self.crossing_akumulasi = {
+            g["label"]: {
+                "total": 0, "motor": 0, "mobil": 0, "truk": 0, "bus": 0,
+            }
+            for g in self.garis_list
+        }
+        self.crossing_riwayat = {g["label"]: [] for g in self.garis_list}
 
-        if window_aktif is None:
-            window_aktif = awal_window
+        # Beda dari crossing_akumulasi (direset tiap jendela 5 detik
+        # buat CSV): ini akumulasi SEUMUR RUN, tidak pernah direset --
+        # dipakai gambar_live() buat panel/label "total sejauh ini",
+        # bukan angka per-jendela yang keliatan macet di 0 kebanyakan
+        # waktu antar-event.
+        self.crossing_total = {
+            g["label"]: {
+                "total": 0, "motor": 0, "mobil": 0, "truk": 0, "bus": 0,
+            }
+            for g in self.garis_list
+        }
 
-        if awal_window != window_aktif:
-            tutup_window()
-            akumulasi = []
-            window_aktif = awal_window
+        self.tersedia = True
 
-        results = model.track(
-            frame,
-            persist=True,
-            tracker="bytetrack.yaml",
-            classes=TRACK_CLASSES,
-            conf=CONFIDENCE,
-            imgsz=imgsz,
-            verbose=False,
-        )
-
-        hasil = hitung_kendaraan_di_zona(
-            ekstrak_deteksi(results[0]),
-            poligon,
-            width,
-            height,
-        )
-
-        akumulasi.append(hasil)
-        frame_terakhir = idx
-        n_proses += 1
-
-        # Laporan tiap 30 frame yang DIPROSES — untuk memastikan
-        # angkanya masuk akal sambil run masih jalan, bukan baru
-        # ketahuan di akhir.
-        if n_proses % 30 == 0:
-            print(
-                f"  {nama_kamera} f{idx:>6} ({idx / fps:>5.0f}s)"
-                f"  zona={hasil['total']:>3}"
-                f"  (motor {hasil['motor']}, mobil {hasil['mobil']}, "
-                f"truk {hasil['truk']}, bus {hasil['bus']})"
-                f"  luar={len(hasil['titik_luar'])}"
-            )
-
-        # Gambar bukti diambil dari frame yang sama sekali ini,
-        # jadi angkanya dijamin hasil perhitungan yang sama.
-        if path_bukti is None and idx >= frame_visual:
-            path_bukti = gambar_bukti(
-                frame,
-                poligon,
-                hasil,
-                nama_kamera,
-                lengan,
-                os.path.join(
-                    OUTPUT_DIR,
-                    f"zona_test_{nama_kamera.replace('_', '')}.jpg",
-                ),
-            )
-
-    tutup_window()
-    cap.release()
-
-    # Kalau videonya lebih pendek dari frame_visual, ambil apa pun
-    # yang sempat terbaca supaya gambar buktinya tetap ada.
-    if path_bukti is None and akumulasi:
         print(
-            f"  [!] {nama_kamera}: frame visual {frame_visual} "
-            f"tidak tercapai, gambar bukti dilewati."
+            f"\n[{nama_kamera}] {self.width}x{self.height} "
+            f"@ {self.fps:.2f} fps -> lengan '{self.lengan}', "
+            f"{len(self.poligon)} titik zona, "
+            f"{len(self.garis_list)} garis crossing, imgsz={imgsz}"
         )
 
-    print(
-        f"  {nama_kamera}: {len(totals)} jendela ditulis"
-        + (f", bukti -> {os.path.basename(path_bukti)}"
-           if path_bukti else "")
+    def tutup(self):
+        if self.cap is not None:
+            self.cap.release()
+
+
+def tulis_baris_csv(state, penulis_csv):
+    """Tulis satu baris CSV dari jendela 5 detik yang baru selesai
+    diakumulasi untuk kamera ini. Diekstrak dari bekas closure
+    tutup_window() di proses_kamera() supaya bisa dipanggil per
+    KameraState, bukan cuma dari dalam satu fungsi tertutup."""
+
+    if not state.akumulasi:
+        return
+
+    n = len(state.akumulasi)
+
+    rata = {
+        k: sum(a[k] for a in state.akumulasi) / n
+        for k in ("total", "motor", "mobil", "truk", "bus")
+    }
+
+    penulis_csv.writerow({
+        "timestamp": state.peta.waktu(state.window_aktif).strftime(
+            "%Y-%m-%d %H:%M:%S"
+        ),
+        "kamera": state.nama_kamera,
+        "lengan": state.lengan,
+        "total_di_zona": round(rata["total"], 2),
+        "motor_di_zona": round(rata["motor"], 2),
+        "mobil_di_zona": round(rata["mobil"], 2),
+        "truk_di_zona": round(rata["truk"], 2),
+        "bus_di_zona": round(rata["bus"], 2),
+        "frame_number": state.frame_terakhir,
+    })
+
+    state.totals.append(rata["total"])
+
+
+def tulis_baris_csv_snapshot(state, penulis_csv_snapshot):
+    """Tulis satu baris SNAPSHOT untuk detik yang baru saja lewat --
+    isinya bacaan MENTAH dari frame TERAKHIR yang diproses dalam
+    detik itu (state.snapshot_hasil_aktif), TIDAK dirata-rata
+    seperti tulis_baris_csv(). Kalau dalam detik itu ada beberapa
+    frame diproses, yang dipakai cuma yang PALING AKHIR -- bukan
+    rata-rata ataupun jumlah semuanya.
+
+    Guard-nya snapshot_hasil_aktif is None (belum pernah ada frame
+    diproses sama sekali), independen dari state akumulasi/window
+    milik tulis_baris_csv/tulis_baris_csv_crossing."""
+
+    if state.snapshot_hasil_aktif is None:
+        return
+
+    hasil = state.snapshot_hasil_aktif
+
+    penulis_csv_snapshot.writerow({
+        "timestamp": state.peta.waktu(state.detik_snapshot_aktif).strftime(
+            "%Y-%m-%d %H:%M:%S"
+        ),
+        "kamera": state.nama_kamera,
+        "lengan": state.lengan,
+        "total_di_zona": hasil["total"],
+        "motor_di_zona": hasil["motor"],
+        "mobil_di_zona": hasil["mobil"],
+        "truk_di_zona": hasil["truk"],
+        "bus_di_zona": hasil["bus"],
+        "frame_number": state.snapshot_frame_aktif,
+    })
+
+
+def tulis_baris_csv_crossing(state, penulis_csv_crossing):
+    """Tulis satu baris per garis crossing kamera ini untuk jendela
+    5 detik yang baru selesai (jumlah_crossing = SUM kejadian dalam
+    jendela itu, bukan rata-rata -- ini ALIRAN, beda dengan zona
+    yang KEHADIRAN), lalu reset akumulasinya buat jendela berikutnya.
+
+    Ditulis 0 kalau memang tidak ada yang melintas jendela itu (bukan
+    dilewati) supaya deret waktunya tetap utuh per jendela, bukan
+    bolong-bolong.
+
+    Guard-nya window_aktif is not None (bukan state.akumulasi seperti
+    tulis_baris_csv) supaya independen dari kapan tulis_baris_csv
+    mereset akumulasi zona-nya sendiri -- dua metrik ini ditulis
+    berdampingan di proses_tick tapi tidak boleh saling bergantung
+    urutan pemanggilan."""
+
+    if state.window_aktif is None:
+        return
+
+    timestamp = state.peta.waktu(state.window_aktif).strftime(
+        "%Y-%m-%d %H:%M:%S"
     )
 
-    return totals
+    for garis in state.garis_list:
+        label = garis["label"]
+        akum = state.crossing_akumulasi[label]
+
+        penulis_csv_crossing.writerow({
+            "timestamp": timestamp,
+            "kamera": state.nama_kamera,
+            "label_garis": label,
+            "jumlah_crossing": akum["total"],
+            "motor_crossing": akum["motor"],
+            "mobil_crossing": akum["mobil"],
+            "truk_crossing": akum["truk"],
+            "bus_crossing": akum["bus"],
+            "frame_number": state.frame_terakhir,
+        })
+
+        state.crossing_riwayat[label].append(akum["total"])
+
+        akum["total"] = 0
+        akum["motor"] = 0
+        akum["mobil"] = 0
+        akum["truk"] = 0
+        akum["bus"] = 0
+
+
+def proses_tick(
+    state, langkah, frame_visual,
+    penulis_csv, penulis_csv_crossing, penulis_csv_snapshot,
+):
+    """
+    Baca dan proses SATU frame untuk satu kamera (satu "giliran"
+    dalam round-robin). Bukan loop -- dipanggil berulang oleh
+    jalankan_gabungan(), satu kali per putaran per kamera.
+
+    Selalu memperbarui state.tampil_frame dengan frame TERBARU
+    (mentah kalau lagi frame yang dilewati --langkah, dengan overlay
+    kalau frame ini yang diproses YOLO) supaya video di window tetap
+    terlihat mengalir mulus walau kotak deteksi cuma di-refresh tiap
+    N frame.
+    """
+    if state.selesai:
+        return
+
+    ok, frame = state.cap.read()
+
+    if not ok:
+        state.selesai = True
+        return
+
+    state.idx += 1
+
+    if state.idx >= state.batas_frame:
+        state.selesai = True
+        return
+
+    if state.idx % langkah != 0:
+        # Frame dilewati dari YOLO, tapi tetap ditampilkan mentah
+        # (+ overlay hasil terakhir) supaya gerakan videonya mulus.
+        state.tampil_frame = gambar_live(
+            frame, state.poligon, state.hasil_terakhir,
+            state.nama_kamera, state.lengan, state.idx,
+            state.garis_list, state.crossing_total,
+        )
+        return
+
+    detik = state.peta.detik_dinding(state.idx)
+
+    # Frame di luar peta keping: lebih baik dilewati daripada
+    # ditulis dengan jam karangan.
+    if detik is None:
+        state.tampil_frame = gambar_live(
+            frame, state.poligon, state.hasil_terakhir,
+            state.nama_kamera, state.lengan, state.idx,
+            state.garis_list, state.crossing_total,
+        )
+        return
+
+    awal_window = int(detik // WINDOW_DETIK) * WINDOW_DETIK
+
+    if state.window_aktif is None:
+        state.window_aktif = awal_window
+
+    if awal_window != state.window_aktif:
+        tulis_baris_csv(state, penulis_csv)
+        tulis_baris_csv_crossing(state, penulis_csv_crossing)
+        state.akumulasi = []
+        state.window_aktif = awal_window
+
+    results = state.model.track(
+        frame,
+        persist=True,
+        tracker="bytetrack.yaml",
+        classes=TRACK_CLASSES,
+        conf=CONFIDENCE,
+        imgsz=state.imgsz,
+        verbose=False,
+    )
+
+    deteksi = ekstrak_deteksi(results[0])
+
+    hasil = hitung_kendaraan_di_zona(
+        deteksi,
+        state.poligon,
+        state.width,
+        state.height,
+    )
+
+    # Butuh posisi track_id frame-SEBELUMNYA (state.prev_pos), jadi
+    # HARUS dipanggil di sini, tiap frame yang diproses -- bukan cuma
+    # saat jendela tutup seperti tulis_baris_csv_crossing.
+    hitung_crossing(state, deteksi)
+
+    # Snapshot per detik: bucket 1 detik TERPISAH dari jendela 5
+    # detik di atas. Begitu detiknya berganti, flush bacaan TERAKHIR
+    # dari detik yang baru lewat (bukan rata-rata), baru pindah ke
+    # bucket detik yang baru dan simpan hasil frame ini sebagai
+    # bacaan (sementara) terakhirnya.
+    detik_bulat = int(detik)
+
+    if state.detik_snapshot_aktif is None:
+        state.detik_snapshot_aktif = detik_bulat
+    elif detik_bulat != state.detik_snapshot_aktif:
+        tulis_baris_csv_snapshot(state, penulis_csv_snapshot)
+        state.detik_snapshot_aktif = detik_bulat
+
+    state.snapshot_hasil_aktif = hasil
+    state.snapshot_frame_aktif = state.idx
+
+    state.akumulasi.append(hasil)
+    state.hasil_terakhir = hasil
+    state.frame_terakhir = state.idx
+    state.n_proses += 1
+
+    # Laporan tiap 30 frame yang DIPROSES — untuk memastikan
+    # angkanya masuk akal sambil run masih jalan, bukan baru
+    # ketahuan di akhir.
+    if state.n_proses % 30 == 0:
+        crossing_ringkas = ", ".join(
+            f"{label}={akum['total']}"
+            for label, akum in state.crossing_akumulasi.items()
+        )
+        print(
+            f"  {state.nama_kamera} f{state.idx:>6} "
+            f"({state.idx / state.fps:>5.0f}s)"
+            f"  zona={hasil['total']:>3}"
+            f"  (motor {hasil['motor']}, mobil {hasil['mobil']}, "
+            f"truk {hasil['truk']}, bus {hasil['bus']})"
+            f"  luar={len(hasil['titik_luar'])}"
+            + (f"  crossing[{crossing_ringkas}]" if crossing_ringkas else "")
+        )
+
+    # Gambar bukti diambil dari frame yang sama sekali ini, jadi
+    # angkanya dijamin hasil perhitungan yang sama.
+    if state.path_bukti is None and state.idx >= frame_visual:
+        state.path_bukti = gambar_bukti(
+            frame,
+            state.poligon,
+            hasil,
+            state.nama_kamera,
+            state.lengan,
+            os.path.join(
+                OUTPUT_DIR,
+                f"zona_test_{state.nama_kamera.replace('_', '')}.jpg",
+            ),
+        )
+
+    state.tampil_frame = gambar_live(
+        frame, state.poligon, hasil,
+        state.nama_kamera, state.lengan, state.idx,
+        state.garis_list, state.crossing_total,
+    )
+
+
+def jalankan_gabungan(
+    dipilih, durasi_detik, langkah, frame_visual, imgsz,
+    penulis_csv, penulis_csv_crossing, penulis_csv_snapshot, tampilkan_live,
+):
+    """
+    Ganti proses_kamera() lama: semua kamera terpilih dibaca
+    ROUND-ROBIN (satu frame CCTV_1, satu frame CCTV_2, satu frame
+    CCTV_3, ulangi) dalam SATU loop, satu thread -- bukan diproses
+    penuh satu-satu, jadi semua kamera berjalan "bersamaan" walau
+    tetap single-threaded.
+
+    Kalau tampilkan_live, tiap kamera dapat window cv2.imshow SENDIRI
+    ("SmartTwin - <nama_kamera>") -- bukan satu grid gabungan --
+    supaya tiap window bisa dipindah/diperbesar bebas. Q di window
+    mana pun (waitKey global, bukan per-window) menghentikan semua
+    kamera bersamaan.
+
+    Balikannya list (nama_kamera, lengan, totals) buat statistik zona
+    -- format sama persis dengan yang dulu dikumpulkan manual di
+    main(). Statistik crossing dicetak langsung di sini (bukan ikut
+    dibalikin) karena bentuknya per-garis, bukan per-kamera. Snapshot
+    per detik (penulis_csv_snapshot) tidak punya statistik ringkasan
+    tersendiri -- isinya memang dimaksudkan dibaca mentah per baris.
+    """
+    states = [
+        KameraState(nama_kamera, zona, durasi_detik, imgsz)
+        for nama_kamera, zona in dipilih.items()
+    ]
+
+    aktif = [s for s in states if s.tersedia]
+
+    if tampilkan_live:
+        for state in aktif:
+            cv2.namedWindow(
+                f"SmartTwin - {state.nama_kamera}", cv2.WINDOW_NORMAL
+            )
+
+    dihentikan_user = False
+
+    try:
+        while any(not s.selesai for s in aktif):
+            for state in aktif:
+                if not state.selesai:
+                    proses_tick(
+                        state, langkah, frame_visual,
+                        penulis_csv, penulis_csv_crossing, penulis_csv_snapshot,
+                    )
+
+                if tampilkan_live and state.tampil_frame is not None:
+                    cv2.imshow(
+                        f"SmartTwin - {state.nama_kamera}",
+                        state.tampil_frame,
+                    )
+
+            if tampilkan_live and aktif:
+                # waitKey dipanggil SEKALI per putaran (bukan per
+                # kamera) -- cukup buat memompa semua window sekaligus
+                # dan menangkap Q dari window mana pun yang fokus.
+                if cv2.waitKey(1) & 0xFF == ord("q"):
+                    print("\n  [Q] Dihentikan user, semua kamera berhenti.")
+                    dihentikan_user = True
+                    break
+    finally:
+        for state in aktif:
+            tulis_baris_csv(state, penulis_csv)
+            tulis_baris_csv_crossing(state, penulis_csv_crossing)
+            tulis_baris_csv_snapshot(state, penulis_csv_snapshot)
+            state.tutup()
+
+        if tampilkan_live:
+            cv2.destroyAllWindows()
+
+    statistik = []
+
+    for state in aktif:
+        if state.path_bukti is None and state.akumulasi:
+            print(
+                f"  [!] {state.nama_kamera}: frame visual "
+                f"{frame_visual} tidak tercapai, gambar bukti dilewati."
+            )
+
+        print(
+            f"  {state.nama_kamera}: {len(state.totals)} jendela ditulis"
+            + (f", bukti -> {os.path.basename(state.path_bukti)}"
+               if state.path_bukti else "")
+        )
+
+        for label, riwayat in state.crossing_riwayat.items():
+            total = sum(riwayat)
+            print(
+                f"    crossing '{label}': {total} kendaraan "
+                f"({len(riwayat)} jendela)"
+            )
+
+        statistik.append((state.nama_kamera, state.lengan, state.totals))
+
+    if dihentikan_user:
+        print("\nDihentikan oleh user (Q). Berhenti.")
+
+    return statistik
 
 
 # ============================================================
@@ -712,13 +1357,13 @@ def cetak_statistik(statistik):
         )
 
 
-def cetak_cuplikan_csv(n=20):
+def cetak_cuplikan_csv(n=20, path=CSV_PATH):
     print()
     print("=" * 68)
-    print(f"{n} BARIS PERTAMA — {os.path.basename(CSV_PATH)}")
+    print(f"{n} BARIS PERTAMA — {os.path.basename(path)}")
     print("=" * 68)
 
-    with open(CSV_PATH, "r", encoding="utf-8", newline="") as f:
+    with open(path, "r", encoding="utf-8", newline="") as f:
         for i, baris in enumerate(f):
             if i > n:
                 break
@@ -730,6 +1375,36 @@ def cetak_cuplikan_csv(n=20):
 # ============================================================
 
 KOLOM = [
+    "timestamp",
+    "kamera",
+    "lengan",
+    "total_di_zona",
+    "motor_di_zona",
+    "mobil_di_zona",
+    "truk_di_zona",
+    "bus_di_zona",
+    "frame_number",
+]
+
+# CSV crossing terpisah -- lihat CROSSING_CSV_PATH. jumlah_crossing
+# dkk itu SUM kejadian dalam jendela 5 detik, bukan rata-rata seperti
+# kolom _di_zona.
+KOLOM_CROSSING = [
+    "timestamp",
+    "kamera",
+    "label_garis",
+    "jumlah_crossing",
+    "motor_crossing",
+    "mobil_crossing",
+    "truk_crossing",
+    "bus_crossing",
+    "frame_number",
+]
+
+# CSV snapshot per detik -- kolomnya SAMA NAMA dengan KOLOM (zona),
+# tapi isinya bacaan mentah (int) satu frame terakhir tiap detik,
+# BUKAN rata-rata seperti KOLOM.
+KOLOM_SNAPSHOT = [
     "timestamp",
     "kamera",
     "lengan",
@@ -753,11 +1428,12 @@ def main():
     parser.add_argument(
         "--langkah", type=int, default=5,
         help=(
-            "Proses tiap frame ke-N (default 5, artinya ~6 fps). "
-            "Aman dinaikkan karena cacah zona per frame tidak "
-            "bergantung pada kesinambungan track — beda dengan "
-            "crossing di file asli, yang jejaknya pecah kalau "
-            "frame-nya dilompati."
+            "Proses tiap frame ke-N (default 5, artinya ~6 fps). Aman "
+            "dinaikkan untuk cacah ZONA (tidak bergantung kesinambungan "
+            "track). Untuk CROSSING beda cerita: dinaikkan artinya "
+            "posisi 'sebelumnya' yang dibandingkan makin renggang, jadi "
+            "kendaraan cepat/dekat garis bisa lompat sisi tanpa "
+            "terdeteksi. Turunkan ke 1 kalau angka crossing perlu akurat."
         ),
     )
     parser.add_argument(
@@ -778,6 +1454,13 @@ def main():
             "Proses SATU kamera saja, misal CCTV_1. Default: semua. "
             "Perlu diingat CSV ditulis ulang dari nol tiap run, jadi "
             "run satu-kamera menghasilkan CSV berisi kamera itu saja."
+        ),
+    )
+    parser.add_argument(
+        "--tanpa-tampilan", action="store_true",
+        help=(
+            "Matikan popup cv2.imshow (mis. dijalankan lewat SSH "
+            "tanpa display). Default: popup nyala."
         ),
     )
     args = parser.parse_args()
@@ -816,33 +1499,57 @@ def main():
     print(f"Langkah  : tiap frame ke-{args.langkah}")
     print(f"Jendela  : {WINDOW_DETIK} detik (rata-rata, bukan jumlah)")
     print(f"Kamera   : {', '.join(dipilih)}")
-    print(f"CSV      : {CSV_PATH}")
+    print(f"CSV zona    : {CSV_PATH}")
+    print(f"CSV cross   : {CROSSING_CSV_PATH}")
+    print(f"CSV snapshot: {SNAPSHOT_CSV_PATH}")
 
     statistik = []
+    tampilkan_live = not args.tanpa_tampilan
 
-    # Context manager: berkasnya dijamin ter-flush dan tertutup
-    # walau proses_kamera() melempar exception di tengah jalan,
-    # jadi baris yang sudah ditulis tidak hilang.
-    with open(CSV_PATH, "w", encoding="utf-8", newline="") as f:
-        penulis = csv.DictWriter(f, fieldnames=KOLOM)
-        penulis.writeheader()
+    try:
+        # Context manager: berkasnya dijamin ter-flush dan tertutup
+        # walau jalankan_gabungan() melempar exception di tengah
+        # jalan, jadi baris yang sudah ditulis tidak hilang. Tiga CSV
+        # (zona + crossing + snapshot) dibuka bersarang supaya
+        # sama-sama dijamin ter-flush lewat context manager yang sama.
+        with open(CSV_PATH, "w", encoding="utf-8", newline="") as f, \
+                open(CROSSING_CSV_PATH, "w", encoding="utf-8", newline="") as f_crossing, \
+                open(SNAPSHOT_CSV_PATH, "w", encoding="utf-8", newline="") as f_snapshot:
+            penulis = csv.DictWriter(f, fieldnames=KOLOM)
+            penulis.writeheader()
 
-        for nama_kamera, zona in dipilih.items():
-            totals = proses_kamera(
-                nama_kamera,
-                zona,
+            penulis_crossing = csv.DictWriter(f_crossing, fieldnames=KOLOM_CROSSING)
+            penulis_crossing.writeheader()
+
+            penulis_snapshot = csv.DictWriter(f_snapshot, fieldnames=KOLOM_SNAPSHOT)
+            penulis_snapshot.writeheader()
+
+            # Semua kamera terpilih dibaca round-robin dalam satu loop
+            # dan (kalau tampilkan_live) tiap kamera dapat window
+            # sendiri -- lihat jalankan_gabungan(). Q ditekan
+            # menghentikan semua kamera bersamaan di dalamnya, tapi
+            # baris yang sudah terkumpul tetap dikembalikan.
+            statistik = jalankan_gabungan(
+                dipilih,
                 args.durasi,
                 args.langkah,
                 args.frame_visual,
                 args.imgsz,
                 penulis,
+                penulis_crossing,
+                penulis_snapshot,
+                tampilkan_live,
             )
+    finally:
+        # Selalu dipanggil -- baik selesai normal, ditekan Q, maupun
+        # kalau ada error lain di tengah jalan. Popup yang lupa
+        # ditutup bisa bikin proses OpenCV nyangkut di background.
+        if tampilkan_live:
+            cv2.destroyAllWindows()
 
-            statistik.append(
-                (nama_kamera, zona["nama_lengan"], totals)
-            )
-
-    cetak_cuplikan_csv(20)
+    cetak_cuplikan_csv(20, CSV_PATH)
+    cetak_cuplikan_csv(20, CROSSING_CSV_PATH)
+    cetak_cuplikan_csv(20, SNAPSHOT_CSV_PATH)
     cetak_statistik(statistik)
 
     print()
