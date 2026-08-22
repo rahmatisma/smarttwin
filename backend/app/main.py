@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.routes.traffic import router as traffic_router
-from app.api.routes.cctv import router as cctv_router
+from app.api.routes.cctv import close_hf_client, router as cctv_router
 
 
 app = FastAPI(
@@ -56,3 +56,8 @@ def health():
     return {
         "status": "ok"
     }
+
+
+@app.on_event("shutdown")
+async def shutdown_hf_client():
+    await close_hf_client()

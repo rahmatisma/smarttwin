@@ -17,6 +17,11 @@ pip-cache/
 cv/videos/
 cv/models/
 
+# Cache video CCTV backend (lihat backend/app/api/routes/cctv.py) --
+# salinan lokal video yang sudah pernah ditonton, regenerated dari
+# Hugging Face, tidak pernah perlu di-commit.
+backend/cache/
+
 # Output CV di-ignore secara umum (regenerated tiap run). Dua jenis
 # berkas dikecualikan secara sadar:
 #   1. dataset hasil run Melpi 14 Agustus 2026 — baseline/bukti laporan.

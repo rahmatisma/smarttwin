@@ -13,12 +13,13 @@ bersama cv/output/smarttwin_traffic_data.csv), script ini:
       di-upsert ke Supabase (trafficStates + trafficApproachStates)
       lewat supabase_writer.py, supaya dashboard ter-update sambil
       video masih diproses
-    - selain menghitung, tiap frame juga digambari kotak deteksi
-      (TANPA garis hitung -- itu cuma alat bantu hitung, bukan buat
-      ditonton) lalu ditulis ke video baru supaya halaman CCTV bisa
-      menampilkan hasil deteksinya secara visual. Video anotasi ini
-      diupload sebagai baris cameraVideos BARU (bukan menimpa video
-      asli), lihat supabase_writer.insert_annotated_video().
+    - selain menghitung, tiap frame juga digambari kotak deteksi DAN
+      garis hitung (merah, dari get_line()/COUNTING_LINES) lalu
+      ditulis ke video baru supaya halaman CCTV bisa menampilkan hasil
+      deteksinya secara visual -- termasuk garis yang menentukan
+      crossing, bukan cuma kotaknya. Video anotasi ini diupload
+      sebagai baris cameraVideos BARU (bukan menimpa video asli),
+      lihat supabase_writer.insert_annotated_video().
 
 Konstanta & fungsi murni diimpor dari vehicle_counter.py (aman,
 file itu dijaga `if __name__ == "__main__":` jadi tidak ada proses
@@ -49,6 +50,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import shutil
 import sys
 import tempfile
 import traceback
@@ -91,6 +93,11 @@ WINDOW_SECONDS = 5
 CONFIDENCE = 0.35
 
 BOX_COLOR = (0, 255, 0)
+
+# Merah (BGR), beda dari kotak deteksi (hijau), supaya garis hitung
+# yang dipakai vehicle_counter.py/get_line() kelihatan di video hasil
+# anotasi -- bukan cuma dipakai diam-diam buat hitung crossing.
+LINE_COLOR = (0, 0, 255)
 
 BACKEND_URL = os.environ.get("BACKEND_URL", "http://127.0.0.1:8001")
 
@@ -254,6 +261,46 @@ class WindowAccumulator:
         self.crossing = {}
 
 
+def _prime_backend_cache(local_path: str, video_id: int) -> None:
+    """
+    Salin video anotasi LANGSUNG ke folder cache backend (kalau
+    VIDEO_CACHE_DIR di-set lewat env oleh cv_trigger_service.py dan
+    VIDEO_CACHE_ENABLED tidak "false").
+
+    Kenapa ini penting: file ini BARU SAJA dibuat lokal di mesin yang
+    sama dengan backend (kasus paling umum: dev/production jalan di
+    satu server). Tanpa ini, mesin yang sama yang baru bikin video ini
+    tetap harus upload ke Hugging Face lalu download BALIK begitu ada
+    yang nonton pertama kali -- padahal salinannya sudah ada di sini.
+
+    Best-effort dan TIDAK BOLEH menggagalkan proses utama: kalau
+    VIDEO_CACHE_DIR tidak di-set (mis. dijalankan manual tanpa lewat
+    cv_trigger_service.py) atau gagal karena alasan apapun, cukup
+    lewati diam-diam -- backend tetap punya jalur download dari HF
+    sebagai fallback (dipakai mesin lain yang tidak pernah punya
+    salinan lokal videonya, mis. komputer rekan tim).
+    """
+
+    if os.environ.get("VIDEO_CACHE_ENABLED", "true").lower() == "false":
+        return
+
+    cache_dir = os.environ.get("VIDEO_CACHE_DIR")
+
+    if not cache_dir:
+        return
+
+    try:
+        os.makedirs(cache_dir, exist_ok=True)
+
+        dest = os.path.join(cache_dir, f"{video_id}.mp4")
+
+        shutil.copyfile(local_path, dest)
+
+        print(f"[INFO] Video anotasi disalin ke cache backend: {dest}")
+    except OSError as exc:
+        print(f"[WARNING] Gagal menyalin ke cache backend: {exc}")
+
+
 def upload_annotated_video(
     *,
     local_path: str,
@@ -289,6 +336,8 @@ def upload_annotated_video(
     )
 
     print(f"[INFO] Video anotasi terupload, videoId={video_id}")
+
+    _prime_backend_cache(local_path, video_id)
 
 
 def run(args: argparse.Namespace) -> None:
@@ -349,6 +398,10 @@ def run(args: argparse.Namespace) -> None:
         height, width = frame.shape[:2]
 
         line_p1, line_p2 = get_line(width, height, approach)
+
+        # Digambar SEBELUM kotak deteksi, supaya kotak/kendaraan yang
+        # menimpa garis tetap kelihatan di atasnya, bukan tertutup.
+        cv2.line(frame, line_p1, line_p2, LINE_COLOR, 2)
 
         results = model.track(
             frame,
@@ -490,6 +543,23 @@ def run(args: argparse.Namespace) -> None:
                 codec="libx264",
                 pix_fmt_in="bgr24",
                 pix_fmt_out="yuv420p",
+                # Dibatasi supaya tetap bisa diputar lancar di koneksi
+                # yang naik-turun (diukur ~111-555 KB/s di lapangan).
+                # 800 kbps ~= 100 KB/s dibutuhkan buat playback lancar,
+                # dengan margin aman di bawah titik terendah yang
+                # terukur. TIDAK mempengaruhi akurasi deteksi -- YOLO
+                # sudah selesai jalan di frame resolusi penuh SEBELUM
+                # baris ini; ini cuma pengaturan kompresi video hasil
+                # akhir yang sudah digambari kotak+garis.
+                bitrate="800k",
+                # Taruh index/metadata MP4 (moov atom) di AWAL file,
+                # bukan di akhir (default ffmpeg). Tanpa ini, browser
+                # harus terima hampir seluruh file dulu sebelum tau
+                # durasinya -- untuk video 1-2GB itu buffering lama
+                # sebelum mulai main sama sekali. Ini bisa dilakukan
+                # karena outputnya file biasa (bisa di-seek utk nulis
+                # ulang header), bukan pipe.
+                output_params=["-movflags", "+faststart"],
             )
             annotated_writer.send(None)
 

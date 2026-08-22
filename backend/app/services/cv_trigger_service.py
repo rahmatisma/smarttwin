@@ -34,7 +34,35 @@ from app.services.supabase_client import get_supabase
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 CV_DIR = PROJECT_ROOT / "cv"
 CV_SCRIPT = CV_DIR / "process_uploaded_video.py"
-CV_VENV_PYTHON = CV_DIR / ".venv" / "Scripts" / "python.exe"
+BACKEND_DIR = PROJECT_ROOT / "backend"
+
+# Dipakai cv/process_uploaded_video.py buat nyalin video anotasi
+# LANGSUNG ke folder cache backend begitu selesai dibuat -- tanpa ini,
+# video yang baru saja dibikin lokal harus diupload ke HF dulu lalu
+# didownload balik lagi saat pertama ditonton, padahal salinannya
+# sudah ada di mesin yang sama. Dikirim sebagai absolute path karena
+# cwd subprocess (CV_DIR) beda dari backend/.
+_video_cache_dir_setting = Path(settings.video_cache_dir)
+
+VIDEO_CACHE_DIR_ABSOLUTE = (
+    _video_cache_dir_setting
+    if _video_cache_dir_setting.is_absolute()
+    else BACKEND_DIR / _video_cache_dir_setting
+)
+
+# venv CUDA terpisah DI LUAR repo (torch cu130, ~5.1x lebih cepat dari
+# CPU di cv/.venv). Ultralytics otomatis pakai GPU kalau torch.cuda
+# tersedia di interpreter yang menjalankannya -- tidak ada flag/kode
+# lain yang perlu diubah, cukup ganti python.exe yang dipakai di sini.
+# Fallback ke cv/.venv (CPU) kalau venv CUDA-nya tidak ada di mesin ini.
+_CV_VENV_CUDA_PYTHON = Path("E:/KMIPN 2026/venv-cuda/Scripts/python.exe")
+_CV_VENV_CPU_PYTHON = CV_DIR / ".venv" / "Scripts" / "python.exe"
+
+CV_VENV_PYTHON = (
+    _CV_VENV_CUDA_PYTHON
+    if _CV_VENV_CUDA_PYTHON.exists()
+    else _CV_VENV_CPU_PYTHON
+)
 
 MODEL_NAME = "YOLO26s-ByteTrack"
 MODEL_VERSION = "ultralytics-track"
@@ -131,6 +159,8 @@ def trigger_cv_processing(
                 "HF_TOKEN": settings.hf_token,
                 "HF_REPO_ID": settings.hf_repo_id,
                 "BACKEND_URL": BACKEND_SELF_URL,
+                "VIDEO_CACHE_ENABLED": "true" if settings.video_cache_enabled else "false",
+                "VIDEO_CACHE_DIR": str(VIDEO_CACHE_DIR_ABSOLUTE),
                 # PATH dkk tetap diwariskan lewat env=None secara default;
                 # di sini env DIGANTI total jadi harus disalin manual.
                 **_inherit_essential_env(),
