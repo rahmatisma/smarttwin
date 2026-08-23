@@ -68,47 +68,102 @@ export async function fetchTrafficState(
     return null;
   }
 
-  // [HACK] Bypass Supabase for traffic state to read directly from CSV via Backend API
-  try {
-    const url = new URL("http://127.0.0.1:8000/api/v1/traffic/live-csv");
-    if (videoTime !== undefined) {
-      url.searchParams.append("video_time", videoTime.toString());
-    }
-    const res = await fetch(url.toString(), { cache: "no-store" });
-    if (res.ok) {
-      const json = await res.json();
-      if (json.success && json.data) {
-        // Development logging as requested
-        const totalVehicles = json.data.approaches?.reduce((sum: number, a: any) => sum + a.volume, 0) ?? 0;
-        console.log("CV:", {
-          requestedVideoTime: videoTime,
-          matchedCvTime: json.timestamp,
-          vehicleCount: totalVehicles
-        });
-
-        return {
-          intersectionId,
-          windowStart: json.data.windowStart,
-          windowEnd: json.data.windowEnd,
-          matchedCvTime: json.timestamp,
-          approaches: json.data.approaches ?? [],
-        };
-      }
-    }
-  } catch (e) {
-    console.warn("Gagal fetch live-csv:", e);
-  }
-
-  const { data: state, error: stateError } = await supabase
+  // Dulu di sini ada bypass yang baca langsung dari CSV via backend
+  // (GET /api/v1/traffic/live-csv), yang mencocokkan baris CSV ke
+  // posisi <video>.currentTime -- jadi angkanya berubah mengikuti
+  // video yang sedang diputar. Sekarang datanya diisi ke Supabase
+  // lewat run_ingest.py, tapi perilaku "ikut posisi video" itu tetap
+  // dipertahankan, cuma sumbernya diganti ke database.
+  //
+  // 1. Cari batch ingest PALING BARU (createdAt) -- run_ingest.py
+  //    menulis ratusan baris sekaligus dengan createdAt yang identik
+  //    (satu bulk upsert), jadi createdAt ini menandai "batch mana
+  //    yang sedang aktif ditonton", bukan sekadar satu baris.
+  const { data: latest, error: latestError } = await supabase
     .from("trafficStates")
-    .select("id, windowStart, windowEnd")
+    .select("createdAt")
     .eq("intersectionId", rowId)
-    .order("windowEnd", { ascending: false })
+    .order("createdAt", { ascending: false })
     .limit(1)
     .maybeSingle();
 
-  if (stateError) {
-    throw new Error(`Gagal mengambil traffic state: ${stateError.message}`);
+  if (latestError) {
+    throw new Error(`Gagal mengambil traffic state: ${latestError.message}`);
+  }
+
+  if (!latest) {
+    return null;
+  }
+
+  let state: { id: number; windowStart: string; windowEnd: string } | null =
+    null;
+
+  if (videoTime !== undefined) {
+    // 2. Cari window PERTAMA batch ini -- jadi acuan "detik ke-0"
+    //    video, sama seperti frame_number=0 di CSV lama.
+    const { data: origin, error: originError } = await supabase
+      .from("trafficStates")
+      .select("windowStart")
+      .eq("intersectionId", rowId)
+      .eq("createdAt", latest.createdAt)
+      .order("windowStart", { ascending: true })
+      .limit(1)
+      .maybeSingle();
+
+    if (originError) {
+      throw new Error(
+        `Gagal mengambil awal batch traffic state: ${originError.message}`
+      );
+    }
+
+    if (origin) {
+      // 3. Jam target = jam mulai batch + posisi video sekarang.
+      //    Ambil window yang MELIPUTI jam itu (windowStart <= target,
+      //    diurutkan descending supaya yang paling dekat menang).
+      //    Kalau video sudah lewat durasi data yang ada, ini otomatis
+      //    jatuh ke window TERAKHIR batch (graceful, tidak error).
+      const targetTime = new Date(
+        new Date(origin.windowStart).getTime() + videoTime * 1000
+      ).toISOString();
+
+      const { data: matched, error: matchedError } = await supabase
+        .from("trafficStates")
+        .select("id, windowStart, windowEnd")
+        .eq("intersectionId", rowId)
+        .eq("createdAt", latest.createdAt)
+        .lte("windowStart", targetTime)
+        .order("windowStart", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (matchedError) {
+        throw new Error(
+          `Gagal mencocokkan traffic state ke posisi video: ${matchedError.message}`
+        );
+      }
+
+      state = matched;
+    }
+  }
+
+  if (!state) {
+    // Tidak ada videoTime (pemanggil tidak sedang menonton video
+    // tertentu), atau batch-nya kosong -- jatuh balik ke window
+    // TERAKHIR batch paling baru.
+    const { data: fallback, error: fallbackError } = await supabase
+      .from("trafficStates")
+      .select("id, windowStart, windowEnd")
+      .eq("intersectionId", rowId)
+      .eq("createdAt", latest.createdAt)
+      .order("windowEnd", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (fallbackError) {
+      throw new Error(`Gagal mengambil traffic state: ${fallbackError.message}`);
+    }
+
+    state = fallback;
   }
 
   if (!state) {

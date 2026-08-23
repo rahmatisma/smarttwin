@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from postgrest.exceptions import APIError
@@ -13,6 +13,30 @@ class TrafficRepositoryError(Exception):
     """Error khusus untuk operasi traffic di Supabase."""
 
     pass
+
+
+def _normalize_timestamp_key(value: datetime | str) -> str:
+    """
+    Samakan representasi timestamp supaya bisa dipakai sebagai key
+    dict yang bisa dicocokkan dari dua sumber berbeda:
+
+    - `state.windowStart`/`windowEnd` (naive datetime dari pandas,
+      hasil parsing CSV -- tidak ada info zona waktu).
+    - Baris hasil upsert dari Supabase (kolom timestamptz, jadi
+      postgrest mengembalikannya BERSAMA offset zona waktu, mis.
+      "2026-08-15T16:30:10+00:00").
+
+    Tanpa ini, str(row["windowStart"]) ("...+00:00") tidak pernah
+    sama dengan state.windowStart.isoformat() (tanpa offset) walau
+    detik dan tanggalnya identik -- bulk_upsert_traffic_states akan
+    selalu gagal mencocokkan trafficStateId hasil upsert ke approach
+    row yang mau disimpan.
+    """
+
+    if isinstance(value, str):
+        value = datetime.fromisoformat(value.replace("Z", "+00:00"))
+
+    return value.replace(tzinfo=None).isoformat()
 
 
 class TrafficRepository:
@@ -468,6 +492,18 @@ class TrafficRepository:
 
         supabase = get_supabase()
 
+        # Satu timestamp dipakai untuk SELURUH baris di batch ini,
+        # dikirim eksplisit di payload (bukan mengandalkan DEFAULT
+        # kolom createdAt). Tanpa ini, baris yang sudah ada sebelumnya
+        # (kena UPDATE lewat upsert, bukan INSERT baru) tidak pernah
+        # ikut ter-refresh createdAt-nya -- akibatnya satu batch CSV
+        # yang sama bisa punya createdAt tercecer beda-beda tiap baris
+        # (sebagian dari ingest lama, sebagian dari yang baru), dan
+        # konsumen yang mengelompokkan "batch ingest terbaru" lewat
+        # createdAt (mis. frontend, lihat fetchTrafficState) jadi
+        # cuma dapat sebagian kecil baris, bukan satu batch utuh.
+        batch_created_at = datetime.now(timezone.utc).isoformat()
+
         # ========================================================
         # STEP 1
         # RESOLVE INTERSECTION IDs
@@ -507,6 +543,7 @@ class TrafficRepository:
                     "windowEnd": state.windowEnd.isoformat(),
                     "source": source,
                     "processingJobId": processing_job_id,
+                    "createdAt": batch_created_at,
                 }
             )
 
@@ -559,8 +596,8 @@ class TrafficRepository:
 
             key = (
                 int(row["intersectionId"]),
-                str(row["windowStart"]),
-                str(row["windowEnd"]),
+                _normalize_timestamp_key(row["windowStart"]),
+                _normalize_timestamp_key(row["windowEnd"]),
             )
 
             traffic_state_id_cache[key] = int(
@@ -618,8 +655,8 @@ class TrafficRepository:
 
             traffic_state_key = (
                 intersection_row_id,
-                state.windowStart.isoformat(),
-                state.windowEnd.isoformat(),
+                _normalize_timestamp_key(state.windowStart),
+                _normalize_timestamp_key(state.windowEnd),
             )
 
             traffic_state_id = traffic_state_id_cache.get(
