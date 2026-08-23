@@ -26,6 +26,7 @@ import {
   ALL_INTERSECTIONS,
   getIntersectionName,
   type IntersectionSelection,
+  type ApproachSelection,
 } from "@/lib/intersections";
 
 import type {
@@ -34,9 +35,7 @@ import type {
   Recommendation,
   ForecastResponse,
   VehicleClassCount,
-  ApproachState,
   ForecastPrediction,
-  Approach,
 } from "@/types/traffic";
 
 /*
@@ -165,59 +164,6 @@ function getAggregatedForecast(
     model: "Aggregated LSTM",
     predictions: aggregatedPredictions,
   };
-}
-
-function getAggregatedApproachesByDirection(
-  approaches: ApproachState[]
-): ApproachState[] {
-  const directions: Approach[] = ["north", "south", "east", "west"];
-  return directions.map((dir) => {
-    const dirApproaches = approaches.filter((a) => a.approach === dir);
-    if (dirApproaches.length === 0) {
-      return {
-        approach: dir,
-        volume: 0,
-        carCount: 0,
-        motorcycleCount: 0,
-        busCount: 0,
-        truckCount: 0,
-        queueLengthVeh: 0,
-        queueLengthMEst: 0,
-        densityIndex: 0,
-        avgSpeedKmh: null,
-      };
-    }
-    const speeds = dirApproaches
-      .map((a) => a.avgSpeedKmh)
-      .filter((s): s is number => s !== null);
-
-    return {
-      approach: dir,
-      volume: dirApproaches.reduce((sum, a) => sum + a.volume, 0),
-      carCount: dirApproaches.reduce((sum, a) => sum + a.carCount, 0),
-      motorcycleCount: dirApproaches.reduce(
-        (sum, a) => sum + a.motorcycleCount,
-        0
-      ),
-      busCount: dirApproaches.reduce((sum, a) => sum + a.busCount, 0),
-      truckCount: dirApproaches.reduce((sum, a) => sum + a.truckCount, 0),
-      queueLengthVeh: dirApproaches.reduce(
-        (sum, a) => sum + a.queueLengthVeh,
-        0
-      ),
-      queueLengthMEst: dirApproaches.reduce(
-        (sum, a) => sum + a.queueLengthMEst,
-        0
-      ),
-      densityIndex:
-        dirApproaches.reduce((sum, a) => sum + a.densityIndex, 0) /
-        dirApproaches.length,
-      avgSpeedKmh:
-        speeds.length > 0
-          ? speeds.reduce((sum, s) => sum + s, 0) / speeds.length
-          : null,
-    };
-  });
 }
 
 /*
@@ -433,6 +379,15 @@ export default function DashboardPage() {
 
   const [selectedIntersection, setSelectedIntersection] =
     useState<IntersectionSelection>("all");
+
+  /*
+   * simpang4-pingit adalah SATU simpang 4 lengan, bukan 4 simpang
+   * terpisah — dropdown utama di Header memfilter lengan (approach),
+   * bukan intersectionId. selectedIntersection di atas tetap
+   * dipertahankan apa adanya untuk CameraFeedPanel.
+   */
+  const [selectedApproach, setSelectedApproach] =
+    useState<ApproachSelection>("all");
 
   const [allTrafficStates, setAllTrafficStates] =
     useState<Record<string, TrafficState | null>>({});
@@ -758,11 +713,17 @@ export default function DashboardPage() {
     return getAggregatedForecast(fcst);
   }, [selectedIntersection, allForecasts]);
 
-  const digitalTwinApproaches = useMemo(() => {
-    if (!activeTrafficState) return [];
-    if (selectedIntersection !== "all") return activeTrafficState.approaches;
-    return getAggregatedApproachesByDirection(activeTrafficState.approaches);
-  }, [selectedIntersection, activeTrafficState]);
+  /*
+   * Approaches dari simpang4-pingit (satu-satunya intersection nyata
+   * di database saat ini), difilter berdasarkan lengan yang dipilih
+   * di dropdown Header — bukan berdasarkan selectedIntersection.
+   * Dipakai oleh StatsRow dan DigitalTwinPanel.
+   */
+  const lenganFilteredApproaches = useMemo(() => {
+    const approaches = allTrafficStates["intersection4"]?.approaches ?? [];
+    if (selectedApproach === "all") return approaches;
+    return approaches.filter((a) => a.approach === selectedApproach);
+  }, [selectedApproach, allTrafficStates]);
 
   /*
    * =========================================================
@@ -906,8 +867,8 @@ export default function DashboardPage() {
             =================================================== */}
 
         <Header
-          selectedIntersection={selectedIntersection}
-          onIntersectionChange={setSelectedIntersection}
+          selectedApproach={selectedApproach}
+          onApproachChange={setSelectedApproach}
           locationName="simpang4-pingit"
           coords={(() => {
             const c = allCoords["intersection4"];
@@ -923,7 +884,7 @@ export default function DashboardPage() {
             =================================================== */}
 
         <StatsRow
-          approaches={activeTrafficState.approaches}
+          approaches={lenganFilteredApproaches}
           weather={weather}
         />
 
@@ -938,7 +899,7 @@ export default function DashboardPage() {
             {/* DIGITAL TWIN */}
 
             <DigitalTwinPanel
-              approaches={digitalTwinApproaches}
+              approaches={lenganFilteredApproaches}
               signal={activeSignal}
             />
 
