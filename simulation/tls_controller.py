@@ -4,22 +4,29 @@ from dataclasses import dataclass
 
 
 # ============================================================
-# TLS CONFIGURATION
+# CONFIGURATION
 # ============================================================
 
-TLS_ID = "SIMPANG_CENTER"
+DEFAULT_GREEN_DURATION = 30
+MIN_GREEN_DURATION = 10
+MAX_GREEN_DURATION = 60
+YELLOW_DURATION = 6
 
-PHASE_NS = 0
-PHASE_YELLOW = 1
-PHASE_EW = 2
+NORTH_SOUTH_PHASE = 0
+YELLOW_NS_PHASE = 1
+EAST_WEST_PHASE = 2
 
 
 # ============================================================
 # PHASE PLAN
 # ============================================================
 
-@dataclass
+@dataclass(frozen=True)
 class PhasePlan:
+    """
+    Rencana phase TLS yang akan diberikan ke SUMO.
+    """
+
     phase: int
     duration: int
     reason: str
@@ -33,104 +40,134 @@ class TLSController:
 
     def __init__(
         self,
-        tls_id: str = TLS_ID,
-    ):
+        tls_id: str = "SIMPANG_CENTER",
+    ) -> None:
+
         self.tls_id = tls_id
 
+        self.current_phase = None
+
+        print("TLS Controller berhasil dibuat.")
+
     # ========================================================
-    # CALCULATE PHASE PLAN
+    # TRAFFIC STATE → PHASE PLAN
     # ========================================================
 
-    def calculate_phase_plan(
+    def create_phase_plan(
         self,
-        north_volume: int,
-        south_volume: int,
-        east_volume: int,
-        west_volume: int,
+        traffic_state,
     ) -> PhasePlan:
 
-        ns_volume = (
-            north_volume
-            + south_volume
+        north = self._get_approach(
+            traffic_state,
+            "north",
         )
 
-        ew_volume = (
-            east_volume
-            + west_volume
+        south = self._get_approach(
+            traffic_state,
+            "south",
+        )
+
+        east = self._get_approach(
+            traffic_state,
+            "east",
+        )
+
+        west = self._get_approach(
+            traffic_state,
+            "west",
         )
 
         # ----------------------------------------------------
-        # NS lebih padat
+        # Hitung demand
         # ----------------------------------------------------
 
-        if ns_volume >= ew_volume:
+        ns_demand = (
+            north.queueLengthVeh
+            + south.queueLengthVeh
+        )
+
+        ew_demand = (
+            east.queueLengthVeh
+            + west.queueLengthVeh
+        )
+
+        # ----------------------------------------------------
+        # Jika North/South lebih padat
+        # ----------------------------------------------------
+
+        if ns_demand > ew_demand:
 
             duration = self._calculate_green_duration(
-                ns_volume
+                ns_demand
             )
 
             return PhasePlan(
-                phase=PHASE_NS,
+                phase=NORTH_SOUTH_PHASE,
                 duration=duration,
                 reason=(
-                    "North + South memiliki "
-                    "volume lebih tinggi."
+                    "North/South memiliki "
+                    "queue lebih tinggi."
                 ),
             )
 
         # ----------------------------------------------------
-        # EW lebih padat
+        # Jika East/West lebih padat
         # ----------------------------------------------------
 
-        duration = self._calculate_green_duration(
-            ew_volume
-        )
+        if ew_demand > ns_demand:
+
+            duration = self._calculate_green_duration(
+                ew_demand
+            )
+
+            return PhasePlan(
+                phase=EAST_WEST_PHASE,
+                duration=duration,
+                reason=(
+                    "East/West memiliki "
+                    "queue lebih tinggi."
+                ),
+            )
+
+        # ----------------------------------------------------
+        # Jika sama
+        # ----------------------------------------------------
 
         return PhasePlan(
-            phase=PHASE_EW,
-            duration=duration,
+            phase=NORTH_SOUTH_PHASE,
+            duration=DEFAULT_GREEN_DURATION,
             reason=(
-                "East + West memiliki "
-                "volume lebih tinggi."
+                "Demand seimbang. "
+                "Menggunakan phase default."
             ),
         )
 
     # ========================================================
-    # GREEN DURATION
+    # APPLY TO TRAFFIC LIGHT
     # ========================================================
 
-    def _calculate_green_duration(
+    def apply_phase(
         self,
-        volume: int,
-    ) -> int:
+        traci,
+        phase_plan: PhasePlan,
+    ) -> None:
 
-        # Minimum green
-        if volume <= 5:
-            return 20
+        traci.trafficlight.setPhase(
+            self.tls_id,
+            phase_plan.phase,
+        )
 
-        # Normal
-        if volume <= 15:
-            return 30
+        traci.trafficlight.setPhaseDuration(
+            self.tls_id,
+            phase_plan.duration,
+        )
 
-        # Padat
-        if volume <= 30:
-            return 40
-
-        # Sangat padat
-        return 50
-
-    # ========================================================
-    # PRINT PLAN
-    # ========================================================
-
-    def print_plan(
-        self,
-        plan: PhasePlan,
-    ):
+        self.current_phase = phase_plan.phase
 
         print()
         print("=" * 70)
-        print("TLS PHASE PLAN")
+        print("TLS PHASE APPLIED")
         print("=" * 70)
 
         print(
@@ -138,13 +175,72 @@ class TLSController:
         )
 
         print(
-            f"Phase    : {plan.phase}"
+            f"Phase    : {phase_plan.phase}"
         )
 
         print(
-            f"Duration : {plan.duration}s"
+            f"Duration : {phase_plan.duration}s"
         )
 
         print(
-            f"Reason   : {plan.reason}"
+            f"Reason   : {phase_plan.reason}"
         )
+
+        print("=" * 70)
+
+    # ========================================================
+    # HELPER
+    # ========================================================
+
+    @staticmethod
+    def _get_approach(
+        traffic_state,
+        approach_name: str,
+    ):
+
+        for approach in traffic_state.approaches:
+
+            if (
+                approach.approach.lower()
+                == approach_name
+            ):
+                return approach
+
+        raise ValueError(
+            f"Approach '{approach_name}' "
+            "tidak ditemukan."
+        )
+
+    # ========================================================
+    # GREEN DURATION
+    # ========================================================
+
+    @staticmethod
+    def _calculate_green_duration(
+        queue: int,
+    ) -> int:
+
+        duration = (
+            DEFAULT_GREEN_DURATION
+            + queue
+        )
+
+        duration = max(
+            MIN_GREEN_DURATION,
+            duration,
+        )
+
+        duration = min(
+            MAX_GREEN_DURATION,
+            duration,
+        )
+
+        return int(duration)
+
+    # ========================================================
+    # INFO
+    # ========================================================
+
+    def get_current_phase(self) -> int | None:
+
+        return self.current_phase

@@ -4,936 +4,406 @@ import argparse
 import json
 import os
 import random
+import shutil
 import sys
-import time
-from dataclasses import dataclass
+from collections import defaultdict
 from pathlib import Path
-from typing import Any
-
-import sumolib
-import traci
-from dotenv import load_dotenv
 
 
 # ============================================================
-# PATH CONFIGURATION
+# PATH
 # ============================================================
 
 SIMULATION_ROOT = Path(__file__).resolve().parent
-PROJECT_ROOT = SIMULATION_ROOT.parent
-BACKEND_ROOT = PROJECT_ROOT / "backend"
-
-DEFAULT_NET_FILE = (
-    SIMULATION_ROOT
-    / "network"
-    / "simpang4_pingit.net.xml.gz"
-)
-
-DEFAULT_RESULT_FILE = (
-    SIMULATION_ROOT
-    / "simulation_result.json"
-)
-
-SUMO_HOME = (
-    SIMULATION_ROOT
-    / ".venv"
-    / "Lib"
-    / "site-packages"
-    / "sumo"
-)
 
 
 # ============================================================
-# PYTHON PATH
+# SUMO ENVIRONMENT
 # ============================================================
 
-if str(BACKEND_ROOT) not in sys.path:
-    sys.path.insert(0, str(BACKEND_ROOT))
+def setup_sumo() -> None:
+    """
+    Setup SUMO dari virtual environment simulation.
 
-load_dotenv(BACKEND_ROOT / ".env")
+    SUMO Python package dan executable diasumsikan berada
+    di simulation/.venv.
+    """
 
+    venv_root = SIMULATION_ROOT / ".venv"
 
-# ============================================================
-# TRAFFIC STATE
-# ============================================================
+    scripts_dir = venv_root / "Scripts"
+    site_packages = venv_root / "Lib" / "site-packages"
 
-APPROACHES = (
-    "north",
-    "south",
-    "east",
-    "west",
-)
+    # --------------------------------------------------------
+    # Python SUMO tools
+    # --------------------------------------------------------
 
+    sumo_tools_candidates = [
+        site_packages / "sumo" / "tools",
+        site_packages / "sumo" / "share" / "sumo" / "tools",
+        venv_root / "tools",
+    ]
 
-@dataclass
-class ApproachTraffic:
-    approach: str
-    volume: int
-    carCount: int
-    motorcycleCount: int
-    busCount: int
-    truckCount: int
-    queueLengthVeh: int
-    queueLengthMEst: float
-    densityIndex: float
+    sumo_tools = None
 
+    for candidate in sumo_tools_candidates:
+        if candidate.exists():
+            sumo_tools = candidate
+            break
 
-@dataclass
-class TrafficStateData:
-    trafficStateId: int
-    intersectionId: str
-    windowStart: str
-    windowEnd: str
-    source: str
-    approaches: dict[str, ApproachTraffic]
-
-
-# ============================================================
-# SUMO PATH
-# ============================================================
-
-def get_sumo_binary(gui: bool) -> str:
-    if gui:
-        binary = SUMO_HOME / "bin" / "sumo-gui.exe"
-    else:
-        binary = SUMO_HOME / "bin" / "sumo.exe"
-
-    if not binary.exists():
+    if sumo_tools is None:
         raise RuntimeError(
-            f"SUMO binary tidak ditemukan:\n{binary}"
+            "SUMO tools tidak ditemukan.\n"
+            f"Checked:\n"
+            + "\n".join(str(x) for x in sumo_tools_candidates)
         )
 
-    return str(binary)
-
-
-# ============================================================
-# LOAD TRAFFIC STATE FROM SUPABASE
-# ============================================================
-
-def load_latest_traffic_state(
-    intersection_id: str | None = None,
-) -> TrafficStateData:
-
-    from app.pipeline.traffic_state_builder import (
-        TrafficStateBuilder,
-        TrafficStateBuilderConfig,
-    )
-
-    builder = TrafficStateBuilder(
-        TrafficStateBuilderConfig(
-            windowSeconds=5
-        )
-    )
+    if str(sumo_tools) not in sys.path:
+        sys.path.insert(0, str(sumo_tools))
 
     # --------------------------------------------------------
-    # BUILD TERBARU DARI SUPABASE
+    # Executable
     # --------------------------------------------------------
 
-    if intersection_id:
-        built_state = builder.build_latest_state_for_intersection(
-            intersection_id,
-            save=False,
-        )
-        states = [built_state] if built_state is not None else []
-    else:
-        states = builder.build_latest_states(
-            limit=1,
-            save=False,
-        )
+    sumo_exe = scripts_dir / "sumo.exe"
+    sumo_gui_exe = scripts_dir / "sumo-gui.exe"
 
-    if not states:
-        raise RuntimeError(
-            "Tidak ada TrafficState yang tersedia dari Supabase."
-        )
+    if not sumo_exe.exists():
+        found = shutil.which("sumo")
 
-    state = states[0]
-
-    # --------------------------------------------------------
-    # AMBIL ID TRAFFIC STATE
-    # --------------------------------------------------------
-
-    from app.services.supabase_client import get_supabase
-
-    supabase = get_supabase()
-
-    query = (
-        supabase
-        .table("trafficStates")
-        .select(
-            "id, intersectionId, windowStart, "
-            "windowEnd, source"
-        )
-        .order("id", desc=True)
-        .limit(1)
-    )
-
-    if intersection_id:
-        intersection_result = (
-            supabase
-            .table("intersections")
-            .select("id")
-            .eq("intersectionId", intersection_id)
-            .limit(1)
-            .execute()
-        )
-
-        rows = intersection_result.data or []
-
-        if not rows:
+        if not found:
             raise RuntimeError(
-                f"Intersection '{intersection_id}' tidak ditemukan."
+                "SUMO executable tidak ditemukan.\n"
+                f"Expected: {sumo_exe}"
             )
-
-        intersection_row_id = rows[0]["id"]
-
-        query = (
-            supabase
-            .table("trafficStates")
-            .select(
-                "id, intersectionId, windowStart, "
-                "windowEnd, source"
-            )
-            .eq(
-                "intersectionId",
-                intersection_row_id,
-            )
-            .order("id", desc=True)
-            .limit(1)
-        )
-
-    result = query.execute()
-
-    rows = result.data or []
-
-    if not rows:
-        raise RuntimeError(
-            "TrafficState terbaru tidak ditemukan."
-        )
-
-    row = rows[0]
 
     # --------------------------------------------------------
-    # CONVERT APPROACH
+    # SUMO_HOME
+    #
+    # Untuk pip installation, kita arahkan ke package SUMO.
+    # Jangan mengasumsikan C:\\Program Files.
     # --------------------------------------------------------
 
-    approach_map: dict[str, ApproachTraffic] = {}
+    sumo_package = site_packages / "sumo"
 
-    for approach_name in APPROACHES:
-
-        approach_state = next(
-            (
-                item
-                for item in state.approaches
-                if item.approach == approach_name
-            ),
-            None,
-        )
-
-        if approach_state is None:
-            approach_state = type(
-                "EmptyApproach",
-                (),
-                {
-                    "volume": 0,
-                    "carCount": 0,
-                    "motorcycleCount": 0,
-                    "busCount": 0,
-                    "truckCount": 0,
-                    "queueLengthVeh": 0,
-                    "queueLengthMEst": 0.0,
-                    "densityIndex": 0.0,
-                },
-            )()
-
-        approach_map[approach_name] = ApproachTraffic(
-            approach=approach_name,
-            volume=int(
-                approach_state.volume
-            ),
-            carCount=int(
-                approach_state.carCount
-            ),
-            motorcycleCount=int(
-                approach_state.motorcycleCount
-            ),
-            busCount=int(
-                approach_state.busCount
-            ),
-            truckCount=int(
-                approach_state.truckCount
-            ),
-            queueLengthVeh=int(
-                approach_state.queueLengthVeh
-            ),
-            queueLengthMEst=float(
-                approach_state.queueLengthMEst
-            ),
-            densityIndex=float(
-                approach_state.densityIndex
-            ),
-        )
-
-    return TrafficStateData(
-        trafficStateId=int(row["id"]),
-        intersectionId=str(
-            state.intersectionId
-        ),
-        windowStart=str(
-            state.windowStart
-        ),
-        windowEnd=str(
-            state.windowEnd
-        ),
-        source=str(
-            row.get("source") or "cv"
-        ),
-        approaches=approach_map,
-    )
-
-
-# ============================================================
-# NETWORK
-# ============================================================
-
-def load_network(
-    net_file: Path,
-):
-    if not net_file.exists():
-        raise FileNotFoundError(
-            f"Network SUMO tidak ditemukan:\n{net_file}"
-        )
-
-    print()
-    print("=" * 60)
-    print("LOADING SUMO NETWORK")
-    print("=" * 60)
-    print(f"Network: {net_file}")
-
-    net = sumolib.net.readNet(
-        str(net_file),
-        withInternal=False,
-    )
-
-    return net
-
-
-# ============================================================
-# FIND INTERSECTION CENTER
-# ============================================================
-
-def find_central_junction(net):
-    """
-    Cari junction yang paling cocok sebagai pusat
-    persimpangan berdasarkan jumlah koneksi.
-    """
-
-    junctions = []
-
-    for junction in net.getNodes():
-
-        incoming = junction.getIncoming()
-        outgoing = junction.getOutgoing()
-
-        if not incoming:
-            continue
-
-        if not outgoing:
-            continue
-
-        score = (
-            len(incoming)
-            + len(outgoing)
-        )
-
-        junctions.append(
-            (
-                score,
-                junction,
-            )
-        )
-
-    if not junctions:
-        raise RuntimeError(
-            "Tidak ditemukan junction yang valid."
-        )
-
-    junctions.sort(
-        key=lambda item: item[0],
-        reverse=True,
-    )
-
-    return junctions[0][1]
-
-
-# ============================================================
-# EDGE DISTANCE TO JUNCTION
-# ============================================================
-
-def edge_distance_to_junction(
-    edge,
-    junction,
-) -> float:
-
-    shape = edge.getShape()
-
-    if not shape:
-        return 999999.0
-
-    junction_x, junction_y = (
-        junction.getCoord()
-    )
-
-    last_x, last_y = shape[-1]
-
-    return (
-        (last_x - junction_x) ** 2
-        + (last_y - junction_y) ** 2
-    ) ** 0.5
-
-
-# ============================================================
-# DETECT INCOMING EDGES
-# ============================================================
-
-def detect_incoming_edges(net):
-    junction = find_central_junction(net)
-
-    incoming = junction.getIncoming()
-
-    if not incoming:
-        raise RuntimeError(
-            "Junction tidak mempunyai incoming edge."
-        )
-
-    print()
-    print("=" * 60)
-    print("CENTRAL JUNCTION")
-    print("=" * 60)
-
-    print(
-        f"Junction: {junction.getID()}"
-    )
-
-    print()
-    print("=" * 60)
-    print("INCOMING EDGES")
-    print("=" * 60)
-
-    for edge in incoming:
-        print(
-            f"{edge.getID():30s}"
-            f" length={edge.getLength():.2f}"
-        )
-
-    return junction, list(incoming)
-
-
-# ============================================================
-# CLASSIFY APPROACH BY GEOMETRY
-# ============================================================
-
-def classify_edges(
-    junction,
-    incoming_edges,
-):
-    """
-    Mengelompokkan incoming edge berdasarkan arah
-    posisi ujung edge terhadap junction.
-    """
-
-    junction_x, junction_y = (
-        junction.getCoord()
-    )
-
-    candidates: dict[
-        str,
-        list[tuple[float, Any]]
-    ] = {
-        "north": [],
-        "south": [],
-        "east": [],
-        "west": [],
-    }
-
-    for edge in incoming_edges:
-
-        shape = edge.getShape()
-
-        if not shape:
-            continue
-
-        x, y = shape[0]
-
-        dx = x - junction_x
-        dy = y - junction_y
-
-        distance = (
-            dx * dx
-            + dy * dy
-        ) ** 0.5
-
-        if distance <= 0:
-            continue
-
-        if abs(dx) > abs(dy):
-
-            if dx < 0:
-                approach = "west"
-            else:
-                approach = "east"
-
-        else:
-
-            if dy > 0:
-                approach = "north"
-            else:
-                approach = "south"
-
-        candidates[approach].append(
-            (
-                distance,
-                edge,
-            )
-        )
+    if sumo_package.exists():
+        os.environ["SUMO_HOME"] = str(sumo_package)
 
     # --------------------------------------------------------
-    # SORT BY DISTANCE
+    # Import setelah sys.path siap
     # --------------------------------------------------------
 
-    for approach in candidates:
-        candidates[approach].sort(
-            key=lambda item: item[0]
-        )
+    global sumolib
+    global traci
 
-    print()
-    print("=" * 60)
-    print("DETECTED INCOMING EDGES")
-    print("=" * 60)
+    import sumolib
+    import traci
 
-    for approach in APPROACHES:
 
-        print()
-        print(
-            f"{approach.upper()}:"
-        )
-
-        if not candidates[approach]:
-            print("  NONE")
-            continue
-
-        for index, (
-            distance,
-            edge,
-        ) in enumerate(
-            candidates[approach][:5],
-            start=1,
-        ):
-
-            print(
-                f"  {index}. "
-                f"{edge.getID()} "
-                f"(distance={distance:.2f})"
-            )
-
-    return {
-        approach: (
-            candidates[approach][0][1]
-            if candidates[approach]
-            else None
-        )
-        for approach in APPROACHES
-    }
+setup_sumo()
 
 
 # ============================================================
-# FIND VALID DESTINATION EDGE
+# VEHICLE CONFIGURATION
 # ============================================================
 
-def find_destination_edge(
-    net,
-    start_edge,
-    junction,
-):
-    """
-    Cari outgoing edge yang benar-benar bisa dicapai
-    dari incoming edge.
-    """
-
-    outgoing_edges = list(
-        junction.getOutgoing()
-    )
-
-    if not outgoing_edges:
-        return None
-
-    best_path = None
-    best_cost = float("inf")
-    best_edge = None
-
-    for destination in outgoing_edges:
-
-        if destination == start_edge:
-            continue
-
-        path, cost = (
-            net.getShortestPath(
-                start_edge,
-                destination,
-                vClass="passenger",
-            )
-        )
-
-        if path is None:
-            continue
-
-        if len(path) < 2:
-            continue
-
-        if cost < best_cost:
-            best_cost = cost
-            best_path = path
-            best_edge = destination
-
-    if best_path is None:
-        return None
-
-    return list(best_path)
+VEHICLE_TYPES = {
+    "motorcycle": {
+        "id": "motorcycle",
+        "vclass": "motorcycle",
+        "length": 2.2,
+        "width": 0.9,
+    },
+    "car": {
+        "id": "car",
+        "vclass": "passenger",
+        "length": 5.0,
+        "width": 1.8,
+    },
+    "bus": {
+        "id": "bus",
+        "vclass": "bus",
+        "length": 12.0,
+        "width": 2.5,
+    },
+    "truck": {
+        "id": "truck",
+        "vclass": "truck",
+        "length": 10.0,
+        "width": 2.5,
+    },
+}
 
 
 # ============================================================
-# BUILD VALID ROUTE
+# APPROACH -> SUMO EDGE
+# ============================================================
+
+EDGE_HULU = {
+    "north": "484349908#0",
+    "south": "134603786#0",
+    "east": "153857851#2",
+    "west": "590064461#0",
+}
+
+EDGE_MASUK = {
+    "north": "484349908#2",
+    "south": "134603786#2",
+    "east": "153857851#4",
+    "west": "590064461#2",
+}
+
+EDGE_KELUAR = {
+    "north": "201299423#0",
+    "south": "153857907#0",
+    "east": "590386082#0",
+    "west": "25006154#0",
+}
+
+
+# ============================================================
+# TURN DISTRIBUTION
+# ============================================================
+
+TURN_DISTRIBUTION = {
+    "lurus": 0.50,
+    "kiri": 0.25,
+    "kanan": 0.25,
+}
+
+
+TURN_MAPPING = {
+    "north": {
+        "lurus": "south",
+        "kiri": "east",
+        "kanan": "west",
+    },
+    "south": {
+        "lurus": "north",
+        "kiri": "west",
+        "kanan": "east",
+    },
+    "east": {
+        "lurus": "west",
+        "kiri": "north",
+        "kanan": "south",
+    },
+    "west": {
+        "lurus": "east",
+        "kiri": "south",
+        "kanan": "north",
+    },
+}
+
+
+# ============================================================
+# ROUTE
 # ============================================================
 
 def build_route(
-    net,
-    start_edge,
-    junction,
-):
-    """
-    Menghasilkan route yang valid:
-    
-    incoming edge
-          ↓
-    intersection
-          ↓
-    outgoing edge
-    """
+    approach: str,
+    rng: random.Random,
+) -> list[str]:
 
-    if start_edge is None:
-        return None
+    turn = rng.choices(
+        list(TURN_DISTRIBUTION.keys()),
+        weights=list(TURN_DISTRIBUTION.values()),
+        k=1,
+    )[0]
 
-    path = find_destination_edge(
-        net,
-        start_edge,
-        junction,
-    )
-
-    if not path:
-        return None
+    destination = TURN_MAPPING[approach][turn]
 
     return [
-        edge.getID()
-        for edge in path
+        EDGE_HULU[approach],
+        EDGE_MASUK[approach],
+        EDGE_KELUAR[destination],
     ]
 
 
 # ============================================================
-# GENERATE VEHICLE ROUTES
+# VEHICLE COUNT
 # ============================================================
 
-def generate_vehicle_routes(
-    net,
-    junction,
-    approach_edges,
-    traffic_state,
-    random_seed: int = 42,
-):
-    random.seed(random_seed)
+def vehicle_count_from_approach(
+    approach_state: dict,
+) -> dict[str, int]:
 
-    routes = []
+    volume = int(approach_state.get("volume", 0))
 
-    vehicle_counter = 0
+    if volume <= 0:
+        return {
+            "motorcycle": 0,
+            "car": 0,
+            "bus": 0,
+            "truck": 0,
+        }
 
-    print()
-    print("=" * 60)
-    print("GENERATING VEHICLE ROUTES")
-    print("=" * 60)
+    # --------------------------------------------------------
+    # Temporary distribution.
+    #
+    # Nanti bisa diganti langsung dengan:
+    # motorcycleCount
+    # carCount
+    # busCount
+    # truckCount
+    #
+    # jika schema TrafficState sudah menyediakan semuanya.
+    # --------------------------------------------------------
 
-    for approach in APPROACHES:
+    motorcycle = round(volume * 0.60)
+    car = round(volume * 0.30)
+    bus = round(volume * 0.05)
+    truck = volume - motorcycle - car - bus
 
-        traffic = (
-            traffic_state.approaches[
-                approach
-            ]
-        )
+    return {
+        "motorcycle": motorcycle,
+        "car": car,
+        "bus": bus,
+        "truck": truck,
+    }
 
-        volume = max(
-            0,
-            int(traffic.volume),
-        )
 
-        start_edge = (
-            approach_edges.get(
-                approach
-            )
-        )
+# ============================================================
+# CREATE VEHICLE TYPES
+# ============================================================
 
-        if start_edge is None:
-            if volume > 0:
-                print(
-                    f"WARNING: "
-                    f"{approach.upper()} "
-                    f"tidak memiliki incoming edge."
-                )
-            continue
+def create_vehicle_types() -> None:
 
-        route = build_route(
-            net,
-            start_edge,
-            junction,
-        )
-
-        if not route:
-
-            print(
-                f"WARNING: "
-                f"route {approach.upper()} "
-                f"tidak ditemukan."
-            )
-
-            continue
-
-        print(
-            f"{approach.upper():6s} "
-            f"volume={volume:<4d} "
-            f"route={' '.join(route)}"
-        )
-
-        # ----------------------------------------------------
-        # DISTRIBUTE VEHICLE TYPES
-        # ----------------------------------------------------
-
-        vehicles = []
-
-        vehicles.extend(
-            ["car"] * traffic.carCount
-        )
-
-        vehicles.extend(
-            ["motorcycle"]
-            * traffic.motorcycleCount
-        )
-
-        vehicles.extend(
-            ["bus"] * traffic.busCount
-        )
-
-        vehicles.extend(
-            ["truck"] * traffic.truckCount
-        )
-
-        # Safety apabila classification
-        # tidak sama dengan volume.
-        while len(vehicles) < volume:
-            vehicles.append("car")
-
-        if len(vehicles) > volume:
-            vehicles = vehicles[:volume]
-
-        random.shuffle(vehicles)
-
-        for vehicle_type in vehicles:
-
-            routes.append(
-                {
-                    "id": (
-                        f"veh_{vehicle_counter}"
-                    ),
-                    "approach": approach,
-                    "type": vehicle_type,
-                    "route": route,
-                }
-            )
-
-            vehicle_counter += 1
-
-    print()
-    print(
-        f"Generated vehicles: "
-        f"{len(routes)}"
+    existing = set(
+        traci.vehicletype.getIDList()
     )
 
-    return routes
+    for config in VEHICLE_TYPES.values():
+
+        vehicle_type_id = config["id"]
+
+        if vehicle_type_id in existing:
+            continue
+
+        traci.vehicletype.copy(
+            "DEFAULT_VEHTYPE",
+            vehicle_type_id,
+        )
+
+        traci.vehicletype.setVehicleClass(
+            vehicle_type_id,
+            config["vclass"],
+        )
+
+        traci.vehicletype.setLength(
+            vehicle_type_id,
+            config["length"],
+        )
+
+        traci.vehicletype.setWidth(
+            vehicle_type_id,
+            config["width"],
+        )
 
 
 # ============================================================
-# CREATE SUMO ROUTE FILE
+# ADD VEHICLE
 # ============================================================
 
-def create_route_file(
-    route_file: Path,
-    vehicles,
-):
-    with route_file.open(
-        "w",
-        encoding="utf-8",
-    ) as file:
+def add_vehicle(
+    vehicle_id: str,
+    vehicle_type: str,
+    approach: str,
+    rng: random.Random,
+) -> bool:
 
-        file.write(
-            '<?xml version="1.0" encoding="UTF-8"?>\n'
+    route_id = f"route_{vehicle_id}"
+
+    edges = build_route(
+        approach,
+        rng,
+    )
+
+    try:
+
+        traci.route.add(
+            route_id,
+            edges,
         )
 
-        file.write("<routes>\n")
-
-        # ----------------------------------------------------
-        # VEHICLE TYPES
-        # ----------------------------------------------------
-
-        file.write(
-            '    <vType '
-            'id="car" '
-            'vClass="passenger" '
-            'accel="2.6" '
-            'decel="4.5" '
-            'sigma="0.5" '
-            'length="4.5" '
-            'maxSpeed="13.9"/>\n'
+        traci.vehicle.add(
+            vehID=vehicle_id,
+            routeID=route_id,
+            typeID=vehicle_type,
+            depart="now",
         )
 
-        file.write(
-            '    <vType '
-            'id="motorcycle" '
-            'vClass="motorcycle" '
-            'accel="3.0" '
-            'decel="5.0" '
-            'sigma="0.5" '
-            'length="2.0" '
-            'maxSpeed="15.0"/>\n'
+        return True
+
+    except traci.TraCIException as exc:
+
+        print(
+            f"[WARNING] vehicle {vehicle_id} gagal dibuat: {exc}"
         )
 
-        file.write(
-            '    <vType '
-            'id="bus" '
-            'vClass="bus" '
-            'accel="1.2" '
-            'decel="3.0" '
-            'sigma="0.5" '
-            'length="12.0" '
-            'maxSpeed="12.0"/>\n'
-        )
-
-        file.write(
-            '    <vType '
-            'id="truck" '
-            'vClass="truck" '
-            'accel="1.2" '
-            'decel="3.0" '
-            'sigma="0.5" '
-            'length="8.0" '
-            'maxSpeed="12.0"/>\n'
-        )
-
-        # ----------------------------------------------------
-        # ROUTES
-        # ----------------------------------------------------
-
-        route_cache = {}
-
-        route_counter = 0
-
-        for vehicle in vehicles:
-
-            route_tuple = tuple(
-                vehicle["route"]
-            )
-
-            if route_tuple not in route_cache:
-
-                route_id = (
-                    f"route_{route_counter}"
-                )
-
-                route_cache[
-                    route_tuple
-                ] = route_id
-
-                file.write(
-                    f'    <route '
-                    f'id="{route_id}" '
-                    f'edges="'
-                    f'{" ".join(route_tuple)}'
-                    f'"/>\n'
-                )
-
-                route_counter += 1
-
-        # ----------------------------------------------------
-        # VEHICLES
-        # ----------------------------------------------------
-
-        for index, vehicle in enumerate(
-            vehicles
-        ):
-
-            route_id = route_cache[
-                tuple(vehicle["route"])
-            ]
-
-            depart = (
-                index * 0.5
-            )
-
-            file.write(
-                f'    <vehicle '
-                f'id="{vehicle["id"]}" '
-                f'type="{vehicle["type"]}" '
-                f'route="{route_id}" '
-                f'depart="{depart:.2f}" '
-                f'departLane="best" '
-                f'departSpeed="max"/>\n'
-            )
-
-        file.write("</routes>\n")
+        return False
 
 
 # ============================================================
-# RUN SUMO
+# SIMULATION
 # ============================================================
 
-def run_sumo(
+def run_simulation(
+    traffic_state: dict,
     net_file: Path,
-    route_file: Path,
-    output_file: Path,
     duration: int,
     gui: bool,
     gui_delay: int,
-):
-    sumo_binary = get_sumo_binary(
-        gui
-    )
+    seed: int,
+) -> dict:
+
+    rng = random.Random(seed)
+
+    # --------------------------------------------------------
+    # SUMO binary
+    # --------------------------------------------------------
+
+    if gui:
+        binary = shutil.which("sumo-gui")
+
+        if not binary:
+            binary = (
+                SIMULATION_ROOT
+                / ".venv"
+                / "Scripts"
+                / "sumo-gui.exe"
+            )
+
+    else:
+        binary = shutil.which("sumo")
+
+        if not binary:
+            binary = (
+                SIMULATION_ROOT
+                / ".venv"
+                / "Scripts"
+                / "sumo.exe"
+            )
+
+    binary = str(binary)
+
+    if not Path(binary).exists():
+        raise RuntimeError(
+            f"SUMO binary tidak ditemukan: {binary}"
+        )
+
+    # --------------------------------------------------------
+    # COMMAND
+    # --------------------------------------------------------
 
     command = [
-        sumo_binary,
-
-        "--net-file",
+        binary,
+        "-n",
         str(net_file),
-
-        "--route-files",
-        str(route_file),
-
-        "--begin",
-        "0",
-
-        "--end",
-        str(duration),
-
         "--step-length",
         "1",
-
-        "--seed",
-        "42",
-
-        "--quit-on-end",
+        "--no-step-log",
+        "--no-warnings",
     ]
 
     if gui:
@@ -945,178 +415,270 @@ def run_sumo(
             ]
         )
 
-    print()
-    print("=" * 60)
-    print("RUNNING SUMO")
-    print("=" * 60)
-
-    print(
-        f"SUMO     : {sumo_binary}"
-    )
-
-    print(
-        f"Network  : {net_file}"
-    )
-
-    print(
-        f"Routes   : {route_file}"
-    )
-
-    print(
-        f"Duration : {duration}"
-    )
-
-    print(
-        f"GUI      : {gui}"
-    )
+    # --------------------------------------------------------
+    # HEADER
+    # --------------------------------------------------------
 
     print()
+    print("=" * 70)
+    print("SMARTTWIN SUMO SIMULATION")
+    print("=" * 70)
+    print(f"Network  : {net_file}")
+    print(f"Duration : {duration} seconds")
+    print(f"GUI      : {gui}")
+    print(f"SUMO     : {binary}")
+    print()
 
-    traci.start(
-        command
-    )
+    # --------------------------------------------------------
+    # START
+    # --------------------------------------------------------
 
-    simulation_data = {
-        "simulation": {
-            "durationSeconds": duration,
-            "gui": gui,
-        },
-        "vehicles": {},
-        "steps": [],
-    }
+    traci.start(command)
 
     try:
 
-        while (
-            traci.simulation
-            .getTime()
-            < duration
-        ):
+        create_vehicle_types()
+
+        approaches = traffic_state.get(
+            "approaches",
+            [],
+        )
+
+        # ----------------------------------------------------
+        # TARGET
+        # ----------------------------------------------------
+
+        target = {}
+
+        for approach_state in approaches:
+
+            approach = approach_state["approach"]
+
+            counts = vehicle_count_from_approach(
+                approach_state
+            )
+
+            target[approach] = counts
+
+        print("TrafficState:")
+        print(
+            f"  ID          : "
+            f"{traffic_state.get('trafficStateId', '-')}"
+        )
+
+        print(
+            f"  Intersection: "
+            f"{traffic_state.get('intersectionId', '-')}"
+        )
+
+        print()
+
+        for approach, counts in target.items():
+
+            print(
+                f"  {approach:<7} "
+                f"motor={counts['motorcycle']:<4} "
+                f"car={counts['car']:<4} "
+                f"bus={counts['bus']:<4} "
+                f"truck={counts['truck']:<4}"
+            )
+
+        print()
+
+        # ----------------------------------------------------
+        # STATISTICS
+        # ----------------------------------------------------
+
+        departed = defaultdict(int)
+        arrived = defaultdict(int)
+
+        waiting_times = defaultdict(list)
+
+        spawned = 0
+
+        # ----------------------------------------------------
+        # SIMULATION LOOP
+        # ----------------------------------------------------
+
+        for second in range(duration):
+
+            # ------------------------------------------------
+            # Inject vehicles
+            # ------------------------------------------------
+
+            for approach, counts in target.items():
+
+                for vehicle_type, total in counts.items():
+
+                    if total <= 0:
+                        continue
+
+                    interval = max(
+                        1,
+                        duration // total,
+                    )
+
+                    if second % interval != 0:
+                        continue
+
+                    index = second // interval
+
+                    if index >= total:
+                        continue
+
+                    vehicle_id = (
+                        f"{vehicle_type}_"
+                        f"{approach}_"
+                        f"{second}_"
+                        f"{index}"
+                    )
+
+                    success = add_vehicle(
+                        vehicle_id=vehicle_id,
+                        vehicle_type=vehicle_type,
+                        approach=approach,
+                        rng=rng,
+                    )
+
+                    if success:
+                        spawned += 1
+
+            # ------------------------------------------------
+            # STEP
+            # ------------------------------------------------
 
             traci.simulationStep()
 
-            current_time = (
-                traci.simulation
-                .getTime()
-            )
-
-            vehicle_ids = (
-                traci.vehicle
-                .getIDList()
-            )
-
             # ------------------------------------------------
-            # VEHICLE STATE
+            # DEPARTED
             # ------------------------------------------------
 
-            current_vehicles = []
+            for vehicle_id in (
+                traci.simulation.getDepartedIDList()
+            ):
 
-            for vehicle_id in vehicle_ids:
+                parts = vehicle_id.split("_")
 
-                vehicle_type = (
-                    traci.vehicle
-                    .getTypeID(
-                        vehicle_id
-                    )
+                approach = (
+                    parts[1]
+                    if len(parts) > 1
+                    else "unknown"
                 )
 
-                edge_id = (
-                    traci.vehicle
-                    .getRoadID(
-                        vehicle_id
-                    )
+                departed[approach] += 1
+
+            # ------------------------------------------------
+            # ARRIVED
+            # ------------------------------------------------
+
+            for vehicle_id in (
+                traci.simulation.getArrivedIDList()
+            ):
+
+                parts = vehicle_id.split("_")
+
+                approach = (
+                    parts[1]
+                    if len(parts) > 1
+                    else "unknown"
                 )
 
-                speed = (
-                    traci.vehicle
-                    .getSpeed(
-                        vehicle_id
-                    )
-                )
+                arrived[approach] += 1
+
+            # ------------------------------------------------
+            # WAITING
+            # ------------------------------------------------
+
+            for vehicle_id in traci.vehicle.getIDList():
+
+                parts = vehicle_id.split("_")
+
+                if len(parts) <= 1:
+                    continue
+
+                approach = parts[1]
 
                 waiting = (
                     traci.vehicle
-                    .getWaitingTime(
+                    .getAccumulatedWaitingTime(
                         vehicle_id
                     )
                 )
 
-                current_vehicles.append(
-                    {
-                        "id": vehicle_id,
-                        "type": vehicle_type,
-                        "edge": edge_id,
-                        "speedKmh": (
-                            speed * 3.6
-                        ),
-                        "waitingTime": waiting,
-                    }
-                )
-
-            simulation_data[
-                "steps"
-            ].append(
-                {
-                    "time": current_time,
-                    "vehicleCount": len(
-                        vehicle_ids
-                    ),
-                    "vehicles": current_vehicles,
-                }
-            )
-
-            if (
-                gui
-                and gui_delay > 0
-            ):
-                time.sleep(
-                    gui_delay / 1000
+                waiting_times[approach].append(
+                    waiting
                 )
 
         # ----------------------------------------------------
-        # FINAL VEHICLE DATA
+        # METRICS
         # ----------------------------------------------------
 
-        for vehicle_id in (
-            traci.vehicle
-            .getIDList()
-        ):
+        all_waiting = []
 
-            simulation_data[
-                "vehicles"
-            ][vehicle_id] = {
-                "type": (
-                    traci.vehicle
-                    .getTypeID(
-                        vehicle_id
-                    )
+        for values in waiting_times.values():
+            all_waiting.extend(values)
+
+        average_waiting = (
+            sum(all_waiting) / len(all_waiting)
+            if all_waiting
+            else 0.0
+        )
+
+        total_departed = sum(
+            departed.values()
+        )
+
+        total_arrived = sum(
+            arrived.values()
+        )
+
+        active = traci.vehicle.getIDCount()
+
+        result = {
+
+            "trafficStateId":
+                traffic_state.get(
+                    "trafficStateId"
                 ),
-                "edge": (
-                    traci.vehicle
-                    .getRoadID(
-                        vehicle_id
-                    )
+
+            "intersectionId":
+                traffic_state.get(
+                    "intersectionId"
                 ),
-                "speedKmh": (
-                    traci.vehicle
-                    .getSpeed(
-                        vehicle_id
-                    )
-                    * 3.6
+
+            "durationSeconds":
+                duration,
+
+            "spawnedVehicles":
+                spawned,
+
+            "departedVehicles":
+                total_departed,
+
+            "arrivedVehicles":
+                total_arrived,
+
+            "activeVehicles":
+                active,
+
+            "averageWaitingTimeSeconds":
+                round(
+                    average_waiting,
+                    2,
                 ),
-            }
+
+            "departedByApproach":
+                dict(departed),
+
+            "arrivedByApproach":
+                dict(arrived),
+        }
+
+        return result
 
     finally:
 
         traci.close()
-
-    output_file.write_text(
-        json.dumps(
-            simulation_data,
-            indent=2,
-        ),
-        encoding="utf-8",
-    )
 
 
 # ============================================================
@@ -1126,39 +688,34 @@ def run_sumo(
 def main():
 
     parser = argparse.ArgumentParser(
-        description=(
-            "SmartTwin SUMO Simulation Runner"
-        )
+        description="SmartTwin SUMO TrafficState Runner"
     )
 
     parser.add_argument(
-        "--intersection-id",
-        default=None,
-        help=(
-            "intersectionId dari Supabase. "
-            "Jika kosong, gunakan intersection "
-            "terbaru yang memiliki TrafficState."
-        ),
-    )
-
-    parser.add_argument(
-        "--net-file",
-        default=str(
-            DEFAULT_NET_FILE
-        ),
+        "--input",
+        required=True,
     )
 
     parser.add_argument(
         "--output",
-        default=str(
-            DEFAULT_RESULT_FILE
-        ),
+        required=True,
+    )
+
+    parser.add_argument(
+        "--net-file",
+        required=True,
     )
 
     parser.add_argument(
         "--duration",
         type=int,
-        default=60,
+        required=True,
+    )
+
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=42,
     )
 
     parser.add_argument(
@@ -1172,201 +729,60 @@ def main():
         default=100,
     )
 
-    parser.add_argument(
-        "--seed",
-        type=int,
-        default=42,
-    )
-
     args = parser.parse_args()
 
-    net_file = Path(
-        args.net_file
-    ).resolve()
+    input_file = Path(args.input)
+    output_file = Path(args.output)
+    net_file = Path(args.net_file)
 
-    output_file = Path(
-        args.output
-    ).resolve()
-
-    # ========================================================
-    # LOAD TRAFFIC STATE FROM SUPABASE
-    # ========================================================
-
-    print()
-    print("=" * 60)
-    print("SMARTTWIN SUMO RUNNER")
-    print("=" * 60)
-
-    print(
-        "Source : Supabase"
-    )
-
-    print(
-        "Mode   : TrafficState terbaru"
-    )
-
-    if args.intersection_id:
-        print(
-            f"Target : "
-            f"{args.intersection_id}"
-        )
-    else:
-        print(
-            "Target : ALL / latest"
-        )
-
-    traffic_state = (
-        load_latest_traffic_state(
-            args.intersection_id
-        )
-    )
-
-    print()
-    print("=" * 60)
-    print("TRAFFIC STATE")
-    print("=" * 60)
-
-    print(
-        f"ID           : "
-        f"{traffic_state.trafficStateId}"
-    )
-
-    print(
-        f"Intersection : "
-        f"{traffic_state.intersectionId}"
-    )
-
-    print(
-        f"Window       : "
-        f"{traffic_state.windowStart}"
-        f" -> "
-        f"{traffic_state.windowEnd}"
-    )
-
-    print(
-        f"Source       : "
-        f"{traffic_state.source}"
-    )
-
-    for approach in APPROACHES:
-
-        traffic = (
-            traffic_state.approaches[
-                approach
-            ]
-        )
-
-        print(
-            f"{approach.upper():7s} "
-            f"| volume={traffic.volume:<4d} "
-            f"| car={traffic.carCount:<4d} "
-            f"| motor={traffic.motorcycleCount:<4d} "
-            f"| bus={traffic.busCount:<4d} "
-            f"| truck={traffic.truckCount:<4d} "
-            f"| queue={traffic.queueLengthVeh:<4d}"
-        )
-
-    # ========================================================
-    # LOAD NETWORK
-    # ========================================================
-
-    net = load_network(
-        net_file
-    )
-
-    # ========================================================
-    # FIND JUNCTION
-    # ========================================================
-
-    junction, incoming_edges = (
-        detect_incoming_edges(
-            net
-        )
-    )
-
-    # ========================================================
-    # CLASSIFY APPROACH
-    # ========================================================
-
-    approach_edges = (
-        classify_edges(
-            junction,
-            incoming_edges,
-        )
-    )
-
-    # ========================================================
-    # GENERATE VALID VEHICLES
-    # ========================================================
-
-    vehicles = (
-        generate_vehicle_routes(
-            net,
-            junction,
-            approach_edges,
-            traffic_state,
-            random_seed=args.seed,
-        )
-    )
-
-    if not vehicles:
+    if not input_file.exists():
         raise RuntimeError(
-            "Tidak ada kendaraan yang berhasil "
-            "dibuat. Periksa volume TrafficState "
-            "dan mapping edge network."
+            f"Input TrafficState tidak ditemukan: {input_file}"
         )
 
-    # ========================================================
-    # TEMP ROUTE FILE
-    # ========================================================
-
-    import tempfile
-
-    with tempfile.TemporaryDirectory(
-        prefix="smarttwin-sumo-"
-    ) as temp_dir:
-
-        route_file = (
-            Path(temp_dir)
-            / "traffic.rou.xml"
+    if not net_file.exists():
+        raise RuntimeError(
+            f"Network SUMO tidak ditemukan: {net_file}"
         )
 
-        create_route_file(
-            route_file,
-            vehicles,
+    traffic_state = json.loads(
+        input_file.read_text(
+            encoding="utf-8"
         )
+    )
 
-        # ====================================================
-        # RUN
-        # ====================================================
+    result = run_simulation(
+        traffic_state=traffic_state,
+        net_file=net_file,
+        duration=args.duration,
+        gui=args.gui,
+        gui_delay=args.gui_delay,
+        seed=args.seed,
+    )
 
-        run_sumo(
-            net_file=net_file,
-            route_file=route_file,
-            output_file=output_file,
-            duration=args.duration,
-            gui=args.gui,
-            gui_delay=args.gui_delay,
-        )
+    output_file.parent.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    output_file.write_text(
+        json.dumps(
+            result,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
 
     print()
-    print("=" * 60)
-    print("SUMO SIMULATION SELESAI")
-    print("=" * 60)
+    print("=" * 70)
+    print("SIMULATION SELESAI")
+    print("=" * 70)
 
     print(
-        f"TrafficState : "
-        f"{traffic_state.trafficStateId}"
-    )
-
-    print(
-        f"Vehicles     : "
-        f"{len(vehicles)}"
-    )
-
-    print(
-        f"Result       : "
-        f"{output_file}"
+        json.dumps(
+            result,
+            indent=2,
+        )
     )
 
 

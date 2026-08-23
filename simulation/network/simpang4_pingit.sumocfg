@@ -1,0 +1,9 @@
+<configuration>
+    <input>
+        <net-file value="simpang4_pingit.net.xml.gz"/>
+    </input>
+    <time>
+        <begin value="0"/>
+        <end value="3600"/>
+    </time>
+</configuration>

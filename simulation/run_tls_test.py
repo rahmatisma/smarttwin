@@ -9,9 +9,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-from simulation.tls_controller import TLSController
-
-from simulation.tls_controller import TLSController
+from tls_controller import TLSController
 
 
 # ============================================================

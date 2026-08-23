@@ -2,111 +2,173 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.schemas.traffic import TrafficState
+from app.pipeline.traffic_state_builder import BuiltTrafficState
 
 
 class SumoTrafficStateAdapter:
     """
-    Adapter yang mengubah TrafficState dari backend menjadi
-    format demand sederhana yang dapat digunakan oleh SUMO.
+    Adapter yang mengubah BuiltTrafficState backend
+    menjadi traffic demand yang dapat digunakan oleh SUMO.
 
-    TrafficState
-        ↓
-    SumoTrafficStateAdapter
-        ↓
-    SUMO demand
+    Alur:
+
+        Traffic State Builder
+                ↓
+        BuiltTrafficState
+                ↓
+        SumoTrafficStateAdapter
+                ↓
+        SUMO demand
     """
+
+    # ========================================================
+    # VALID APPROACHES
+    # ========================================================
+
+    VALID_APPROACHES = {
+        "north",
+        "south",
+        "east",
+        "west",
+    }
+
+    # ========================================================
+    # INIT
+    # ========================================================
 
     def __init__(
         self,
         approach_to_edge: dict[str, str],
     ) -> None:
         """
-        Mapping antara nama approach dengan edge SUMO.
+        Parameters
+        ----------
+        approach_to_edge:
+            Mapping approach backend ke edge SUMO.
 
         Contoh:
 
             {
-                "north": "north_in",
-                "south": "south_in",
-                "east": "east_in",
-                "west": "west_in",
+                "north": "484349908#2",
+                "south": "134603786#2",
+                "east": "153857851#4",
+                "west": "590064461#2",
             }
         """
 
         self.approach_to_edge = {
-            str(key).lower(): str(value)
+            str(key).lower().strip(): str(value)
             for key, value in approach_to_edge.items()
         }
 
     # ========================================================
-    # TRAFFIC STATE -> SUMO DEMAND
+    # TO DEMAND
     # ========================================================
 
     def to_demand(
         self,
-        state: TrafficState,
+        state: BuiltTrafficState,
     ) -> list[dict[str, Any]]:
         """
-        Mengubah satu TrafficState menjadi daftar demand SUMO.
+        Mengubah BuiltTrafficState menjadi SUMO demand.
+
+        Input:
+
+            BuiltTrafficState
+                ↓
+            approaches
+                ↓
+            ApproachState
 
         Output:
 
             [
                 {
-                    "approach": "south",
-                    "edge_id": "south_in",
+                    "approach": "north",
+                    "edge_id": "484349908#2",
                     "volume": 10,
+                    "motorcycleCount": 6,
+                    "carCount": 3,
+                    "busCount": 1,
+                    "truckCount": 0,
                 }
             ]
-
-        Catatan:
-        Adapter ini BELUM menjalankan SUMO.
-
-        Tugasnya hanya menerjemahkan data backend
-        ke format yang dapat digunakan simulation layer.
         """
 
         demand: list[dict[str, Any]] = []
 
         for approach_state in state.approaches:
 
-            # ------------------------------------------------
-            # Normalisasi nama approach
-            # ------------------------------------------------
-
             approach_name = str(
                 approach_state.approach
-            ).lower()
+            ).lower().strip()
 
             # ------------------------------------------------
-            # Cari edge SUMO
+            # VALIDATE APPROACH
             # ------------------------------------------------
 
-            edge_id = self.approach_to_edge.get(
+            if (
                 approach_name
-            )
+                not in self.VALID_APPROACHES
+            ):
+                continue
 
             # ------------------------------------------------
-            # Kalau approach belum memiliki mapping,
-            # jangan membuat edge SUMO palsu.
-            #
-            # Approach tersebut dilewati.
+            # GET SUMO EDGE
             # ------------------------------------------------
+
+            edge_id = (
+                self.approach_to_edge.get(
+                    approach_name
+                )
+            )
 
             if edge_id is None:
                 continue
 
             # ------------------------------------------------
-            # Buat demand
+            # BUILD DEMAND
             # ------------------------------------------------
 
             demand.append(
                 {
                     "approach": approach_name,
+
                     "edge_id": edge_id,
-                    "volume": int(
-                        approach_state.volume
+
+                    "volume": max(
+                        0,
+                        int(
+                            approach_state.volume
+                        ),
+                    ),
+
+                    "motorcycleCount": max(
+                        0,
+                        int(
+                            approach_state.motorcycleCount
+                        ),
+                    ),
+
+                    "carCount": max(
+                        0,
+                        int(
+                            approach_state.carCount
+                        ),
+                    ),
+
+                    "busCount": max(
+                        0,
+                        int(
+                            approach_state.busCount
+                        ),
+                    ),
+
+                    "truckCount": max(
+                        0,
+                        int(
+                            approach_state.truckCount
+                        ),
                     ),
                 }
             )

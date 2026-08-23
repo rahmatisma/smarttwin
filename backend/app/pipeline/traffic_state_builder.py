@@ -2,10 +2,16 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
+import sys
+from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 from supabase import Client
+
+BACKEND_ROOT = Path(__file__).resolve().parents[2]
+if str(BACKEND_ROOT) not in sys.path:
+    sys.path.insert(0, str(BACKEND_ROOT))
 
 from app.services.supabase_client import get_supabase
 
@@ -29,6 +35,12 @@ EXPECTED_APPROACHES = (
 # ============================================================
 
 class ApproachTrafficState(BaseModel):
+    """
+    Kondisi lalu lintas pada satu approach.
+
+    Model ini disesuaikan dengan schema backend terbaru.
+    """
+
     approach: str
 
     volume: int = 0
@@ -47,6 +59,13 @@ class ApproachTrafficState(BaseModel):
 
 
 class BuiltTrafficState(BaseModel):
+    """
+    Traffic state hasil agregasi dari database.
+
+    Ini merupakan format yang nantinya bisa langsung
+    dikonsumsi oleh modul SUMO / TLS controller.
+    """
+
     trafficStateId: int
 
     intersectionId: str
@@ -60,7 +79,7 @@ class BuiltTrafficState(BaseModel):
 
 
 # ============================================================
-# CONFIG
+# BUILDER CONFIG
 # ============================================================
 
 @dataclass(frozen=True)
@@ -80,40 +99,50 @@ class TrafficStateBuilderConfig:
 
 class TrafficStateBuilder:
     """
-    Traffic State Builder.
+    Traffic State Builder SmartTwin.
 
-    Sumber data:
+    Arsitektur:
 
         YOLO / Computer Vision
-                |
-                v
-        trafficStates
                 |
                 v
         trafficLaneMetrics
                 |
                 v
-        lanes
+              lanes
                 |
                 v
-        approaches
+            approaches
                 |
                 v
-        intersections
+          intersections
+                |
+                v
+        BuiltTrafficState
+                |
+                v
+              SUMO
 
-    Builder melakukan:
+    Builder ini:
 
-        1. Ambil trafficStates
-        2. Ambil trafficLaneMetrics
-        3. Hubungkan lane -> approach -> intersection
-        4. Kelompokkan metric berdasarkan approach
-        5. Hitung aggregate traffic state
-        6. Simpan hasil ke trafficApproachStates
-        7. Kembalikan data yang siap dipakai SUMO
+    1. Mengambil trafficStates dari Supabase.
+    2. Mengambil trafficLaneMetrics.
+    3. Menghubungkan lane -> approach -> intersection.
+    4. Mengelompokkan metric berdasarkan approach.
+    5. Mengagregasikan metric setiap approach.
+    6. Menghasilkan 4 approach:
+       north, south, east, west.
+    7. Menyimpan hasil ke trafficApproachStates.
+    8. Menghasilkan BuiltTrafficState untuk SUMO.
 
     Tidak bergantung pada CSV.
+
     Tidak dikunci ke satu intersection.
     """
+
+    # ========================================================
+    # INIT
+    # ========================================================
 
     def __init__(
         self,
@@ -127,354 +156,36 @@ class TrafficStateBuilder:
             else TrafficStateBuilderConfig()
         )
 
-        self.supabase = supabase or get_supabase()
+        self.supabase = (
+            supabase
+            if supabase is not None
+            else get_supabase()
+        )
 
     # ========================================================
     # INTERSECTIONS
     # ========================================================
 
-<<<<<<< HEAD
-    def loadCvOutput(
+    def get_active_intersections(
         self,
-        crossPath: str | Path,
-        densityPath: str | Path,
-    ) -> pd.DataFrame:
-        """
-        Membaca dan menggabungkan output asli dari Computer Vision.
-=======
-    def get_active_intersections(self) -> list[dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """
         Mengambil seluruh intersection aktif.
->>>>>>> 6147cc07d11ab5910b7a950bceb53a0fe3c1d7a8
         """
-        crossPath = Path(crossPath)
-        densityPath = Path(densityPath)
 
-<<<<<<< HEAD
-        if not crossPath.exists() or not densityPath.exists():
-            raise FileNotFoundError("Satu atau lebih CSV CV output tidak ditemukan.")
-
-        df_cross = pd.read_csv(crossPath)
-        df_density = pd.read_csv(densityPath)
-
-        # 1. Standardize Timestamps
-        df_cross["timestamp"] = pd.to_datetime(df_cross["timestamp"], errors="coerce")
-        df_density["timestamp"] = pd.to_datetime(df_density["timestamp"], errors="coerce")
-
-        if df_cross.empty and df_density.empty:
-            return pd.DataFrame(columns=REQUIRED_COLUMNS)
-
-        # 2. Map Kamera to Approach (Hard override berdasarkan spec)
-        camera_map = {
-            "CCTV_1": "south",
-            "CCTV_2": "west",
-            "CCTV_3": "east",
-            "CCTV_4": "north",
-        }
-
-        df_cross["approach"] = df_cross["kamera"].map(camera_map)
-        df_density["approach"] = df_density["kamera"].map(camera_map)
-
-        # Drop rows without known camera
-        df_cross = df_cross.dropna(subset=["approach"])
-        df_density = df_density.dropna(subset=["approach"])
-
-        # 3. Aggregate crossing per timestamp & approach
-        cross_agg = df_cross.groupby(["timestamp", "approach"], as_index=False).agg({
-            "jumlah_crossing": "sum",
-            "motor_crossing": "sum",
-            "mobil_crossing": "sum",
-            "truk_crossing": "sum",
-            "bus_crossing": "sum",
-        })
-
-        # Aggregate density per timestamp & approach
-        density_agg = df_density.groupby(["timestamp", "approach"], as_index=False).agg({
-            "total_di_zona": "mean",
-            "motor_di_zona": "mean",
-            "mobil_di_zona": "mean",
-            "truk_di_zona": "mean",
-            "bus_di_zona": "mean",
-            "frame_number": "first",
-        })
-
-        # 4. Merge
-        merged = pd.merge(cross_agg, density_agg, on=["timestamp", "approach"], how="outer").fillna(0)
-
-        # 5. Normalize into standard required columns
-        merged["intersectionId"] = "simpang4-pingit"
-        merged["laneId"] = "all_lanes"
-
-        merged = merged.rename(columns={
-            "total_di_zona": "vehicleCount",
-            "mobil_di_zona": "carCount",
-            "motor_di_zona": "motorcycleCount",
-            "bus_di_zona": "busCount",
-            "truk_di_zona": "truckCount",
-        })
-        
-        # Use snapshot count for density index as well
-        merged["densityIndex"] = merged["vehicleCount"]
-
-        merged["queueLengthVeh"] = 0
-        merged["queueLengthMEst"] = 0.0
-
-        for col in NUMERIC_COLUMNS:
-            if col not in merged.columns:
-                merged[col] = 0
-
-        # Integer validation
-        integerColumns = (
-            "vehicleCount",
-            "carCount",
-            "motorcycleCount",
-            "busCount",
-            "truckCount",
-            "queueLengthVeh",
-        )
-        for col in integerColumns:
-            merged[col] = merged[col].round().astype(int)
-
-        merged = merged.sort_values(
-            by=[
-                "timestamp",
-                "intersectionId",
-                "approach",
-                "laneId",
-            ]
-        ).reset_index(drop=True)
-
-        return merged
-
-    # ========================================================
-    # TIME WINDOW
-    # ========================================================
-
-    def assignWindows(
-        self,
-        dataFrame: pd.DataFrame,
-    ) -> pd.DataFrame:
-
-        result = dataFrame.copy()
-
-        window = f"{self.config.windowSeconds}s"
-
-        result["windowStart"] = (
-            result["timestamp"]
-            .dt.floor(window)
-        )
-
-        result["windowEnd"] = (
-            result["windowStart"]
-            + pd.Timedelta(
-                seconds=self.config.windowSeconds
-            )
-        )
-
-        return result
-
-    # ========================================================
-    # APPROACH AGGREGATION
-    # ========================================================
-
-    def aggregateApproach(
-        self,
-        group: pd.DataFrame,
-    ) -> ApproachState:
-
-        approach = str(
-            group["approach"].iloc[0]
-        )
-
-        volume = int(
-            group["vehicleCount"].iloc[-1]
-        )
-
-        carCount = int(
-            group["carCount"].iloc[-1]
-        )
-
-        motorcycleCount = int(
-            group["motorcycleCount"].iloc[-1]
-        )
-
-        busCount = int(
-            group["busCount"].iloc[-1]
-        )
-
-        truckCount = int(
-            group["truckCount"].iloc[-1]
-        )
-
-        queueLengthVeh = int(
-            group["queueLengthVeh"].iloc[-1]
-        )
-
-        queueLengthMEst = float(
-            group["queueLengthMEst"].sum()
-        )
-
-        densityIndex = float(
-            group["densityIndex"].mean()
-        )
-
-        # CSV belum mempunyai speed.
-        avgSpeedKmh = None
-
-        return ApproachState(
-            approach=approach,
-            volume=volume,
-            carCount=carCount,
-            motorcycleCount=motorcycleCount,
-            busCount=busCount,
-            truckCount=truckCount,
-            queueLengthVeh=queueLengthVeh,
-            queueLengthMEst=queueLengthMEst,
-            densityIndex=densityIndex,
-            avgSpeedKmh=avgSpeedKmh,
-        )
-
-    # ========================================================
-    # BUILD STATES
-    # ========================================================
-
-    def buildFromDataFrame(
-        self,
-        dataFrame: pd.DataFrame,
-    ) -> list[TrafficState]:
-
-        if dataFrame.empty:
-            return []
-
-        dataFrame = self.assignWindows(
-            dataFrame
-        )
-
-        states: list[TrafficState] = []
-
-        grouped = dataFrame.groupby(
-            [
-                "intersectionId",
-                "windowStart",
-                "windowEnd",
-            ],
-            sort=True,
-        )
-
-        for (
-            intersectionId,
-            windowStart,
-            windowEnd,
-        ), windowGroup in grouped:
-
-            approaches: list[ApproachState] = []
-
-            for approachName in EXPECTED_APPROACHES:
-
-                approachGroup = windowGroup[
-                    windowGroup["approach"]
-                    == approachName
-                ]
-
-                if approachGroup.empty:
-
-                    approachState = ApproachState(
-                        approach=approachName,
-                        volume=0,
-                        carCount=0,
-                        motorcycleCount=0,
-                        busCount=0,
-                        truckCount=0,
-                        queueLengthVeh=0,
-                        queueLengthMEst=0.0,
-                        densityIndex=0.0,
-                        avgSpeedKmh=None,
-                    )
-
-                else:
-
-                    approachState = (
-                        self.aggregateApproach(
-                            approachGroup
-                        )
-                    )
-
-                approaches.append(
-                    approachState
-                )
-
-            state = TrafficState(
-                intersectionId=str(
-                    intersectionId
-                ),
-                windowStart=pd.Timestamp(
-                    windowStart
-                ).to_pydatetime(),
-                windowEnd=pd.Timestamp(
-                    windowEnd
-                ).to_pydatetime(),
-                approaches=approaches,
-            )
-
-            states.append(state)
-
-        return states
-
-    # ========================================================
-    # BUILD FROM SUPABASE
-    # ========================================================
-
-    def buildFromSupabase(
-        self,
-        *,
-        intersectionId: str | None = None,
-        limit: int | None = None,
-        supabase: Client | None = None,
-    ) -> list[TrafficState]:
-        """Membaca trafficStates dan trafficApproachStates dari Supabase."""
-
-        if limit is not None and limit <= 0:
-            raise ValueError("limit harus lebih besar dari 0.")
-
-        client = supabase or get_supabase()
-
-        traffic_query = (
-            client
-            .table("trafficStates")
-            .select("id, intersectionId, windowStart, windowEnd")
-            .order("windowStart", desc=True)
-        )
-
-        if limit is not None:
-            traffic_query = traffic_query.limit(limit)
-
-        traffic_result = traffic_query.execute()
-        traffic_rows = (
-            traffic_result.data
-            if traffic_result is not None
-            else []
-        ) or []
-
-        if not traffic_rows:
-            return []
-
-        intersection_row_ids = {
-            int(row["intersectionId"])
-            for row in traffic_rows
-        }
-
-        intersections_result = (
-            client
-=======
         result = (
             self.supabase
->>>>>>> 6147cc07d11ab5910b7a950bceb53a0fe3c1d7a8
             .table("intersections")
             .select(
                 "id, intersectionId, name, status"
             )
-            .eq("status", "active")
-            .order("id")
+            .eq(
+                "status",
+                "active",
+            )
+            .order(
+                "id",
+            )
             .execute()
         )
 
@@ -484,7 +195,9 @@ class TrafficStateBuilder:
     # APPROACHES
     # ========================================================
 
-    def get_approaches(self) -> list[dict[str, Any]]:
+    def get_approaches(
+        self,
+    ) -> list[dict[str, Any]]:
         """
         Mengambil seluruh approach.
         """
@@ -493,9 +206,16 @@ class TrafficStateBuilder:
             self.supabase
             .table("approaches")
             .select(
-                "id, intersectionId, approach, name"
+                """
+                id,
+                intersectionId,
+                approach,
+                name
+                """
             )
-            .order("id")
+            .order(
+                "id",
+            )
             .execute()
         )
 
@@ -505,7 +225,9 @@ class TrafficStateBuilder:
     # LANES
     # ========================================================
 
-    def get_lanes(self) -> list[dict[str, Any]]:
+    def get_lanes(
+        self,
+    ) -> list[dict[str, Any]]:
         """
         Mengambil seluruh lane.
         """
@@ -514,9 +236,17 @@ class TrafficStateBuilder:
             self.supabase
             .table("lanes")
             .select(
-                "id, approachId, laneId, laneNumber, direction"
+                """
+                id,
+                approachId,
+                laneId,
+                laneNumber,
+                direction
+                """
             )
-            .order("id")
+            .order(
+                "id",
+            )
             .execute()
         )
 
@@ -529,12 +259,24 @@ class TrafficStateBuilder:
     def get_latest_traffic_states(
         self,
         limit: int = 100,
+        intersection_id: str | None = None,
     ) -> list[dict[str, Any]]:
         """
-        Mengambil traffic state terbaru dari seluruh intersection.
+        Mengambil traffic state terbaru.
+
+        Jika intersection_id diberikan:
+            hanya intersection tersebut.
+
+        Jika None:
+            seluruh intersection aktif.
         """
 
-        result = (
+        if limit <= 0:
+            raise ValueError(
+                "limit harus lebih besar dari 0."
+            )
+
+        query = (
             self.supabase
             .table("trafficStates")
             .select(
@@ -553,8 +295,26 @@ class TrafficStateBuilder:
                 desc=True,
             )
             .limit(limit)
-            .execute()
         )
+
+        # ----------------------------------------------------
+        # Filter intersection jika diminta
+        # ----------------------------------------------------
+
+        if intersection_id is not None:
+
+            intersection_row_id = (
+                self.get_intersection_row_id(
+                    intersection_id
+                )
+            )
+
+            query = query.eq(
+                "intersectionId",
+                intersection_row_id,
+            )
+
+        result = query.execute()
 
         return result.data or []
 
@@ -569,18 +329,18 @@ class TrafficStateBuilder:
         """
         Mengambil metric YOLO berdasarkan trafficStateId.
 
-        PENTING:
-        trafficLaneMetrics TIDAK mempunyai intersectionId.
-
-        Relasinya:
+        Relasi database:
 
             trafficLaneMetrics.laneId
-                    ↓
-                lanes.id
-                    ↓
-                approaches.id
-                    ↓
-            approaches.intersectionId
+                    |
+                    v
+                  lanes.id
+                    |
+                    v
+              approaches.id
+                    |
+                    v
+          intersections.id
         """
 
         if not traffic_state_ids:
@@ -632,19 +392,22 @@ class TrafficStateBuilder:
         """
         Membuat mapping:
 
-        lane_id
-            -> lane
-
-        approach_id
-            -> approach
-
-        intersection_id
-            -> intersection
+            intersection_row_id -> intersection
+            approach_row_id     -> approach
+            lane_row_id         -> lane
         """
 
-        intersections = self.get_active_intersections()
-        approaches = self.get_approaches()
-        lanes = self.get_lanes()
+        intersections = (
+            self.get_active_intersections()
+        )
+
+        approaches = (
+            self.get_approaches()
+        )
+
+        lanes = (
+            self.get_lanes()
+        )
 
         intersection_map = {
             int(row["id"]): row
@@ -680,57 +443,131 @@ class TrafficStateBuilder:
         Menggabungkan seluruh lane dalam satu approach.
         """
 
+        # ----------------------------------------------------
+        # Tidak ada data
+        # ----------------------------------------------------
+
         if not rows:
+
             return ApproachTrafficState(
                 approach=approach_name,
+
                 volume=0,
+
                 carCount=0,
                 motorcycleCount=0,
                 busCount=0,
                 truckCount=0,
+
                 queueLengthVeh=0,
                 queueLengthMEst=0.0,
+
                 densityIndex=0.0,
+
                 avgSpeedKmh=None,
             )
 
+        # ----------------------------------------------------
+        # Vehicle count
+        # ----------------------------------------------------
+
         volume = sum(
-            int(row.get("vehicleCount") or 0)
+            int(
+                row.get(
+                    "vehicleCount",
+                    0,
+                )
+                or 0
+            )
             for row in rows
         )
 
+        # ----------------------------------------------------
+        # Vehicle classes
+        # ----------------------------------------------------
+
         car_count = sum(
-            int(row.get("carCount") or 0)
+            int(
+                row.get(
+                    "carCount",
+                    0,
+                )
+                or 0
+            )
             for row in rows
         )
 
         motorcycle_count = sum(
-            int(row.get("motorcycleCount") or 0)
+            int(
+                row.get(
+                    "motorcycleCount",
+                    0,
+                )
+                or 0
+            )
             for row in rows
         )
 
         bus_count = sum(
-            int(row.get("busCount") or 0)
+            int(
+                row.get(
+                    "busCount",
+                    0,
+                )
+                or 0
+            )
             for row in rows
         )
 
         truck_count = sum(
-            int(row.get("truckCount") or 0)
+            int(
+                row.get(
+                    "truckCount",
+                    0,
+                )
+                or 0
+            )
             for row in rows
         )
 
+        # ----------------------------------------------------
+        # Queue
+        # ----------------------------------------------------
+
         queue_length_veh = sum(
-            int(row.get("queueLengthVeh") or 0)
+            int(
+                row.get(
+                    "queueLengthVeh",
+                    0,
+                )
+                or 0
+            )
             for row in rows
         )
 
         queue_length_m = sum(
-            float(row.get("queueLengthMEst") or 0)
+            float(
+                row.get(
+                    "queueLengthMEst",
+                    0.0,
+                )
+                or 0.0
+            )
             for row in rows
         )
 
+        # ----------------------------------------------------
+        # Density
+        # ----------------------------------------------------
+
         density_values = [
-            float(row.get("densityIndex") or 0)
+            float(
+                row.get(
+                    "densityIndex",
+                    0.0,
+                )
+                or 0.0
+            )
             for row in rows
         ]
 
@@ -741,17 +578,40 @@ class TrafficStateBuilder:
             else 0.0
         )
 
+        # ----------------------------------------------------
+        # Speed
+        # ----------------------------------------------------
+
+        # Saat ini trafficLaneMetrics belum menyediakan
+        # avgSpeedKmh.
+        #
+        # Jadi kita biarkan None.
+        #
+        # Nantinya bisa diisi jika schema CV sudah
+        # menyediakan speed.
+
+        avg_speed_kmh = None
+
+        # ----------------------------------------------------
+        # Return
+        # ----------------------------------------------------
+
         return ApproachTrafficState(
             approach=approach_name,
+
             volume=volume,
+
             carCount=car_count,
             motorcycleCount=motorcycle_count,
             busCount=bus_count,
             truckCount=truck_count,
+
             queueLengthVeh=queue_length_veh,
             queueLengthMEst=queue_length_m,
+
             densityIndex=density_index,
-            avgSpeedKmh=None,
+
+            avgSpeedKmh=avg_speed_kmh,
         )
 
     # ========================================================
@@ -767,7 +627,7 @@ class TrafficStateBuilder:
         lane_map: dict[int, dict[str, Any]],
     ) -> BuiltTrafficState | None:
         """
-        Membentuk satu TrafficState dari metric YOLO.
+        Membentuk satu BuiltTrafficState.
         """
 
         traffic_state_id = int(
@@ -777,6 +637,10 @@ class TrafficStateBuilder:
         intersection_row_id = int(
             traffic_state["intersectionId"]
         )
+
+        # ----------------------------------------------------
+        # Intersection
+        # ----------------------------------------------------
 
         intersection = intersection_map.get(
             intersection_row_id
@@ -790,19 +654,33 @@ class TrafficStateBuilder:
         )
 
         # ----------------------------------------------------
-        # Group metric berdasarkan approach
+        # Prepare approach groups
         # ----------------------------------------------------
 
-        approach_rows: dict[str, list[dict[str, Any]]] = {
+        approach_rows: dict[
+            str,
+            list[dict[str, Any]]
+        ] = {
             approach: []
             for approach in EXPECTED_APPROACHES
         }
 
+        # ----------------------------------------------------
+        # Lane metric -> lane -> approach
+        # ----------------------------------------------------
+
         for metric in lane_metrics:
 
-            lane_row_id = int(
-                metric["laneId"]
-            )
+            try:
+                lane_row_id = int(
+                    metric["laneId"]
+                )
+            except (
+                KeyError,
+                TypeError,
+                ValueError,
+            ):
+                continue
 
             lane = lane_map.get(
                 lane_row_id
@@ -811,9 +689,16 @@ class TrafficStateBuilder:
             if lane is None:
                 continue
 
-            approach_row_id = int(
-                lane["approachId"]
-            )
+            try:
+                approach_row_id = int(
+                    lane["approachId"]
+                )
+            except (
+                KeyError,
+                TypeError,
+                ValueError,
+            ):
+                continue
 
             approach = approach_map.get(
                 approach_row_id
@@ -822,13 +707,14 @@ class TrafficStateBuilder:
             if approach is None:
                 continue
 
-            approach_name = (
-                str(approach["approach"])
-                .strip()
-                .lower()
-            )
+            approach_name = str(
+                approach["approach"]
+            ).strip().lower()
 
-            if approach_name not in EXPECTED_APPROACHES:
+            if (
+                approach_name
+                not in EXPECTED_APPROACHES
+            ):
                 continue
 
             approach_rows[
@@ -836,32 +722,51 @@ class TrafficStateBuilder:
             ].append(metric)
 
         # ----------------------------------------------------
-        # Aggregate
+        # Aggregate all approaches
         # ----------------------------------------------------
 
-        approaches: list[ApproachTrafficState] = []
+        approaches: list[
+            ApproachTrafficState
+        ] = []
 
         for approach_name in EXPECTED_APPROACHES:
 
-            approach_state = self.aggregate_approach(
-                rows=approach_rows[approach_name],
-                approach_name=approach_name,
+            approach_state = (
+                self.aggregate_approach(
+                    rows=approach_rows[
+                        approach_name
+                    ],
+                    approach_name=approach_name,
+                )
             )
 
             approaches.append(
                 approach_state
             )
 
+        # ----------------------------------------------------
+        # Build final state
+        # ----------------------------------------------------
+
         return BuiltTrafficState(
             trafficStateId=traffic_state_id,
+
             intersectionId=intersection_name,
+
             windowStart=self.parse_datetime(
-                traffic_state["windowStart"]
+                traffic_state[
+                    "windowStart"
+                ]
             ),
+
             windowEnd=self.parse_datetime(
-                traffic_state["windowEnd"]
+                traffic_state[
+                    "windowEnd"
+                ]
             ),
+
             approaches=approaches,
+
             source=str(
                 traffic_state.get(
                     "source",
@@ -884,46 +789,66 @@ class TrafficStateBuilder:
 
             trafficApproachStates
 
-        Catatan:
-        Karena data approach state merupakan hasil builder,
-        kita hapus hasil lama untuk trafficStateId tersebut
-        lalu insert ulang.
+        Untuk satu trafficStateId:
+
+            DELETE old rows
+                    |
+                    v
+            INSERT new rows
         """
 
-        self.supabase \
-            .table("trafficApproachStates") \
-            .delete() \
+        # ----------------------------------------------------
+        # Delete previous result
+        # ----------------------------------------------------
+
+        (
+            self.supabase
+            .table("trafficApproachStates")
+            .delete()
             .eq(
                 "trafficStateId",
                 traffic_state_id,
-            ) \
+            )
             .execute()
+        )
 
-        rows: list[dict[str, Any]] = []
+        rows: list[
+            dict[str, Any]
+        ] = []
+
+        # ----------------------------------------------------
+        # Insert each approach
+        # ----------------------------------------------------
+
+        intersection_row_id = (
+            self.get_intersection_row_id(
+                built_state.intersectionId
+            )
+        )
 
         for approach in built_state.approaches:
 
-            # Cari approach ID berdasarkan intersection
             approach_result = (
                 self.supabase
                 .table("approaches")
-                .select("id, approach")
+                .select(
+                    "id, approach"
+                )
                 .eq(
                     "approach",
                     approach.approach,
                 )
                 .eq(
                     "intersectionId",
-                    self.get_intersection_row_id(
-                        built_state.intersectionId
-                    ),
+                    intersection_row_id,
                 )
                 .limit(1)
                 .execute()
             )
 
             approach_rows = (
-                approach_result.data or []
+                approach_result.data
+                or []
             )
 
             if not approach_rows:
@@ -935,25 +860,55 @@ class TrafficStateBuilder:
 
             rows.append(
                 {
-                    "trafficStateId": traffic_state_id,
-                    "approachId": approach_id,
-                    "approach": approach.approach,
-                    "volume": approach.volume,
-                    "carCount": approach.carCount,
-                    "motorcycleCount": approach.motorcycleCount,
-                    "busCount": approach.busCount,
-                    "truckCount": approach.truckCount,
-                    "queueLengthVeh": approach.queueLengthVeh,
-                    "queueLengthMEst": approach.queueLengthMEst,
-                    "densityIndex": approach.densityIndex,
-                    "avgSpeedKmh": approach.avgSpeedKmh,
+                    "trafficStateId":
+                        traffic_state_id,
+
+                    "approachId":
+                        approach_id,
+
+                    "approach":
+                        approach.approach,
+
+                    "volume":
+                        approach.volume,
+
+                    "carCount":
+                        approach.carCount,
+
+                    "motorcycleCount":
+                        approach.motorcycleCount,
+
+                    "busCount":
+                        approach.busCount,
+
+                    "truckCount":
+                        approach.truckCount,
+
+                    "queueLengthVeh":
+                        approach.queueLengthVeh,
+
+                    "queueLengthMEst":
+                        approach.queueLengthMEst,
+
+                    "densityIndex":
+                        approach.densityIndex,
+
+                    "avgSpeedKmh":
+                        approach.avgSpeedKmh,
                 }
             )
 
+        # ----------------------------------------------------
+        # Insert
+        # ----------------------------------------------------
+
         if rows:
+
             (
                 self.supabase
-                .table("trafficApproachStates")
+                .table(
+                    "trafficApproachStates"
+                )
                 .insert(rows)
                 .execute()
             )
@@ -991,9 +946,11 @@ class TrafficStateBuilder:
         rows = result.data or []
 
         if not rows:
+
             raise ValueError(
-                f"Intersection '{intersection_id}' "
-                "tidak ditemukan."
+                f"Intersection "
+                f"'{intersection_id}' "
+                f"tidak ditemukan."
             )
 
         return int(
@@ -1001,7 +958,7 @@ class TrafficStateBuilder:
         )
 
     # ========================================================
-    # BUILD LATEST
+    # BUILD LATEST STATES
     # ========================================================
 
     def build_latest_states(
@@ -1010,7 +967,8 @@ class TrafficStateBuilder:
         save: bool = True,
     ) -> list[BuiltTrafficState]:
         """
-        Memproses traffic state terbaru dari SEMUA intersection.
+        Memproses traffic state terbaru
+        dari seluruh intersection aktif.
         """
 
         traffic_states = (
@@ -1042,6 +1000,10 @@ class TrafficStateBuilder:
             lane_map,
         ) = self.build_relation_maps()
 
+        # ----------------------------------------------------
+        # Group metrics by traffic state
+        # ----------------------------------------------------
+
         metrics_by_state: dict[
             int,
             list[dict[str, Any]]
@@ -1050,15 +1012,23 @@ class TrafficStateBuilder:
         for metric in lane_metrics:
 
             state_id = int(
-                metric["trafficStateId"]
+                metric[
+                    "trafficStateId"
+                ]
             )
 
             metrics_by_state.setdefault(
                 state_id,
-                []
+                [],
             ).append(metric)
 
-        built_states: list[BuiltTrafficState] = []
+        # ----------------------------------------------------
+        # Build states
+        # ----------------------------------------------------
+
+        built_states: list[
+            BuiltTrafficState
+        ] = []
 
         for traffic_state in traffic_states:
 
@@ -1069,28 +1039,43 @@ class TrafficStateBuilder:
             state_metrics = (
                 metrics_by_state.get(
                     state_id,
-                    []
+                    [],
                 )
             )
 
             if not state_metrics:
                 continue
 
-            built_state = self.build_state(
-                traffic_state=traffic_state,
-                lane_metrics=state_metrics,
-                intersection_map=intersection_map,
-                approach_map=approach_map,
-                lane_map=lane_map,
+            built_state = (
+                self.build_state(
+                    traffic_state=
+                        traffic_state,
+
+                    lane_metrics=
+                        state_metrics,
+
+                    intersection_map=
+                        intersection_map,
+
+                    approach_map=
+                        approach_map,
+
+                    lane_map=
+                        lane_map,
+                )
             )
 
             if built_state is None:
                 continue
 
             if save:
+
                 self.save_approach_states(
-                    traffic_state_id=state_id,
-                    built_state=built_state,
+                    traffic_state_id=
+                        state_id,
+
+                    built_state=
+                        built_state,
                 )
 
             built_states.append(
@@ -1100,7 +1085,7 @@ class TrafficStateBuilder:
         return built_states
 
     # ========================================================
-    # BUILD SINGLE INTERSECTION
+    # BUILD LATEST STATE FOR ONE INTERSECTION
     # ========================================================
 
     def build_latest_state_for_intersection(
@@ -1109,9 +1094,12 @@ class TrafficStateBuilder:
         save: bool = True,
     ) -> BuiltTrafficState | None:
         """
-        Optional helper untuk testing satu intersection.
+        Helper untuk mengambil traffic state terbaru
+        dari satu intersection.
 
-        BUKAN berarti sistem hanya mendukung satu intersection.
+        Contoh:
+
+            simpang4-pingit
         """
 
         intersection_row_id = (
@@ -1147,13 +1135,16 @@ class TrafficStateBuilder:
         )
 
         traffic_states = (
-            traffic_result.data or []
+            traffic_result.data
+            or []
         )
 
         if not traffic_states:
             return None
 
-        traffic_state = traffic_states[0]
+        traffic_state = (
+            traffic_states[0]
+        )
 
         state_id = int(
             traffic_state["id"]
@@ -1174,21 +1165,36 @@ class TrafficStateBuilder:
             lane_map,
         ) = self.build_relation_maps()
 
-        built_state = self.build_state(
-            traffic_state=traffic_state,
-            lane_metrics=lane_metrics,
-            intersection_map=intersection_map,
-            approach_map=approach_map,
-            lane_map=lane_map,
+        built_state = (
+            self.build_state(
+                traffic_state=
+                    traffic_state,
+
+                lane_metrics=
+                    lane_metrics,
+
+                intersection_map=
+                    intersection_map,
+
+                approach_map=
+                    approach_map,
+
+                lane_map=
+                    lane_map,
+            )
         )
 
         if built_state is None:
             return None
 
         if save:
+
             self.save_approach_states(
-                traffic_state_id=state_id,
-                built_state=built_state,
+                traffic_state_id=
+                    state_id,
+
+                built_state=
+                    built_state,
             )
 
         return built_state
@@ -1201,18 +1207,27 @@ class TrafficStateBuilder:
     def parse_datetime(
         value: Any,
     ) -> datetime:
+        """
+        Normalisasi datetime dari Supabase.
+        """
 
-        if isinstance(value, datetime):
-            return value
+        if isinstance(
+            value,
+            datetime,
+        ):
+            parsed = value
 
-        parsed = datetime.fromisoformat(
-            str(value).replace(
-                "Z",
-                "+00:00",
+        else:
+
+            parsed = datetime.fromisoformat(
+                str(value).replace(
+                    "Z",
+                    "+00:00",
+                )
             )
-        )
 
         if parsed.tzinfo is None:
+
             parsed = parsed.replace(
                 tzinfo=timezone.utc
             )
@@ -1227,11 +1242,15 @@ class TrafficStateBuilder:
     def print_state(
         state: BuiltTrafficState,
     ) -> None:
+        """
+        Print traffic state untuk debugging.
+        """
 
         print()
-        print("=" * 70)
+
+        print("=" * 80)
         print("TRAFFIC STATE")
-        print("=" * 70)
+        print("=" * 80)
 
         print(
             f"Traffic State ID : "
@@ -1254,7 +1273,7 @@ class TrafficStateBuilder:
             f"{state.source}"
         )
 
-        print("-" * 70)
+        print("-" * 80)
 
         for approach in state.approaches:
 
@@ -1266,11 +1285,11 @@ class TrafficStateBuilder:
                 f"bus={approach.busCount:<5} | "
                 f"truck={approach.truckCount:<5} | "
                 f"queue={approach.queueLengthVeh:<5} | "
-                f"queueM={approach.queueLengthMEst:.2f} | "
+                f"queueM={approach.queueLengthMEst:>7.2f} | "
                 f"density={approach.densityIndex:.3f}"
             )
 
-        print("=" * 70)
+        print("=" * 80)
 
     # ========================================================
     # RUN ONCE
@@ -1281,25 +1300,39 @@ class TrafficStateBuilder:
         limit: int = 100,
         save: bool = True,
     ) -> list[BuiltTrafficState]:
+        """
+        Jalankan builder satu kali.
+        """
 
-        states = self.build_latest_states(
-            limit=limit,
-            save=save,
+        states = (
+            self.build_latest_states(
+                limit=limit,
+                save=save,
+            )
         )
 
         if not states:
+
             print()
+
             print(
-                "Tidak ada traffic state yang memiliki "
+                "Tidak ada traffic state "
+                "yang memiliki "
                 "trafficLaneMetrics."
             )
+
             print()
+
             return []
 
         for state in states:
-            self.print_state(state)
+
+            self.print_state(
+                state
+            )
 
         print()
+
         print(
             f"Berhasil membangun "
             f"{len(states)} traffic state."
@@ -1307,76 +1340,13 @@ class TrafficStateBuilder:
 
         return states
 
-<<<<<<< HEAD
-    # ========================================================
-    # BUILD FROM CSV
-    # ========================================================
-
-    def buildFromCvOutput(
-        self,
-        crossPath: str | Path,
-        densityPath: str | Path,
-        video_time: float | None = None,
-    ) -> list[TrafficState]:
-
-        dataFrame = self.loadCvOutput(
-            crossPath,
-            densityPath
-        )
-
-        if video_time is not None and not dataFrame.empty and "frame_number" in dataFrame.columns:
-            target_frame = video_time * 30.0
-            dataFrame["frame_diff"] = (dataFrame["frame_number"] - target_frame).abs()
-            min_diff_timestamp = dataFrame.groupby("timestamp")["frame_diff"].mean().idxmin()
-            
-            matched_df = dataFrame[dataFrame["timestamp"] == min_diff_timestamp]
-            matched_frame = matched_df["frame_number"].iloc[0]
-            matched_video_time = matched_frame / 30.0
-            
-            self.last_matched_video_time = matched_video_time
-            
-            print(f"\nREQUEST {video_time:.2f}")
-            print(f"MATCHED {matched_video_time:.2f}")
-            print(f"TIMESTAMP {min_diff_timestamp}\n")
-            
-            dataFrame = matched_df
-
-        return self.buildFromDataFrame(
-            dataFrame
-        )
-
-
-# ============================================================
-# DEFAULT CSV PATH
-# ============================================================
-
-# ============================================================
-# DEFAULT CV PATHS
-# ============================================================
-
-def getDefaultCrossPath() -> Path:
-    projectRoot = Path(__file__).resolve().parents[3]
-    return projectRoot / "cv" / "output" / "crossing_simpang.csv"
-
-def getDefaultDensityPath() -> Path:
-    projectRoot = Path(__file__).resolve().parents[3]
-    return projectRoot / "cv" / "output" / "percobaan_logic_simpang.csv"
 
 # ============================================================
 # CLI
-=======
-
-# ============================================================
-# MAIN
->>>>>>> 6147cc07d11ab5910b7a950bceb53a0fe3c1d7a8
 # ============================================================
 
 def main() -> None:
 
-<<<<<<< HEAD
-    crossPath = getDefaultCrossPath()
-    densityPath = getDefaultDensityPath()
-=======
     import argparse
 
     parser = argparse.ArgumentParser(
@@ -1390,7 +1360,8 @@ def main() -> None:
         type=str,
         default=None,
         help=(
-            "Optional. Contoh: simpang4-pingit"
+            "Optional. Contoh: "
+            "simpang4-pingit"
         ),
     )
 
@@ -1399,8 +1370,8 @@ def main() -> None:
         type=int,
         default=100,
         help=(
-            "Jumlah traffic state terbaru "
-            "yang diproses."
+            "Jumlah traffic state "
+            "terbaru yang diproses."
         ),
     )
 
@@ -1408,13 +1379,16 @@ def main() -> None:
         "--no-save",
         action="store_true",
         help=(
-            "Jangan menyimpan hasil ke "
-            "trafficApproachStates."
+            "Jangan menyimpan hasil "
+            "ke trafficApproachStates."
         ),
     )
 
     args = parser.parse_args()
->>>>>>> 6147cc07d11ab5910b7a950bceb53a0fe3c1d7a8
+
+    # --------------------------------------------------------
+    # Builder
+    # --------------------------------------------------------
 
     builder = TrafficStateBuilder(
         TrafficStateBuilderConfig(
@@ -1422,43 +1396,33 @@ def main() -> None:
         )
     )
 
-<<<<<<< HEAD
-    states = builder.buildFromCvOutput(
-        crossPath,
-        densityPath
+    print("=" * 80)
+    print(
+        "SMARTTWIN TRAFFIC STATE BUILDER"
     )
-=======
-    print("=" * 70)
-    print("SMARTTWIN TRAFFIC STATE BUILDER")
-    print("=" * 70)
-    print("Source : Supabase")
-    print("Window : 5 seconds")
->>>>>>> 6147cc07d11ab5910b7a950bceb53a0fe3c1d7a8
+    print("=" * 80)
+
+    print(
+        "Source : Supabase"
+    )
+
+    print(
+        "Window : 5 seconds"
+    )
+
+    print(
+        f"Save   : "
+        f"{not args.no_save}"
+    )
 
     # --------------------------------------------------------
     # SINGLE INTERSECTION
     # --------------------------------------------------------
 
-<<<<<<< HEAD
-    print(f"Cross CSV   : {crossPath}")
-    print(f"Density CSV : {densityPath}")
-    print(f"States      : {len(states)}")
-    print()
-
-    if states:
-        import json
-        print(
-            json.dumps(
-                states[0].model_dump(
-                    mode="json"
-                ),
-                indent=2,
-                default=str
-=======
     if args.intersection_id:
 
         print(
-            "Mode   : Single Intersection"
+            "Mode   : SINGLE INTERSECTION"
         )
 
         print(
@@ -1469,23 +1433,29 @@ def main() -> None:
         state = (
             builder
             .build_latest_state_for_intersection(
-                intersection_id=args.intersection_id,
-                save=not args.no_save,
->>>>>>> 6147cc07d11ab5910b7a950bceb53a0fe3c1d7a8
+                intersection_id=
+                    args.intersection_id,
+
+                save=
+                    not args.no_save,
             )
         )
 
         if state is None:
 
             print()
+
             print(
-                "Tidak ada trafficLaneMetrics "
+                "Tidak ada "
+                "trafficLaneMetrics "
                 "untuk intersection ini."
             )
 
             return
 
-        builder.print_state(state)
+        builder.print_state(
+            state
+        )
 
         return
 
@@ -1502,6 +1472,10 @@ def main() -> None:
         save=not args.no_save,
     )
 
+
+# ============================================================
+# ENTRY POINT
+# ============================================================
 
 if __name__ == "__main__":
     main()
