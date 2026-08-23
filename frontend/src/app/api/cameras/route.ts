@@ -14,7 +14,10 @@
 import { NextResponse } from "next/server";
 
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import { supabase } from "@/lib/supabaseClient";
 import { findOrCreateIntersection } from "./intersectionHelper";
+
+const supabaseClient = supabaseAdmin || supabase;
 import { DEFAULT_INTERSECTION_ID } from "@/lib/supabaseData";
 
 interface CreateCameraBody {
@@ -52,14 +55,15 @@ export async function POST(request: Request) {
   let intersection;
   try {
     intersection = await findOrCreateIntersection(body.intersection_name);
-  } catch (err: any) {
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
     return NextResponse.json(
-      { error: "Gagal memproses persimpangan: " + err.message },
+      { error: "Gagal memproses persimpangan: " + message },
       { status: 500 }
     );
   }
 
-  const { data: approach, error: approachError } = await supabaseAdmin
+  const { data: approach, error: approachError } = await supabaseClient
     .from("approaches")
     .select("id")
     .eq("intersectionId", intersection.id)
@@ -75,7 +79,7 @@ export async function POST(request: Request) {
 
   const cameraId = `cam-${crypto.randomUUID()}`;
 
-  const { data: camera, error: cameraError } = await supabaseAdmin
+  const { data: camera, error: cameraError } = await supabaseClient
     .from("cameras")
     .insert({
       intersectionId: intersection.id,

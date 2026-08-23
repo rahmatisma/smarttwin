@@ -1,11 +1,14 @@
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import { supabase } from "@/lib/supabaseClient";
+
+const supabaseClient = supabaseAdmin || supabase;
 
 export async function findOrCreateIntersection(name: string) {
   const trimmedName = name.trim();
   const slug = trimmedName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
 
   // Find existing by name (case-insensitive) or by intersectionId
-  const { data: existing, error: existingError } = await supabaseAdmin
+  const { data: existing, error: existingError } = await supabaseClient
     .from("intersections")
     .select("id")
     .ilike("name", trimmedName)
@@ -16,7 +19,7 @@ export async function findOrCreateIntersection(name: string) {
   }
 
   // Not found, create new
-  const { data: newIntersection, error: insertError } = await supabaseAdmin
+  const { data: newIntersection, error: insertError } = await supabaseClient
     .from("intersections")
     .insert({
       intersectionId: slug,
@@ -39,7 +42,7 @@ export async function findOrCreateIntersection(name: string) {
     createdAt: new Date().toISOString()
   }));
 
-  const { error: approachesError } = await supabaseAdmin
+  const { error: approachesError } = await supabaseClient
     .from("approaches")
     .insert(approaches);
 

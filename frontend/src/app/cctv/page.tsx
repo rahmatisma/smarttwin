@@ -19,6 +19,7 @@ type Approach = "north" | "south" | "east" | "west";
 
 type Camera = {
     id: string;
+    cameraId?: string;
     name: string;
     intersection: string;
     approach: Approach;
@@ -33,6 +34,13 @@ const APPROACH_LABELS: Record<Approach, string> = {
     south: "Selatan",
     east: "Timur",
     west: "Barat",
+};
+
+const ROAD_LABELS: Record<Approach, string> = {
+    north: "Jl. Magelang",
+    south: "Jl. Tentara Pelajar",
+    east: "Jl. Diponegoro",
+    west: "Jl. Kyai Mojo",
 };
 
 const API_BASE_URL =
@@ -141,6 +149,12 @@ export default function CCTVPage() {
     const [deletingId, setDeletingId] = useState<string | null>(null);
     const [formError, setFormError] = useState<string | null>(null);
     const [editingId, setEditingId] = useState<string | null>(null);
+    const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
+
+    const displayCameraId = useMemo(() => {
+        if (!editingId) return "";
+        return cameras.find((c) => c.id === editingId)?.cameraId ?? "";
+    }, [editingId, cameras]);
 
     /*
      * File asli untuk diupload ke backend saat submit. Blob URL
@@ -178,6 +192,7 @@ export default function CCTVPage() {
                 rows.map((row) => ({
                     id: String(row.id),
                     name: row.name,
+                    cameraId: row.cameraId,
                     intersection: row.intersectionName || row.intersectionId || DEFAULT_INTERSECTION_ID,
                     approach: (row.approach as Approach) ?? "north",
                     sourceType: toFrontendSourceType(row.sourceType),
@@ -434,14 +449,20 @@ export default function CCTVPage() {
 
             await loadCameras();
 
+            if (isEditing) {
+                setToast({ message: "Metadata CCTV berhasil diperbarui.", type: "success" });
+                setTimeout(() => setToast(null), 3000);
+            }
+
             setShowModal(false);
             resetForm();
         } catch (error) {
-            setFormError(
-                error instanceof Error
-                    ? error.message
-                    : "Gagal menyimpan CCTV."
-            );
+            const errorMsg = error instanceof Error ? error.message : "Gagal menyimpan CCTV.";
+            setFormError(errorMsg);
+            if (editingId) {
+                setToast({ message: "Gagal memperbarui metadata CCTV. Silakan coba lagi.", type: "error" });
+                setTimeout(() => setToast(null), 3000);
+            }
         } finally {
             setSaving(false);
         }
@@ -1064,198 +1085,243 @@ export default function CCTVPage() {
 
                             </div>
 
-                            {/* JENIS SUMBER */}
-                            <div>
-
-                                <label className="mb-2 block text-xs text-text-secondary">
-                                    Jenis Sumber {editingId && "(Tidak dapat diubah saat mode edit)"}
-                                </label>
-
-                                <div className="grid grid-cols-3 gap-2">
-
-                                    {[
-                                        {
-                                            value: "file" as SourceType,
-                                            label: "Video File",
-                                        },
-                                        {
-                                            value: "url" as SourceType,
-                                            label: "HTTP / HLS",
-                                        },
-                                        {
-                                            value: "rtsp" as SourceType,
-                                            label: "RTSP",
-                                        },
-                                    ].map((item) => (
-
-                                        <button
-                                            key={item.value}
-                                            type="button"
-                                            onClick={() => {
-
-                                                if (
-                                                    form.source.startsWith(
-                                                        "blob:"
-                                                    )
-                                                ) {
-                                                    URL.revokeObjectURL(
-                                                        form.source
-                                                    );
-                                                }
-
-                                                setForm((current) => ({
-                                                    ...current,
-                                                    sourceType: item.value,
-                                                    source: "",
-                                                    fileName: "",
-                                                }));
-                                            }}
-                                            className={`rounded-lg border px-3 py-2.5 text-xs transition ${
-                                                form.sourceType ===
-                                                item.value
-                                                    ? "border-accent bg-accent-dim text-accent"
-                                                    : "border-border bg-surface-2 text-text-secondary"
-                                            } ${editingId ? "opacity-50 cursor-not-allowed" : ""}`}
-                                            disabled={!!editingId}
-                                        >
-                                            {item.label}
-                                        </button>
-
-                                    ))}
-
-                                </div>
-
-                            </div>
-
-                            {/* FILE VIDEO */}
-                            {form.sourceType === "file" && (
-
-                                <div>
-
-                                    <label className="mb-2 block text-xs text-text-secondary">
-                                        File Video
-                                    </label>
-
-                                    <label className="flex cursor-pointer flex-col items-center justify-center rounded-lg border border-dashed border-border bg-surface-2 px-4 py-8 text-center transition hover:border-accent">
-
-                                        <span className="text-3xl">
-                                            🎥
-                                        </span>
-
-                                        <span className="mt-3 text-sm text-text">
-                                            {form.fileName ||
-                                                "Pilih video CCTV"}
-                                        </span>
-
-                                        <span className="mt-1 text-xs text-text-muted">
-                                            MP4, WebM, MOV,
-                                            dan format video
-                                            browser lainnya.
-                                            Video diupload ke
-                                            Hugging Face Hub,
-                                            metadata disimpan
-                                            di Supabase.
-                                        </span>
-
+                             {editingId ? (
+                                <>
+                                    {/* NAMA JALAN (Read Only) */}
+                                    <div>
+                                        <label className="mb-2 block text-xs text-text-secondary">
+                                            Nama Jalan
+                                        </label>
                                         <input
-                                            type="file"
-                                            accept="video/*"
-                                            onChange={handleFileChange}
-                                            className="hidden"
+                                            type="text"
+                                            value={ROAD_LABELS[form.approach] || ""}
+                                            readOnly
+                                            className="w-full rounded-lg border border-border bg-surface-2/50 px-3 py-2.5 text-sm text-text-muted outline-none cursor-not-allowed"
                                         />
+                                    </div>
 
-                                    </label>
+                                    {/* ID KAMERA (Read Only) */}
+                                    <div>
+                                        <label className="mb-2 block text-xs text-text-secondary">
+                                            ID Kamera
+                                        </label>
+                                        <input
+                                            type="text"
+                                            value={displayCameraId}
+                                            readOnly
+                                            className="w-full rounded-lg border border-border bg-surface-2/50 px-3 py-2.5 text-sm text-text-muted outline-none cursor-not-allowed"
+                                        />
+                                    </div>
 
-                                    {/* PREVIEW VIDEO */}
-                                    {form.source && (
+                                    {/* SUMBER VIDEO (Read Only) */}
+                                    <div>
+                                        <label className="mb-2 block text-xs text-text-secondary">
+                                            Sumber Video
+                                        </label>
+                                        <input
+                                            type="text"
+                                            value={form.fileName || form.source}
+                                            readOnly
+                                            className="w-full rounded-lg border border-border bg-surface-2/50 px-3 py-2.5 text-sm text-text-muted outline-none cursor-not-allowed"
+                                        />
+                                    </div>
+                                </>
+                            ) : (
+                                <>
+                                    {/* JENIS SUMBER */}
+                                    <div>
 
-                                        <div className="mt-4 overflow-hidden rounded-lg border border-border bg-black">
+                                        <label className="mb-2 block text-xs text-text-secondary">
+                                            Jenis Sumber {editingId && "(Tidak dapat diubah saat mode edit)"}
+                                        </label>
 
-                                            <video
-                                                src={form.source}
-                                                controls
-                                                muted
-                                                playsInline
-                                                preload="metadata"
-                                                className="max-h-64 w-full object-contain"
-                                            />
+                                        <div className="grid grid-cols-3 gap-2">
+
+                                            {[
+                                                {
+                                                    value: "file" as SourceType,
+                                                    label: "Video File",
+                                                },
+                                                {
+                                                    value: "url" as SourceType,
+                                                    label: "HTTP / HLS",
+                                                },
+                                                {
+                                                    value: "rtsp" as SourceType,
+                                                    label: "RTSP",
+                                                },
+                                            ].map((item) => (
+
+                                                <button
+                                                    key={item.value}
+                                                    type="button"
+                                                    onClick={() => {
+
+                                                        if (
+                                                            form.source.startsWith(
+                                                                "blob:"
+                                                            )
+                                                        ) {
+                                                            URL.revokeObjectURL(
+                                                                form.source
+                                                            );
+                                                        }
+
+                                                        setForm((current) => ({
+                                                            ...current,
+                                                            sourceType: item.value,
+                                                            source: "",
+                                                            fileName: "",
+                                                        }));
+                                                    }}
+                                                    className={`rounded-lg border px-3 py-2.5 text-xs transition ${
+                                                        form.sourceType ===
+                                                        item.value
+                                                            ? "border-accent bg-accent-dim text-accent"
+                                                            : "border-border bg-surface-2 text-text-secondary"
+                                                    } ${editingId ? "opacity-50 cursor-not-allowed" : ""}`}
+                                                    disabled={!!editingId}
+                                                >
+                                                    {item.label}
+                                                </button>
+
+                                            ))}
 
                                         </div>
 
+                                    </div>
+
+                                    {/* FILE VIDEO */}
+                                    {form.sourceType === "file" && (
+
+                                        <div>
+
+                                            <label className="mb-2 block text-xs text-text-secondary">
+                                                File Video
+                                            </label>
+
+                                            <label className="flex cursor-pointer flex-col items-center justify-center rounded-lg border border-dashed border-border bg-surface-2 px-4 py-8 text-center transition hover:border-accent">
+
+                                                <span className="text-3xl">
+                                                    🎥
+                                                </span>
+
+                                                <span className="mt-3 text-sm text-text">
+                                                    {form.fileName ||
+                                                        "Pilih video CCTV"}
+                                                </span>
+
+                                                <span className="mt-1 text-xs text-text-muted">
+                                                    MP4, WebM, MOV,
+                                                    dan format video
+                                                    browser lainnya.
+                                                    Video diupload ke
+                                                    Hugging Face Hub,
+                                                    metadata disimpan
+                                                    di Supabase.
+                                                </span>
+
+                                                <input
+                                                    type="file"
+                                                    accept="video/*"
+                                                    onChange={handleFileChange}
+                                                    className="hidden"
+                                                />
+
+                                            </label>
+
+                                            {/* PREVIEW VIDEO */}
+                                            {form.source && (
+
+                                                <div className="mt-4 overflow-hidden rounded-lg border border-border bg-black">
+
+                                                    <video
+                                                        src={form.source}
+                                                        controls
+                                                        muted
+                                                        playsInline
+                                                        preload="metadata"
+                                                        className="max-h-64 w-full object-contain"
+                                                    />
+
+                                                </div>
+
+                                            )}
+
+                                        </div>
                                     )}
 
-                                </div>
-                            )}
+                                    {/* URL */}
+                                    {form.sourceType === "url" && (
 
-                            {/* URL */}
-                            {form.sourceType === "url" && (
+                                        <div>
 
-                                <div>
+                                            <label className="mb-2 block text-xs text-text-secondary">
+                                                Stream URL
+                                            </label>
 
-                                    <label className="mb-2 block text-xs text-text-secondary">
-                                        Stream URL
-                                    </label>
+                                            <input
+                                                type="text"
+                                                value={form.source}
+                                                onChange={(event) =>
+                                                    setForm((current) => ({
+                                                        ...current,
+                                                        source: event.target.value,
+                                                    }))
+                                                }
+                                                placeholder="https://example.com/live/stream.m3u8"
+                                                className="w-full rounded-lg border border-border bg-surface-2 px-3 py-2.5 text-sm text-text outline-none focus:border-accent"
+                                            />
 
-                                    <input
-                                        type="text"
-                                        value={form.source}
-                                        onChange={(event) =>
-                                            setForm((current) => ({
-                                                ...current,
-                                                source: event.target.value,
-                                            }))
-                                        }
-                                        placeholder="https://example.com/live/stream.m3u8"
-                                        className="w-full rounded-lg border border-border bg-surface-2 px-3 py-2.5 text-sm text-text outline-none focus:border-accent"
-                                    />
+                                        </div>
+                                    )}
 
-                                </div>
-                            )}
+                                    {/* RTSP */}
+                                    {form.sourceType === "rtsp" && (
 
-                            {/* RTSP */}
-                            {form.sourceType === "rtsp" && (
+                                        <div>
 
-                                <div>
+                                            <label className="mb-2 block text-xs text-text-secondary">
+                                                RTSP URL
+                                            </label>
 
-                                    <label className="mb-2 block text-xs text-text-secondary">
-                                        RTSP URL
-                                    </label>
+                                            <input
+                                                type="text"
+                                                value={form.source}
+                                                onChange={(event) =>
+                                                    setForm((current) => ({
+                                                        ...current,
+                                                        source: event.target.value,
+                                                    }))
+                                                }
+                                                placeholder="rtsp://192.168.1.10:554/stream"
+                                                className="w-full rounded-lg border border-border bg-surface-2 px-3 py-2.5 text-sm text-text outline-none focus:border-accent"
+                                            />
 
-                                    <input
-                                        type="text"
-                                        value={form.source}
-                                        onChange={(event) =>
-                                            setForm((current) => ({
-                                                ...current,
-                                                source: event.target.value,
-                                            }))
-                                        }
-                                        placeholder="rtsp://192.168.1.10:554/stream"
-                                        className="w-full rounded-lg border border-border bg-surface-2 px-3 py-2.5 text-sm text-text outline-none focus:border-accent"
-                                    />
+                                            <p className="mt-2 text-xs leading-5 text-text-muted">
+                                                RTSP tidak dapat
+                                                diputar langsung
+                                                oleh browser.
+                                                Nantinya dapat
+                                                dihubungkan ke
+                                                backend untuk
+                                                HLS/WebRTC.
+                                            </p>
 
-                                    <p className="mt-2 text-xs leading-5 text-text-muted">
-                                        RTSP tidak dapat
-                                        diputar langsung
-                                        oleh browser.
-                                        Nantinya dapat
-                                        dihubungkan ke
-                                        backend untuk
-                                        HLS/WebRTC.
-                                    </p>
+                                        </div>
+                                    )}
 
-                                </div>
-                            )}
-
-                            {form.sourceType === "file" && (
-                                <p className="text-[11px] leading-4 text-text-muted">
-                                    Begitu disimpan, modal ini langsung
-                                    tertutup dan upload jalan di
-                                    background — progresnya muncul
-                                    sebagai kartu di grid CCTV, kamu
-                                    bebas buka modal ini lagi buat
-                                    upload video lain sambil menunggu.
-                                </p>
+                                    {form.sourceType === "file" && (
+                                        <p className="text-[11px] leading-4 text-text-muted">
+                                            Begitu disimpan, modal ini langsung
+                                            tertutup dan upload jalan di
+                                            background — progresnya muncul
+                                            sebagai kartu di grid CCTV, kamu
+                                            bebas buka modal ini lagi buat
+                                            upload video lain sambil menunggu.
+                                        </p>
+                                    )}
+                                </>
                             )}
 
                             {/* ERROR */}
@@ -1283,6 +1349,8 @@ export default function CCTVPage() {
                                 >
                                     {saving
                                         ? "Menyimpan..."
+                                        : editingId
+                                        ? "Simpan"
                                         : form.sourceType === "file"
                                         ? "Mulai Upload"
                                         : "Simpan CCTV"}
@@ -1373,6 +1441,16 @@ export default function CCTVPage() {
                         </div>
 
                     </div>
+                </div>
+            )}
+            {toast && (
+                <div className={`fixed bottom-5 right-5 z-50 flex items-center gap-2.5 rounded-lg border px-4 py-3 shadow-lg backdrop-blur-md transition-all duration-300 ${
+                    toast.type === "success" 
+                        ? "border-signal-green/30 bg-signal-green/10 text-signal-green" 
+                        : "border-signal-red/30 bg-signal-red/10 text-signal-red"
+                }`}>
+                    <span>{toast.type === "success" ? "✅" : "⚠️"}</span>
+                    <span className="text-sm font-medium">{toast.message}</span>
                 </div>
             )}
         </div>

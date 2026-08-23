@@ -20,13 +20,11 @@ import type {
 
 import {
   fetchCameras,
-  DEFAULT_INTERSECTION_ID,
 } from "@/lib/supabaseData";
 import {
   ALL_INTERSECTIONS,
-  getIntersectionDatabaseIds,
-  INTERSECTION_OPTIONS,
-  type IntersectionSelection,
+  APPROACH_OPTIONS,
+  type ApproachSelection,
 } from "@/lib/intersections";
 
 // =====================================================
@@ -142,14 +140,13 @@ async function loadCamerasForIntersection(
 
 export default function CameraFeedPanel({
   counts,
-  cameraStatus = [],
-  selectedIntersection = "all",
-  onIntersectionChange,
+  selectedApproach = "all",
+  onApproachChange,
 }: {
   counts: VehicleClassCount[];
   cameraStatus?: CameraStatus[];
-  selectedIntersection?: IntersectionSelection;
-  onIntersectionChange?: (selection: IntersectionSelection) => void;
+  selectedApproach?: ApproachSelection;
+  onApproachChange?: (selection: ApproachSelection) => void;
 }) {
 
   // ===================================================
@@ -170,27 +167,20 @@ export default function CameraFeedPanel({
       
       const allCams = results.flat();
 
-      if (selectedIntersection === "all") {
+      if (selectedApproach === "all") {
         setCameras(allCams);
       } else {
-        const config = ALL_INTERSECTIONS.find((i) => i.id === selectedIntersection);
-        if (config) {
-          // Ambil bagian "CCTV X" saja untuk pencarian (misal dari "CCTV 4 (Jl Pangeran Diponegoro)")
-          const shortName = config.cameraName.split(" (")[0].toLowerCase();
-          const filtered = allCams.filter((cam) =>
-            cam.name.toLowerCase().includes(shortName)
-          );
-          setCameras(filtered);
-        } else {
-          setCameras([]);
-        }
+        const filtered = allCams.filter((cam) =>
+          cam.direction === selectedApproach
+        );
+        setCameras(filtered);
       }
     });
 
     return () => {
       cancelled = true;
     };
-  }, [selectedIntersection]);
+  }, [selectedApproach]);
 
   // ===================================================
   // RETURN
@@ -210,18 +200,18 @@ export default function CameraFeedPanel({
         </h2>
 
         <div className="flex items-center gap-2">
-          {onIntersectionChange && (
+          {onApproachChange && (
             <select
-              value={selectedIntersection}
+              value={selectedApproach}
               onChange={(event) =>
-                onIntersectionChange(
-                  event.target.value as IntersectionSelection
+                onApproachChange(
+                  event.target.value as ApproachSelection
                 )
               }
               className="max-w-32 rounded border border-border bg-surface-2 px-1.5 py-1 text-[10px] text-text outline-none"
               aria-label="Filter kamera berdasarkan persimpangan"
             >
-              {INTERSECTION_OPTIONS.map((option) => (
+              {APPROACH_OPTIONS.map((option) => (
                 <option key={option.id} value={option.id}>
                   {option.name}
                 </option>
@@ -229,7 +219,7 @@ export default function CameraFeedPanel({
             </select>
           )}
           <span className="text-xs text-text-muted">
-            {cameras.length}/{selectedIntersection === "all" ? 4 : 1} CAMERA
+            {cameras.length}/{selectedApproach === "all" ? 4 : 1} CAMERA
           </span>
         </div>
 

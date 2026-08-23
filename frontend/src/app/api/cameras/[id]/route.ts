@@ -23,7 +23,10 @@
 import { NextResponse } from "next/server";
 
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import { supabase } from "@/lib/supabaseClient";
 import { findOrCreateIntersection } from "../intersectionHelper";
+
+const supabaseClient = supabaseAdmin || supabase;
 
 export async function DELETE(
   _request: Request,
@@ -39,7 +42,7 @@ export async function DELETE(
     );
   }
 
-  const { data: videos, error: videosLookupError } = await supabaseAdmin
+  const { data: videos, error: videosLookupError } = await supabaseClient
     .from("cameraVideos")
     .select("id")
     .eq("cameraId", cameraId);
@@ -54,7 +57,7 @@ export async function DELETE(
   const videoIds = (videos ?? []).map((video) => video.id);
 
   if (videoIds.length > 0) {
-    const { data: jobs, error: jobsLookupError } = await supabaseAdmin
+    const { data: jobs, error: jobsLookupError } = await supabaseClient
       .from("cvProcessingJobs")
       .select("id")
       .in("videoId", videoIds);
@@ -69,7 +72,7 @@ export async function DELETE(
     const jobIds = (jobs ?? []).map((job) => job.id);
 
     if (jobIds.length > 0) {
-      const { data: states, error: statesLookupError } = await supabaseAdmin
+      const { data: states, error: statesLookupError } = await supabaseClient
         .from("trafficStates")
         .select("id")
         .in("processingJobId", jobIds);
@@ -84,7 +87,7 @@ export async function DELETE(
       const stateIds = (states ?? []).map((state) => state.id);
 
       if (stateIds.length > 0) {
-        const { error: laneMetricsDeleteError } = await supabaseAdmin
+        const { error: laneMetricsDeleteError } = await supabaseClient
           .from("trafficLaneMetrics")
           .delete()
           .in("trafficStateId", stateIds);
@@ -96,7 +99,7 @@ export async function DELETE(
           );
         }
 
-        const { error: approachStatesDeleteError } = await supabaseAdmin
+        const { error: approachStatesDeleteError } = await supabaseClient
           .from("trafficApproachStates")
           .delete()
           .in("trafficStateId", stateIds);
@@ -109,7 +112,7 @@ export async function DELETE(
         }
 
         const { data: simulations, error: simulationsLookupError } =
-          await supabaseAdmin
+          await supabaseClient
             .from("simulations")
             .select("id")
             .in("trafficStateId", stateIds);
@@ -124,7 +127,7 @@ export async function DELETE(
         const simulationIds = (simulations ?? []).map((sim) => sim.id);
 
         if (simulationIds.length > 0) {
-          const { error: simulationMetricsDeleteError } = await supabaseAdmin
+          const { error: simulationMetricsDeleteError } = await supabaseClient
             .from("simulationMetrics")
             .delete()
             .in("simulationId", simulationIds);
@@ -136,7 +139,7 @@ export async function DELETE(
             );
           }
 
-          const { error: simulationsDeleteError } = await supabaseAdmin
+          const { error: simulationsDeleteError } = await supabaseClient
             .from("simulations")
             .delete()
             .in("id", simulationIds);
@@ -149,7 +152,7 @@ export async function DELETE(
           }
         }
 
-        const { error: statesDeleteError } = await supabaseAdmin
+        const { error: statesDeleteError } = await supabaseClient
           .from("trafficStates")
           .delete()
           .in("id", stateIds);
@@ -162,7 +165,7 @@ export async function DELETE(
         }
       }
 
-      const { error: historyDeleteError } = await supabaseAdmin
+      const { error: historyDeleteError } = await supabaseClient
         .from("cctvHistory")
         .delete()
         .in("processingJobId", jobIds);
@@ -174,7 +177,7 @@ export async function DELETE(
         );
       }
 
-      const { error: jobsDeleteError } = await supabaseAdmin
+      const { error: jobsDeleteError } = await supabaseClient
         .from("cvProcessingJobs")
         .delete()
         .in("id", jobIds);
@@ -187,7 +190,7 @@ export async function DELETE(
       }
     }
 
-    const { error: videosDeleteError } = await supabaseAdmin
+    const { error: videosDeleteError } = await supabaseClient
       .from("cameraVideos")
       .delete()
       .in("id", videoIds);
@@ -200,7 +203,7 @@ export async function DELETE(
     }
   }
 
-  const { error: cameraDeleteError } = await supabaseAdmin
+  const { error: cameraDeleteError } = await supabaseClient
     .from("cameras")
     .delete()
     .eq("id", cameraId);
@@ -241,14 +244,15 @@ export async function PATCH(
   let intersection;
   try {
     intersection = await findOrCreateIntersection(body.intersection_name);
-  } catch (err: any) {
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
     return NextResponse.json(
-      { error: "Gagal memproses persimpangan: " + err.message },
+      { error: "Gagal memproses persimpangan: " + message },
       { status: 500 }
     );
   }
 
-  const { data: approach, error: approachError } = await supabaseAdmin
+  const { data: approach, error: approachError } = await supabaseClient
     .from("approaches")
     .select("id")
     .eq("intersectionId", intersection.id)
@@ -262,7 +266,7 @@ export async function PATCH(
     );
   }
 
-  const { error: updateError } = await supabaseAdmin
+  const { error: updateError } = await supabaseClient
     .from("cameras")
     .update({
       name: body.name.trim(),

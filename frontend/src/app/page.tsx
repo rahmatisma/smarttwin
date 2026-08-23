@@ -14,7 +14,6 @@ import ForecastChart from "@/components/ForecastChart";
 import { useTrafficSimulation } from "@/hooks/useTrafficSimulaton";
 
 import {
-  DEFAULT_INTERSECTION_ID,
   fetchTrafficState,
   fetchSignalStatus,
   fetchRecommendation,
@@ -24,7 +23,6 @@ import {
 
 import {
   ALL_INTERSECTIONS,
-  getIntersectionName,
   type IntersectionSelection,
   type ApproachSelection,
 } from "@/lib/intersections";
@@ -377,8 +375,7 @@ export default function DashboardPage() {
    * =========================================================
    */
 
-  const [selectedIntersection, setSelectedIntersection] =
-    useState<IntersectionSelection>("all");
+  const selectedIntersection: IntersectionSelection = "all";
 
   /*
    * simpang4-pingit adalah SATU simpang 4 lengan, bukan 4 simpang
@@ -911,8 +908,8 @@ export default function DashboardPage() {
 
               <CameraFeedPanel
                 counts={vehicleClassCounts}
-                selectedIntersection={selectedIntersection}
-                onIntersectionChange={setSelectedIntersection}
+                selectedApproach={selectedApproach}
+                onApproachChange={setSelectedApproach}
               />
 
               {/* SIGNAL STATUS */}
