@@ -419,62 +419,37 @@ def create_phase_plan(
         if x.approach == "west"
     )
 
-    queue_ns = (
-        north.queueLengthVeh
-        + south.queueLengthVeh
-    )
-
-    queue_ew = (
-        east.queueLengthVeh
-        + west.queueLengthVeh
-    )
+    queue_north = north.queueLengthVeh
+    queue_south = south.queueLengthVeh
+    queue_east = east.queueLengthVeh
+    queue_west = west.queueLengthVeh
 
     # --------------------------------------------------------
-    # Adaptive rule-based TLS
+    # Adaptive rule-based TLS (4 Phases)
     # --------------------------------------------------------
 
-    if queue_ns >= queue_ew:
+    queues = {
+        0: ("South", queue_south),
+        1: ("East", queue_east),
+        2: ("North", queue_north),
+        3: ("West", queue_west),
+    }
 
-        phase = 0
+    best_phase = max(queues.items(), key=lambda x: x[1][1])[0]
+    best_name, best_queue = queues[best_phase]
 
-        duration = min(
-            60,
-            max(
-                20,
-                30 + queue_ns,
-            ),
-        )
-
-        reason = (
-            "North/South memiliki queue "
-            "lebih tinggi atau sama "
-            "dengan East/West."
-        )
-
-    else:
-
-        phase = 1
-
-        duration = min(
-            60,
-            max(
-                20,
-                30 + queue_ew,
-            ),
-        )
-
-        reason = (
-            "East/West memiliki queue "
-            "lebih tinggi daripada "
-            "North/South."
-        )
+    phase = best_phase
+    duration = min(60, max(20, 30 + best_queue))
+    reason = f"{best_name} memiliki queue tertinggi ({best_queue})."
 
     plan = {
         "phase": phase,
         "duration": float(duration),
         "reason": reason,
-        "queueNS": queue_ns,
-        "queueEW": queue_ew,
+        "queueNorth": queue_north,
+        "queueSouth": queue_south,
+        "queueEast": queue_east,
+        "queueWest": queue_west,
     }
 
     print(
@@ -494,15 +469,10 @@ def create_phase_plan(
 
     print()
 
-    print(
-        f"Queue NS        : "
-        f"{queue_ns}"
-    )
-
-    print(
-        f"Queue EW        : "
-        f"{queue_ew}"
-    )
+    print(f"Queue South     : {queue_south}")
+    print(f"Queue East      : {queue_east}")
+    print(f"Queue North     : {queue_north}")
+    print(f"Queue West      : {queue_west}")
 
     return plan
 

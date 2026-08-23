@@ -57,11 +57,13 @@ const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
 
 function resolveVideoSrc(source: string): string {
+  // Add cache buster to prevent browser from using corrupted cached responses
+  const t = Date.now();
   if (source.startsWith("/api/")) {
-    return `${API_BASE_URL}${source}`;
+    return `${API_BASE_URL}${source}?t=${t}`;
   }
 
-  return source;
+  return `${source}${source.includes("?") ? "&" : "?"}t=${t}`;
 }
 
 // =====================================================
@@ -321,14 +323,11 @@ export default function CameraFeedPanel({
                       }
                     }}
                     onError={(event) => {
-
+                      const err = event.currentTarget.error;
                       console.error(
                         `Video CCTV ${camera.name} gagal diputar:`,
-                        event
-                          .currentTarget
-                          .error
+                        err ? `Code ${err.code}: ${err.message}` : "Unknown error"
                       );
-
                     }}
                   />
 

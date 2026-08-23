@@ -1,6 +1,7 @@
 <configuration>
     <input>
-        <net-file value="simpang4_pingit.net.xml.gz"/>
+        <net-file value="simpang44_pingit.net.xml.gz"/>
+        <route-files value="../outputs/demo_mobil.rou.xml,../outputs/demo_motor.rou.xml,../outputs/demo_bus.rou.xml,../outputs/demo_truk.rou.xml"/>
     </input>
     <time>
         <begin value="0"/>

@@ -270,6 +270,8 @@ async def upload_cctv_video(
 # STREAM VIDEO
 # ============================================================
 
+
+
 @router.get("/videos/{video_id}/stream")
 async def stream_cctv_video(video_id: int, request: Request):
     """
@@ -293,6 +295,7 @@ async def stream_cctv_video(video_id: int, request: Request):
             return FileResponse(
                 cached_path,
                 media_type="video/mp4",
+                stat_result=cached_path.stat(),
                 headers={"Accept-Ranges": "bytes"},
             )
 

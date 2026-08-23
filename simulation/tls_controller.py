@@ -12,9 +12,10 @@ MIN_GREEN_DURATION = 10
 MAX_GREEN_DURATION = 60
 YELLOW_DURATION = 6
 
-NORTH_SOUTH_PHASE = 0
-YELLOW_NS_PHASE = 1
-EAST_WEST_PHASE = 2
+# PHASE_SOUTH = 0
+# PHASE_EAST = 1
+# PHASE_NORTH = 2
+# PHASE_WEST = 3
 
 
 # ============================================================
@@ -79,68 +80,25 @@ class TLSController:
         )
 
         # ----------------------------------------------------
-        # Hitung demand
+        # Hitung demand 4 arah (South=0, East=1, North=2, West=3)
         # ----------------------------------------------------
 
-        ns_demand = (
-            north.queueLengthVeh
-            + south.queueLengthVeh
-        )
+        queues = {
+            0: ("South", south.queueLengthVeh),
+            1: ("East", east.queueLengthVeh),
+            2: ("North", north.queueLengthVeh),
+            3: ("West", west.queueLengthVeh),
+        }
 
-        ew_demand = (
-            east.queueLengthVeh
-            + west.queueLengthVeh
-        )
+        best_phase = max(queues.items(), key=lambda x: x[1][1])[0]
+        best_name, best_queue = queues[best_phase]
 
-        # ----------------------------------------------------
-        # Jika North/South lebih padat
-        # ----------------------------------------------------
-
-        if ns_demand > ew_demand:
-
-            duration = self._calculate_green_duration(
-                ns_demand
-            )
-
-            return PhasePlan(
-                phase=NORTH_SOUTH_PHASE,
-                duration=duration,
-                reason=(
-                    "North/South memiliki "
-                    "queue lebih tinggi."
-                ),
-            )
-
-        # ----------------------------------------------------
-        # Jika East/West lebih padat
-        # ----------------------------------------------------
-
-        if ew_demand > ns_demand:
-
-            duration = self._calculate_green_duration(
-                ew_demand
-            )
-
-            return PhasePlan(
-                phase=EAST_WEST_PHASE,
-                duration=duration,
-                reason=(
-                    "East/West memiliki "
-                    "queue lebih tinggi."
-                ),
-            )
-
-        # ----------------------------------------------------
-        # Jika sama
-        # ----------------------------------------------------
+        duration = self._calculate_green_duration(best_queue)
 
         return PhasePlan(
-            phase=NORTH_SOUTH_PHASE,
-            duration=DEFAULT_GREEN_DURATION,
-            reason=(
-                "Demand seimbang. "
-                "Menggunakan phase default."
-            ),
+            phase=best_phase,
+            duration=duration,
+            reason=f"{best_name} memiliki queue tertinggi ({best_queue})."
         )
 
     # ========================================================
