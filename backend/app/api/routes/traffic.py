@@ -20,7 +20,9 @@ from app.schemas.traffic_response import (
     TrafficListResponse,
 )
 
-from app.services.ws_manager import traffic_ws_manager
+from app.services.ws_manager import (
+    traffic_ws_manager,
+)
 
 from app.pipeline.traffic_state_builder import (
     TrafficStateBuilder,
@@ -51,79 +53,125 @@ traffic_service = TrafficService()
 
 @router.get("/live-csv")
 def get_live_csv(
-    video_time: float | None = Query(default=None),
+    video_time: float | None = Query(
+        default=None,
+    ),
 ):
     """
-    Legacy endpoint untuk membaca output CV.
+    Mengambil traffic state terbaru dari Supabase.
 
-    NOTE:
-    Pipeline utama SmartTwin sekarang menggunakan:
+    Endpoint ini TIDAK bergantung pada koneksi SUMO/TraCI.
+
+    Alur:
 
         CV
-        ↓
+         ↓
         Supabase
-        ↓
+         ↓
         TrafficStateBuilder
+         ↓
+        /api/v1/traffic/live-csv
+         ↓
+        Frontend
 
-    Jadi endpoint ini tidak lagi menggunakan
-    getDefaultCrossPath() / getDefaultDensityPath().
+    SUMO boleh sedang berjalan ataupun sudah ditutup.
     """
 
     try:
+
+        # ----------------------------------------------------
+        # BUILD TRAFFIC STATE
+        # ----------------------------------------------------
+
         builder = TrafficStateBuilder(
             TrafficStateBuilderConfig(
                 windowSeconds=1,
             )
         )
 
-        # ----------------------------------------------------
-        # BUILD DARI SUPABASE
-        # ----------------------------------------------------
-        #
-        # Jika video_time diberikan, pipeline terbaru
-        # seharusnya mencari traffic state berdasarkan
-        # timestamp/video time.
-        #
-        # Untuk sementara kita ambil traffic state terbaru
-        # dari intersection yang digunakan oleh pipeline.
-        #
-        # Endpoint ini dipertahankan agar frontend lama
-        # tidak langsung error.
-        # ----------------------------------------------------
-
         states = builder.buildFromSupabase(
             intersectionId="simpang4-pingit",
             limit=1,
         )
 
+        # ----------------------------------------------------
+        # NO DATA
+        # ----------------------------------------------------
+
         if not states:
-            raise HTTPException(
-                status_code=404,
-                detail="No traffic state data found.",
-            )
+
+            return {
+                "success": True,
+                "data": None,
+                "timestamp": None,
+                "requestedVideoTime": video_time,
+                "message": "No traffic state data found.",
+            }
+
+        # ----------------------------------------------------
+        # LATEST STATE
+        # ----------------------------------------------------
 
         latest_state = states[-1]
 
         return {
             "success": True,
+
             "data": latest_state.model_dump(
                 mode="json"
             ),
+
             "timestamp": getattr(
                 builder,
                 "last_matched_video_time",
                 None,
             ),
+
             "requestedVideoTime": video_time,
         }
 
-    except HTTPException:
-        raise
-
     except Exception as exc:
+
+        # ----------------------------------------------------
+        # IMPORTANT
+        #
+        # Jangan membuat API traffic bergantung pada SUMO.
+        #
+        # Kalau SUMO ditutup dan ada error koneksi yang
+        # ikut terlempar dari pipeline, API tetap memberi
+        # response yang aman.
+        # ----------------------------------------------------
+
+        error_message = str(exc)
+
+        if (
+            "Connection closed by SUMO"
+            in error_message
+            or "TraCI"
+            in error_message
+            or "SUMO" in error_message
+        ):
+
+            return {
+                "success": True,
+                "data": None,
+                "timestamp": None,
+                "requestedVideoTime": video_time,
+                "sumoConnected": False,
+                "message": (
+                    "SUMO tidak sedang terhubung. "
+                    "Traffic API tetap berjalan "
+                    "tanpa koneksi SUMO."
+                ),
+            }
+
+        # ----------------------------------------------------
+        # ERROR LAIN
+        # ----------------------------------------------------
+
         raise HTTPException(
             status_code=500,
-            detail=str(exc),
+            detail=error_message,
         ) from exc
 
 
@@ -146,9 +194,15 @@ def get_latest_traffic(
     """
     Mengambil traffic state terbaru
     untuk satu intersection.
+
+    Endpoint ini hanya membaca data dari
+    TrafficService -> Repository -> Supabase.
+
+    Tidak bergantung pada SUMO.
     """
 
     try:
+
         data = traffic_service.get_latest_traffic(
             intersection_id=intersectionId,
             limit=limit,
@@ -162,6 +216,7 @@ def get_latest_traffic(
         }
 
     except TrafficServiceError as exc:
+
         raise HTTPException(
             status_code=404,
             detail=str(exc),
@@ -177,13 +232,29 @@ async def traffic_websocket(
     websocket: WebSocket,
 ) -> None:
 
-    await traffic_ws_manager.connect(websocket)
+    await traffic_ws_manager.connect(
+        websocket
+    )
 
     try:
+
         while True:
+
             await websocket.receive_text()
 
     except WebSocketDisconnect:
+
+        traffic_ws_manager.disconnect(
+            websocket
+        )
+
+    except Exception:
+
+        # ----------------------------------------------------
+        # Client / connection error tidak boleh membuat
+        # server crash.
+        # ----------------------------------------------------
+
         traffic_ws_manager.disconnect(
             websocket
         )
@@ -224,15 +295,19 @@ def get_traffic_state(
     """
 
     try:
+
         data = traffic_service.get_traffic_state(
             intersection_id=intersectionId,
             traffic_state_id=trafficStateId,
         )
 
         if data is None:
+
             raise HTTPException(
                 status_code=404,
-                detail="Traffic state tidak ditemukan.",
+                detail=(
+                    "Traffic state tidak ditemukan."
+                ),
             )
 
         return {
@@ -242,6 +317,7 @@ def get_traffic_state(
         }
 
     except TrafficServiceError as exc:
+
         raise HTTPException(
             status_code=404,
             detail=str(exc),

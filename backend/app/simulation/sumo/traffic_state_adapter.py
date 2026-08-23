@@ -2,28 +2,29 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.pipeline.traffic_state_builder import BuiltTrafficState
+from app.pipeline.traffic_state_builder import (
+    BuiltTrafficState,
+)
 
 
 class SumoTrafficStateAdapter:
     """
-    Adapter yang mengubah BuiltTrafficState backend
-    menjadi traffic demand yang dapat digunakan oleh SUMO.
+    Adapter:
 
-    Alur:
-
-        Traffic State Builder
-                ↓
         BuiltTrafficState
                 ↓
-        SumoTrafficStateAdapter
-                ↓
         SUMO demand
+                ↓
+        SumoController.inject_demand()
+
+    Adapter TIDAK menjalankan SUMO.
+
+    Adapter hanya bertugas mengubah format data.
     """
 
-    # ========================================================
+    # ============================================================
     # VALID APPROACHES
-    # ========================================================
+    # ============================================================
 
     VALID_APPROACHES = {
         "north",
@@ -32,80 +33,70 @@ class SumoTrafficStateAdapter:
         "west",
     }
 
-    # ========================================================
+    # ============================================================
     # INIT
-    # ========================================================
+    # ============================================================
 
     def __init__(
         self,
         approach_to_edge: dict[str, str],
     ) -> None:
-        """
-        Parameters
-        ----------
-        approach_to_edge:
-            Mapping approach backend ke edge SUMO.
-
-        Contoh:
-
-            {
-                "north": "484349908#2",
-                "south": "134603786#2",
-                "east": "153857851#4",
-                "west": "590064461#2",
-            }
-        """
 
         self.approach_to_edge = {
-            str(key).lower().strip(): str(value)
-            for key, value in approach_to_edge.items()
+            str(key)
+            .lower()
+            .strip(): str(value)
+            for key, value in (
+                approach_to_edge.items()
+            )
         }
 
-    # ========================================================
+    # ============================================================
     # TO DEMAND
-    # ========================================================
+    # ============================================================
 
     def to_demand(
         self,
         state: BuiltTrafficState,
     ) -> list[dict[str, Any]]:
         """
-        Mengubah BuiltTrafficState menjadi SUMO demand.
-
-        Input:
-
-            BuiltTrafficState
-                ↓
-            approaches
-                ↓
-            ApproachState
+        Mengubah BuiltTrafficState menjadi
+        demand kendaraan untuk SUMO.
 
         Output:
 
-            [
-                {
-                    "approach": "north",
-                    "edge_id": "484349908#2",
-                    "volume": 10,
-                    "motorcycleCount": 6,
-                    "carCount": 3,
-                    "busCount": 1,
-                    "truckCount": 0,
-                }
-            ]
+        [
+            {
+                "approach": "north",
+                "edge_id": "484349908#2",
+                "volume": 10,
+                "motorcycleCount": 6,
+                "carCount": 3,
+                "busCount": 1,
+                "truckCount": 0
+            }
+        ]
         """
 
-        demand: list[dict[str, Any]] = []
+        demand: list[
+            dict[str, Any]
+        ] = []
 
-        for approach_state in state.approaches:
+        # ========================================================
+        # APPROACH
+        # ========================================================
+
+        for approach_state in (
+            state.approaches
+        ):
 
             approach_name = str(
                 approach_state.approach
             ).lower().strip()
 
-            # ------------------------------------------------
+            # ----------------------------------------------------
             # VALIDATE APPROACH
-            # ------------------------------------------------
+            # ----------------------------------------------------
 
             if (
                 approach_name
@@ -113,9 +104,9 @@ class SumoTrafficStateAdapter:
             ):
                 continue
 
-            # ------------------------------------------------
-            # GET SUMO EDGE
-            # ------------------------------------------------
+            # ----------------------------------------------------
+            # GET EDGE
+            # ----------------------------------------------------
 
             edge_id = (
                 self.approach_to_edge.get(
@@ -126,51 +117,117 @@ class SumoTrafficStateAdapter:
             if edge_id is None:
                 continue
 
-            # ------------------------------------------------
+            # ----------------------------------------------------
+            # READ COUNTS
+            # ----------------------------------------------------
+
+            motorcycle_count = max(
+                0,
+                int(
+                    approach_state.motorcycleCount
+                    or 0
+                ),
+            )
+
+            car_count = max(
+                0,
+                int(
+                    approach_state.carCount
+                    or 0
+                ),
+            )
+
+            bus_count = max(
+                0,
+                int(
+                    approach_state.busCount
+                    or 0
+                ),
+            )
+
+            truck_count = max(
+                0,
+                int(
+                    approach_state.truckCount
+                    or 0
+                ),
+            )
+
+            volume = max(
+                0,
+                int(
+                    approach_state.volume
+                    or 0
+                ),
+            )
+
+            # ----------------------------------------------------
             # BUILD DEMAND
-            # ------------------------------------------------
+            # ----------------------------------------------------
 
             demand.append(
                 {
-                    "approach": approach_name,
-
+                    "approach": (
+                        approach_name
+                    ),
                     "edge_id": edge_id,
-
-                    "volume": max(
-                        0,
-                        int(
-                            approach_state.volume
-                        ),
+                    "volume": volume,
+                    "motorcycleCount": (
+                        motorcycle_count
                     ),
-
-                    "motorcycleCount": max(
-                        0,
-                        int(
-                            approach_state.motorcycleCount
-                        ),
-                    ),
-
-                    "carCount": max(
-                        0,
-                        int(
-                            approach_state.carCount
-                        ),
-                    ),
-
-                    "busCount": max(
-                        0,
-                        int(
-                            approach_state.busCount
-                        ),
-                    ),
-
-                    "truckCount": max(
-                        0,
-                        int(
-                            approach_state.truckCount
-                        ),
+                    "carCount": car_count,
+                    "busCount": bus_count,
+                    "truckCount": (
+                        truck_count
                     ),
                 }
             )
 
         return demand
+
+    # ============================================================
+    # EMPTY CHECK
+    # ============================================================
+
+    @staticmethod
+    def has_demand(
+        demand: list[dict[str, Any]],
+    ) -> bool:
+
+        for item in demand:
+
+            total = (
+                int(
+                    item.get(
+                        "motorcycleCount",
+                        0,
+                    )
+                    or 0
+                )
+                + int(
+                    item.get(
+                        "carCount",
+                        0,
+                    )
+                    or 0
+                )
+                + int(
+                    item.get(
+                        "busCount",
+                        0,
+                    )
+                    or 0
+                )
+                + int(
+                    item.get(
+                        "truckCount",
+                        0,
+                    )
+                    or 0
+                )
+            )
+
+            if total > 0:
+                return True
+
+        return False

@@ -8,6 +8,10 @@ from app.services.traffic_repository import (
 )
 
 
+# ============================================================
+# ERROR
+# ============================================================
+
 class TrafficServiceError(Exception):
     """
     Error khusus untuk traffic service.
@@ -16,11 +20,15 @@ class TrafficServiceError(Exception):
     pass
 
 
+# ============================================================
+# TRAFFIC SERVICE
+# ============================================================
+
 class TrafficService:
     """
     Business logic untuk membaca traffic data.
 
-    Service ini menjadi penghubung antara:
+    Alur:
 
         API
          ↓
@@ -29,12 +37,15 @@ class TrafficService:
         TrafficRepository
          ↓
         Supabase
+
+    Service ini TIDAK mengontrol SUMO/TraCI.
     """
 
     def __init__(
         self,
         repository: TrafficRepository | None = None,
     ) -> None:
+
         self.repository = (
             repository
             if repository is not None
@@ -54,12 +65,23 @@ class TrafficService:
         menjadi database primary key.
         """
 
+        if not intersection_id.strip():
+
+            raise TrafficServiceError(
+                "intersection_id tidak boleh kosong."
+            )
+
         try:
-            return self.repository.get_intersection_row_id(
-                intersection_id
+
+            return (
+                self.repository
+                .get_intersection_row_id(
+                    intersection_id
+                )
             )
 
         except TrafficRepositoryError as exc:
+
             raise TrafficServiceError(
                 str(exc)
             ) from exc
@@ -79,24 +101,37 @@ class TrafficService:
         beserta approach states.
         """
 
+        # ----------------------------------------------------
+        # VALIDATION
+        # ----------------------------------------------------
+
         if not intersection_id.strip():
+
             raise TrafficServiceError(
                 "intersection_id tidak boleh kosong."
             )
 
         if limit <= 0:
+
             raise TrafficServiceError(
                 "limit harus lebih besar dari 0."
             )
 
         if limit > 100:
+
             raise TrafficServiceError(
                 "limit maksimal adalah 100."
             )
 
+        # ----------------------------------------------------
+        # DATABASE
+        # ----------------------------------------------------
+
         try:
+
             intersection_row_id = (
-                self.repository.get_intersection_row_id(
+                self.repository
+                .get_intersection_row_id(
                     intersection_id
                 )
             )
@@ -104,12 +139,15 @@ class TrafficService:
             return (
                 self.repository
                 .get_latest_complete_traffic_states(
-                    intersection_row_id=intersection_row_id,
+                    intersection_row_id=(
+                        intersection_row_id
+                    ),
                     limit=limit,
                 )
             )
 
         except TrafficRepositoryError as exc:
+
             raise TrafficServiceError(
                 str(exc)
             ) from exc
@@ -128,19 +166,31 @@ class TrafficService:
         Mengambil satu traffic state lengkap.
         """
 
+        # ----------------------------------------------------
+        # VALIDATION
+        # ----------------------------------------------------
+
         if not intersection_id.strip():
+
             raise TrafficServiceError(
                 "intersection_id tidak boleh kosong."
             )
 
         if traffic_state_id <= 0:
+
             raise TrafficServiceError(
                 "traffic_state_id tidak valid."
             )
 
+        # ----------------------------------------------------
+        # DATABASE
+        # ----------------------------------------------------
+
         try:
+
             intersection_row_id = (
-                self.repository.get_intersection_row_id(
+                self.repository
+                .get_intersection_row_id(
                     intersection_id
                 )
             )
@@ -148,15 +198,28 @@ class TrafficService:
             traffic_state = (
                 self.repository
                 .get_traffic_state_with_approaches(
-                    traffic_state_id=traffic_state_id
+                    traffic_state_id=(
+                        traffic_state_id
+                    )
                 )
             )
 
+            # ------------------------------------------------
+            # NOT FOUND
+            # ------------------------------------------------
+
             if traffic_state is None:
+
                 return None
 
+            # ------------------------------------------------
+            # VALIDATE INTERSECTION
+            # ------------------------------------------------
+
             database_intersection_id = int(
-                traffic_state["trafficState"][
+                traffic_state[
+                    "trafficState"
+                ][
                     "intersectionId"
                 ]
             )
@@ -165,11 +228,13 @@ class TrafficService:
                 database_intersection_id
                 != intersection_row_id
             ):
+
                 return None
 
             return traffic_state
 
         except TrafficRepositoryError as exc:
+
             raise TrafficServiceError(
                 str(exc)
             ) from exc

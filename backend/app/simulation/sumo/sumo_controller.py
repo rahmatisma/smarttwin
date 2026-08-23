@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import random
-
+import threading
+import time
 from collections import defaultdict
 from pathlib import Path
 from typing import Any
@@ -9,50 +10,40 @@ from typing import Any
 
 class SumoController:
     """
-    Controller untuk menjalankan simulasi SUMO melalui TraCI.
+    Long-running SUMO Controller.
 
-    Struktur project yang digunakan:
+    SUMO hanya dijalankan SATU KALI selama controller aktif.
 
-        smarttwin/
-        ├── backend/
-        │   └── app/
-        │       └── simulation/
-        │           └── sumo/
-        │               └── sumo_controller.py
-        │
-        └── simulation/
-            ├── .venv/
-            │   └── Scripts/
-            │       ├── sumo.exe
-            │       └── sumo-gui.exe
-            │
-            └── network/
-                └── simpang4_pingit.sumocfg
+    Alur:
 
-    Tugas:
-        1. Menentukan executable SUMO
-        2. Start SUMO
-        3. Membuat vehicle type
-        4. Membuat route
-        5. Spawn kendaraan berdasarkan traffic demand
-        6. Menjalankan simulation step
-        7. Mengumpulkan metrics
-        8. Menutup SUMO
+        TrafficState
+             ↓
+        inject_demand()
+             ↓
+        SUMO simulationStep()
+             ↓
+        metrics
+
+    Background thread menjalankan simulationStep()
+    setiap 1 detik.
+
+    TraCI hanya boleh diakses satu thread pada satu waktu,
+    sehingga semua operasi TraCI dilindungi oleh _traci_lock.
     """
 
-    # ========================================================
+    # ============================================================
     # PROJECT PATH
-    # ========================================================
+    # ============================================================
 
-    # File ini:
-    #
+    # File:
     # backend/app/simulation/sumo/sumo_controller.py
     #
-    # parents[0] = backend/app/simulation/sumo
-    # parents[1] = backend/app/simulation
-    # parents[2] = backend/app
-    # parents[3] = backend
-    # parents[4] = smarttwin
+    # parents:
+    # [0] sumo
+    # [1] simulation
+    # [2] app
+    # [3] backend
+    # [4] smarttwin
     #
     PROJECT_ROOT = Path(__file__).resolve().parents[4]
 
@@ -60,7 +51,9 @@ class SumoController:
 
     SUMO_VENV_DIR = SIMULATION_DIR / ".venv"
 
-    SUMO_SCRIPTS_DIR = SUMO_VENV_DIR / "Scripts"
+    SUMO_SCRIPTS_DIR = (
+        SUMO_VENV_DIR / "Scripts"
+    )
 
     SUMO_BIN_DIR = (
         SUMO_VENV_DIR
@@ -70,42 +63,43 @@ class SumoController:
         / "bin"
     )
 
-    NETWORK_DIR = SIMULATION_DIR / "network"
-
-    DEFAULT_CONFIG_FILE = (
-        NETWORK_DIR / "simpang4_pingit.sumocfg"
+    NETWORK_DIR = (
+        SIMULATION_DIR / "network"
     )
 
-    # ========================================================
-    # VEHICLE TYPES
-    # ========================================================
+    DEFAULT_CONFIG_FILE = (
+        NETWORK_DIR
+        / "simpang4_pingit.sumocfg"
+    )
 
-    VEHICLE_TYPES = {
-        "motorcycle": {
-            "vclass": "motorcycle",
-            "length": 2.2,
-            "width": 0.9,
-        },
-        "car": {
-            "vclass": "passenger",
-            "length": 5.0,
-            "width": 1.8,
-        },
-        "bus": {
-            "vclass": "bus",
-            "length": 12.0,
-            "width": 2.5,
-        },
-        "truck": {
-            "vclass": "truck",
-            "length": 10.0,
-            "width": 2.5,
-        },
+    # ============================================================
+    # EDGE CONFIGURATION
+    # ============================================================
+
+    EDGE_HULU = {
+        "north": "484349908#0",
+        "south": "134603786#0",
+        "east": "153857851#2",
+        "west": "590064461#0",
     }
 
-    # ========================================================
+    EDGE_MASUK = {
+        "north": "484349908#2",
+        "south": "134603786#2",
+        "east": "153857851#4",
+        "west": "590064461#2",
+    }
+
+    EDGE_KELUAR = {
+        "north": "201299423#0",
+        "south": "153857907#0",
+        "east": "590386082#0",
+        "west": "25006154#0",
+    }
+
+    # ============================================================
     # TURN DISTRIBUTION
-    # ========================================================
+    # ============================================================
 
     TURN_DISTRIBUTION = {
         "lurus": 0.50,
@@ -136,34 +130,47 @@ class SumoController:
         },
     }
 
-    # ========================================================
-    # EDGE CONFIGURATION
-    # ========================================================
+    # ============================================================
+    # VEHICLE TYPES
+    # ============================================================
 
-    EDGE_HULU = {
-        "north": "484349908#0",
-        "south": "134603786#0",
-        "east": "153857851#2",
-        "west": "590064461#0",
+    VEHICLE_TYPES = {
+        "motorcycle": {
+            "vclass": "motorcycle",
+            "length": 2.2,
+            "width": 0.9,
+            "maxSpeed": 13.9,
+        },
+        "car": {
+            "vclass": "passenger",
+            "length": 5.0,
+            "width": 1.8,
+            "maxSpeed": 13.9,
+        },
+        "bus": {
+            "vclass": "bus",
+            "length": 12.0,
+            "width": 2.5,
+            "maxSpeed": 13.9,
+        },
+        "truck": {
+            "vclass": "truck",
+            "length": 10.0,
+            "width": 2.5,
+            "maxSpeed": 13.9,
+        },
     }
 
-    EDGE_MASUK = {
-        "north": "484349908#2",
-        "south": "134603786#2",
-        "east": "153857851#4",
-        "west": "590064461#2",
+    VALID_APPROACHES = {
+        "north",
+        "south",
+        "east",
+        "west",
     }
 
-    EDGE_KELUAR = {
-        "north": "201299423#0",
-        "south": "153857907#0",
-        "east": "590386082#0",
-        "west": "25006154#0",
-    }
-
-    # ========================================================
+    # ============================================================
     # INIT
-    # ========================================================
+    # ============================================================
 
     def __init__(
         self,
@@ -185,22 +192,80 @@ class SumoController:
         )
 
         self.seed = seed
+
+        # ========================================================
+        # TRACI
+        # ========================================================
+
         self.traci = None
 
-    # ========================================================
-    # FIND SUMO BINARY
-    # ========================================================
+        # ========================================================
+        # REALTIME STATE
+        # ========================================================
+
+        self.running = False
+
+        self._stop_event = threading.Event()
+
+        self._simulation_thread: (
+            threading.Thread | None
+        ) = None
+
+        # ========================================================
+        # TRACI LOCK
+        # ========================================================
+
+        self._traci_lock = threading.RLock()
+
+        # ========================================================
+        # RANDOM
+        # ========================================================
+
+        self._rng = random.Random(seed)
+
+        # ========================================================
+        # METRICS
+        # ========================================================
+
+        self.spawned_total = 0
+
+        self.departed_total = defaultdict(int)
+
+        self.arrived_total = defaultdict(int)
+
+        self.last_simulation_time = 0.0
+
+        self.last_error: str | None = None
+
+        # ========================================================
+        # VEHICLE COUNTER
+        # ========================================================
+
+        self._vehicle_counter = 0
+
+        # ========================================================
+        # APPROACH DEMAND
+        # ========================================================
+
+        self.current_demand: dict[
+            str,
+            dict[str, int],
+        ] = {}
+
+    # ============================================================
+    # SUMO BINARY
+    # ============================================================
 
     @classmethod
-    def _default_sumo_binary(cls) -> Path:
+    def _default_sumo_binary(
+        cls,
+    ) -> Path:
         """
-        Menentukan lokasi SUMO executable.
-
         Prioritas:
 
         1. simulation/.venv/Scripts/sumo.exe
         2. simulation/.venv/Lib/site-packages/sumo/bin/sumo.exe
-        3. fallback ke 'sumo' dari PATH.
+        3. PATH
         """
 
         candidates = [
@@ -209,92 +274,143 @@ class SumoController:
         ]
 
         for candidate in candidates:
+
             if candidate.exists():
                 return candidate
 
         return Path("sumo")
 
-    # ========================================================
-    # FIND SUMO GUI
-    # ========================================================
+    # ============================================================
+    # SUMO GUI BINARY
+    # ============================================================
 
     @classmethod
-    def _default_sumo_gui_binary(cls) -> Path:
-        """
-        Menentukan lokasi SUMO-GUI executable.
-        """
+    def _default_sumo_gui_binary(
+        cls,
+    ) -> Path:
 
         candidates = [
-            cls.SUMO_SCRIPTS_DIR / "sumo-gui.exe",
-            cls.SUMO_BIN_DIR / "sumo-gui.exe",
+            cls.SUMO_SCRIPTS_DIR
+            / "sumo-gui.exe",
+
+            cls.SUMO_BIN_DIR
+            / "sumo-gui.exe",
         ]
 
         for candidate in candidates:
+
             if candidate.exists():
                 return candidate
 
         return Path("sumo-gui")
 
-    # ========================================================
+    # ============================================================
     # START
-    # ========================================================
+    # ============================================================
 
     def start(
         self,
         gui: bool = False,
-        gui_delay_ms: int = 100,
+        gui_delay_ms: int = 0,
     ) -> None:
 
+        # ========================================================
+        # ALREADY RUNNING
+        # ========================================================
+
+        if (
+            self.running
+            and self.traci is not None
+        ):
+            print(
+                "[SUMO] Controller sudah running."
+            )
+            return
+
+        # ========================================================
+        # IMPORT TRACI
+        # ========================================================
+
         try:
+
             import traci
+
         except ImportError as exc:
+
             raise RuntimeError(
-                "TraCI belum tersedia. "
-                "Pastikan package traci sudah terinstall "
-                "di virtual environment backend."
+                "TraCI belum tersedia di environment backend. "
+                "Pastikan package traci terinstall pada "
+                "virtual environment backend."
             ) from exc
 
-        # ----------------------------------------------------
+        # ========================================================
         # CHECK CONFIG
-        # ----------------------------------------------------
+        # ========================================================
 
         if self.config_file is None:
+
             raise ValueError(
                 "Config file SUMO belum diberikan."
             )
 
         if not self.config_file.exists():
+
             raise FileNotFoundError(
-                f"SUMO config file tidak ditemukan: "
+                "SUMO config file tidak ditemukan: "
                 f"{self.config_file}"
             )
 
-        # ----------------------------------------------------
+        # ========================================================
         # SELECT BINARY
-        # ----------------------------------------------------
+        # ========================================================
 
         if gui:
-            binary = self._default_sumo_gui_binary()
+
+            binary = (
+                self._default_sumo_gui_binary()
+            )
+
         else:
+
             binary = self.sumo_binary
 
-        # ----------------------------------------------------
+        # ========================================================
         # CHECK BINARY
-        # ----------------------------------------------------
+        # ========================================================
 
         if (
             isinstance(binary, Path)
-            and binary.name != "sumo"
-            and binary.name != "sumo-gui"
+            and binary.name
+            not in {
+                "sumo",
+                "sumo.exe",
+                "sumo-gui",
+                "sumo-gui.exe",
+            }
             and not binary.exists()
         ):
+
             raise FileNotFoundError(
                 f"SUMO binary tidak ditemukan: {binary}"
             )
 
-        # ----------------------------------------------------
+        if (
+            isinstance(binary, Path)
+            and binary.name
+            in {
+                "sumo.exe",
+                "sumo-gui.exe",
+            }
+            and not binary.exists()
+        ):
+
+            raise FileNotFoundError(
+                f"SUMO binary tidak ditemukan: {binary}"
+            )
+
+        # ========================================================
         # COMMAND
-        # ----------------------------------------------------
+        # ========================================================
 
         command = [
             str(binary),
@@ -303,10 +419,14 @@ class SumoController:
             "--step-length",
             "1",
             "--no-step-log",
-            "--no-warnings",
         ]
 
+        # ========================================================
+        # SEED
+        # ========================================================
+
         if self.seed is not None:
+
             command.extend(
                 [
                     "--seed",
@@ -314,7 +434,15 @@ class SumoController:
                 ]
             )
 
-        if gui:
+        # ========================================================
+        # GUI DELAY
+        # ========================================================
+
+        if (
+            gui
+            and gui_delay_ms > 0
+        ):
+
             command.extend(
                 [
                     "--delay",
@@ -322,46 +450,148 @@ class SumoController:
                 ]
             )
 
-        # ----------------------------------------------------
+        # ========================================================
         # LOG
-        # ----------------------------------------------------
+        # ========================================================
 
         print()
         print("=" * 70)
         print("STARTING SUMO")
         print("=" * 70)
-        print(f"Binary : {binary}")
-        print(f"Config : {self.config_file}")
-        print(f"Command: {' '.join(command)}")
+
+        print(
+            f"Binary : {binary}"
+        )
+
+        print(
+            f"Config : {self.config_file}"
+        )
+
+        print(
+            f"Command: {' '.join(command)}"
+        )
+
         print("=" * 70)
 
-        # ----------------------------------------------------
-        # START TRACI
-        # ----------------------------------------------------
+        # ========================================================
+        # START SUMO THROUGH TRACI
+        # ========================================================
 
         try:
-            traci.start(command)
+
+            traci.start(
+                command,
+                label="smarttwin",
+            )
+
         except Exception as exc:
+
+            # ----------------------------------------------------
+            # Cleanup jika koneksi setengah terbuka
+            # ----------------------------------------------------
+
+            try:
+
+                traci.close()
+
+            except Exception:
+
+                pass
+
+            self.traci = None
+
+            self.running = False
+
+            self.last_error = str(exc)
+
             raise RuntimeError(
                 "Gagal menjalankan SUMO melalui TraCI.\n\n"
-                f"Binary   : {binary}\n"
-                f"Config   : {self.config_file}\n"
-                f"Command  : {' '.join(command)}\n"
-                f"Error    : {exc}"
+                f"Binary : {binary}\n"
+                f"Config : {self.config_file}\n"
+                f"Command: {' '.join(command)}\n"
+                f"Error  : {exc}"
             ) from exc
+
+        # ========================================================
+        # CONNECTION SUCCESS
+        # ========================================================
 
         self.traci = traci
 
-        print("SUMO berhasil terhubung melalui TraCI.")
+        self.running = True
+
+        self.last_error = None
+
+        self._stop_event.clear()
+
+        # ========================================================
+        # CREATE VEHICLE TYPES
+        # ========================================================
+
+        try:
+
+            with self._traci_lock:
+
+                self.create_vehicle_types()
+
+        except Exception as exc:
+
+            self.running = False
+
+            try:
+
+                with self._traci_lock:
+
+                    self.traci.close()
+
+            except Exception:
+
+                pass
+
+            self.traci = None
+
+            self.last_error = str(exc)
+
+            raise RuntimeError(
+                "SUMO berhasil start tetapi gagal "
+                "membuat vehicle types.\n\n"
+                f"Error: {exc}"
+            ) from exc
+
+        # ========================================================
+        # START BACKGROUND LOOP
+        # ========================================================
+
+        self._simulation_thread = (
+            threading.Thread(
+                target=self._simulation_loop,
+                name="sumo-realtime-loop",
+                daemon=True,
+            )
+        )
+
+        self._simulation_thread.start()
+
+        print(
+            "SUMO berhasil terhubung melalui TraCI."
+        )
+
+        print(
+            "SUMO realtime loop berhasil dimulai."
+        )
+
         print("=" * 70)
 
-    # ========================================================
-    # VEHICLE TYPES
-    # ========================================================
+    # ============================================================
+    # CREATE VEHICLE TYPES
+    # ============================================================
 
-    def create_vehicle_types(self) -> None:
+    def create_vehicle_types(
+        self,
+    ) -> None:
 
         if self.traci is None:
+
             raise RuntimeError(
                 "SUMO belum dijalankan."
             )
@@ -372,19 +602,23 @@ class SumoController:
             traci.vehicletype.getIDList()
         )
 
-        for vehicle_type, config in (
-            self.VEHICLE_TYPES.items()
-        ):
+        for (
+            vehicle_type,
+            config,
+        ) in self.VEHICLE_TYPES.items():
 
             if vehicle_type in existing_types:
                 continue
 
             try:
+
                 traci.vehicletype.copy(
                     "DEFAULT_VEHTYPE",
                     vehicle_type,
                 )
+
             except traci.TraCIException:
+
                 continue
 
             traci.vehicletype.setVehicleClass(
@@ -402,24 +636,36 @@ class SumoController:
                 config["width"],
             )
 
-    # ========================================================
+            traci.vehicletype.setMaxSpeed(
+                vehicle_type,
+                config["maxSpeed"],
+            )
+
+    # ============================================================
     # BUILD ROUTE
-    # ========================================================
+    # ============================================================
 
     def build_route(
         self,
         approach: str,
-        rng: random.Random,
     ) -> list[str]:
 
-        approach = str(approach).lower()
+        approach = (
+            str(approach)
+            .lower()
+            .strip()
+        )
 
-        if approach not in self.TURN_MAPPING:
+        if (
+            approach
+            not in self.VALID_APPROACHES
+        ):
+
             raise ValueError(
                 f"Approach tidak valid: {approach}"
             )
 
-        turn = rng.choices(
+        turn = self._rng.choices(
             list(
                 self.TURN_DISTRIBUTION.keys()
             ),
@@ -429,9 +675,11 @@ class SumoController:
             k=1,
         )[0]
 
-        destination = self.TURN_MAPPING[
-            approach
-        ][turn]
+        destination = (
+            self.TURN_MAPPING[
+                approach
+            ][turn]
+        )
 
         return [
             self.EDGE_HULU[approach],
@@ -439,32 +687,59 @@ class SumoController:
             self.EDGE_KELUAR[destination],
         ]
 
-    # ========================================================
+    # ============================================================
     # ADD VEHICLE
-    # ========================================================
+    # ============================================================
 
     def add_vehicle(
         self,
-        vehicle_id: str,
         vehicle_type: str,
         approach: str,
-        rng: random.Random,
     ) -> bool:
 
         if self.traci is None:
+
             raise RuntimeError(
                 "SUMO belum dijalankan."
             )
 
-        if vehicle_type not in self.VEHICLE_TYPES:
+        if (
+            vehicle_type
+            not in self.VEHICLE_TYPES
+        ):
+
             return False
 
-        route_id = f"route_{vehicle_id}"
+        approach = (
+            str(approach)
+            .lower()
+            .strip()
+        )
+
+        if (
+            approach
+            not in self.VALID_APPROACHES
+        ):
+
+            return False
+
+        vehicle_id = (
+            f"smart_{vehicle_type}_"
+            f"{approach}_"
+            f"{self._vehicle_counter}"
+        )
+
+        route_id = (
+            f"smart_route_"
+            f"{self._vehicle_counter}"
+        )
+
+        self._vehicle_counter += 1
 
         try:
+
             edges = self.build_route(
-                approach,
-                rng,
+                approach
             )
 
             self.traci.route.add(
@@ -479,268 +754,626 @@ class SumoController:
                 depart="now",
             )
 
+            self.spawned_total += 1
+
             return True
 
         except self.traci.TraCIException:
+
             return False
 
-    # ========================================================
-    # RUN SIMULATION
-    # ========================================================
+    # ============================================================
+    # INJECT DEMAND
+    # ============================================================
 
-    def run(
+    def inject_demand(
         self,
         demand: list[dict[str, Any]],
-        duration_seconds: int,
-    ) -> dict[str, Any]:
+    ) -> dict[str, int]:
 
         if self.traci is None:
+
             raise RuntimeError(
                 "SUMO belum dijalankan."
             )
 
-        if duration_seconds <= 0:
-            raise ValueError(
-                "duration_seconds harus lebih besar dari 0."
-            )
-
-        rng = random.Random(self.seed)
-
-        # ----------------------------------------------------
-        # TARGET DEMAND
-        # ----------------------------------------------------
-
-        target: dict[
-            str,
-            dict[str, int],
-        ] = {}
-
-        for item in demand:
-
-            approach = str(
-                item["approach"]
-            ).lower()
-
-            target[approach] = {
-                "motorcycle": int(
-                    item.get(
-                        "motorcycleCount",
-                        0,
-                    )
-                ),
-                "car": int(
-                    item.get(
-                        "carCount",
-                        0,
-                    )
-                ),
-                "bus": int(
-                    item.get(
-                        "busCount",
-                        0,
-                    )
-                ),
-                "truck": int(
-                    item.get(
-                        "truckCount",
-                        0,
-                    )
-                ),
-            }
-
-        departed = defaultdict(int)
-        arrived = defaultdict(int)
-
-        waiting_times: defaultdict[
-            str,
-            list[float],
-        ] = defaultdict(list)
-
-        spawned = 0
-
-        # ====================================================
-        # SIMULATION LOOP
-        # ====================================================
-
-        for second in range(
-            duration_seconds
-        ):
-
-            # ------------------------------------------------
-            # SPAWN
-            # ------------------------------------------------
-
-            for approach, counts in target.items():
-
-                for vehicle_type, total in (
-                    counts.items()
-                ):
-
-                    if total <= 0:
-                        continue
-
-                    interval = max(
-                        1,
-                        duration_seconds // total,
-                    )
-
-                    if second % interval != 0:
-                        continue
-
-                    index = (
-                        second // interval
-                    )
-
-                    if index >= total:
-                        continue
-
-                    vehicle_id = (
-                        f"{vehicle_type}_"
-                        f"{approach}_"
-                        f"{second}_"
-                        f"{index}"
-                    )
-
-                    success = self.add_vehicle(
-                        vehicle_id=vehicle_id,
-                        vehicle_type=vehicle_type,
-                        approach=approach,
-                        rng=rng,
-                    )
-
-                    if success:
-                        spawned += 1
-
-            # ------------------------------------------------
-            # STEP
-            # ------------------------------------------------
-
-            self.traci.simulationStep()
-
-            # ------------------------------------------------
-            # DEPARTED
-            # ------------------------------------------------
-
-            for vehicle_id in (
-                self.traci.simulation
-                .getDepartedIDList()
-            ):
-
-                parts = vehicle_id.split("_")
-
-                approach = (
-                    parts[1]
-                    if len(parts) > 1
-                    else "unknown"
-                )
-
-                departed[approach] += 1
-
-            # ------------------------------------------------
-            # ARRIVED
-            # ------------------------------------------------
-
-            for vehicle_id in (
-                self.traci.simulation
-                .getArrivedIDList()
-            ):
-
-                parts = vehicle_id.split("_")
-
-                approach = (
-                    parts[1]
-                    if len(parts) > 1
-                    else "unknown"
-                )
-
-                arrived[approach] += 1
-
-            # ------------------------------------------------
-            # WAITING TIME
-            # ------------------------------------------------
-
-            for vehicle_id in (
-                self.traci.vehicle.getIDList()
-            ):
-
-                parts = vehicle_id.split("_")
-
-                if len(parts) < 2:
-                    continue
-
-                approach = parts[1]
-
-                waiting = (
-                    self.traci.vehicle
-                    .getAccumulatedWaitingTime(
-                        vehicle_id
-                    )
-                )
-
-                waiting_times[
-                    approach
-                ].append(waiting)
-
-        # ====================================================
-        # METRICS
-        # ====================================================
-
-        all_waiting: list[float] = []
-
-        for values in waiting_times.values():
-            all_waiting.extend(values)
-
-        average_waiting = (
-            sum(all_waiting)
-            / len(all_waiting)
-            if all_waiting
-            else 0.0
-        )
-
-        return {
-            "durationSeconds": duration_seconds,
-
-            "spawnedVehicles": spawned,
-
-            "departedVehicles": sum(
-                departed.values()
-            ),
-
-            "arrivedVehicles": sum(
-                arrived.values()
-            ),
-
-            "activeVehicles": (
-                self.traci.vehicle.getIDCount()
-            ),
-
-            "averageWaitingTimeSeconds": round(
-                average_waiting,
-                2,
-            ),
-
-            "departedByApproach": dict(
-                departed
-            ),
-
-            "arrivedByApproach": dict(
-                arrived
-            ),
+        result = {
+            "motorcycle": 0,
+            "car": 0,
+            "bus": 0,
+            "truck": 0,
+            "total": 0,
         }
 
-    # ========================================================
-    # CLOSE
-    # ========================================================
+        with self._traci_lock:
 
-    def close(self) -> None:
+            for item in demand:
+
+                approach = str(
+                    item.get(
+                        "approach",
+                        "",
+                    )
+                ).lower().strip()
+
+                if (
+                    approach
+                    not in self.VALID_APPROACHES
+                ):
+                    continue
+
+                vehicle_counts = {
+                    "motorcycle": max(
+                        0,
+                        int(
+                            item.get(
+                                "motorcycleCount",
+                                0,
+                            )
+                            or 0
+                        ),
+                    ),
+                    "car": max(
+                        0,
+                        int(
+                            item.get(
+                                "carCount",
+                                0,
+                            )
+                            or 0
+                        ),
+                    ),
+                    "bus": max(
+                        0,
+                        int(
+                            item.get(
+                                "busCount",
+                                0,
+                            )
+                            or 0
+                        ),
+                    ),
+                    "truck": max(
+                        0,
+                        int(
+                            item.get(
+                                "truckCount",
+                                0,
+                            )
+                            or 0
+                        ),
+                    ),
+                }
+
+                self.current_demand[
+                    approach
+                ] = vehicle_counts
+
+                for (
+                    vehicle_type,
+                    count,
+                ) in vehicle_counts.items():
+
+                    for _ in range(count):
+
+                        success = (
+                            self.add_vehicle(
+                                vehicle_type=vehicle_type,
+                                approach=approach,
+                            )
+                        )
+
+                        if success:
+
+                            result[
+                                vehicle_type
+                            ] += 1
+
+                            result[
+                                "total"
+                            ] += 1
+
+        return result
+
+    # ============================================================
+    # SIMULATION LOOP
+    # ============================================================
+
+    def _simulation_loop(
+        self,
+    ) -> None:
+
+        """
+        Background realtime loop.
+
+        1 simulation step = 1 detik.
+
+        Loop:
+
+            simulationStep()
+                 ↓
+            collect metrics
+                 ↓
+            sleep
+                 ↓
+            repeat
+        """
+
+        print(
+            "[SUMO LOOP] "
+            "Background simulation loop aktif."
+        )
+
+        while not self._stop_event.is_set():
+
+            started_at = (
+                time.perf_counter()
+            )
+
+            try:
+
+                with self._traci_lock:
+
+                    # --------------------------------------------
+                    # CHECK TRACI
+                    # --------------------------------------------
+
+                    if self.traci is None:
+
+                        print(
+                            "[SUMO LOOP] "
+                            "TraCI object sudah None."
+                        )
+
+                        break
+
+                    if not self.running:
+
+                        print(
+                            "[SUMO LOOP] "
+                            "Controller tidak running."
+                        )
+
+                        break
+
+                    # --------------------------------------------
+                    # SIMULATION STEP
+                    # --------------------------------------------
+
+                    self.traci.simulationStep()
+
+                    # --------------------------------------------
+                    # SIMULATION TIME
+                    # --------------------------------------------
+
+                    self.last_simulation_time = (
+                        self.traci
+                        .simulation
+                        .getTime()
+                    )
+
+                    # --------------------------------------------
+                    # DEPARTED
+                    # --------------------------------------------
+
+                    departed_ids = (
+                        self.traci
+                        .simulation
+                        .getDepartedIDList()
+                    )
+
+                    for vehicle_id in departed_ids:
+
+                        approach = (
+                            self._extract_approach(
+                                vehicle_id
+                            )
+                        )
+
+                        self.departed_total[
+                            approach
+                        ] += 1
+
+                    # --------------------------------------------
+                    # ARRIVED
+                    # --------------------------------------------
+
+                    arrived_ids = (
+                        self.traci
+                        .simulation
+                        .getArrivedIDList()
+                    )
+
+                    for vehicle_id in arrived_ids:
+
+                        approach = (
+                            self._extract_approach(
+                                vehicle_id
+                            )
+                        )
+
+                        self.arrived_total[
+                            approach
+                        ] += 1
+
+                    # --------------------------------------------
+                    # DEBUG
+                    # --------------------------------------------
+
+                    if (
+                        int(
+                            self.last_simulation_time
+                        )
+                        % 10
+                        == 0
+                    ):
+
+                        try:
+
+                            active_count = (
+                                self.traci
+                                .vehicle
+                                .getIDCount()
+                            )
+
+                            print(
+                                "[SUMO LOOP] "
+                                f"time="
+                                f"{self.last_simulation_time:.0f}s "
+                                f"active="
+                                f"{active_count} "
+                                f"spawned="
+                                f"{self.spawned_total}"
+                            )
+
+                        except Exception:
+
+                            pass
+
+            # ====================================================
+            # SUMO / TRACI ERROR
+            # ====================================================
+
+            except Exception as exc:
+
+                self.last_error = str(exc)
+
+                print()
+                print("=" * 70)
+                print(
+                    "[SUMO REALTIME ERROR]"
+                )
+                print("=" * 70)
+
+                print(
+                    "Error type:",
+                    type(exc).__name__,
+                )
+
+                print(
+                    "Error:",
+                    exc,
+                )
+
+                print(
+                    "Simulation time:",
+                    self.last_simulation_time,
+                )
+
+                print(
+                    "Spawned vehicles:",
+                    self.spawned_total,
+                )
+
+                print(
+                    "Running:",
+                    self.running,
+                )
+
+                print(
+                    "TraCI available:",
+                    self.traci is not None,
+                )
+
+                print("=" * 70)
+
+                self.running = False
+
+                break
+
+            # ====================================================
+            # REALTIME CLOCK
+            # ====================================================
+
+            elapsed = (
+                time.perf_counter()
+                - started_at
+            )
+
+            sleep_time = max(
+                0.0,
+                1.0 - elapsed,
+            )
+
+            if self._stop_event.wait(
+                sleep_time
+            ):
+                break
+
+        print(
+            "[SUMO LOOP] "
+            "Background simulation loop berhenti."
+        )
+
+    # ============================================================
+    # EXTRACT APPROACH
+    # ============================================================
+
+    @staticmethod
+    def _extract_approach(
+        vehicle_id: str,
+    ) -> str:
+
+        parts = str(
+            vehicle_id
+        ).split("_")
+
+        for approach in (
+            "north",
+            "south",
+            "east",
+            "west",
+        ):
+
+            if approach in parts:
+                return approach
+
+        return "unknown"
+
+    # ============================================================
+    # GET METRICS
+    # ============================================================
+
+    def get_metrics(
+        self,
+    ) -> dict[str, Any]:
+
+        if self.traci is None:
+
+            return {
+                "durationSeconds": 0,
+                "spawnedVehicles": 0,
+                "departedVehicles": 0,
+                "arrivedVehicles": 0,
+                "activeVehicles": 0,
+                "averageWaitingTimeSeconds": 0.0,
+                "departedByApproach": {},
+                "arrivedByApproach": {},
+                "simulationTimeSeconds": 0.0,
+                "running": False,
+                "lastError": self.last_error,
+            }
+
+        with self._traci_lock:
+
+            try:
+
+                # --------------------------------------------
+                # ACTIVE VEHICLES
+                # --------------------------------------------
+
+                active_vehicles = (
+                    self.traci
+                    .vehicle
+                    .getIDCount()
+                )
+
+                # --------------------------------------------
+                # WAITING TIME
+                # --------------------------------------------
+
+                waiting_values: list[
+                    float
+                ] = []
+
+                for vehicle_id in (
+                    self.traci
+                    .vehicle
+                    .getIDList()
+                ):
+
+                    try:
+
+                        waiting = (
+                            self.traci
+                            .vehicle
+                            .getAccumulatedWaitingTime(
+                                vehicle_id
+                            )
+                        )
+
+                        waiting_values.append(
+                            float(waiting)
+                        )
+
+                    except (
+                        self.traci
+                        .TraCIException
+                    ):
+
+                        continue
+
+                average_waiting = (
+                    sum(waiting_values)
+                    / len(waiting_values)
+                    if waiting_values
+                    else 0.0
+                )
+
+                # --------------------------------------------
+                # SIMULATION TIME
+                # --------------------------------------------
+
+                simulation_time = (
+                    self.traci
+                    .simulation
+                    .getTime()
+                )
+
+                # --------------------------------------------
+                # RESULT
+                # --------------------------------------------
+
+                return {
+                    "durationSeconds": int(
+                        simulation_time
+                    ),
+                    "spawnedVehicles": (
+                        self.spawned_total
+                    ),
+                    "departedVehicles": sum(
+                        self.departed_total.values()
+                    ),
+                    "arrivedVehicles": sum(
+                        self.arrived_total.values()
+                    ),
+                    "activeVehicles": (
+                        active_vehicles
+                    ),
+                    "averageWaitingTimeSeconds": round(
+                        average_waiting,
+                        2,
+                    ),
+                    "departedByApproach": dict(
+                        self.departed_total
+                    ),
+                    "arrivedByApproach": dict(
+                        self.arrived_total
+                    ),
+                    "simulationTimeSeconds": (
+                        simulation_time
+                    ),
+                    "running": self.running,
+                    "lastError": self.last_error,
+                }
+
+            except Exception as exc:
+
+                self.last_error = str(exc)
+
+                return {
+                    "durationSeconds": int(
+                        self.last_simulation_time
+                    ),
+                    "spawnedVehicles": (
+                        self.spawned_total
+                    ),
+                    "departedVehicles": sum(
+                        self.departed_total.values()
+                    ),
+                    "arrivedVehicles": sum(
+                        self.arrived_total.values()
+                    ),
+                    "activeVehicles": 0,
+                    "averageWaitingTimeSeconds": 0.0,
+                    "departedByApproach": dict(
+                        self.departed_total
+                    ),
+                    "arrivedByApproach": dict(
+                        self.arrived_total
+                    ),
+                    "simulationTimeSeconds": (
+                        self.last_simulation_time
+                    ),
+                    "running": False,
+                    "lastError": self.last_error,
+                }
+
+    # ============================================================
+    # IS RUNNING
+    # ============================================================
+
+    def is_running(
+        self,
+    ) -> bool:
+
+        return (
+            self.running
+            and self.traci is not None
+        )
+
+    # ============================================================
+    # CLOSE
+    # ============================================================
+
+    def close(
+        self,
+    ) -> None:
+
+        print(
+            "[SUMO] Closing realtime controller..."
+        )
+
+        # ========================================================
+        # SIGNAL BACKGROUND LOOP TO STOP
+        # ========================================================
+
+        self._stop_event.set()
+
+        self.running = False
+
+        # ========================================================
+        # WAIT BACKGROUND THREAD
+        # ========================================================
+
+        thread = (
+            self._simulation_thread
+        )
+
+        if (
+            thread is not None
+            and thread.is_alive()
+            and thread
+            is not threading.current_thread()
+        ):
+
+            thread.join(
+                timeout=3.0
+            )
+
+        self._simulation_thread = None
+
+        # ========================================================
+        # CLOSE TRACI
+        # ========================================================
 
         if self.traci is not None:
 
             try:
-                self.traci.close()
 
-            except Exception:
-                pass
+                with self._traci_lock:
+
+                    self.traci.close()
+
+            except Exception as exc:
+
+                print(
+                    "[SUMO] Error ketika "
+                    "menutup TraCI:"
+                )
+
+                print(exc)
 
             finally:
+
                 self.traci = None
+
+        # ========================================================
+        # RESET STATE
+        # ========================================================
+
+        self.last_error = None
+
+        print(
+            "[SUMO] Realtime controller closed."
+        )
