@@ -1,18 +1,16 @@
 from __future__ import annotations
 
+import inspect
 import threading
 from pathlib import Path
+from typing import Any
 
-from app.pipeline.traffic_state_builder import (
-    TrafficStateBuilder,
-)
+from app.pipeline.traffic_state_builder import TrafficStateBuilder
 from app.schemas.simulation import (
     SimulationRequest,
     SimulationResult,
 )
-from app.simulation.sumo.sumo_controller import (
-    SumoController,
-)
+from app.simulation.sumo.sumo_controller import SumoController
 from app.simulation.sumo.traffic_state_adapter import (
     SumoTrafficStateAdapter,
 )
@@ -22,21 +20,40 @@ from app.simulation.sumo.traffic_state_adapter import (
 # DEBUG IMPORT
 # ================================================================
 
-# Ini membantu memastikan Uvicorn benar-benar menggunakan
-# SumoController yang kita maksud.
-import inspect
-
 print("=" * 70)
 print("SUMO CONTROLLER IMPORT CHECK")
 print("=" * 70)
+
 print(
     "Loaded from:",
     inspect.getfile(SumoController),
 )
+
+print(
+    "Has start():",
+    hasattr(SumoController, "start"),
+)
+
 print(
     "Has close():",
     hasattr(SumoController, "close"),
 )
+
+print(
+    "Has inject_demand():",
+    hasattr(SumoController, "inject_demand"),
+)
+
+print(
+    "Has is_running():",
+    hasattr(SumoController, "is_running"),
+)
+
+print(
+    "Has get_metrics():",
+    hasattr(SumoController, "get_metrics"),
+)
+
 print("=" * 70)
 
 
@@ -45,6 +62,10 @@ print("=" * 70)
 # ================================================================
 
 class SimulationServiceError(Exception):
+    """
+    Exception khusus untuk error pada simulation service.
+    """
+
     pass
 
 
@@ -54,36 +75,47 @@ class SimulationServiceError(Exception):
 
 class SimulationService:
     """
-    Service untuk mengelola satu instance SUMO
-    yang berjalan terus-menerus.
+    Service untuk mengelola SATU instance SUMO yang berjalan
+    secara terus-menerus.
 
-    Alur:
+    Arsitektur:
 
-        POST /simulation/run
-                ↓
-        Ambil TrafficState terbaru
-                ↓
-        Start SUMO jika belum hidup
-                ↓
-        Convert TrafficState → SUMO demand
-                ↓
-        Inject vehicle ke SUMO
-                ↓
-        Background thread menjalankan simulationStep()
-                ↓
-        Ambil metrics SUMO
-                ↓
-        Return SimulationResult
+        TrafficStateBuilder
+                |
+                v
+        TrafficState terbaru
+                |
+                v
+        SimulationService
+                |
+                v
+        SumoTrafficStateAdapter
+                |
+                v
+        SUMO / TraCI
+                |
+                v
+        Background simulation loop
+                |
+                v
+        Metrics
 
-    SUMO TIDAK dijalankan ulang setiap request.
 
-    Jika SUMO sudah hidup:
-        → instance yang sama digunakan kembali.
+    IMPORTANT:
 
-    Jika SUMO belum hidup:
-        → satu instance SUMO dibuat.
+    SUMO TIDAK restart setiap request.
 
-    TrafficState diambil dari TrafficStateBuilder.
+    Request pertama:
+        -> build TrafficState
+        -> start SUMO
+        -> inject demand
+
+    Request berikutnya:
+        -> build TrafficState terbaru
+        -> gunakan SUMO instance yang sama
+        -> inject demand terbaru
+
+    SUMO terus berjalan di background thread.
     """
 
     # ============================================================
@@ -91,25 +123,23 @@ class SimulationService:
     # ============================================================
 
     def __init__(self) -> None:
+
+        # --------------------------------------------------------
+        # TRAFFIC STATE BUILDER
+        # --------------------------------------------------------
+
         self.builder = TrafficStateBuilder()
 
         # --------------------------------------------------------
         # SUMO CONTROLLER
         # --------------------------------------------------------
 
-        # Hanya SATU instance SUMO.
         self.controller: SumoController | None = None
 
         # --------------------------------------------------------
         # LOCK
         # --------------------------------------------------------
 
-        # Melindungi operasi:
-        #
-        # - start SUMO
-        # - inject demand
-        # - stop SUMO
-        #
         self._lock = threading.RLock()
 
         # --------------------------------------------------------
@@ -120,27 +150,28 @@ class SimulationService:
         self.active_traffic_state_id: str | None = None
 
     # ============================================================
-    # SUMO CONFIG
+    # SUMO CONFIG PATH
     # ============================================================
 
     @staticmethod
     def _get_config_file() -> Path:
         """
-        File:
-            backend/app/services/simulation_service.py
+        Struktur:
 
-        Project root:
             smarttwin/
-
-        SUMO config:
-            simulation/network/simpang4_pingit.sumocfg
+            ├── backend/
+            │   └── app/
+            │       └── services/
+            │           └── simulation_service.py
+            │
+            └── simulation/
+                └── network/
+                    └── simpang4_pingit.sumocfg
         """
 
-        project_root = (
-            Path(__file__)
-            .resolve()
-            .parents[3]
-        )
+        current_file = Path(__file__).resolve()
+
+        project_root = current_file.parents[3]
 
         config_file = (
             project_root
@@ -148,6 +179,33 @@ class SimulationService:
             / "network"
             / "simpang4_pingit.sumocfg"
         )
+
+        print()
+        print("=" * 70)
+        print("SUMO CONFIG PATH DEBUG")
+        print("=" * 70)
+
+        print(
+            "Current file :",
+            current_file,
+        )
+
+        print(
+            "Project root :",
+            project_root,
+        )
+
+        print(
+            "Config file  :",
+            config_file,
+        )
+
+        print(
+            "Exists       :",
+            config_file.exists(),
+        )
+
+        print("=" * 70)
 
         return config_file
 
@@ -158,7 +216,7 @@ class SimulationService:
     @staticmethod
     def _create_adapter() -> SumoTrafficStateAdapter:
         """
-        Mapping approach TrafficState ke edge masuk SUMO.
+        Mapping TrafficState approach -> SUMO incoming edge.
         """
 
         approach_to_edge = {
@@ -179,18 +237,29 @@ class SimulationService:
     def _build_traffic_state(
         self,
         request: SimulationRequest,
-    ):
-        """
-        Mengambil TrafficState terbaru dari Supabase.
+    ) -> Any:
 
-        Untuk sekarang trafficStateId spesifik belum
-        digunakan.
+        print()
+        print("=" * 70)
+        print("BUILDING TRAFFIC STATE")
+        print("=" * 70)
 
-        Sistem mengambil TrafficState terbaru
-        berdasarkan intersectionId.
-        """
+        print(
+            "Intersection:",
+            request.intersectionId,
+        )
+
+        print(
+            "Requested TrafficState ID:",
+            request.trafficStateId,
+        )
+
+        # --------------------------------------------------------
+        # BUILD LATEST STATE
+        # --------------------------------------------------------
 
         try:
+
             traffic_state = (
                 self.builder
                 .build_latest_state_for_intersection(
@@ -200,12 +269,18 @@ class SimulationService:
             )
 
         except Exception as exc:
+
             raise SimulationServiceError(
                 "Gagal membangun TrafficState "
-                f"dari Supabase: {exc}"
+                f"dari database: {exc}"
             ) from exc
 
+        # --------------------------------------------------------
+        # STATE NOT FOUND
+        # --------------------------------------------------------
+
         if traffic_state is None:
+
             raise SimulationServiceError(
                 "Tidak ditemukan TrafficState "
                 "dengan trafficLaneMetrics "
@@ -214,7 +289,7 @@ class SimulationService:
             )
 
         # --------------------------------------------------------
-        # SIMPAN STATE AKTIF
+        # SAVE ACTIVE STATE
         # --------------------------------------------------------
 
         self.active_intersection_id = (
@@ -224,6 +299,22 @@ class SimulationService:
         self.active_traffic_state_id = (
             traffic_state.trafficStateId
         )
+
+        print(
+            "TrafficState berhasil dibangun:"
+        )
+
+        print(
+            "  trafficStateId:",
+            traffic_state.trafficStateId,
+        )
+
+        print(
+            "  intersectionId:",
+            traffic_state.intersectionId,
+        )
+
+        print("=" * 70)
 
         return traffic_state
 
@@ -239,7 +330,7 @@ class SimulationService:
         with self._lock:
 
             # ====================================================
-            # SUMO SUDAH HIDUP
+            # SUMO SUDAH RUNNING
             # ====================================================
 
             if (
@@ -247,14 +338,30 @@ class SimulationService:
                 and self.controller.is_running()
             ):
 
+                print()
+                print("=" * 70)
+                print("SUMO CONTROLLER ALREADY RUNNING")
+                print("=" * 70)
+
+                print(
+                    "Active intersection:",
+                    self.active_intersection_id,
+                )
+
+                print(
+                    "Requested intersection:",
+                    request.intersectionId,
+                )
+
                 # ------------------------------------------------
-                # Pastikan intersection sama
+                # CHECK INTERSECTION
                 # ------------------------------------------------
 
                 if (
                     self.active_intersection_id
                     != request.intersectionId
                 ):
+
                     raise SimulationServiceError(
                         "SUMO sedang menjalankan "
                         f"intersection "
@@ -262,6 +369,12 @@ class SimulationService:
                         "Stop simulation terlebih dahulu "
                         "sebelum mengganti intersection."
                     )
+
+                print(
+                    "Menggunakan instance SUMO yang sama."
+                )
+
+                print("=" * 70)
 
                 return self.controller
 
@@ -271,31 +384,33 @@ class SimulationService:
 
             config_file = self._get_config_file()
 
-            print()
-            print("=" * 70)
-            print("CHECKING SUMO CONFIG")
-            print("=" * 70)
-            print(
-                f"Config file: {config_file}"
-            )
-
             if not config_file.exists():
+
                 raise SimulationServiceError(
                     "SUMO config file tidak ditemukan: "
                     f"{config_file}"
                 )
 
-            print("SUMO config ditemukan.")
-            print("=" * 70)
-
             # ====================================================
             # CREATE CONTROLLER
             # ====================================================
+
+            print()
+            print("=" * 70)
+            print("CREATING SUMO CONTROLLER")
+            print("=" * 70)
 
             controller = SumoController(
                 config_file=config_file,
                 seed=request.seed,
             )
+
+            print(
+                "Controller created:",
+                controller,
+            )
+
+            print("=" * 70)
 
             # ====================================================
             # START SUMO
@@ -308,48 +423,65 @@ class SimulationService:
                 print("STARTING SUMO CONTROLLER")
                 print("=" * 70)
 
+                print(
+                    "GUI:",
+                    request.gui,
+                )
+
+                print(
+                    "GUI Delay:",
+                    request.guiDelayMs,
+                )
+
+                print(
+                    "Seed:",
+                    request.seed,
+                )
+
                 controller.start(
                     gui=request.gui,
-                    gui_delay_ms=0,
+                    gui_delay_ms=request.guiDelayMs,
                 )
 
                 print(
                     "SUMO controller berhasil dijalankan."
                 )
 
-            except Exception as exc:
+                print(
+                    "SUMO running:",
+                    controller.is_running(),
+                )
 
-                # ------------------------------------------------
-                # PENTING
-                #
-                # Jangan biarkan error cleanup menutupi
-                # error asli dari controller.start().
-                # ------------------------------------------------
+                print("=" * 70)
+
+            except Exception as exc:
 
                 print()
                 print("=" * 70)
                 print("SUMO START FAILED")
                 print("=" * 70)
+
                 print(
-                    f"Original error type: "
-                    f"{type(exc).__name__}"
+                    "Original error type:",
+                    type(exc).__name__,
                 )
+
                 print(
-                    f"Original error: {exc}"
+                    "Original error:",
+                    exc,
                 )
+
                 print("=" * 70)
 
                 try:
-
                     controller.close()
-
                 except Exception as close_exc:
 
-                    print()
                     print(
                         "[SUMO] Cleanup setelah "
                         "start gagal juga gagal:"
                     )
+
                     print(
                         f"{type(close_exc).__name__}: "
                         f"{close_exc}"
@@ -366,6 +498,11 @@ class SimulationService:
 
             self.controller = controller
 
+            print(
+                "SUMO controller berhasil disimpan "
+                "sebagai active controller."
+            )
+
             return controller
 
     # ============================================================
@@ -380,7 +517,7 @@ class SimulationService:
         with self._lock:
 
             # ====================================================
-            # 1. BUILD LATEST TRAFFIC STATE
+            # REQUEST DEBUG
             # ====================================================
 
             print()
@@ -394,8 +531,23 @@ class SimulationService:
             )
 
             print(
+                "TrafficState ID:",
+                request.trafficStateId,
+            )
+
+            print(
+                "Duration:",
+                request.durationSeconds,
+            )
+
+            print(
                 "GUI:",
                 request.gui,
+            )
+
+            print(
+                "GUI Delay:",
+                request.guiDelayMs,
             )
 
             print(
@@ -403,15 +555,14 @@ class SimulationService:
                 request.seed,
             )
 
-            traffic_state = (
-                self._build_traffic_state(
-                    request
-                )
-            )
+            print("=" * 70)
 
-            print(
-                "TrafficState:",
-                traffic_state.trafficStateId,
+            # ====================================================
+            # 1. BUILD TRAFFIC STATE
+            # ====================================================
+
+            traffic_state = (
+                self._build_traffic_state(request)
             )
 
             # ====================================================
@@ -419,25 +570,23 @@ class SimulationService:
             # ====================================================
 
             controller = (
-                self._ensure_sumo(
-                    request
-                )
+                self._ensure_sumo(request)
             )
 
             # ====================================================
-            # 3. ADAPTER
+            # 3. CREATE ADAPTER
             # ====================================================
 
-            adapter = (
-                self._create_adapter()
-            )
+            adapter = self._create_adapter()
+
+            # ====================================================
+            # 4. TRAFFIC STATE -> DEMAND
+            # ====================================================
 
             try:
 
-                demand = (
-                    adapter.to_demand(
-                        traffic_state
-                    )
+                demand = adapter.to_demand(
+                    traffic_state
                 )
 
             except Exception as exc:
@@ -449,7 +598,7 @@ class SimulationService:
                 ) from exc
 
             # ====================================================
-            # 4. DEBUG DEMAND
+            # 5. DEBUG DEMAND
             # ====================================================
 
             print()
@@ -459,8 +608,10 @@ class SimulationService:
 
             print(demand)
 
+            print("=" * 70)
+
             # ====================================================
-            # 5. INJECT NEW TRAFFIC
+            # 6. INJECT DEMAND
             # ====================================================
 
             if demand:
@@ -468,8 +619,7 @@ class SimulationService:
                 try:
 
                     injected = (
-                        controller
-                        .inject_demand(
+                        controller.inject_demand(
                             demand
                         )
                     )
@@ -494,7 +644,7 @@ class SimulationService:
                 }
 
             # ====================================================
-            # 6. DEBUG INJECTION
+            # 7. DEBUG INJECTION
             # ====================================================
 
             print()
@@ -504,15 +654,15 @@ class SimulationService:
 
             print(injected)
 
+            print("=" * 70)
+
             # ====================================================
-            # 7. GET CURRENT SUMO METRICS
+            # 8. GET CURRENT METRICS
             # ====================================================
 
             try:
 
-                result = (
-                    controller.get_metrics()
-                )
+                result = controller.get_metrics()
 
             except Exception as exc:
 
@@ -522,7 +672,7 @@ class SimulationService:
                 ) from exc
 
             # ====================================================
-            # 8. IDENTIFIERS
+            # 9. IDENTIFIERS
             # ====================================================
 
             result["trafficStateId"] = (
@@ -533,8 +683,10 @@ class SimulationService:
                 traffic_state.intersectionId
             )
 
+            result["injectedVehicles"] = injected
+
             # ====================================================
-            # 9. RETURN
+            # 10. RETURN
             # ====================================================
 
             print()
@@ -559,7 +711,7 @@ class SimulationService:
         with self._lock:
 
             # ----------------------------------------------------
-            # BELUM ADA CONTROLLER
+            # NO CONTROLLER
             # ----------------------------------------------------
 
             if self.controller is None:
@@ -575,14 +727,13 @@ class SimulationService:
                 }
 
             # ----------------------------------------------------
-            # AMBIL METRICS
+            # METRICS
             # ----------------------------------------------------
 
             try:
 
                 metrics = (
-                    self.controller
-                    .get_metrics()
+                    self.controller.get_metrics()
                 )
 
             except Exception as exc:
@@ -599,13 +750,12 @@ class SimulationService:
                 }
 
             # ----------------------------------------------------
-            # RETURN STATUS
+            # RESULT
             # ----------------------------------------------------
 
             return {
                 "running": (
-                    self.controller
-                    .is_running()
+                    self.controller.is_running()
                 ),
                 "intersectionId": (
                     self.active_intersection_id
@@ -625,7 +775,7 @@ class SimulationService:
         with self._lock:
 
             # ----------------------------------------------------
-            # BELUM ADA CONTROLLER
+            # NO CONTROLLER
             # ----------------------------------------------------
 
             if self.controller is None:
@@ -638,7 +788,7 @@ class SimulationService:
                 }
 
             # ----------------------------------------------------
-            # CLOSE CONTROLLER
+            # CLOSE
             # ----------------------------------------------------
 
             try:
@@ -651,9 +801,11 @@ class SimulationService:
                 print("=" * 70)
                 print("SUMO STOP ERROR")
                 print("=" * 70)
+
                 print(
                     f"{type(exc).__name__}: {exc}"
                 )
+
                 print("=" * 70)
 
                 raise SimulationServiceError(
@@ -665,13 +817,13 @@ class SimulationService:
 
                 self.controller = None
 
-                self.active_intersection_id = (
-                    None
-                )
+                self.active_intersection_id = None
 
-                self.active_traffic_state_id = (
-                    None
-                )
+                self.active_traffic_state_id = None
+
+            # ----------------------------------------------------
+            # RETURN
+            # ----------------------------------------------------
 
             return {
                 "running": False,
