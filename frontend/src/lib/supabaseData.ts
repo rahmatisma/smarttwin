@@ -238,6 +238,8 @@ export interface DbCamera {
   cameraId: string;
   name: string;
   approach: string | null;
+  intersectionId: string | null;
+  intersectionName: string | null;
   sourceType: string;
   sourceUrl: string | null;
   status: string;
@@ -246,18 +248,21 @@ export interface DbCamera {
 }
 
 export async function fetchCameras(
-  intersectionId: string = DEFAULT_INTERSECTION_ID
+  intersectionId: string = "all"
 ): Promise<DbCamera[]> {
-  const rowId = await getIntersectionRowId(intersectionId);
+  let query = supabase
+    .from("cameras")
+    .select("id, cameraId, name, approachId, intersectionId, sourceType, sourceUrl, status");
 
-  if (rowId === null) {
-    return [];
+  if (intersectionId !== "all") {
+    const rowId = await getIntersectionRowId(intersectionId);
+    if (rowId === null) {
+      return [];
+    }
+    query = query.eq("intersectionId", rowId);
   }
 
-  const { data: cameras, error: cameraError } = await supabase
-    .from("cameras")
-    .select("id, cameraId, name, approachId, sourceType, sourceUrl, status")
-    .eq("intersectionId", rowId);
+  const { data: cameras, error: cameraError } = await query;
 
   if (cameraError) {
     throw new Error(`Gagal mengambil cameras: ${cameraError.message}`);
@@ -266,6 +271,16 @@ export async function fetchCameras(
   if (!cameras || cameras.length === 0) {
     return [];
   }
+
+  const { data: intersections } = await supabase
+    .from("intersections")
+    .select("id, intersectionId, name");
+  const intersectionIdMap = new Map(
+    (intersections ?? []).map((i) => [i.id, i.intersectionId])
+  );
+  const intersectionNameMap = new Map(
+    (intersections ?? []).map((i) => [i.id, i.name])
+  );
 
   const approachIds = [
     ...new Set(
@@ -326,6 +341,12 @@ export async function fetchCameras(
       name: camera.name,
       approach: camera.approachId
         ? approachById.get(camera.approachId) ?? null
+        : null,
+      intersectionId: camera.intersectionId
+        ? intersectionIdMap.get(camera.intersectionId) ?? null
+        : null,
+      intersectionName: camera.intersectionId
+        ? intersectionNameMap.get(camera.intersectionId) ?? null
         : null,
       sourceType: camera.sourceType,
       sourceUrl: camera.sourceUrl,

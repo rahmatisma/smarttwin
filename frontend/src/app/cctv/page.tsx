@@ -40,6 +40,7 @@ const API_BASE_URL =
 
 const EMPTY_FORM = {
     name: "",
+    intersection: "",
     approach: "north" as Approach,
     sourceType: "file" as SourceType,
     source: "",
@@ -139,6 +140,7 @@ export default function CCTVPage() {
     const [saving, setSaving] = useState(false);
     const [deletingId, setDeletingId] = useState<string | null>(null);
     const [formError, setFormError] = useState<string | null>(null);
+    const [editingId, setEditingId] = useState<string | null>(null);
 
     /*
      * File asli untuk diupload ke backend saat submit. Blob URL
@@ -170,13 +172,13 @@ export default function CCTVPage() {
 
     const loadCameras = useCallback(async () => {
         try {
-            const rows = await fetchCameras(DEFAULT_INTERSECTION_ID);
+            const rows = await fetchCameras("all");
 
             setCameras(
                 rows.map((row) => ({
                     id: String(row.id),
                     name: row.name,
-                    intersection: DEFAULT_INTERSECTION_ID,
+                    intersection: row.intersectionName || row.intersectionId || DEFAULT_INTERSECTION_ID,
                     approach: (row.approach as Approach) ?? "north",
                     sourceType: toFrontendSourceType(row.sourceType),
                     source: row.videoUrl ?? "",
@@ -276,6 +278,7 @@ export default function CCTVPage() {
         setForm(EMPTY_FORM);
         setFileObject(null);
         setFormError(null);
+        setEditingId(null);
     }
 
     function closeModal() {
@@ -296,7 +299,8 @@ export default function CCTVPage() {
     async function startFileUpload(
         file: File,
         name: string,
-        approach: Approach
+        approach: Approach,
+        intersectionId: string
     ) {
         const taskId = crypto.randomUUID();
 
@@ -324,7 +328,7 @@ export default function CCTVPage() {
             body.append("file", file);
             body.append("name", name);
             body.append("approach", approach);
-            body.append("intersection_id", DEFAULT_INTERSECTION_ID);
+            body.append("intersection_name", intersectionId); // This is actually intersection_name now
 
             const { ok, payload } = await uploadCctvFileWithProgress(
                 body,
@@ -383,15 +387,20 @@ export default function CCTVPage() {
             return;
         }
 
-        if (form.sourceType === "file" && !fileObject) {
+        if (!editingId && form.sourceType === "file" && !fileObject) {
             setFormError("Silakan pilih video.");
             return;
         }
 
         setFormError(null);
 
-        if (form.sourceType === "file" && fileObject) {
-            void startFileUpload(fileObject, form.name.trim(), form.approach);
+        if (!editingId && form.sourceType === "file" && fileObject) {
+            void startFileUpload(
+                fileObject,
+                form.name.trim(),
+                form.approach,
+                form.intersection
+            );
 
             setShowModal(false);
             resetForm();
@@ -401,12 +410,17 @@ export default function CCTVPage() {
         setSaving(true);
 
         try {
-            const response = await fetch("/api/cameras", {
-                method: "POST",
+            const isEditing = !!editingId;
+            const endpoint = isEditing ? `/api/cameras/${editingId}` : "/api/cameras";
+            const method = isEditing ? "PATCH" : "POST";
+
+            const response = await fetch(endpoint, {
+                method: method,
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
                     name: form.name.trim(),
                     approach: form.approach,
+                    intersection_name: form.intersection,
                     sourceType: form.sourceType,
                     source: form.source,
                 }),
@@ -863,8 +877,28 @@ export default function CCTVPage() {
 
                                                 </div>
 
-                                                {/* DELETE */}
-                                                <div className="mt-4 flex justify-end">
+                                                {/* ACTION BUTTONS */}
+                                                <div className="mt-4 flex justify-end gap-2">
+
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => {
+                                                            setEditingId(camera.id);
+                                                            setForm({
+                                                                name: camera.name,
+                                                                intersection: camera.intersection,
+                                                                approach: camera.approach,
+                                                                sourceType: camera.sourceType,
+                                                                source: camera.source,
+                                                                fileName: camera.fileName ?? "",
+                                                            });
+                                                            setShowModal(true);
+                                                        }}
+                                                        disabled={deletingId === camera.id}
+                                                        className="rounded-md border border-border px-3 py-2 text-xs text-text-secondary transition hover:border-accent hover:text-accent disabled:opacity-50"
+                                                    >
+                                                        Edit
+                                                    </button>
 
                                                     <button
                                                         type="button"
@@ -916,12 +950,13 @@ export default function CCTVPage() {
                             <div>
 
                                 <h2 className="font-semibold">
-                                    Tambah CCTV
+                                    {editingId ? "Edit CCTV" : "Tambah CCTV"}
                                 </h2>
 
                                 <p className="mt-1 text-xs text-text-muted">
-                                    Daftarkan kamera baru ke
-                                    SmartTwin.
+                                    {editingId 
+                                        ? "Ubah data kamera yang sudah terdaftar." 
+                                        : "Daftarkan kamera baru ke SmartTwin."}
                                 </p>
 
                             </div>
@@ -975,9 +1010,15 @@ export default function CCTVPage() {
 
                                     <input
                                         type="text"
-                                        value={DEFAULT_INTERSECTION_ID}
-                                        readOnly
-                                        className="w-full cursor-not-allowed rounded-lg border border-border bg-surface-2 px-3 py-2.5 text-sm text-text-muted outline-none"
+                                        value={form.intersection}
+                                        onChange={(event) =>
+                                            setForm((current) => ({
+                                                ...current,
+                                                intersection: event.target.value,
+                                            }))
+                                        }
+                                        placeholder="Simpang Baru"
+                                        className="w-full rounded-lg border border-border bg-surface-2 px-3 py-2.5 text-sm text-text outline-none focus:border-accent"
                                     />
 
                                 </div>
@@ -1027,7 +1068,7 @@ export default function CCTVPage() {
                             <div>
 
                                 <label className="mb-2 block text-xs text-text-secondary">
-                                    Jenis Sumber
+                                    Jenis Sumber {editingId && "(Tidak dapat diubah saat mode edit)"}
                                 </label>
 
                                 <div className="grid grid-cols-3 gap-2">
@@ -1074,7 +1115,8 @@ export default function CCTVPage() {
                                                 item.value
                                                     ? "border-accent bg-accent-dim text-accent"
                                                     : "border-border bg-surface-2 text-text-secondary"
-                                            }`}
+                                            } ${editingId ? "opacity-50 cursor-not-allowed" : ""}`}
+                                            disabled={!!editingId}
                                         >
                                             {item.label}
                                         </button>

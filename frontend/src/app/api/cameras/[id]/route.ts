@@ -23,6 +23,7 @@
 import { NextResponse } from "next/server";
 
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import { findOrCreateIntersection } from "../intersectionHelper";
 
 export async function DELETE(
   _request: Request,
@@ -207,6 +208,72 @@ export async function DELETE(
   if (cameraDeleteError) {
     return NextResponse.json(
       { error: cameraDeleteError.message },
+      { status: 500 }
+    );
+  }
+
+  return NextResponse.json({ success: true });
+}
+
+export async function PATCH(
+  request: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { id } = await params;
+  const cameraId = Number(id);
+
+  if (!Number.isFinite(cameraId)) {
+    return NextResponse.json(
+      { error: "ID kamera tidak valid." },
+      { status: 400 }
+    );
+  }
+
+  const body = await request.json();
+
+  if (!body.name?.trim()) {
+    return NextResponse.json(
+      { error: "Nama CCTV wajib diisi." },
+      { status: 400 }
+    );
+  }
+
+  let intersection;
+  try {
+    intersection = await findOrCreateIntersection(body.intersection_name);
+  } catch (err: any) {
+    return NextResponse.json(
+      { error: "Gagal memproses persimpangan: " + err.message },
+      { status: 500 }
+    );
+  }
+
+  const { data: approach, error: approachError } = await supabaseAdmin
+    .from("approaches")
+    .select("id")
+    .eq("intersectionId", intersection.id)
+    .eq("approach", body.approach)
+    .maybeSingle();
+
+  if (approachError || !approach) {
+    return NextResponse.json(
+      { error: "Approach tidak ditemukan." },
+      { status: 500 }
+    );
+  }
+
+  const { error: updateError } = await supabaseAdmin
+    .from("cameras")
+    .update({
+      name: body.name.trim(),
+      intersectionId: intersection.id,
+      approachId: approach.id,
+    })
+    .eq("id", cameraId);
+
+  if (updateError) {
+    return NextResponse.json(
+      { error: updateError.message },
       { status: 500 }
     );
   }

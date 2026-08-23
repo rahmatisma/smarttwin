@@ -14,11 +14,13 @@
 import { NextResponse } from "next/server";
 
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import { findOrCreateIntersection } from "./intersectionHelper";
 import { DEFAULT_INTERSECTION_ID } from "@/lib/supabaseData";
 
 interface CreateCameraBody {
   name: string;
   approach: "north" | "south" | "east" | "west";
+  intersection_name: string;
   sourceType: "url" | "rtsp";
   source: string;
 }
@@ -47,16 +49,12 @@ export async function POST(request: Request) {
     );
   }
 
-  const { data: intersection, error: intersectionError } =
-    await supabaseAdmin
-      .from("intersections")
-      .select("id")
-      .eq("intersectionId", DEFAULT_INTERSECTION_ID)
-      .maybeSingle();
-
-  if (intersectionError || !intersection) {
+  let intersection;
+  try {
+    intersection = await findOrCreateIntersection(body.intersection_name);
+  } catch (err: any) {
     return NextResponse.json(
-      { error: "Intersection tidak ditemukan." },
+      { error: "Gagal memproses persimpangan: " + err.message },
       { status: 500 }
     );
   }

@@ -15,13 +15,13 @@ export interface IntersectionConfig {
 export const ALL_INTERSECTIONS: IntersectionConfig[] = [
     {
         id: "intersection1",
-        name: "Simpang 1",
+        name: "Simpang Surabaya",
         databaseId: "simpang1",
         cameraName: "CCTV 1",
     },
     {
         id: "intersection2",
-        name: "Simpang 2",
+        name: "Simpang Kandang",
         databaseId: "simpang2",
         cameraName: "CCTV 2 (Jl Magelang)",
     },
@@ -33,7 +33,7 @@ export const ALL_INTERSECTIONS: IntersectionConfig[] = [
     },
     {
         id: "intersection4",
-        name: "Simpang 4",
+        name: "Simpang Pingit",
         databaseId: "simpang4-pingit",
         cameraName: "CCTV 4 (Jl Pangeran Diponegoro)",
     },
