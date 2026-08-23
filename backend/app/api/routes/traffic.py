@@ -14,13 +14,25 @@ from app.services.traffic_service import (
     TrafficService,
     TrafficServiceError,
 )
+
 from app.schemas.traffic_response import (
     TrafficDetailResponse,
     TrafficListResponse,
 )
-from app.services.ws_manager import traffic_ws_manager
-from app.pipeline.traffic_state_builder import TrafficStateBuilder, getDefaultCrossPath, getDefaultDensityPath
 
+from app.services.ws_manager import (
+    traffic_ws_manager,
+)
+
+from app.pipeline.traffic_state_builder import (
+    TrafficStateBuilder,
+    TrafficStateBuilderConfig,
+)
+
+
+# ============================================================
+# ROUTER
+# ============================================================
 
 router = APIRouter(
     prefix="/api/v1/traffic",
@@ -36,32 +48,131 @@ traffic_service = TrafficService()
 
 
 # ============================================================
-# DIRECT CV OUTPUT BRPASS SUPABASE
+# DIRECT CV OUTPUT -> SUPABASE
 # ============================================================
 
 @router.get("/live-csv")
-def get_live_csv(video_time: float | None = Query(default=None)):
+def get_live_csv(
+    video_time: float | None = Query(
+        default=None,
+    ),
+):
+    """
+    Mengambil traffic state terbaru dari Supabase.
+
+    Endpoint ini TIDAK bergantung pada koneksi SUMO/TraCI.
+
+    Alur:
+
+        CV
+         ↓
+        Supabase
+         ↓
+        TrafficStateBuilder
+         ↓
+        /api/v1/traffic/live-csv
+         ↓
+        Frontend
+
+    SUMO boleh sedang berjalan ataupun sudah ditutup.
+    """
+
     try:
-        from app.pipeline.traffic_state_builder import TrafficStateBuilderConfig
-        builder = TrafficStateBuilder(TrafficStateBuilderConfig(windowSeconds=1))
-        states = builder.buildFromCvOutput(
-            getDefaultCrossPath(),
-            getDefaultDensityPath(),
-            video_time=video_time
+
+        # ----------------------------------------------------
+        # BUILD TRAFFIC STATE
+        # ----------------------------------------------------
+
+        builder = TrafficStateBuilder(
+            TrafficStateBuilderConfig(
+                windowSeconds=1,
+            )
         )
+
+        states = builder.buildFromSupabase(
+            intersectionId="simpang4-pingit",
+            limit=1,
+        )
+
+        # ----------------------------------------------------
+        # NO DATA
+        # ----------------------------------------------------
+
         if not states:
-            raise HTTPException(status_code=404, detail="No data in CSV")
-            
-        matched_time = getattr(builder, "last_matched_video_time", None)
-        
+
+            return {
+                "success": True,
+                "data": None,
+                "timestamp": None,
+                "requestedVideoTime": video_time,
+                "message": "No traffic state data found.",
+            }
+
+        # ----------------------------------------------------
+        # LATEST STATE
+        # ----------------------------------------------------
+
+        latest_state = states[-1]
+
         return {
-            "success": True, 
-            "data": states[-1].model_dump(mode="json"),
-            "timestamp": matched_time,
-            "requestedVideoTime": video_time
+            "success": True,
+
+            "data": latest_state.model_dump(
+                mode="json"
+            ),
+
+            "timestamp": getattr(
+                builder,
+                "last_matched_video_time",
+                None,
+            ),
+
+            "requestedVideoTime": video_time,
         }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+
+    except Exception as exc:
+
+        # ----------------------------------------------------
+        # IMPORTANT
+        #
+        # Jangan membuat API traffic bergantung pada SUMO.
+        #
+        # Kalau SUMO ditutup dan ada error koneksi yang
+        # ikut terlempar dari pipeline, API tetap memberi
+        # response yang aman.
+        # ----------------------------------------------------
+
+        error_message = str(exc)
+
+        if (
+            "Connection closed by SUMO"
+            in error_message
+            or "TraCI"
+            in error_message
+            or "SUMO" in error_message
+        ):
+
+            return {
+                "success": True,
+                "data": None,
+                "timestamp": None,
+                "requestedVideoTime": video_time,
+                "sumoConnected": False,
+                "message": (
+                    "SUMO tidak sedang terhubung. "
+                    "Traffic API tetap berjalan "
+                    "tanpa koneksi SUMO."
+                ),
+            }
+
+        # ----------------------------------------------------
+        # ERROR LAIN
+        # ----------------------------------------------------
+
+        raise HTTPException(
+            status_code=500,
+            detail=error_message,
+        ) from exc
 
 
 # ============================================================
@@ -83,9 +194,15 @@ def get_latest_traffic(
     """
     Mengambil traffic state terbaru
     untuk satu intersection.
+
+    Endpoint ini hanya membaca data dari
+    TrafficService -> Repository -> Supabase.
+
+    Tidak bergantung pada SUMO.
     """
 
     try:
+
         data = traffic_service.get_latest_traffic(
             intersection_id=intersectionId,
             limit=limit,
@@ -99,6 +216,7 @@ def get_latest_traffic(
         }
 
     except TrafficServiceError as exc:
+
         raise HTTPException(
             status_code=404,
             detail=str(exc),
@@ -106,26 +224,58 @@ def get_latest_traffic(
 
 
 # ============================================================
-# REALTIME TRAFFIC
+# REALTIME TRAFFIC WEBSOCKET
 # ============================================================
 
 @router.websocket("/ws")
-async def traffic_websocket(websocket: WebSocket) -> None:
-    await traffic_ws_manager.connect(websocket)
+async def traffic_websocket(
+    websocket: WebSocket,
+) -> None:
+
+    await traffic_ws_manager.connect(
+        websocket
+    )
 
     try:
-        while True:
-            await websocket.receive_text()
-    except WebSocketDisconnect:
-        traffic_ws_manager.disconnect(websocket)
 
+        while True:
+
+            await websocket.receive_text()
+
+    except WebSocketDisconnect:
+
+        traffic_ws_manager.disconnect(
+            websocket
+        )
+
+    except Exception:
+
+        # ----------------------------------------------------
+        # Client / connection error tidak boleh membuat
+        # server crash.
+        # ----------------------------------------------------
+
+        traffic_ws_manager.disconnect(
+            websocket
+        )
+
+
+# ============================================================
+# NOTIFY TRAFFIC UPDATE
+# ============================================================
 
 @router.post("/notify")
 async def notify_traffic_update(
     payload: dict[str, Any],
 ) -> dict[str, str]:
-    await traffic_ws_manager.broadcast(payload)
-    return {"status": "broadcast"}
+
+    await traffic_ws_manager.broadcast(
+        payload
+    )
+
+    return {
+        "status": "broadcast"
+    }
 
 
 # ============================================================
@@ -145,15 +295,19 @@ def get_traffic_state(
     """
 
     try:
+
         data = traffic_service.get_traffic_state(
             intersection_id=intersectionId,
             traffic_state_id=trafficStateId,
         )
 
         if data is None:
+
             raise HTTPException(
                 status_code=404,
-                detail="Traffic state tidak ditemukan.",
+                detail=(
+                    "Traffic state tidak ditemukan."
+                ),
             )
 
         return {
@@ -163,26 +317,34 @@ def get_traffic_state(
         }
 
     except TrafficServiceError as exc:
+
         raise HTTPException(
             status_code=404,
             detail=str(exc),
         ) from exc
 
 
+# ============================================================
+# LEGACY ROUTES
+# ============================================================
+
 legacy_router.add_api_route(
     "/{intersectionId}",
     get_latest_traffic,
     methods=["GET"],
 )
+
 legacy_router.add_api_route(
     "/{intersectionId}/states/{trafficStateId}",
     get_traffic_state,
     methods=["GET"],
 )
+
 legacy_router.add_api_websocket_route(
     "/ws",
     traffic_websocket,
 )
+
 legacy_router.add_api_route(
     "/notify",
     notify_traffic_update,

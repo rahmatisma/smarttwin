@@ -1,71 +1,127 @@
+
 # Traffic State Builder
 
-Traffic State Builder adalah pipeline yang mengubah data traffic hasil Computer Vision (YOLO + ByteTrack) menjadi **TrafficState** yang dapat digunakan oleh Backend, SUMO, dan Dashboard SmartTwin.
+Traffic State Builder mengubah data traffic dari Computer Vision (YOLO + ByteTrack) menjadi `TrafficState` yang digunakan oleh Backend, SUMO, dan Dashboard SmartTwin.
 
 ## 1. Alur
 
 ```text
-YOLO + ByteTrack
-       ↓
 CV Traffic Data
-       ↓
+      ↓
 Traffic State Builder
-       ↓
+      ↓
+BuiltTrafficState
+      ↓
 TrafficState
-       ↓
+      ↓
 Backend API
-       ↓
-Frontend / SUMO
-```
+   ↓       ↓
+Frontend   SUMO
+````
 
 ## 2. Input
 
-Input utama:
+Sumber data utama:
 
 ```text
 cv/output/smarttwin_traffic_data.csv
 ```
 
-Format data saat ini adalah **per timestamp + approach + lane**.
+Data berada pada level:
+
+```text
+timestamp + intersection + approach + lane
+```
 
 Kolom utama:
 
-| Kolom                | Fungsi                                |
+| Kolom                | Keterangan                            |
 | -------------------- | ------------------------------------- |
 | `timestamp`          | Waktu pengamatan                      |
-| `intersection_id`    | Identitas simpang                     |
-| `approach`           | Lengan simpang: north/south/east/west |
-| `lane_id`            | Identitas lajur                       |
-| `vehicle_count`      | Kendaraan yang memotong counting line |
+| `intersection_id`    | ID simpang                            |
+| `approach`           | `north`, `south`, `east`, `west`      |
+| `lane_id`            | ID lajur                              |
+| `vehicle_count`      | Kendaraan yang melewati counting line |
 | `car_count`          | Jumlah mobil                          |
 | `motorcycle_count`   | Jumlah motor                          |
 | `bus_count`          | Jumlah bus                            |
 | `truck_count`        | Jumlah truk                           |
 | `queue_length_veh`   | Jumlah kendaraan dalam antrean        |
 | `queue_length_m_est` | Estimasi panjang antrean              |
-| `density_index`      | Proxy kepadatan/occupancy lajur       |
+| `density_index`      | Proxy kepadatan/occupancy             |
 
-## 3. Tugas Traffic State Builder
+## 3. Tugas Builder
 
-Builder melakukan:
+Traffic State Builder bertugas:
 
-1. Membaca data traffic dari CSV.
-2. Mengelompokkan data berdasarkan **time window**.
-3. Mengelompokkan data berdasarkan **approach**.
-4. Menggabungkan data dari beberapa lane dalam satu approach.
-5. Menghasilkan `volume`.
-6. Menghasilkan `queue_length_veh`.
-7. Menghasilkan `queue_length_m_est`.
-8. Menghasilkan `density_index`.
-9. Mengisi `avg_speed_kmh` sebagai `None` karena speed belum tersedia.
-10. Menghasilkan object `TrafficState` sesuai data contract.
+1. Membaca data traffic.
+2. Parsing dan mengurutkan timestamp.
+3. Membentuk time window **5 detik**.
+4. Menggabungkan data beberapa lane menjadi satu approach.
+5. Menghitung `volume`.
+6. Mengagregasikan `queueLengthVeh`.
+7. Mengagregasikan `queueLengthMEst`.
+8. Mengagregasikan `densityIndex`.
+9. Menghitung `carCount`, `motorcycleCount`, `busCount`, dan `truckCount`.
+10. Menghasilkan `BuiltTrafficState` sesuai contract backend.
 
-## 4. Output
-
-Output mengikuti contract:
+## 4. Aggregation
 
 ```text
-TrafficState
+Lane
+ │
+ ├── lane_1
+ ├── lane_2
+ └── lane_3
+       ↓
+   Approach
+       ↓
+ ApproachState
+```
+
+Aturan utama:
+
+| Metric            | Aggregation                      |
+| ----------------- | -------------------------------- |
+| `volume`          | SUM `vehicle_count`              |
+| `carCount`        | SUM `car_count`                  |
+| `motorcycleCount` | SUM `motorcycle_count`           |
+| `busCount`        | SUM `bus_count`                  |
+| `truckCount`      | SUM `truck_count`                |
+| `queueLengthVeh`  | SUM antar-lane                   |
+| `queueLengthMEst` | SUM antar-lane                   |
+| `densityIndex`    | Rata-rata antar-lane             |
+| `avgSpeedKmh`     | `None` jika speed belum tersedia |
+
+## 5. Time Window
+
+Window default:
+
+```text
+5 detik
+```
+
+Contoh:
+
+```text
+16:30:12 ───── 16:30:17
+       ↓
+ TrafficState #1
+
+16:30:17 ───── 16:30:22
+       ↓
+ TrafficState #2
+```
+
+Window harus dikonfigurasi melalui builder dan tidak di-hardcode di banyak tempat.
+
+## 6. Output
+
+Struktur utama:
+
+```text
+BuiltTrafficState
+├── trafficStateId
 ├── intersectionId
 ├── windowStart
 ├── windowEnd
@@ -76,18 +132,22 @@ TrafficState
     └── west
 ```
 
-Setiap `ApproachState` memiliki:
+Setiap approach memiliki metric:
 
 ```text
 approach
 volume
+carCount
+motorcycleCount
+busCount
+truckCount
 queueLengthVeh
 queueLengthMEst
 densityIndex
 avgSpeedKmh
 ```
 
-Contoh konsep:
+Contoh:
 
 ```json
 {
@@ -98,6 +158,10 @@ Contoh konsep:
     {
       "approach": "south",
       "volume": 10,
+      "carCount": 3,
+      "motorcycleCount": 6,
+      "busCount": 1,
+      "truckCount": 0,
       "queueLengthVeh": 5,
       "queueLengthMEst": 12.5,
       "densityIndex": 24.3,
@@ -107,286 +171,137 @@ Contoh konsep:
 }
 ```
 
-## 5. Tahapan Implementasi
-
-### Tahap 1 — Load Data
-
-Membaca CSV dan melakukan parsing:
+## 7. Integrasi
 
 ```text
-CSV
+CV
  ↓
-timestamp
-intersection_id
-approach
-lane_id
-metrics
+TrafficStateBuilder
+ ↓
+BuiltTrafficState
+ ├──→ Traffic Service
+ │       ↓
+ │    Backend API
+ │       ↓
+ │    Frontend
+ │
+ └──→ SumoTrafficStateAdapter
+         ↓
+       SUMO
 ```
 
-### Tahap 2 — Time Window
+`TrafficStateBuilder` hanya bertanggung jawab terhadap pembentukan traffic state.
 
-Traffic State Builder menggunakan window observasi sebesar **5 detik**.
+Logic SUMO, API, frontend, forecasting, dan recommendation berada di layer masing-masing.
 
-Contoh:
+## 8. Validasi
 
-```text
-16:30:12 ── 16:30:17
-      ↓
-TrafficState #1
+Builder memastikan:
 
-16:30:17 ── 16:30:22
-      ↓
-TrafficState #2
-```
-
-Durasi window harus ditentukan sebagai konfigurasi, bukan hardcoded di banyak tempat.
-
-### Tahap 3 — Aggregate Lane → Approach
-
-Contoh:
-
-```text
-south
-├── lane_1
-├── lane_2
-└── lane_3
-```
-
-menjadi:
-
-```text
-south
-└── ApproachState
-```
-
-### Tahap 4 — Hitung Metrik Approach
-
-Metrik per-lane digabungkan menjadi metrik per-approach.
-
-* `volume` → total kendaraan yang tercatat crossing.
-* `queue_length_veh` → nilai antrean sesuai hasil CV.
-* `queue_length_m_est` → estimasi panjang antrean.
-* `density_index` → agregasi proxy occupancy/density.
-* `avg_speed_kmh` → `None` sampai sumber speed tersedia.
-
-### Tahap 5 — Build TrafficState
-
-Hasil agregasi dimasukkan ke schema:
-
-```text
-TrafficState
-        ↓
-ApproachState[]
-```
-
-### Tahap 6 — Validasi
-
-Validasi minimal:
-
-* Semua approach menggunakan nilai yang valid.
-* Tidak ada volume negatif.
-* Queue tidak negatif.
-* `density_index` tidak negatif.
+* Approach valid: `north`, `south`, `east`, `west`
+* Tidak ada nilai metric negatif.
 * Timestamp terurut.
 * Tidak terjadi double counting antar-lane.
-* `avg_speed_kmh` tetap `None` jika speed belum tersedia.
+* `queueLengthVeh` merupakan agregasi queue per-lane.
+* `queueLengthMEst` merupakan agregasi queue length per-lane.
+* `densityIndex` merupakan rata-rata antar-lane.
+* `avgSpeedKmh = None` jika data speed belum tersedia.
 
-### Tahap 7 — Integrasi Backend
-
-```text
-TrafficStateBuilder
-        ↓
-TrafficService
-        ↓
-GET /api/traffic/latest
-        ↓
-Frontend
-```
-
-## 6. Catatan Penting
-
-### Volume ≠ kendaraan yang terlihat
-
-`volume` hanya merepresentasikan kendaraan yang **memotong counting line**, bukan seluruh kendaraan yang terlihat pada frame.
-
-### Queue ≠ Volume
-
-`queue_length_veh` merupakan jumlah kendaraan yang sedang mengantre dan tidak boleh disamakan dengan volume.
-
-### Density bukan kendaraan/km
-
-`density_index` saat ini merupakan **proxy lane occupancy** dan belum merupakan kepadatan fisik dalam kendaraan/km.
-
-### Speed belum tersedia
-
-Jika belum ada data kecepatan:
-
-```json
-"avgSpeedKmh": null
-```
-
-Jangan menggunakan `0.0` sebagai placeholder.
-
-## 7. File Utama
+## 9. File Utama
 
 ```text
-smarttwin/
-│
-├── backend/
-│   ├── app/
-│   │   ├── main.py
-│   │   │
-│   │   ├── api/
-│   │   │   └── routes/
-│   │   │       └── traffic.py
-│   │   │
-│   │   ├── schemas/
-│   │   │   └── traffic.py
-│   │   │
-│   │   ├── services/
-│   │   │   └── traffic_service.py
-│   │   │
-│   │   ├── pipeline/
-│   │   │   └── traffic_state_builder.py      ← 1
-│   │   │
-│   │   └── simulation/
-│   │       └── sumo/
-│   │           ├── traffic_state_adapter.py  ← 2
-│   │           └── sumo_controller.py        ← 3
-│   │
-│   └── tests/
-│       ├── test_traffic_state_builder.py      ← 4
-│       └── test_sumo_adapter.py               ← 5
-│
-├── cv/
-│   ├── vehicle_counter.py
-│   └── output/
-│       └── smarttwin_traffic_data.csv
-│
-└── simulation/
-    └── sumo/
-        ├── network/
-        ├── routes/
-        ├── configs/
-        └── outputs/
+backend/
+└── app/
+    ├── pipeline/
+    │   └── traffic_state_builder.py
+    │
+    ├── schemas/
+    │   └── traffic.py
+    │
+    ├── services/
+    │   └── traffic_service.py
+    │
+    └── simulation/
+        └── sumo/
+            ├── traffic_state_adapter.py
+            └── sumo_controller.py
 ```
 
-## 8. Target Akhir
-
-Traffic State Builder dianggap selesai apabila pipeline berikut berjalan:
+Input CV:
 
 ```text
-CV CSV
-  ↓
-Time Window
-  ↓
-Lane Aggregation
-  ↓
-Approach Aggregation
-  ↓
-TrafficState
-  ↓
-Backend API
-  ↓
-Dashboard / SUMO
+cv/
+└── output/
+    └── smarttwin_traffic_data.csv
 ```
 
-## 8. Minimal Hasil Tes
+SUMO network:
 
-### Input & Preprocessing
-[x] CSV berhasil dibaca
-[x] timestamp berhasil diparse
-[x] window 5 detik terbentuk
+```text
+simulation/
+└── network/
+    └── simpang4_pingit.sumocfg
+```
 
-### Lane → Approach
-[x] lane → approach
-[x] volume = SUM vehicle_count
-[x] carCount benar
-[x] motorcycleCount benar
-[x] busCount benar
-[x] truckCount benar
+## 10. Testing
 
-### Queue & Density
-[x] queueLengthVeh benar
-[x] queueLengthMEst benar
-[x] densityIndex benar
+Test khusus Traffic State Builder:
 
-### Contract
-[x] avgSpeedKmh = None
-[x] semua north/south/east/west tersedia
-
-### Validation
-[x] tidak ada nilai negatif
-[x] tidak terjadi double counting pada proses agregasi builder
-
-### Integration
-[x] TrafficStateBuilder → TrafficService
-[x] TrafficState → SUMO Adapter
-[x] API
-[x] seluruh test backend PASS
-
-### Final Test
-[x] 24 tests passed
-
-
-lane
- └── berada di dalam approach
-
-queueLengthVeh
- └── CSV = per lane
- └── builder = SUM semua lane
- └── hasil = queueLengthVeh per approach
-
-queueLengthMEst
- └── CSV = per lane
- └── builder = SUM semua lane
- └── hasil = queueLengthMEst per approach
-
-vehicleCount
- └── berasal dari counting line CV
- └── bukan jumlah kendaraan yang terlihat pada satu frame
- └── diagregasikan ke window 5 detik
-
-densityIndex
- └── tersedia per lane
- └── builder = rata-rata antar lane
- └── hasil = densityIndex per approach
-
-avgSpeedKmh
- └── belum tersedia
- └── tetap None
-
- Command pengujian
-1. Test khusus Traffic State Builder
-
-Jalankan:
+```bash
 python -m pytest tests/test_traffic_state_builder.py -q
+```
 
-Expected:
-12 passed
+Test Traffic Service:
 
-Ini yang paling penting untuk checklist Traffic State Builder.
-
-2. Test Traffic Service
+```bash
 python -m pytest tests/test_traffic_service.py -q
+```
 
-Expected:
-10 passed
+Test SUMO Adapter:
 
-3. Test SUMO Adapter
+```bash
 python -m pytest tests/test_sumo_adapter.py -q
+```
 
-Expected:
-1 passed
+Seluruh backend:
 
-4. Test seluruh backend
-Ini yang paling terakhir kamu jalankan:
-
+```bash
 python -m pytest -q
+```
 
-Expected kondisi sekarang
-24 passed, 1 warning
+## Prinsip Utama
 
-Warning Starlette/httpx tadi bukan failure.
+```text
+CV Data
+   ↓
+Time Window
+   ↓
+Lane Aggregation
+   ↓
+Approach Aggregation
+   ↓
+BuiltTrafficState
+   ↓
+Backend / SUMO / Frontend
+```
 
-**Prinsip utama:** Traffic State Builder hanya bertanggung jawab mengubah data CV menjadi state lalu lintas sesuai contract. Logika API, frontend, SUMO, forecasting, dan recommendation tetap berada di layer masing-masing.
+Traffic State Builder **tidak mengatur simulasi SUMO atau tampilan frontend**. Builder hanya menghasilkan traffic state yang menjadi sumber data bagi layer berikutnya.
+
+```
+
+## Note — Waktu dan Data
+
+- Data CV memiliki timestamp berdasarkan waktu pengamatan video/CCTV.
+- Traffic State Builder menggunakan **time window 5 detik** untuk mengagregasikan data CV.
+- Satu `TrafficState` merepresentasikan kondisi lalu lintas pada **satu window 5 detik**, bukan kondisi satu frame.
+- `windowStart` dan `windowEnd` menunjukkan periode data yang digunakan untuk membentuk state.
+- Data yang masuk ke builder harus memiliki timestamp yang valid dan terurut.
+- Jika tidak ada data pada suatu window, builder tidak boleh menganggapnya sebagai `0` tanpa aturan preprocessing yang jelas.
+- `volume` merupakan jumlah kendaraan yang tercatat oleh CV pada window tersebut, bukan jumlah kendaraan yang sedang berada di jalan.
+- `queueLengthVeh` merepresentasikan kendaraan yang sedang mengantre pada window tersebut.
+- Data CV merupakan **observasi**, sedangkan SUMO merupakan **representasi/simulasi** dari kondisi tersebut.
+- Untuk mode realtime, setiap `TrafficState` baru dapat digunakan sebagai input/update kondisi SUMO tanpa harus menunggu simulasi selesai selama beberapa menit.
+- `durationSeconds` pada endpoint SUMO menentukan berapa lama proses simulasi berjalan, **bukan durasi data CV**.
+
+**Catatan penting:** aku sengaja menghapus checklist `24 passed` dari README. Angka jumlah test itu gampang berubah ketika kalian nambah test, jadi lebih aman README menjelaskan **command testing**, bukan mengunci jumlah test saat ini.
+```

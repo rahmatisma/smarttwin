@@ -1,28 +1,59 @@
 from __future__ import annotations
 
-from datetime import datetime
-
 from pydantic import BaseModel, Field
 
 
 class SimulationRequest(BaseModel):
-    intersectionId: str
-    trafficStateId: int | None = Field(default=None, ge=1)
-    durationSeconds: int = Field(default=300, ge=1, le=3600)
-    seed: int | None = None
-    gui: bool = False
-    guiDelayMs: int = Field(default=0, ge=0)
+    intersectionId: str = Field(
+        ...,
+        description="ID intersection, contoh: simpang4-pingit",
+    )
+
+    trafficStateId: int | None = Field(
+        default=None,
+        description="ID traffic state. Jika null, gunakan traffic state terbaru.",
+    )
+
+    durationSeconds: int = Field(
+        default=60,
+        ge=1,
+        description="Durasi simulasi dalam detik.",
+    )
+
+    gui: bool = Field(
+        default=False,
+        description="Jalankan SUMO GUI atau tidak.",
+    )
+
+    guiDelayMs: int = Field(
+        default=100,
+        ge=0,
+        description="Delay GUI SUMO dalam milidetik.",
+    )
+
+    seed: int = Field(
+        default=42,
+        description="Random seed untuk simulasi.",
+    )
 
 
 class SimulationResult(BaseModel):
     trafficStateId: int | None = None
     intersectionId: str
-    durationSeconds: int = Field(ge=1)
-    generatedVehicles: int = Field(ge=0)
-    departedVehicles: int = Field(ge=0)
-    arrivedVehicles: int = Field(ge=0)
-    maxQueueVehicles: int = Field(ge=0)
-    totalWaitingSeconds: float = Field(ge=0)
-    simulationRuntimeSeconds: float = Field(ge=0)
-    status: str
-    simulatedAt: datetime
+
+    durationSeconds: int
+
+    spawnedVehicles: int = 0
+    departedVehicles: int = 0
+    arrivedVehicles: int = 0
+    activeVehicles: int = 0
+
+    averageWaitingTimeSeconds: float = 0.0
+
+    departedByApproach: dict[str, int] = Field(
+        default_factory=dict
+    )
+
+    arrivedByApproach: dict[str, int] = Field(
+        default_factory=dict
+    )

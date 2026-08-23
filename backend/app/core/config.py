@@ -1,19 +1,46 @@
+from __future__ import annotations
+
 from functools import lru_cache
+from pathlib import Path
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
+# ============================================================
+# PATH
+# ============================================================
+
+# backend/app/core/config.py
+# parents[0] = core
+# parents[1] = app
+# parents[2] = backend
+
+BACKEND_ROOT = Path(__file__).resolve().parents[2]
+
+ENV_FILE = BACKEND_ROOT / ".env"
+
+
+# ============================================================
+# SETTINGS
+# ============================================================
+
 class Settings(BaseSettings):
-    # ============================================================
+
+    # ========================================================
     # APPLICATION
-    # ============================================================
+    # ========================================================
 
     app_name: str = "SmartTwin Backend"
+
     app_version: str = "0.1.0"
+
     debug: bool = True
 
-    cors_origins: str = "http://localhost:3000"
+    cors_origins: str = (
+        "http://localhost:3000,"
+        "http://127.0.0.1:3000"
+    )
 
     # ========================================================
     # DATABASE
@@ -26,78 +53,67 @@ class Settings(BaseSettings):
 
     # ========================================================
     # SUPABASE
-    # ============================================================
+    # ========================================================
 
-    # URL project Supabase
     supabase_url: str
 
-    # Service role key.
-    # SERVER-ONLY — jangan pernah dikirim ke frontend.
     supabase_service_role_key: str
 
-    # ============================================================
+    # ========================================================
     # HUGGING FACE
-    # ============================================================
+    # ========================================================
 
-    # Token Hugging Face
     hf_token: str
 
-    # Repository tempat video CCTV disimpan
-    # Contoh:
-    # rahmatisma/smarttwin-cctv
     hf_repo_id: str
 
-    # ============================================================
-    # VIDEO CACHE (lihat app/api/routes/cctv.py)
-    # ============================================================
-    #
-    # Cache lokal di disk supaya video yang sudah pernah ditonton
-    # tidak perlu ditarik ulang dari Hugging Face setiap kali --
-    # opsional karena butuh disk (lihat estimasi di percakapan tim),
-    # jadi tim dengan disk terbatas bisa matikan ini tanpa yang lain
-    # rusak (fallback ke proxy langsung seperti sebelumnya).
+    # ========================================================
+    # VIDEO CACHE
+    # ========================================================
 
     video_cache_enabled: bool = Field(
         default=True,
-        description="Simpan salinan video CCTV di disk lokal setelah pertama kali ditonton.",
+        description=(
+            "Simpan salinan video CCTV "
+            "di disk lokal."
+        ),
     )
 
     video_cache_dir: str = Field(
         default="cache/videos",
-        description="Folder cache, relatif terhadap direktori kerja saat uvicorn dijalankan (biasanya backend/).",
+        description=(
+            "Folder cache video."
+        ),
     )
 
-    # ============================================================
-    # ENVIRONMENT CONFIG
-    # ============================================================
+    # ========================================================
+    # PYDANTIC SETTINGS CONFIG
+    # ========================================================
 
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=str(ENV_FILE),
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
     )
 
+    # ========================================================
+    # CORS
+    # ========================================================
+
     @property
     def cors_origins_list(self) -> list[str]:
-        """
-        Mengubah:
 
-            http://localhost:3000,http://127.0.0.1:3000
-
-        menjadi:
-
-            [
-                "http://localhost:3000",
-                "http://127.0.0.1:3000"
-            ]
-        """
         return [
             origin.strip()
             for origin in self.cors_origins.split(",")
             if origin.strip()
         ]
 
+
+# ============================================================
+# SINGLETON
+# ============================================================
 
 @lru_cache
 def get_settings() -> Settings:
