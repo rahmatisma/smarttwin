@@ -4,9 +4,9 @@ import json
 import os
 import subprocess
 import tempfile
-
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 from app.pipeline.traffic_state_builder import (
     TrafficStateBuilder,
@@ -36,41 +36,33 @@ class SimulationService:
             or TrafficRepository()
         )
 
-        # ====================================================
+        # ----------------------------------------------------
         # PROJECT ROOT
-        # ====================================================
+        # ----------------------------------------------------
 
         self.project_root = (
             Path(__file__)
             .resolve()
-            .parents[2]
+            .parents[3]
         )
 
-        # ====================================================
-        # SIMULATION ROOT
-        #
-        # smarttwin/
-        # ├── backend/
-        # └── simulation/
-        # ====================================================
+        # ----------------------------------------------------
+        # SIMULATION
+        # ----------------------------------------------------
 
         self.simulation_root = (
             self.project_root
             / "simulation"
         )
 
-        # ====================================================
-        # SUMO RUNNER
-        # ====================================================
-
         self.runner = (
             self.simulation_root
             / "run_simulation.py"
         )
 
-        # ====================================================
-        # PYTHON SIMULATION ENV
-        # ====================================================
+        # ----------------------------------------------------
+        # PYTHON
+        # ----------------------------------------------------
 
         self.python = (
             self.simulation_root
@@ -79,9 +71,9 @@ class SimulationService:
             / "python.exe"
         )
 
-        # ====================================================
-        # SUMO NETWORK
-        # ====================================================
+        # ----------------------------------------------------
+        # NETWORK
+        # ----------------------------------------------------
 
         self.net_file = (
             self.simulation_root
@@ -98,36 +90,36 @@ class SimulationService:
         request: SimulationRequest,
     ) -> SimulationResult:
 
-        # ====================================================
+        # ----------------------------------------------------
         # VALIDATE FILES
-        # ====================================================
+        # ----------------------------------------------------
 
         if not self.python.exists():
 
             raise SimulationServiceError(
-                "Python simulation tidak ditemukan: "
+                "Python simulation tidak ditemukan:\n"
                 f"{self.python}"
             )
 
         if not self.runner.exists():
 
             raise SimulationServiceError(
-                "SUMO runner tidak ditemukan: "
+                "SUMO runner tidak ditemukan:\n"
                 f"{self.runner}"
             )
 
         if not self.net_file.exists():
 
             raise SimulationServiceError(
-                "Network SUMO tidak ditemukan: "
+                "Network SUMO tidak ditemukan:\n"
                 f"{self.net_file}"
             )
 
-        # ====================================================
-        # LOAD TRAFFIC STATE
-        # ====================================================
+        # ----------------------------------------------------
+        # GET LATEST TRAFFIC STATE
+        # ----------------------------------------------------
 
-        intersectionRowId = (
+        intersection_row_id = (
             self.repository
             .get_intersection_row_id(
                 request.intersectionId
@@ -137,14 +129,16 @@ class SimulationService:
         raw_states = (
             self.repository
             .get_latest_traffic_states(
-                intersection_row_id=intersectionRowId,
+                intersection_row_id=(
+                    intersection_row_id
+                ),
                 limit=100,
             )
         )
 
-        # ====================================================
+        # ----------------------------------------------------
         # FILTER TRAFFIC STATE ID
-        # ====================================================
+        # ----------------------------------------------------
 
         if request.trafficStateId is not None:
 
@@ -163,9 +157,13 @@ class SimulationService:
 
         raw_state = raw_states[0]
 
-        # ====================================================
+        traffic_state_id = int(
+            raw_state["id"]
+        )
+
+        # ----------------------------------------------------
         # BUILD TRAFFIC STATE
-        # ====================================================
+        # ----------------------------------------------------
 
         builder = TrafficStateBuilder()
 
@@ -175,14 +173,9 @@ class SimulationService:
                     request.intersectionId
                 ),
                 trafficStateId=(
-                    request.trafficStateId
+                    traffic_state_id
                 ),
-                limit=(
-                    None
-                    if request.trafficStateId
-                    is not None
-                    else 100
-                ),
+                limit=1,
             )
         )
 
@@ -195,21 +188,23 @@ class SimulationService:
 
         target = states[0]
 
-        # ====================================================
-        # CREATE INPUT JSON
-        # ====================================================
+        # ----------------------------------------------------
+        # SERIALIZE
+        # ----------------------------------------------------
 
-        payload = target.model_dump(
-            mode="json"
+        payload: dict[str, Any] = (
+            target.model_dump(
+                mode="json"
+            )
         )
 
-        payload["trafficStateId"] = int(
-            raw_state["id"]
-        )
+        payload[
+            "trafficStateId"
+        ] = traffic_state_id
 
-        # ====================================================
+        # ----------------------------------------------------
         # TEMP DIRECTORY
-        # ====================================================
+        # ----------------------------------------------------
 
         with tempfile.TemporaryDirectory(
             prefix="smarttwin-sumo-"
@@ -231,24 +226,29 @@ class SimulationService:
 
             input_file.write_text(
                 json.dumps(
-                    payload
+                    payload,
+                    indent=2,
                 ),
                 encoding="utf-8",
             )
 
-            # =================================================
+            # ------------------------------------------------
             # COMMAND
-            # =================================================
+            # ------------------------------------------------
 
             command = [
                 str(self.python),
                 str(self.runner),
+
                 "--input",
                 str(input_file),
+
                 "--output",
                 str(output_file),
+
                 "--net-file",
                 str(self.net_file),
+
                 "--duration",
                 str(
                     request.durationSeconds
@@ -269,18 +269,50 @@ class SimulationService:
                 command.extend(
                     [
                         "--gui",
+
                         "--gui-delay",
+
                         str(
                             request.guiDelayMs
                         ),
                     ]
                 )
 
-            # =================================================
-            # RUN SUMO
-            # =================================================
+            # ------------------------------------------------
+            # EXECUTE
+            # ------------------------------------------------
 
             try:
+
+                print()
+                print(
+                    "=" * 60
+                )
+                print(
+                    "SMARTTWIN → SUMO"
+                )
+                print(
+                    "=" * 60
+                )
+                print(
+                    f"Traffic State : "
+                    f"{traffic_state_id}"
+                )
+                print(
+                    f"Intersection  : "
+                    f"{request.intersectionId}"
+                )
+                print(
+                    f"Duration      : "
+                    f"{request.durationSeconds}s"
+                )
+                print(
+                    f"GUI           : "
+                    f"{request.gui}"
+                )
+                print(
+                    "=" * 60
+                )
 
                 subprocess.run(
                     command,
@@ -300,12 +332,13 @@ class SimulationService:
             ) as exc:
 
                 raise SimulationServiceError(
-                    f"SUMO gagal dijalankan: {exc}"
+                    "SUMO gagal dijalankan: "
+                    f"{exc}"
                 ) from exc
 
-            # =================================================
+            # ------------------------------------------------
             # RESULT
-            # =================================================
+            # ------------------------------------------------
 
             if not output_file.exists():
 
@@ -314,17 +347,25 @@ class SimulationService:
                     "result JSON."
                 )
 
-            result = json.loads(
-                output_file.read_text(
-                    encoding="utf-8"
-                )
-            )
+            try:
 
-            result["simulatedAt"] = (
-                datetime.now(
-                    timezone.utc
-                ).isoformat()
-            )
+                result = json.loads(
+                    output_file.read_text(
+                        encoding="utf-8"
+                    )
+                )
+
+            except json.JSONDecodeError as exc:
+
+                raise SimulationServiceError(
+                    "Result SUMO bukan JSON valid."
+                ) from exc
+
+            result[
+                "simulatedAt"
+            ] = datetime.now(
+                timezone.utc
+            ).isoformat()
 
             return SimulationResult.model_validate(
                 result
@@ -348,15 +389,19 @@ class SimulationService:
             / "sumo"
         )
 
-        environment["SUMO_HOME"] = str(
-            sumo_home
-        )
+        if sumo_home.exists():
 
-        environment["PATH"] = (
-            f"{sumo_home / 'bin'}"
-            f"{os.pathsep}"
-            f"{environment.get('PATH', '')}"
-        )
+            environment[
+                "SUMO_HOME"
+            ] = str(sumo_home)
+
+            environment[
+                "PATH"
+            ] = (
+                f"{sumo_home / 'bin'}"
+                f"{os.pathsep}"
+                f"{environment.get('PATH', '')}"
+            )
 
         return environment
 

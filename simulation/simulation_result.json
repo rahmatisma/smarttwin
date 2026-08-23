@@ -1,0 +1,1213 @@
+{
+  "simulation": {
+    "durationSeconds": 60,
+    "gui": true
+  },
+  "vehicles": {},
+  "steps": [
+    {
+      "time": 1.0,
+      "vehicleCount": 1,
+      "vehicles": [
+        {
+          "id": "veh_0",
+          "type": "motorcycle",
+          "edge": "484349908#2",
+          "speedKmh": 54.0,
+          "waitingTime": 0.0
+        }
+      ]
+    },
+    {
+      "time": 2.0,
+      "vehicleCount": 3,
+      "vehicles": [
+        {
+          "id": "veh_0",
+          "type": "motorcycle",
+          "edge": ":SIMPANG_CENTER_11",
+          "speedKmh": 53.90555255413056,
+          "waitingTime": 0.0
+        },
+        {
+          "id": "veh_1",
+          "type": "motorcycle",
+          "edge": "484349908#2",
+          "speedKmh": 48.504352554130556,
+          "waitingTime": 0.0
+        },
+        {
+          "id": "veh_2",
+          "type": "motorcycle",
+          "edge": "484349908#2",
+          "speedKmh": 54.0,
+          "waitingTime": 0.0
+        }
+      ]
+    },
+    {
+      "time": 3.0,
+      "vehicleCount": 5,
+      "vehicles": [
+        {
+          "id": "veh_0",
+          "type": "motorcycle",
+          "edge": ":SIMPANG_CENTER_11",
+          "speedKmh": 48.65933782565408,
+          "waitingTime": 0.0
+        },
+        {
+          "id": "veh_1",
+          "type": "motorcycle",
+          "edge": ":SIMPANG_CENTER_11",
+          "speedKmh": 46.201340238155055,
+          "waitingTime": 0.0
+        },
+        {
+          "id": "veh_2",
+          "type": "motorcycle",
+          "edge": ":SIMPANG_CENTER_11",
+          "speedKmh": 52.37479194486514,
+          "waitingTime": 0.0
+        },
+        {
+          "id": "veh_3",
+          "type": "motorcycle",
+          "edge": "484349908#2",
+          "speedKmh": 40.80014023815505,
+          "waitingTime": 0.0
+        },
+        {
+          "id": "veh_4",
+          "type": "motorcycle",
+          "edge": "484349908#2",
+          "speedKmh": 46.973591944865134,
+          "waitingTime": 0.0
+        }
+      ]
+    },
+    {
+      "time": 4.0,
+      "vehicleCount": 6,
+      "vehicles": [
+        {
+          "id": "veh_1",
+          "type": "motorcycle",
+          "edge": ":SIMPANG_CENTER_11",
+          "speedKmh": 42.85866709592827,
+          "waitingTime": 0.0
+        },
+        {
+          "id": "veh_2",
+          "type": "motorcycle",
+          "edge": ":SIMPANG_CENTER_11",
+          "speedKmh": 49.767305279569705,
+          "waitingTime": 0.0
+        },
+        {
+          "id": "veh_3",
+          "type": "motorcycle",
+          "edge": "484349908#2",
+          "speedKmh": 35.98564458472877,
+          "waitingTime": 0.0
+        },
+        {
+          "id": "veh_4",
+          "type": "motorcycle",
+          "edge": ":SIMPANG_CENTER_11",
+          "speedKmh": 44.415411275961624,
+          "waitingTime": 0.0
+        },
+        {
+          "id": "veh_5",
+          "type": "car",
+          "edge": "484349908#2",
+          "speedKmh": 34.214211275961624,
+          "waitingTime": 0.0
+        },
+        {
+          "id": "veh_6",
+          "type": "car",
+          "edge": "484349908#2",
+          "speedKmh": 22.483844584728768,
+          "waitingTime": 0.0
+        }
+      ]
+    },
+    {
+      "time": 5.0,
+      "vehicleCount": 7,
+      "vehicles": [
+        {
+          "id": "veh_1",
+          "type": "motorcycle",
+          "edge": "153857907#0",
+          "speedKmh": 50.032676871112365,
+          "waitingTime": 0.0
+        },
+        {
+          "id": "veh_3",
+          "type": "motorcycle",
+          "edge": ":SIMPANG_CENTER_11",
+          "speedKmh": 39.423754215409616,
+          "waitingTime": 0.0
+        },
+        {
+          "id": "veh_4",
+          "type": "motorcycle",
+          "edge": ":SIMPANG_CENTER_11",
+          "speedKmh": 43.591130173989384,
+          "waitingTime": 0.0
+        },
+        {
+          "id": "veh_5",
+          "type": "car",
+          "edge": ":SIMPANG_CENTER_11",
+          "speedKmh": 33.05796192021332,
+          "waitingTime": 0.0
+        },
+        {
+          "id": "veh_6",
+          "type": "car",
+          "edge": "484349908#2",
+          "speedKmh": 21.150694315721456,
+          "waitingTime": 0.0
+        },
+        {
+          "id": "veh_7",
+          "type": "motorcycle",
+          "edge": "484349908#2",
+          "speedKmh": 24.956161920213326,
+          "waitingTime": 0.0
+        },
+        {
+          "id": "veh_8",
+          "type": "motorcycle",
+          "edge": "484349908#2",
+          "speedKmh": 8.097788631442908,
+          "waitingTime": 0.0
+        }
+      ]
+    },
+    {
+      "time": 6.0,
+      "vehicleCount": 7,
+      "vehicles": [
+        {
+          "id": "veh_3",
+          "type": "motorcycle",
+          "edge": ":SIMPANG_CENTER_11",
+          "speedKmh": 47.66186430210683,
+          "waitingTime": 0.0
+        },
+        {
+          "id": "veh_4",
+          "type": "motorcycle",
+          "edge": "153857907#0",
+          "speedKmh": 50.30522657353431,
+          "waitingTime": 0.0
+        },
+        {
+          "id": "veh_5",
+          "type": "car",
+          "edge": ":SIMPANG_CENTER_11",
+          "speedKmh": 36.01022496126741,
+          "waitingTime": 0.0
+        },
+        {
+          "id": "veh_6",
+          "type": "car",
+          "edge": ":SIMPANG_CENTER_11",
+          "speedKmh": 27.263818763931454,
+          "waitingTime": 0.0
+        },
+        {
+          "id": "veh_7",
+          "type": "motorcycle",
+          "edge": "484349908#2",
+          "speedKmh": 20.8444262801662,
+          "waitingTime": 0.0
+        },
+        {
+          "id": "veh_8",
+          "type": "motorcycle",
+          "edge": "484349908#2",
+          "speedKmh": 6.887264879478723,
+          "waitingTime": 0.0
+        },
+        {
+          "id": "veh_9",
+          "type": "motorcycle",
+          "edge": "484349908#2",
+          "speedKmh": 7.485252560332401,
+          "waitingTime": 0.0
+        }
+      ]
+    },
+    {
+      "time": 7.0,
+      "vehicleCount": 6,
+      "vehicles": [
+        {
+          "id": "veh_10",
+          "type": "motorcycle",
+          "edge": "484349908#2",
+          "speedKmh": 7.7865863508161635,
+          "waitingTime": 0.0
+        },
+        {
+          "id": "veh_5",
+          "type": "car",
+          "edge": ":SIMPANG_CENTER_11",
+          "speedKmh": 41.077074249770114,
+          "waitingTime": 0.0
+        },
+        {
+          "id": "veh_6",
+          "type": "car",
+          "edge": ":SIMPANG_CENTER_11",
+          "speedKmh": 36.26210359645932,
+          "waitingTime": 0.0
+        },
+        {
+          "id": "veh_7",
+          "type": "motorcycle",
+          "edge": ":SIMPANG_CENTER_11",
+          "speedKmh": 26.642216531000276,
+          "waitingTime": 0.0
+        },
+        {
+          "id": "veh_8",
+          "type": "motorcycle",
+          "edge": "484349908#2",
+          "speedKmh": 17.102921471337435,
+          "waitingTime": 0.0
+        },
+        {
+          "id": "veh_9",
+          "type": "motorcycle",
+          "edge": "484349908#2",
+          "speedKmh": 6.758375732065324,
+          "waitingTime": 0.0
+        }
+      ]
+    },
+    {
+      "time": 8.0,
+      "vehicleCount": 6,
+      "vehicles": [
+        {
+          "id": "veh_10",
+          "type": "motorcycle",
+          "edge": "484349908#2",
+          "speedKmh": 4.036054285354283,
+          "waitingTime": 0.0
+        },
+        {
+          "id": "veh_11",
+          "type": "motorcycle",
+          "edge": "484349908#2",
+          "speedKmh": 3.2984929054825676,
+          "waitingTime": 0.0
+        },
+        {
+          "id": "veh_6",
+          "type": "car",
+          "edge": "153857907#0",
+          "speedKmh": 41.14216221083811,
+          "waitingTime": 0.0
+        },
+        {
+          "id": "veh_7",
+          "type": "motorcycle",
+          "edge": ":SIMPANG_CENTER_11",
+          "speedKmh": 36.33557267053909,
+          "waitingTime": 0.0
+        },
+        {
+          "id": "veh_8",
+          "type": "motorcycle",
+          "edge": ":SIMPANG_CENTER_11",
+          "speedKmh": 23.62593649501225,
+          "waitingTime": 0.0
+        },
+        {
+          "id": "veh_9",
+          "type": "motorcycle",
+          "edge": "484349908#2",
+          "speedKmh": 12.743717173417245,
+          "waitingTime": 0.0
+        }
+      ]
+    },
+    {
+      "time": 9.0,
+      "vehicleCount": 5,
+      "vehicles": [
+        {
+          "id": "veh_10",
+          "type": "motorcycle",
+          "edge": "484349908#2",
+          "speedKmh": 13.083913039713469,
+          "waitingTime": 0.0
+        },
+        {
+          "id": "veh_11",
+          "type": "motorcycle",
+          "edge": "484349908#2",
+          "speedKmh": 2.1716011348536512,
+          "waitingTime": 0.0
+        },
+        {
+          "id": "veh_7",
+          "type": "motorcycle",
+          "edge": "153857907#0",
+          "speedKmh": 45.44495722148492,
+          "waitingTime": 0.0
+        },
+        {
+          "id": "veh_8",
+          "type": "motorcycle",
+          "edge": ":SIMPANG_CENTER_11",
+          "speedKmh": 32.02580124979152,
+          "waitingTime": 0.0
+        },
+        {
+          "id": "veh_9",
+          "type": "motorcycle",
+          "edge": ":SIMPANG_CENTER_11",
+          "speedKmh": 19.425516683352328,
+          "waitingTime": 0.0
+        }
+      ]
+    },
+    {
+      "time": 10.0,
+      "vehicleCount": 5,
+      "vehicles": [
+        {
+          "id": "veh_10",
+          "type": "motorcycle",
+          "edge": ":SIMPANG_CENTER_11",
+          "speedKmh": 21.74372885256943,
+          "waitingTime": 0.0
+        },
+        {
+          "id": "veh_11",
+          "type": "motorcycle",
+          "edge": "484349908#2",
+          "speedKmh": 11.248763078440193,
+          "waitingTime": 0.0
+        },
+        {
+          "id": "veh_12",
+          "type": "car",
+          "edge": "484349908#2",
+          "speedKmh": 16.801912515103304,
+          "waitingTime": 0.0
+        },
+        {
+          "id": "veh_8",
+          "type": "motorcycle",
+          "edge": ":SIMPANG_CENTER_11",
+          "speedKmh": 37.886742216732934,
+          "waitingTime": 0.0
+        },
+        {
+          "id": "veh_9",
+          "type": "motorcycle",
+          "edge": ":SIMPANG_CENTER_11",
+          "speedKmh": 24.881210532342234,
+          "waitingTime": 0.0
+        }
+      ]
+    },
+    {
+      "time": 11.0,
+      "vehicleCount": 5,
+      "vehicles": [
+        {
+          "id": "veh_10",
+          "type": "motorcycle",
+          "edge": ":SIMPANG_CENTER_11",
+          "speedKmh": 29.947009412869182,
+          "waitingTime": 0.0
+        },
+        {
+          "id": "veh_11",
+          "type": "motorcycle",
+          "edge": "484349908#2",
+          "speedKmh": 18.9875858808758,
+          "waitingTime": 0.0
+        },
+        {
+          "id": "veh_12",
+          "type": "car",
+          "edge": "484349908#2",
+          "speedKmh": 12.755067909039035,
+          "waitingTime": 0.0
+        },
+        {
+          "id": "veh_13",
+          "type": "motorcycle",
+          "edge": "484349908#2",
+          "speedKmh": 17.191935975045446,
+          "waitingTime": 0.0
+        },
+        {
+          "id": "veh_9",
+          "type": "motorcycle",
+          "edge": ":SIMPANG_CENTER_11",
+          "speedKmh": 30.620128796878422,
+          "waitingTime": 0.0
+        }
+      ]
+    },
+    {
+      "time": 12.0,
+      "vehicleCount": 6,
+      "vehicles": [
+        {
+          "id": "veh_10",
+          "type": "motorcycle",
+          "edge": ":SIMPANG_CENTER_11",
+          "speedKmh": 40.48499061806996,
+          "waitingTime": 0.0
+        },
+        {
+          "id": "veh_11",
+          "type": "motorcycle",
+          "edge": ":SIMPANG_CENTER_11",
+          "speedKmh": 29.592647816322955,
+          "waitingTime": 0.0
+        },
+        {
+          "id": "veh_12",
+          "type": "car",
+          "edge": ":SIMPANG_CENTER_11",
+          "speedKmh": 19.870690034297702,
+          "waitingTime": 0.0
+        },
+        {
+          "id": "veh_13",
+          "type": "motorcycle",
+          "edge": "484349908#2",
+          "speedKmh": 14.238320230121271,
+          "waitingTime": 0.0
+        },
+        {
+          "id": "veh_14",
+          "type": "motorcycle",
+          "edge": "484349908#2",
+          "speedKmh": 18.14642398881722,
+          "waitingTime": 0.0
+        },
+        {
+          "id": "veh_9",
+          "type": "motorcycle",
+          "edge": "153857907#0",
+          "speedKmh": 37.53851965579685,
+          "waitingTime": 0.0
+        }
+      ]
+    },
+    {
+      "time": 13.0,
+      "vehicleCount": 5,
+      "vehicles": [
+        {
+          "id": "veh_11",
+          "type": "motorcycle",
+          "edge": ":SIMPANG_CENTER_11",
+          "speedKmh": 40.16117438491269,
+          "waitingTime": 0.0
+        },
+        {
+          "id": "veh_12",
+          "type": "car",
+          "edge": ":SIMPANG_CENTER_11",
+          "speedKmh": 28.46633161416784,
+          "waitingTime": 0.0
+        },
+        {
+          "id": "veh_13",
+          "type": "motorcycle",
+          "edge": "484349908#2",
+          "speedKmh": 21.043725258006262,
+          "waitingTime": 0.0
+        },
+        {
+          "id": "veh_14",
+          "type": "motorcycle",
+          "edge": "484349908#2",
+          "speedKmh": 15.729855797374569,
+          "waitingTime": 0.0
+        },
+        {
+          "id": "veh_15",
+          "type": "motorcycle",
+          "edge": "484349908#2",
+          "speedKmh": 20.0610853730669,
+          "waitingTime": 0.0
+        }
+      ]
+    },
+    {
+      "time": 14.0,
+      "vehicleCount": 5,
+      "vehicles": [
+        {
+          "id": "veh_12",
+          "type": "car",
+          "edge": ":SIMPANG_CENTER_11",
+          "speedKmh": 36.11641290245153,
+          "waitingTime": 0.0
+        },
+        {
+          "id": "veh_13",
+          "type": "motorcycle",
+          "edge": ":SIMPANG_CENTER_11",
+          "speedKmh": 30.70743654601883,
+          "waitingTime": 0.0
+        },
+        {
+          "id": "veh_14",
+          "type": "motorcycle",
+          "edge": ":SIMPANG_CENTER_11",
+          "speedKmh": 22.495808449229173,
+          "waitingTime": 0.0
+        },
+        {
+          "id": "veh_15",
+          "type": "motorcycle",
+          "edge": "484349908#2",
+          "speedKmh": 19.071868273333248,
+          "waitingTime": 0.0
+        },
+        {
+          "id": "veh_16",
+          "type": "car",
+          "edge": "484349908#2",
+          "speedKmh": 16.85893634791646,
+          "waitingTime": 0.0
+        }
+      ]
+    },
+    {
+      "time": 15.0,
+      "vehicleCount": 5,
+      "vehicles": [
+        {
+          "id": "veh_12",
+          "type": "car",
+          "edge": "153857907#0",
+          "speedKmh": 44.93376354739577,
+          "waitingTime": 0.0
+        },
+        {
+          "id": "veh_13",
+          "type": "motorcycle",
+          "edge": ":SIMPANG_CENTER_11",
+          "speedKmh": 39.12675365329396,
+          "waitingTime": 0.0
+        },
+        {
+          "id": "veh_14",
+          "type": "motorcycle",
+          "edge": ":SIMPANG_CENTER_11",
+          "speedKmh": 32.986725447075386,
+          "waitingTime": 0.0
+        },
+        {
+          "id": "veh_15",
+          "type": "motorcycle",
+          "edge": ":SIMPANG_CENTER_11",
+          "speedKmh": 25.715194178835088,
+          "waitingTime": 0.0
+        },
+        {
+          "id": "veh_16",
+          "type": "car",
+          "edge": "484349908#2",
+          "speedKmh": 14.293220368178293,
+          "waitingTime": 0.0
+        }
+      ]
+    },
+    {
+      "time": 16.0,
+      "vehicleCount": 3,
+      "vehicles": [
+        {
+          "id": "veh_14",
+          "type": "motorcycle",
+          "edge": ":SIMPANG_CENTER_11",
+          "speedKmh": 40.39881035921159,
+          "waitingTime": 0.0
+        },
+        {
+          "id": "veh_15",
+          "type": "motorcycle",
+          "edge": ":SIMPANG_CENTER_11",
+          "speedKmh": 31.586493776223218,
+          "waitingTime": 0.0
+        },
+        {
+          "id": "veh_16",
+          "type": "car",
+          "edge": ":SIMPANG_CENTER_11",
+          "speedKmh": 21.538036232685407,
+          "waitingTime": 0.0
+        }
+      ]
+    },
+    {
+      "time": 17.0,
+      "vehicleCount": 4,
+      "vehicles": [
+        {
+          "id": "veh_15",
+          "type": "motorcycle",
+          "edge": ":SIMPANG_CENTER_11",
+          "speedKmh": 42.116172421347876,
+          "waitingTime": 0.0
+        },
+        {
+          "id": "veh_16",
+          "type": "car",
+          "edge": ":SIMPANG_CENTER_11",
+          "speedKmh": 26.89110424105238,
+          "waitingTime": 0.0
+        },
+        {
+          "id": "veh_17",
+          "type": "bus",
+          "edge": "484349908#2",
+          "speedKmh": 16.004932541484227,
+          "waitingTime": 0.0
+        },
+        {
+          "id": "veh_18",
+          "type": "car",
+          "edge": "484349908#2",
+          "speedKmh": 50.04,
+          "waitingTime": 0.0
+        }
+      ]
+    },
+    {
+      "time": 18.0,
+      "vehicleCount": 3,
+      "vehicles": [
+        {
+          "id": "veh_16",
+          "type": "car",
+          "edge": ":SIMPANG_CENTER_11",
+          "speedKmh": 34.76805763151656,
+          "waitingTime": 0.0
+        },
+        {
+          "id": "veh_17",
+          "type": "bus",
+          "edge": ":SIMPANG_CENTER_11",
+          "speedKmh": 15.233441035086502,
+          "waitingTime": 0.0
+        },
+        {
+          "id": "veh_18",
+          "type": "car",
+          "edge": ":SIMPANG_CENTER_11",
+          "speedKmh": 46.11957586174831,
+          "waitingTime": 0.0
+        }
+      ]
+    },
+    {
+      "time": 19.0,
+      "vehicleCount": 3,
+      "vehicles": [
+        {
+          "id": "veh_16",
+          "type": "car",
+          "edge": "153857907#0",
+          "speedKmh": 41.08557831022117,
+          "waitingTime": 0.0
+        },
+        {
+          "id": "veh_17",
+          "type": "bus",
+          "edge": ":SIMPANG_CENTER_11",
+          "speedKmh": 17.553992546061266,
+          "waitingTime": 0.0
+        },
+        {
+          "id": "veh_18",
+          "type": "car",
+          "edge": ":SIMPANG_CENTER_11",
+          "speedKmh": 48.96618120482192,
+          "waitingTime": 0.0
+        }
+      ]
+    },
+    {
+      "time": 20.0,
+      "vehicleCount": 4,
+      "vehicles": [
+        {
+          "id": "veh_17",
+          "type": "bus",
+          "edge": ":SIMPANG_CENTER_11",
+          "speedKmh": 19.734033715771726,
+          "waitingTime": 0.0
+        },
+        {
+          "id": "veh_18",
+          "type": "car",
+          "edge": "153857907#0",
+          "speedKmh": 47.66286726244726,
+          "waitingTime": 0.0
+        },
+        {
+          "id": "veh_19",
+          "type": "truck",
+          "edge": "484349908#2",
+          "speedKmh": 17.22595050634561,
+          "waitingTime": 0.0
+        },
+        {
+          "id": "veh_20",
+          "type": "car",
+          "edge": "484349908#2",
+          "speedKmh": 50.04,
+          "waitingTime": 0.0
+        }
+      ]
+    },
+    {
+      "time": 21.0,
+      "vehicleCount": 4,
+      "vehicles": [
+        {
+          "id": "veh_17",
+          "type": "bus",
+          "edge": ":SIMPANG_CENTER_11",
+          "speedKmh": 22.739621503027372,
+          "waitingTime": 0.0
+        },
+        {
+          "id": "veh_19",
+          "type": "truck",
+          "edge": "484349908#2",
+          "speedKmh": 15.819123184827395,
+          "waitingTime": 0.0
+        },
+        {
+          "id": "veh_20",
+          "type": "car",
+          "edge": ":SIMPANG_CENTER_11",
+          "speedKmh": 45.84564315618016,
+          "waitingTime": 0.0
+        },
+        {
+          "id": "veh_21",
+          "type": "car",
+          "edge": "484349908#2",
+          "speedKmh": 37.44444315618016,
+          "waitingTime": 0.0
+        }
+      ]
+    },
+    {
+      "time": 22.0,
+      "vehicleCount": 6,
+      "vehicles": [
+        {
+          "id": "veh_17",
+          "type": "bus",
+          "edge": "153857907#0",
+          "speedKmh": 26.04366388750284,
+          "waitingTime": 0.0
+        },
+        {
+          "id": "veh_19",
+          "type": "truck",
+          "edge": ":SIMPANG_CENTER_11",
+          "speedKmh": 19.896529209983775,
+          "waitingTime": 0.0
+        },
+        {
+          "id": "veh_20",
+          "type": "car",
+          "edge": ":SIMPANG_CENTER_11",
+          "speedKmh": 49.186176888691264,
+          "waitingTime": 0.0
+        },
+        {
+          "id": "veh_21",
+          "type": "car",
+          "edge": ":SIMPANG_CENTER_11",
+          "speedKmh": 33.15917499873899,
+          "waitingTime": 0.0
+        },
+        {
+          "id": "veh_22",
+          "type": "car",
+          "edge": "484349908#2",
+          "speedKmh": 14.208581604794945,
+          "waitingTime": 0.0
+        },
+        {
+          "id": "veh_23",
+          "type": "car",
+          "edge": "484349908#2",
+          "speedKmh": 20.936962498108485,
+          "waitingTime": 0.0
+        }
+      ]
+    },
+    {
+      "time": 23.0,
+      "vehicleCount": 5,
+      "vehicles": [
+        {
+          "id": "veh_19",
+          "type": "truck",
+          "edge": ":SIMPANG_CENTER_11",
+          "speedKmh": 22.45860087543471,
+          "waitingTime": 0.0
+        },
+        {
+          "id": "veh_21",
+          "type": "car",
+          "edge": ":SIMPANG_CENTER_11",
+          "speedKmh": 38.86095299625881,
+          "waitingTime": 0.0
+        },
+        {
+          "id": "veh_22",
+          "type": "car",
+          "edge": "484349908#2",
+          "speedKmh": 10.112234583753489,
+          "waitingTime": 0.0
+        },
+        {
+          "id": "veh_23",
+          "type": "car",
+          "edge": "484349908#2",
+          "speedKmh": 17.55963837891686,
+          "waitingTime": 0.0
+        },
+        {
+          "id": "veh_24",
+          "type": "motorcycle",
+          "edge": "484349908#2",
+          "speedKmh": 1.3560383789168546,
+          "waitingTime": 0.0
+        }
+      ]
+    },
+    {
+      "time": 24.0,
+      "vehicleCount": 5,
+      "vehicles": [
+        {
+          "id": "veh_19",
+          "type": "truck",
+          "edge": ":SIMPANG_CENTER_11",
+          "speedKmh": 25.443084795565586,
+          "waitingTime": 0.0
+        },
+        {
+          "id": "veh_21",
+          "type": "car",
+          "edge": "153857907#0",
+          "speedKmh": 46.22563598200791,
+          "waitingTime": 0.0
+        },
+        {
+          "id": "veh_22",
+          "type": "car",
+          "edge": ":SIMPANG_CENTER_11",
+          "speedKmh": 18.80815589630544,
+          "waitingTime": 0.0
+        },
+        {
+          "id": "veh_23",
+          "type": "car",
+          "edge": ":SIMPANG_CENTER_11",
+          "speedKmh": 23.688344529055612,
+          "waitingTime": 0.0
+        },
+        {
+          "id": "veh_24",
+          "type": "motorcycle",
+          "edge": "484349908#2",
+          "speedKmh": 1.0178557318923962,
+          "waitingTime": 0.0
+        }
+      ]
+    },
+    {
+      "time": 25.0,
+      "vehicleCount": 4,
+      "vehicles": [
+        {
+          "id": "veh_19",
+          "type": "truck",
+          "edge": "153857907#0",
+          "speedKmh": 27.99330141668884,
+          "waitingTime": 0.0
+        },
+        {
+          "id": "veh_22",
+          "type": "car",
+          "edge": ":SIMPANG_CENTER_11",
+          "speedKmh": 26.145333668128206,
+          "waitingTime": 0.0
+        },
+        {
+          "id": "veh_23",
+          "type": "car",
+          "edge": ":SIMPANG_CENTER_11",
+          "speedKmh": 31.69071779026519,
+          "waitingTime": 0.0
+        },
+        {
+          "id": "veh_24",
+          "type": "motorcycle",
+          "edge": "484349908#2",
+          "speedKmh": 10.004900520696301,
+          "waitingTime": 0.0
+        }
+      ]
+    },
+    {
+      "time": 26.0,
+      "vehicleCount": 3,
+      "vehicles": [
+        {
+          "id": "veh_22",
+          "type": "car",
+          "edge": ":SIMPANG_CENTER_11",
+          "speedKmh": 28.540738498178236,
+          "waitingTime": 0.0
+        },
+        {
+          "id": "veh_23",
+          "type": "car",
+          "edge": ":SIMPANG_CENTER_11",
+          "speedKmh": 37.56076239705886,
+          "waitingTime": 0.0
+        },
+        {
+          "id": "veh_24",
+          "type": "motorcycle",
+          "edge": "484349908#2",
+          "speedKmh": 18.416951488546093,
+          "waitingTime": 0.0
+        }
+      ]
+    },
+    {
+      "time": 27.0,
+      "vehicleCount": 2,
+      "vehicles": [
+        {
+          "id": "veh_22",
+          "type": "car",
+          "edge": ":SIMPANG_CENTER_11",
+          "speedKmh": 33.333042967320345,
+          "waitingTime": 0.0
+        },
+        {
+          "id": "veh_24",
+          "type": "motorcycle",
+          "edge": ":SIMPANG_CENTER_11",
+          "speedKmh": 29.14882502367813,
+          "waitingTime": 0.0
+        }
+      ]
+    },
+    {
+      "time": 28.0,
+      "vehicleCount": 1,
+      "vehicles": [
+        {
+          "id": "veh_24",
+          "type": "motorcycle",
+          "edge": ":SIMPANG_CENTER_11",
+          "speedKmh": 35.266585513931695,
+          "waitingTime": 0.0
+        }
+      ]
+    },
+    {
+      "time": 29.0,
+      "vehicleCount": 1,
+      "vehicles": [
+        {
+          "id": "veh_24",
+          "type": "motorcycle",
+          "edge": "153857907#0",
+          "speedKmh": 41.15285848489124,
+          "waitingTime": 0.0
+        }
+      ]
+    },
+    {
+      "time": 30.0,
+      "vehicleCount": 0,
+      "vehicles": []
+    },
+    {
+      "time": 31.0,
+      "vehicleCount": 0,
+      "vehicles": []
+    },
+    {
+      "time": 32.0,
+      "vehicleCount": 0,
+      "vehicles": []
+    },
+    {
+      "time": 33.0,
+      "vehicleCount": 0,
+      "vehicles": []
+    },
+    {
+      "time": 34.0,
+      "vehicleCount": 0,
+      "vehicles": []
+    },
+    {
+      "time": 35.0,
+      "vehicleCount": 0,
+      "vehicles": []
+    },
+    {
+      "time": 36.0,
+      "vehicleCount": 0,
+      "vehicles": []
+    },
+    {
+      "time": 37.0,
+      "vehicleCount": 0,
+      "vehicles": []
+    },
+    {
+      "time": 38.0,
+      "vehicleCount": 0,
+      "vehicles": []
+    },
+    {
+      "time": 39.0,
+      "vehicleCount": 0,
+      "vehicles": []
+    },
+    {
+      "time": 40.0,
+      "vehicleCount": 0,
+      "vehicles": []
+    },
+    {
+      "time": 41.0,
+      "vehicleCount": 0,
+      "vehicles": []
+    },
+    {
+      "time": 42.0,
+      "vehicleCount": 0,
+      "vehicles": []
+    },
+    {
+      "time": 43.0,
+      "vehicleCount": 0,
+      "vehicles": []
+    },
+    {
+      "time": 44.0,
+      "vehicleCount": 0,
+      "vehicles": []
+    },
+    {
+      "time": 45.0,
+      "vehicleCount": 0,
+      "vehicles": []
+    },
+    {
+      "time": 46.0,
+      "vehicleCount": 0,
+      "vehicles": []
+    },
+    {
+      "time": 47.0,
+      "vehicleCount": 0,
+      "vehicles": []
+    },
+    {
+      "time": 48.0,
+      "vehicleCount": 0,
+      "vehicles": []
+    },
+    {
+      "time": 49.0,
+      "vehicleCount": 0,
+      "vehicles": []
+    },
+    {
+      "time": 50.0,
+      "vehicleCount": 0,
+      "vehicles": []
+    },
+    {
+      "time": 51.0,
+      "vehicleCount": 0,
+      "vehicles": []
+    },
+    {
+      "time": 52.0,
+      "vehicleCount": 0,
+      "vehicles": []
+    },
+    {
+      "time": 53.0,
+      "vehicleCount": 0,
+      "vehicles": []
+    },
+    {
+      "time": 54.0,
+      "vehicleCount": 0,
+      "vehicles": []
+    },
+    {
+      "time": 55.0,
+      "vehicleCount": 0,
+      "vehicles": []
+    },
+    {
+      "time": 56.0,
+      "vehicleCount": 0,
+      "vehicles": []
+    },
+    {
+      "time": 57.0,
+      "vehicleCount": 0,
+      "vehicles": []
+    },
+    {
+      "time": 58.0,
+      "vehicleCount": 0,
+      "vehicles": []
+    },
+    {
+      "time": 59.0,
+      "vehicleCount": 0,
+      "vehicles": []
+    },
+    {
+      "time": 60.0,
+      "vehicleCount": 0,
+      "vehicles": []
+    }
+  ]
+}

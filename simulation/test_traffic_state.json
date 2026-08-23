@@ -1,0 +1,56 @@
+{
+  "trafficStateId": 6497,
+  "intersectionId": "simpang4-pingit",
+  "windowStart": "2026-08-23T13:40:45.554705+00:00",
+  "windowEnd": "2026-08-23T13:40:50.554705+00:00",
+  "approaches": [
+    {
+      "approach": "north",
+      "volume": 25,
+      "carCount": 9,
+      "motorcycleCount": 14,
+      "busCount": 1,
+      "truckCount": 1,
+      "queueLengthVeh": 9,
+      "queueLengthMEst": 50.5,
+      "densityIndex": 0.427,
+      "avgSpeedKmh": null
+    },
+    {
+      "approach": "south",
+      "volume": 0,
+      "carCount": 0,
+      "motorcycleCount": 0,
+      "busCount": 0,
+      "truckCount": 0,
+      "queueLengthVeh": 0,
+      "queueLengthMEst": 0,
+      "densityIndex": 0,
+      "avgSpeedKmh": null
+    },
+    {
+      "approach": "east",
+      "volume": 0,
+      "carCount": 0,
+      "motorcycleCount": 0,
+      "busCount": 0,
+      "truckCount": 0,
+      "queueLengthVeh": 0,
+      "queueLengthMEst": 0,
+      "densityIndex": 0,
+      "avgSpeedKmh": null
+    },
+    {
+      "approach": "west",
+      "volume": 0,
+      "carCount": 0,
+      "motorcycleCount": 0,
+      "busCount": 0,
+      "truckCount": 0,
+      "queueLengthVeh": 0,
+      "queueLengthMEst": 0,
+      "densityIndex": 0,
+      "avgSpeedKmh": null
+    }
+  ]
+}
