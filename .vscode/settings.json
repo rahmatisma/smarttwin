@@ -15,5 +15,6 @@
   },
   "files.exclude": {
     "**/__pycache__": true
-  }
+  },
+  "python.pythonPath": "venv\\Scripts\\python.exe"
 }

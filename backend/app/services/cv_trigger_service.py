@@ -71,7 +71,7 @@ MODEL_VERSION = "ultralytics-track"
 # POST /api/v1/traffic/notify tiap window selesai -- lihat
 # app/services/ws_manager.py soal kenapa ini menggantikan Supabase
 # Realtime (terbukti tidak mem-broadcast event di project ini).
-BACKEND_SELF_URL = "http://127.0.0.1:8001"
+BACKEND_SELF_URL = "http://127.0.0.1:8000"
 
 
 def _create_processing_job(video_id: int) -> int:

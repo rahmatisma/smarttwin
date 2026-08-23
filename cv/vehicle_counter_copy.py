@@ -78,11 +78,13 @@ Cara pakai:
 """
 
 import argparse
+import concurrent.futures
 import csv
 import os
 import sys
 
 import cv2
+import imageio_ffmpeg
 import numpy as np
 from ultralytics import YOLO
 
@@ -96,6 +98,13 @@ from vehicle_counter import (  # noqa: E402
     VIDEO_DIR,
     muat_peta_jam,
 )
+
+# Modul upload HF/Supabase punya proyek ini sendiri (dipakai juga
+# oleh process_uploaded_video.py) -- dipakai apa adanya, bukan
+# ditulis ulang. Lihat upload_dan_update() soal kenapa pola INSERT +
+# fileUrl proxy backend dipilih, bukan UPDATE baris existing.
+import hf_writer as hw  # noqa: E402
+import supabase_writer as sw  # noqa: E402
 
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -859,6 +868,130 @@ def ekstrak_deteksi(result):
 # kamera tetap tampil di window cv2.imshow sendiri-sendiri, tanpa
 # threading (satu frame per kamera per putaran, bergiliran).
 
+# cameraId (baris tabel `cameras` di Supabase) tiap kamera -- HARDCODE
+# via query manual ke project Digital-Twins-KMIPN-2026, bukan lookup
+# dinamis, karena cuma 4 kamera tetap di intersection simpang4-pingit
+# ini. Dicocokkan lewat NOMOR kamera (CCTV 1..4 di kolom `name`),
+# BUKAN kolom `approach` -- approach di database untuk CCTV_3/CCTV_4
+# TERBALIK (east/west) dibanding lengan barat/timur yang
+# didokumentasikan di ZONA_KEPADATAN di atas. Itu bug data terpisah
+# di Supabase, DI LUAR SCOPE file ini -- nomor kameranya sendiri
+# tidak ambigu, jadi pemetaan di bawah tetap benar.
+CAMERA_ID_MAP = {
+    "CCTV_1": 18,
+    "CCTV_2": 27,
+    "CCTV_3": 28,
+    "CCTV_4": 29,
+}
+
+INTERSECTION_SLUG = "simpang4-pingit"
+
+# Upload jalan di thread terpisah (lihat KameraState.tutup() dan
+# upload_dan_update()) supaya kamera-kamera tidak saling menunggu.
+# max_workers=4 karena cuma ada 4 kamera -- semuanya bisa paralel
+# penuh sekaligus, tidak perlu antre.
+_UPLOAD_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
+    max_workers=4, thread_name_prefix="upload-hf"
+)
+_UPLOAD_FUTURES = []
+
+
+def _muat_kredensial_backend():
+    """
+    Suntik SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY/HF_TOKEN/HF_REPO_ID
+    dari backend/.env ke os.environ, SEKALI di awal main().
+
+    hf_writer.py dan supabase_writer.py didesain baca kredensial dari
+    os.environ yang di-inject cv_trigger_service.py saat men-spawn
+    subprocess CV produksi -- lihat komentar di kedua file itu.
+    Karena vehicle_counter_copy.py dijalankan manual/standalone
+    (bukan subprocess backend), env itu tidak pernah ke-set otomatis,
+    jadi disuntik manual di sini dari file yang SAMA yang dipakai
+    backend (backend/.env), bukan file .env baru di cv/.
+
+    Tidak pakai python-dotenv (tidak ada di requirements cv/) --
+    parsing manual KEY=VALUE apa adanya sudah cukup buat 4 baris yang
+    dibutuhkan.
+    """
+    env_path = os.path.join(BASE_DIR, "..", "backend", ".env")
+
+    if not os.path.exists(env_path):
+        print(
+            f"[!] {env_path} tidak ada -- upload HuggingFace/Supabase "
+            f"akan gagal."
+        )
+        return
+
+    dibutuhkan = {
+        "SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY", "HF_TOKEN", "HF_REPO_ID",
+    }
+
+    with open(env_path, encoding="utf-8") as f:
+        for baris in f:
+            baris = baris.strip()
+
+            if not baris or baris.startswith("#") or "=" not in baris:
+                continue
+
+            kunci, _, nilai = baris.partition("=")
+            kunci = kunci.strip()
+
+            if kunci in dibutuhkan and kunci not in os.environ:
+                os.environ[kunci] = nilai.strip()
+
+
+def upload_dan_update(nama_kamera, path_mp4):
+    """
+    Upload video anotasi ke HuggingFace lalu INSERT baris BARU di
+    cameraVideos (Supabase) -- ikut PERSIS pola
+    process_uploaded_video.upload_annotated_video(): INSERT baris
+    baru (bukan UPDATE baris existing lewat name-match, yang
+    berisiko menimpa video produksi yang salah), dan fileUrl diisi
+    endpoint proxy backend (bukan link HuggingFace mentah -- repo-nya
+    private, link mentah tidak akan bisa diputar langsung di
+    browser).
+
+    Dipanggil dari thread terpisah (lihat KameraState.tutup()) supaya
+    upload beberapa kamera jalan paralel, tidak saling menunggu.
+    """
+    camera_id = CAMERA_ID_MAP.get(nama_kamera)
+
+    if camera_id is None:
+        print(
+            f"[{nama_kamera}] Tidak terdaftar di CAMERA_ID_MAP, "
+            f"upload dilewati."
+        )
+        return
+
+    print(f"[{nama_kamera}] Mengupload ke HuggingFace...")
+
+    try:
+        filename = f"anotasi_{nama_kamera}.mp4"
+
+        hasil = hw.upload_annotated_video(
+            local_path=path_mp4,
+            intersection_id=INTERSECTION_SLUG,
+            filename=filename,
+        )
+
+        file_size_bytes = os.path.getsize(path_mp4)
+
+        video_id = sw.insert_annotated_video(
+            camera_id=camera_id,
+            video_name=filename,
+            repository_id=hasil.repository_id,
+            file_path=hasil.file_path,
+            file_size_bytes=file_size_bytes,
+        )
+
+        sw.set_video_file_url(
+            video_id, f"/api/v1/cctv/videos/{video_id}/stream"
+        )
+
+        print(f"[{nama_kamera}] ✅ Upload selesai, Supabase diupdate.")
+    except Exception as exc:  # noqa: BLE001
+        print(f"[{nama_kamera}] Gagal upload/update Supabase: {exc}")
+
 
 class KameraState:
     """Menampung semua state yang dulu jadi variabel lokal di
@@ -882,6 +1015,18 @@ class KameraState:
             "total": 0, "motor": 0, "mobil": 0, "truk": 0, "bus": 0,
             "kotak_dalam": [], "kotak_luar": [],
         }
+
+        # Video anotasi (imageio_ffmpeg, BUKAN cv2.VideoWriter -- yang
+        # terakhir gagal di Windows karena DLL openh264 hilang, sudah
+        # dibuktikan gagal di cv/process_uploaded_video.py). Writer
+        # dibuka LAZY di jalankan_gabungan() begitu tampil_frame
+        # pertama siap, bukan di sini -- soalnya butuh frame asli
+        # (bukan cuma width/height dari VideoCapture) supaya ukurannya
+        # dijamin sama persis dengan yang benar-benar dikirim.
+        self.video_anotasi_path = os.path.join(
+            OUTPUT_DIR, f"anotasi_{nama_kamera}.mp4"
+        )
+        self.writer = None
 
         video_path = os.path.join(VIDEO_DIR, f"{nama_kamera}.mp4")
 
@@ -967,6 +1112,16 @@ class KameraState:
     def tutup(self):
         if self.cap is not None:
             self.cap.release()
+
+        if self.writer is not None:
+            self.writer.close()
+            self.writer = None
+            print(f"[{self.nama_kamera}] Video anotasi selesai disimpan.")
+
+            future = _UPLOAD_EXECUTOR.submit(
+                upload_dan_update, self.nama_kamera, self.video_anotasi_path
+            )
+            _UPLOAD_FUTURES.append(future)
 
 
 def tulis_baris_csv(state, penulis_csv):
@@ -1284,6 +1439,35 @@ def jalankan_gabungan(
                         state.tampil_frame,
                     )
 
+                # Video anotasi -- SENGAJA tidak digantung ke
+                # tampilkan_live seperti imshow di atas: run headless
+                # (--tanpa-tampilan, mis. full run tanpa GUI) tetap
+                # butuh rekamannya, cuma popup-nya yang dimatikan.
+                if state.tampil_frame is not None:
+                    if state.writer is None:
+                        state.writer = imageio_ffmpeg.write_frames(
+                            state.video_anotasi_path,
+                            (state.width, state.height),
+                            fps=state.fps,
+                            codec="libx264",
+                            pix_fmt_in="bgr24",
+                            pix_fmt_out="yuv420p",
+                            # Tanpa ini, bitrate defaultnya ~6 Mbps --
+                            # video durasi penuh (~43 menit) jadi ~2GB
+                            # per kamera, upload ke HF bisa berjam-jam.
+                            # 800k sama seperti cap proven di
+                            # process_uploaded_video.py.
+                            bitrate="800k",
+                            output_params=["-movflags", "+faststart"],
+                        )
+                        state.writer.send(None)
+                        print(
+                            f"[{state.nama_kamera}] Merekam anotasi -> "
+                            f"{state.video_anotasi_path}"
+                        )
+
+                    state.writer.send(state.tampil_frame.tobytes())
+
             if tampilkan_live and aktif:
                 # waitKey dipanggil SEKALI per putaran (bukan per
                 # kamera) -- cukup buat memompa semua window sekaligus
@@ -1503,6 +1687,11 @@ def main():
     print(f"CSV cross   : {CROSSING_CSV_PATH}")
     print(f"CSV snapshot: {SNAPSHOT_CSV_PATH}")
 
+    # Kredensial HF/Supabase disuntik SEKALI di sini, sebelum kamera
+    # manapun sempat selesai merekam dan memicu upload_dan_update()
+    # dari thread lain -- lihat _muat_kredensial_backend().
+    _muat_kredensial_backend()
+
     statistik = []
     tampilkan_live = not args.tanpa_tampilan
 
@@ -1561,6 +1750,17 @@ def main():
         )
         if os.path.exists(p):
             print(f"  {p}")
+
+    # Upload HF/Supabase jalan di background sejak tiap kamera
+    # selesai merekam (lihat KameraState.tutup()) -- ditunggu di sini
+    # supaya program tidak exit sebelum semuanya benar-benar beres.
+    if _UPLOAD_FUTURES:
+        print()
+        print(f"Menunggu {len(_UPLOAD_FUTURES)} upload HuggingFace selesai...")
+        concurrent.futures.wait(_UPLOAD_FUTURES)
+        print("Semua upload selesai.")
+
+    _UPLOAD_EXECUTOR.shutdown(wait=True)
 
 
 if __name__ == "__main__":

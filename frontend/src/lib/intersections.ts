@@ -71,3 +71,33 @@ export function getIntersectionDatabaseIds(
 
     return intersection ? [intersection.databaseId] : [];
 }
+
+/*
+ * =========================================================
+ * LENGAN (APPROACH) SELECTION
+ * =========================================================
+ *
+ * simpang4-pingit adalah SATU simpang dengan 4 lengan, bukan 4
+ * simpang terpisah (lihat CATATAN.md di cv/). Dropdown ini dipakai
+ * untuk memfilter approach dari intersection tunggal itu — beda
+ * dari IntersectionSelection di atas, yang memilih antar
+ * intersectionId (dipertahankan apa adanya untuk filter kamera).
+ */
+
+export type ApproachSelection =
+    | "all"
+    | "south"
+    | "west"
+    | "east"
+    | "north";
+
+export const APPROACH_OPTIONS: Array<{
+    id: ApproachSelection;
+    name: string;
+}> = [
+    { id: "all", name: "Semua Lengan" },
+    { id: "south", name: "Selatan (Jl. Tentara Pelajar)" },
+    { id: "west", name: "Barat (Jl. Kyai Mojo)" },
+    { id: "east", name: "Timur (Jl. Diponegoro)" },
+    { id: "north", name: "Utara (Jl. Magelang)" },
+];

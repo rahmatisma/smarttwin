@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 import pandas as pd
+from supabase import Client
 
 from app.schemas.traffic import ApproachState, TrafficState
+from app.services.supabase_client import get_supabase
 
 
 # ============================================================
@@ -24,28 +27,28 @@ EXPECTED_APPROACHES = (
 
 REQUIRED_COLUMNS = (
     "timestamp",
-    "intersection_id",
+    "intersectionId",
     "approach",
-    "lane_id",
-    "vehicle_count",
-    "car_count",
-    "motorcycle_count",
-    "bus_count",
-    "truck_count",
-    "queue_length_veh",
-    "queue_length_m_est",
-    "density_index",
+    "laneId",
+    "vehicleCount",
+    "carCount",
+    "motorcycleCount",
+    "busCount",
+    "truckCount",
+    "queueLengthVeh",
+    "queueLengthMEst",
+    "densityIndex",
 )
 
 NUMERIC_COLUMNS = (
-    "vehicle_count",
-    "car_count",
-    "motorcycle_count",
-    "bus_count",
-    "truck_count",
-    "queue_length_veh",
-    "queue_length_m_est",
-    "density_index",
+    "vehicleCount",
+    "carCount",
+    "motorcycleCount",
+    "busCount",
+    "truckCount",
+    "queueLengthVeh",
+    "queueLengthMEst",
+    "densityIndex",
 )
 
 
@@ -59,12 +62,12 @@ class TrafficStateBuilderConfig:
     Konfigurasi Traffic State Builder.
     """
 
-    window_seconds: int = DEFAULT_WINDOW_SECONDS
+    windowSeconds: int = DEFAULT_WINDOW_SECONDS
 
     def __post_init__(self) -> None:
-        if self.window_seconds <= 0:
+        if self.windowSeconds <= 0:
             raise ValueError(
-                "window_seconds harus lebih besar dari 0."
+                "windowSeconds harus lebih besar dari 0."
             )
 
 
@@ -79,32 +82,21 @@ class TrafficStateBuilder:
     Input:
         CSV hasil Computer Vision.
 
-    Format data CV:
-        timestamp
-        intersection_id
-        approach
-        lane_id
-        vehicle_count
-        car_count
-        motorcycle_count
-        bus_count
-        truck_count
-        queue_length_veh
-        queue_length_m_est
-        density_index
+    Output:
+        TrafficState[]
 
     Alur:
 
         CSV
-         ↓
+          ↓
         Load + Validate
-         ↓
+          ↓
         Time Window
-         ↓
+          ↓
         Lane Data
-         ↓
+          ↓
         Approach Aggregation
-         ↓
+          ↓
         TrafficState
     """
 
@@ -112,6 +104,7 @@ class TrafficStateBuilder:
         self,
         config: TrafficStateBuilderConfig | None = None,
     ) -> None:
+
         self.config = (
             config
             if config is not None
@@ -122,513 +115,343 @@ class TrafficStateBuilder:
     # LOAD CSV
     # ========================================================
 
-    def load_csv(
+    def loadCsv(
         self,
-        csv_path: str | Path,
+        csvPath: str | Path,
     ) -> pd.DataFrame:
         """
         Membaca CSV asli hasil Computer Vision.
-
-        Tidak membuat dummy data.
-
-        CSV harus memiliki seluruh REQUIRED_COLUMNS.
         """
 
-        csv_path = Path(csv_path)
+        csvPath = Path(csvPath)
 
-        if not csv_path.exists():
+        if not csvPath.exists():
             raise FileNotFoundError(
-                f"CSV traffic tidak ditemukan: {csv_path}"
+                f"CSV traffic tidak ditemukan: {csvPath}"
             )
 
-        df = pd.read_csv(csv_path)
+        dataFrame = pd.read_csv(csvPath)
 
-        # ----------------------------------------------------
-        # Validasi kolom
-        # ----------------------------------------------------
-
-        missing_columns = [
+        missingColumns = [
             column
             for column in REQUIRED_COLUMNS
-            if column not in df.columns
+            if column not in dataFrame.columns
         ]
 
-        if missing_columns:
+        if missingColumns:
             raise ValueError(
                 "Kolom CSV tidak lengkap. "
-                f"Kolom yang hilang: {missing_columns}"
+                f"Kolom yang hilang: {missingColumns}"
             )
 
-        if df.empty:
+        if dataFrame.empty:
             raise ValueError(
                 "CSV traffic kosong."
             )
 
-        # ----------------------------------------------------
-        # Parse timestamp
-        # ----------------------------------------------------
+        # ====================================================
+        # TIMESTAMP
+        # ====================================================
 
-        df["timestamp"] = pd.to_datetime(
-            df["timestamp"],
+        dataFrame["timestamp"] = pd.to_datetime(
+            dataFrame["timestamp"],
             errors="coerce",
         )
 
-        if df["timestamp"].isna().any():
+        if dataFrame["timestamp"].isna().any():
             raise ValueError(
                 "Terdapat timestamp yang tidak valid."
             )
 
-        # ----------------------------------------------------
-        # Normalisasi string
-        # ----------------------------------------------------
+        # ====================================================
+        # STRING NORMALIZATION
+        # ====================================================
 
-        df["intersection_id"] = (
-            df["intersection_id"]
+        dataFrame["intersectionId"] = (
+            dataFrame["intersectionId"]
             .astype(str)
             .str.strip()
         )
 
-        df["approach"] = (
-            df["approach"]
+        dataFrame["approach"] = (
+            dataFrame["approach"]
             .astype(str)
             .str.strip()
             .str.lower()
         )
 
-        df["lane_id"] = (
-            df["lane_id"]
+        dataFrame["laneId"] = (
+            dataFrame["laneId"]
             .astype(str)
             .str.strip()
         )
 
-        # ----------------------------------------------------
-        # Validasi string penting
-        # ----------------------------------------------------
-
-        if (df["intersection_id"] == "").any():
+        if (dataFrame["intersectionId"] == "").any():
             raise ValueError(
-                "Terdapat intersection_id kosong."
+                "Terdapat intersectionId kosong."
             )
 
-        if (df["lane_id"] == "").any():
+        if (dataFrame["laneId"] == "").any():
             raise ValueError(
-                "Terdapat lane_id kosong."
+                "Terdapat laneId kosong."
             )
 
-        # ----------------------------------------------------
-        # Validasi approach
-        # ----------------------------------------------------
+        # ====================================================
+        # APPROACH VALIDATION
+        # ====================================================
 
-        invalid_approaches = sorted(
-            set(df["approach"])
+        invalidApproaches = sorted(
+            set(dataFrame["approach"])
             - set(EXPECTED_APPROACHES)
         )
 
-        if invalid_approaches:
+        if invalidApproaches:
             raise ValueError(
                 "Approach tidak valid: "
-                f"{invalid_approaches}. "
+                f"{invalidApproaches}. "
                 f"Approach yang diperbolehkan: "
                 f"{EXPECTED_APPROACHES}"
             )
 
-        # ----------------------------------------------------
-        # Numeric conversion
-        # ----------------------------------------------------
+        # ====================================================
+        # NUMERIC CONVERSION
+        # ====================================================
 
         for column in NUMERIC_COLUMNS:
-            df[column] = pd.to_numeric(
-                df[column],
+            dataFrame[column] = pd.to_numeric(
+                dataFrame[column],
                 errors="coerce",
             )
 
-        if df[list(NUMERIC_COLUMNS)].isna().any().any():
-            invalid_columns = [
+        if dataFrame[list(NUMERIC_COLUMNS)].isna().any().any():
+            invalidColumns = [
                 column
                 for column in NUMERIC_COLUMNS
-                if df[column].isna().any()
+                if dataFrame[column].isna().any()
             ]
 
             raise ValueError(
                 "Terdapat nilai numerik yang tidak valid "
-                f"atau kosong pada kolom: {invalid_columns}"
+                f"atau kosong pada kolom: {invalidColumns}"
             )
 
-        # ----------------------------------------------------
-        # Validasi integer metrics
-        #
-        # Count kendaraan dan queue kendaraan harus berupa
-        # bilangan bulat.
-        # ----------------------------------------------------
+        # ====================================================
+        # INTEGER VALIDATION
+        # ====================================================
 
-        integer_columns = (
-            "vehicle_count",
-            "car_count",
-            "motorcycle_count",
-            "bus_count",
-            "truck_count",
-            "queue_length_veh",
+        integerColumns = (
+            "vehicleCount",
+            "carCount",
+            "motorcycleCount",
+            "busCount",
+            "truckCount",
+            "queueLengthVeh",
         )
 
-        for column in integer_columns:
+        for column in integerColumns:
             if (
-                df[column] % 1 != 0
+                dataFrame[column] % 1 != 0
             ).any():
                 raise ValueError(
                     f"Kolom {column} harus berupa bilangan bulat."
                 )
 
-            df[column] = df[column].astype(int)
+            dataFrame[column] = (
+                dataFrame[column].astype(int)
+            )
 
-        # ----------------------------------------------------
-        # Validasi nilai negatif
-        # ----------------------------------------------------
+        # ====================================================
+        # NEGATIVE VALUES
+        # ====================================================
 
-        negative_mask = (
-            df[list(NUMERIC_COLUMNS)] < 0
+        negativeMask = (
+            dataFrame[list(NUMERIC_COLUMNS)] < 0
         ).any(axis=1)
 
-        if negative_mask.any():
+        if negativeMask.any():
             raise ValueError(
                 "Terdapat nilai negatif pada metric traffic."
             )
 
-        # ----------------------------------------------------
-        # Validasi klasifikasi kendaraan
-        #
-        # vehicle_count harus konsisten dengan:
-        #
-        # car + motorcycle + bus + truck
-        #
-        # Karena semua berasal dari counting line.
-        # ----------------------------------------------------
+        # ====================================================
+        # VEHICLE CLASSIFICATION CONSISTENCY
+        # ====================================================
 
-        classification_total = (
-            df["car_count"]
-            + df["motorcycle_count"]
-            + df["bus_count"]
-            + df["truck_count"]
+        classificationTotal = (
+            dataFrame["carCount"]
+            + dataFrame["motorcycleCount"]
+            + dataFrame["busCount"]
+            + dataFrame["truckCount"]
         )
 
-        inconsistent_mask = (
-            df["vehicle_count"]
-            != classification_total
+        inconsistentMask = (
+            dataFrame["vehicleCount"]
+            != classificationTotal
         )
 
-        if inconsistent_mask.any():
-            first_invalid = df.loc[
-                inconsistent_mask
+        if inconsistentMask.any():
+            firstInvalid = dataFrame.loc[
+                inconsistentMask
             ].iloc[0]
 
             raise ValueError(
-                "vehicle_count tidak konsisten dengan "
+                "vehicleCount tidak konsisten dengan "
                 "jumlah klasifikasi kendaraan pada "
                 "setidaknya satu row. "
-                f"Timestamp: {first_invalid['timestamp']}, "
-                f"approach: {first_invalid['approach']}, "
-                f"lane: {first_invalid['lane_id']}"
+                f"Timestamp: {firstInvalid['timestamp']}, "
+                f"approach: {firstInvalid['approach']}, "
+                f"lane: {firstInvalid['laneId']}"
             )
 
-        # ----------------------------------------------------
-        # Sort berdasarkan waktu
-        # ----------------------------------------------------
+        # ====================================================
+        # SORT
+        # ====================================================
 
-        df = df.sort_values(
+        dataFrame = dataFrame.sort_values(
             by=[
                 "timestamp",
-                "intersection_id",
+                "intersectionId",
                 "approach",
-                "lane_id",
+                "laneId",
             ]
         ).reset_index(drop=True)
 
-        return df
+        return dataFrame
 
     # ========================================================
     # TIME WINDOW
     # ========================================================
 
-    def _assign_windows(
+    def assignWindows(
         self,
-        df: pd.DataFrame,
+        dataFrame: pd.DataFrame,
     ) -> pd.DataFrame:
-        """
-        Menentukan time window untuk setiap row.
 
-        Dengan window 5 detik:
+        result = dataFrame.copy()
 
-            16:30:10 -> 16:30:15
-            16:30:15 -> 16:30:20
-            16:30:20 -> 16:30:25
+        window = f"{self.config.windowSeconds}s"
 
-        Karena data CV berasal per detik, beberapa timestamp
-        akan masuk ke window yang sama.
-        """
-
-        result = df.copy()
-
-        window = f"{self.config.window_seconds}s"
-
-        result["window_start"] = (
+        result["windowStart"] = (
             result["timestamp"]
             .dt.floor(window)
         )
 
-        result["window_end"] = (
-            result["window_start"]
+        result["windowEnd"] = (
+            result["windowStart"]
             + pd.Timedelta(
-                seconds=self.config.window_seconds
+                seconds=self.config.windowSeconds
             )
         )
 
         return result
 
     # ========================================================
-    # AGGREGATE APPROACH
+    # APPROACH AGGREGATION
     # ========================================================
 
-    def _aggregate_approach(
+    def aggregateApproach(
         self,
         group: pd.DataFrame,
     ) -> ApproachState:
-        """
-        Menggabungkan data beberapa lane menjadi
-        satu ApproachState.
-
-        Struktur:
-
-            north
-            ├── lane_1
-            ├── lane_2
-            └── lane_3
-
-                    ↓
-
-            ApproachState(north)
-
-        ======================================================
-        ATURAN AGREGASI
-        ======================================================
-
-        volume
-            = total vehicle_count dalam window
-              untuk seluruh lane.
-
-        carCount
-            = total car_count.
-
-        motorcycleCount
-            = total motorcycle_count.
-
-        busCount
-            = total bus_count.
-
-        truckCount
-            = total truck_count.
-
-        queueLengthVeh
-            = total queue_length_veh antar lane.
-
-            IMPORTANT:
-            Saat ini queue_length_veh dianggap
-            merupakan queue PER LANE.
-
-        queueLengthMEst
-            = total queue_length_m_est antar lane.
-
-            IMPORTANT:
-            Saat ini queue_length_m_est dianggap
-            merupakan queue PER LANE.
-
-        densityIndex
-            = rata-rata density_index antar lane.
-
-            densityIndex adalah proxy lane occupancy,
-            bukan kendaraan/km.
-
-        avgSpeedKmh
-            = None.
-
-            CSV tidak menyediakan speed.
-        """
 
         approach = str(
             group["approach"].iloc[0]
         )
 
-        # ----------------------------------------------------
-        # Volume
-        #
-        # vehicle_count = kendaraan yang MEMOTONG
-        # counting line.
-        #
-        # BUKAN jumlah seluruh kendaraan yang terlihat
-        # pada frame.
-        #
-        # Data CV dicatat per detik sehingga seluruh
-        # counting event dalam window dijumlahkan.
-        # ----------------------------------------------------
-
         volume = int(
-            group["vehicle_count"].sum()
+            group["vehicleCount"].sum()
         )
 
-        # ----------------------------------------------------
-        # Vehicle classification
-        # ----------------------------------------------------
-
-        car_count = int(
-            group["car_count"].sum()
+        carCount = int(
+            group["carCount"].sum()
         )
 
-        motorcycle_count = int(
-            group["motorcycle_count"].sum()
+        motorcycleCount = int(
+            group["motorcycleCount"].sum()
         )
 
-        bus_count = int(
-            group["bus_count"].sum()
+        busCount = int(
+            group["busCount"].sum()
         )
 
-        truck_count = int(
-            group["truck_count"].sum()
+        truckCount = int(
+            group["truckCount"].sum()
         )
 
-        # ----------------------------------------------------
-        # Queue
-        #
-        # Queue diasumsikan PER LANE.
-        #
-        # Contoh:
-        #
-        # lane_1 = 3 kendaraan
-        # lane_2 = 2 kendaraan
-        # lane_3 = 4 kendaraan
-        #
-        # approach queue = 3 + 2 + 4 = 9 kendaraan
-        #
-        # Jika nanti tim CV mengubah definisi queue menjadi
-        # TOTAL APPROACH, bagian ini HARUS diubah agar
-        # tidak terjadi double counting.
-        # ----------------------------------------------------
-
-        queue_length_veh = int(
-            group["queue_length_veh"].sum()
+        queueLengthVeh = int(
+            group["queueLengthVeh"].sum()
         )
 
-        queue_length_m_est = float(
-            group["queue_length_m_est"].sum()
+        queueLengthMEst = float(
+            group["queueLengthMEst"].sum()
         )
 
-        # ----------------------------------------------------
-        # Density
-        #
-        # density_index tersedia per lane.
-        #
-        # Kita gunakan mean antar lane agar nilai approach
-        # tidak otomatis membesar hanya karena approach
-        # mempunyai lebih banyak lane.
-        #
-        # Ini adalah proxy occupancy/density.
-        # BUKAN vehicles/km.
-        # ----------------------------------------------------
-
-        density_index = float(
-            group["density_index"].mean()
+        densityIndex = float(
+            group["densityIndex"].mean()
         )
 
-        # ----------------------------------------------------
-        # Speed
-        #
-        # Tidak ada data speed pada CSV.
-        #
-        # None berarti data belum tersedia.
-        #
-        # JANGAN menggunakan 0.0.
-        # ----------------------------------------------------
-
-        avg_speed_kmh = None
+        # CSV belum mempunyai speed.
+        avgSpeedKmh = None
 
         return ApproachState(
             approach=approach,
             volume=volume,
-            carCount=car_count,
-            motorcycleCount=motorcycle_count,
-            busCount=bus_count,
-            truckCount=truck_count,
-            queueLengthVeh=queue_length_veh,
-            queueLengthMEst=queue_length_m_est,
-            densityIndex=density_index,
-            avgSpeedKmh=avg_speed_kmh,
+            carCount=carCount,
+            motorcycleCount=motorcycleCount,
+            busCount=busCount,
+            truckCount=truckCount,
+            queueLengthVeh=queueLengthVeh,
+            queueLengthMEst=queueLengthMEst,
+            densityIndex=densityIndex,
+            avgSpeedKmh=avgSpeedKmh,
         )
 
     # ========================================================
-    # BUILD TRAFFIC STATE
+    # BUILD STATES
     # ========================================================
 
-    def build_from_dataframe(
+    def buildFromDataFrame(
         self,
-        df: pd.DataFrame,
+        dataFrame: pd.DataFrame,
     ) -> list[TrafficState]:
-        """
-        Menghasilkan list TrafficState dari DataFrame
-        yang sudah divalidasi.
-        """
 
-        if df.empty:
+        if dataFrame.empty:
             return []
 
-        df = self._assign_windows(df)
+        dataFrame = self.assignWindows(
+            dataFrame
+        )
 
         states: list[TrafficState] = []
 
-        # ----------------------------------------------------
-        # Group berdasarkan:
-        #
-        # intersection
-        # +
-        # time window
-        # ----------------------------------------------------
-
-        grouped = df.groupby(
+        grouped = dataFrame.groupby(
             [
-                "intersection_id",
-                "window_start",
-                "window_end",
+                "intersectionId",
+                "windowStart",
+                "windowEnd",
             ],
             sort=True,
         )
 
         for (
-            intersection_id,
-            window_start,
-            window_end,
-        ), window_group in grouped:
+            intersectionId,
+            windowStart,
+            windowEnd,
+        ), windowGroup in grouped:
 
             approaches: list[ApproachState] = []
 
-            # ------------------------------------------------
-            # Pastikan output selalu mempunyai 4 approach:
-            #
-            # north
-            # south
-            # east
-            # west
-            #
-            # Jika tidak ada data kendaraan pada approach,
-            # metric kendaraan dan queue menjadi 0.
-            # ------------------------------------------------
+            for approachName in EXPECTED_APPROACHES:
 
-            for approach_name in EXPECTED_APPROACHES:
-
-                approach_group = window_group[
-                    window_group["approach"]
-                    == approach_name
+                approachGroup = windowGroup[
+                    windowGroup["approach"]
+                    == approachName
                 ]
 
-                if approach_group.empty:
+                if approachGroup.empty:
 
-                    approach_state = ApproachState(
-                        approach=approach_name,
+                    approachState = ApproachState(
+                        approach=approachName,
                         volume=0,
                         carCount=0,
                         motorcycleCount=0,
@@ -642,29 +465,25 @@ class TrafficStateBuilder:
 
                 else:
 
-                    approach_state = (
-                        self._aggregate_approach(
-                            approach_group
+                    approachState = (
+                        self.aggregateApproach(
+                            approachGroup
                         )
                     )
 
                 approaches.append(
-                    approach_state
+                    approachState
                 )
-
-            # ------------------------------------------------
-            # TrafficState
-            # ------------------------------------------------
 
             state = TrafficState(
                 intersectionId=str(
-                    intersection_id
+                    intersectionId
                 ),
                 windowStart=pd.Timestamp(
-                    window_start
+                    windowStart
                 ).to_pydatetime(),
                 windowEnd=pd.Timestamp(
-                    window_end
+                    windowEnd
                 ).to_pydatetime(),
                 approaches=approaches,
             )
@@ -674,57 +493,197 @@ class TrafficStateBuilder:
         return states
 
     # ========================================================
+    # BUILD FROM SUPABASE
+    # ========================================================
+
+    def buildFromSupabase(
+        self,
+        *,
+        intersectionId: str | None = None,
+        limit: int | None = None,
+        supabase: Client | None = None,
+    ) -> list[TrafficState]:
+        """Membaca trafficStates dan trafficApproachStates dari Supabase."""
+
+        if limit is not None and limit <= 0:
+            raise ValueError("limit harus lebih besar dari 0.")
+
+        client = supabase or get_supabase()
+
+        traffic_query = (
+            client
+            .table("trafficStates")
+            .select("id, intersectionId, windowStart, windowEnd")
+            .order("windowStart", desc=True)
+        )
+
+        if limit is not None:
+            traffic_query = traffic_query.limit(limit)
+
+        traffic_result = traffic_query.execute()
+        traffic_rows = (
+            traffic_result.data
+            if traffic_result is not None
+            else []
+        ) or []
+
+        if not traffic_rows:
+            return []
+
+        intersection_row_ids = {
+            int(row["intersectionId"])
+            for row in traffic_rows
+        }
+
+        intersections_result = (
+            client
+            .table("intersections")
+            .select("id, intersectionId")
+            .in_("id", list(intersection_row_ids))
+            .execute()
+        )
+        intersection_names = {
+            int(row["id"]): str(row["intersectionId"])
+            for row in (
+                intersections_result.data
+                if intersections_result is not None
+                else []
+            ) or []
+        }
+
+        traffic_state_ids = [
+            int(row["id"])
+            for row in traffic_rows
+        ]
+
+        approach_result = (
+            client
+            .table("trafficApproachStates")
+            .select(
+                "trafficStateId, approachId, approach, volume, "
+                "carCount, motorcycleCount, busCount, truckCount, "
+                "queueLengthVeh, queueLengthMEst, densityIndex, "
+                "avgSpeedKmh"
+            )
+            .in_("trafficStateId", traffic_state_ids)
+            .order("approachId")
+            .execute()
+        )
+        approaches_by_state: dict[int, dict[str, ApproachState]] = {}
+
+        for row in (
+            approach_result.data
+            if approach_result is not None
+            else []
+        ) or []:
+            traffic_state_id = int(row["trafficStateId"])
+            approach_name = str(row["approach"]).strip().lower()
+            approaches_by_state.setdefault(
+                traffic_state_id,
+                {},
+            )[approach_name] = ApproachState(
+                approach=approach_name,
+                volume=int(row["volume"]),
+                carCount=int(row["carCount"]),
+                motorcycleCount=int(row["motorcycleCount"]),
+                busCount=int(row["busCount"]),
+                truckCount=int(row["truckCount"]),
+                queueLengthVeh=int(row["queueLengthVeh"]),
+                queueLengthMEst=float(row["queueLengthMEst"]),
+                densityIndex=float(row["densityIndex"]),
+                avgSpeedKmh=(
+                    None
+                    if row["avgSpeedKmh"] is None
+                    else float(row["avgSpeedKmh"])
+                ),
+            )
+
+        states: list[TrafficState] = []
+
+        for row in traffic_rows:
+            traffic_state_id = int(row["id"])
+            intersection_row_id = int(row["intersectionId"])
+            intersection_name = intersection_names.get(
+                intersection_row_id
+            )
+
+            if intersection_name is None:
+                raise ValueError(
+                    "Intersection tidak ditemukan untuk "
+                    f"trafficStateId {traffic_state_id}."
+                )
+
+            state_approaches = approaches_by_state.get(
+                traffic_state_id,
+                {},
+            )
+
+            approaches = [
+                state_approaches.get(
+                    approach_name,
+                    ApproachState(
+                        approach=approach_name,
+                        volume=0,
+                        carCount=0,
+                        motorcycleCount=0,
+                        busCount=0,
+                        truckCount=0,
+                        queueLengthVeh=0,
+                        queueLengthMEst=0.0,
+                        densityIndex=0.0,
+                        avgSpeedKmh=None,
+                    ),
+                )
+                for approach_name in EXPECTED_APPROACHES
+            ]
+
+            states.append(
+                TrafficState(
+                    intersectionId=intersection_name,
+                    windowStart=pd.to_datetime(
+                        row["windowStart"]
+                    ).to_pydatetime(),
+                    windowEnd=pd.to_datetime(
+                        row["windowEnd"]
+                    ).to_pydatetime(),
+                    approaches=approaches,
+                )
+            )
+
+        return states
+
+    # ========================================================
     # BUILD FROM CSV
     # ========================================================
 
-    def build_from_csv(
+    def buildFromCsv(
         self,
-        csv_path: str | Path,
+        csvPath: str | Path,
     ) -> list[TrafficState]:
-        """
-        Pipeline lengkap:
 
-            CSV
-             ↓
-            load_csv()
-             ↓
-            build_from_dataframe()
-             ↓
-            TrafficState[]
-        """
+        dataFrame = self.loadCsv(
+            csvPath
+        )
 
-        df = self.load_csv(csv_path)
-
-        return self.build_from_dataframe(df)
+        return self.buildFromDataFrame(
+            dataFrame
+        )
 
 
 # ============================================================
 # DEFAULT CSV PATH
 # ============================================================
 
-def get_default_csv_path() -> Path:
-    """
-    Mengambil lokasi CSV asli berdasarkan struktur project:
+def getDefaultCsvPath() -> Path:
 
-    smarttwin/
-    ├── backend/
-    │   └── app/
-    │       └── pipeline/
-    │           └── traffic_state_builder.py
-    │
-    └── cv/
-        └── output/
-            └── smarttwin_traffic_data.csv
-    """
-
-    project_root = (
+    projectRoot = (
         Path(__file__)
         .resolve()
         .parents[3]
     )
 
     return (
-        project_root
+        projectRoot
         / "cv"
         / "output"
         / "smarttwin_traffic_data.csv"
@@ -732,38 +691,33 @@ def get_default_csv_path() -> Path:
 
 
 # ============================================================
-# CLI / MANUAL TEST
+# CLI
 # ============================================================
 
 def main() -> None:
-    """
-    Menjalankan Traffic State Builder menggunakan
-    CSV ASLI project.
 
-    Tidak menggunakan dummy data.
-    """
-
-    csv_path = get_default_csv_path()
+    csvPath = getDefaultCsvPath()
 
     builder = TrafficStateBuilder(
         TrafficStateBuilderConfig(
-            window_seconds=5
+            windowSeconds=5
         )
     )
 
-    states = builder.build_from_csv(
-        csv_path
+    states = builder.buildFromCsv(
+        csvPath
     )
 
     print("=" * 60)
     print("TRAFFIC STATE BUILDER")
     print("=" * 60)
 
-    print(f"CSV    : {csv_path}")
+    print(f"CSV    : {csvPath}")
     print(f"States : {len(states)}")
     print()
 
     if states:
+
         import json
 
         print(

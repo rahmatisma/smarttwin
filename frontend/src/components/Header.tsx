@@ -4,20 +4,20 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Bell, MapPin } from "lucide-react";
 import {
-  INTERSECTION_OPTIONS,
-  type IntersectionSelection,
+  APPROACH_OPTIONS,
+  type ApproachSelection,
 } from "@/lib/intersections";
 
 export default function Header({
   locationName,
   coords,
-  selectedIntersection,
-  onIntersectionChange,
+  selectedApproach,
+  onApproachChange,
 }: {
   locationName: string;
   coords: string;
-  selectedIntersection?: IntersectionSelection;
-  onIntersectionChange?: (selection: IntersectionSelection) => void;
+  selectedApproach?: ApproachSelection;
+  onApproachChange?: (selection: ApproachSelection) => void;
 }) {
   const router = useRouter();
   const [time, setTime] = useState<string>("");
@@ -46,18 +46,18 @@ export default function Header({
       </div>
 
       <div className="hidden max-w-md flex-1 md:flex">
-        {selectedIntersection && onIntersectionChange ? (
+        {selectedApproach && onApproachChange ? (
           <select
-            value={selectedIntersection}
+            value={selectedApproach}
             onChange={(event) =>
-              onIntersectionChange(
-                event.target.value as IntersectionSelection
+              onApproachChange(
+                event.target.value as ApproachSelection
               )
             }
             className="w-full rounded-md border border-border bg-surface px-3 py-2 text-sm text-text outline-none focus:border-accent"
-            aria-label="Pilih persimpangan"
+            aria-label="Pilih lengan simpang"
           >
-            {INTERSECTION_OPTIONS.map((option) => (
+            {APPROACH_OPTIONS.map((option) => (
               <option key={option.id} value={option.id}>
                 {option.name}
               </option>
@@ -65,7 +65,7 @@ export default function Header({
           </select>
         ) : (
           <div className="w-full rounded-md border border-border bg-surface px-3 py-2 text-sm text-text-muted">
-            Pilih persimpangan...
+            Pilih lengan...
           </div>
         )}
       </div>
