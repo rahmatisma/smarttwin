@@ -142,11 +142,13 @@ export default function CameraFeedPanel({
   counts,
   selectedApproach = "all",
   onApproachChange,
+  onTimeUpdate,
 }: {
   counts: VehicleClassCount[];
   cameraStatus?: CameraStatus[];
   selectedApproach?: ApproachSelection;
   onApproachChange?: (selection: ApproachSelection) => void;
+  onTimeUpdate?: (time: number) => void;
 }) {
 
   // ===================================================
@@ -296,6 +298,28 @@ export default function CameraFeedPanel({
                     playsInline
                     preload="metadata"
                     className="h-full w-full object-cover"
+                    autoPlay
+                    onLoadedMetadata={async (e) => {
+                      try {
+                        await e.currentTarget.play();
+                      } catch (error) {
+                        console.warn(`Autoplay blocked for CCTV ${camera.name}:`, error);
+                      }
+                    }}
+                    onTimeUpdate={(e) => {
+                      if (onTimeUpdate && camera.id === cameras[0].id) {
+                        onTimeUpdate(e.currentTarget.currentTime);
+                      }
+                      // Development logging as requested
+                      if (camera.id === cameras[0].id) {
+                        console.log("VIDEO:", {
+                          camera: camera.id,
+                          videoTime: e.currentTarget.currentTime,
+                          paused: e.currentTarget.paused,
+                          ended: e.currentTarget.ended
+                        });
+                      }
+                    }}
                     onError={(event) => {
 
                       console.error(

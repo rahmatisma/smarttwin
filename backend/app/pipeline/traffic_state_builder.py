@@ -115,130 +115,90 @@ class TrafficStateBuilder:
     # LOAD CSV
     # ========================================================
 
-    def loadCsv(
+    def loadCvOutput(
         self,
-        csvPath: str | Path,
+        crossPath: str | Path,
+        densityPath: str | Path,
     ) -> pd.DataFrame:
         """
-        Membaca CSV asli hasil Computer Vision.
+        Membaca dan menggabungkan output asli dari Computer Vision.
         """
+        crossPath = Path(crossPath)
+        densityPath = Path(densityPath)
 
-        csvPath = Path(csvPath)
+        if not crossPath.exists() or not densityPath.exists():
+            raise FileNotFoundError("Satu atau lebih CSV CV output tidak ditemukan.")
 
-        if not csvPath.exists():
-            raise FileNotFoundError(
-                f"CSV traffic tidak ditemukan: {csvPath}"
-            )
+        df_cross = pd.read_csv(crossPath)
+        df_density = pd.read_csv(densityPath)
 
-        dataFrame = pd.read_csv(csvPath)
+        # 1. Standardize Timestamps
+        df_cross["timestamp"] = pd.to_datetime(df_cross["timestamp"], errors="coerce")
+        df_density["timestamp"] = pd.to_datetime(df_density["timestamp"], errors="coerce")
 
-        missingColumns = [
-            column
-            for column in REQUIRED_COLUMNS
-            if column not in dataFrame.columns
-        ]
+        if df_cross.empty and df_density.empty:
+            return pd.DataFrame(columns=REQUIRED_COLUMNS)
 
-        if missingColumns:
-            raise ValueError(
-                "Kolom CSV tidak lengkap. "
-                f"Kolom yang hilang: {missingColumns}"
-            )
+        # 2. Map Kamera to Approach (Hard override berdasarkan spec)
+        camera_map = {
+            "CCTV_1": "south",
+            "CCTV_2": "west",
+            "CCTV_3": "east",
+            "CCTV_4": "north",
+        }
 
-        if dataFrame.empty:
-            raise ValueError(
-                "CSV traffic kosong."
-            )
+        df_cross["approach"] = df_cross["kamera"].map(camera_map)
+        df_density["approach"] = df_density["kamera"].map(camera_map)
 
-        # ====================================================
-        # TIMESTAMP
-        # ====================================================
+        # Drop rows without known camera
+        df_cross = df_cross.dropna(subset=["approach"])
+        df_density = df_density.dropna(subset=["approach"])
 
-        dataFrame["timestamp"] = pd.to_datetime(
-            dataFrame["timestamp"],
-            errors="coerce",
-        )
+        # 3. Aggregate crossing per timestamp & approach
+        cross_agg = df_cross.groupby(["timestamp", "approach"], as_index=False).agg({
+            "jumlah_crossing": "sum",
+            "motor_crossing": "sum",
+            "mobil_crossing": "sum",
+            "truk_crossing": "sum",
+            "bus_crossing": "sum",
+        })
 
-        if dataFrame["timestamp"].isna().any():
-            raise ValueError(
-                "Terdapat timestamp yang tidak valid."
-            )
+        # Aggregate density per timestamp & approach
+        density_agg = df_density.groupby(["timestamp", "approach"], as_index=False).agg({
+            "total_di_zona": "mean",
+            "motor_di_zona": "mean",
+            "mobil_di_zona": "mean",
+            "truk_di_zona": "mean",
+            "bus_di_zona": "mean",
+            "frame_number": "first",
+        })
 
-        # ====================================================
-        # STRING NORMALIZATION
-        # ====================================================
+        # 4. Merge
+        merged = pd.merge(cross_agg, density_agg, on=["timestamp", "approach"], how="outer").fillna(0)
 
-        dataFrame["intersectionId"] = (
-            dataFrame["intersectionId"]
-            .astype(str)
-            .str.strip()
-        )
+        # 5. Normalize into standard required columns
+        merged["intersectionId"] = "simpang4-pingit"
+        merged["laneId"] = "all_lanes"
 
-        dataFrame["approach"] = (
-            dataFrame["approach"]
-            .astype(str)
-            .str.strip()
-            .str.lower()
-        )
+        merged = merged.rename(columns={
+            "total_di_zona": "vehicleCount",
+            "mobil_di_zona": "carCount",
+            "motor_di_zona": "motorcycleCount",
+            "bus_di_zona": "busCount",
+            "truk_di_zona": "truckCount",
+        })
+        
+        # Use snapshot count for density index as well
+        merged["densityIndex"] = merged["vehicleCount"]
 
-        dataFrame["laneId"] = (
-            dataFrame["laneId"]
-            .astype(str)
-            .str.strip()
-        )
+        merged["queueLengthVeh"] = 0
+        merged["queueLengthMEst"] = 0.0
 
-        if (dataFrame["intersectionId"] == "").any():
-            raise ValueError(
-                "Terdapat intersectionId kosong."
-            )
+        for col in NUMERIC_COLUMNS:
+            if col not in merged.columns:
+                merged[col] = 0
 
-        if (dataFrame["laneId"] == "").any():
-            raise ValueError(
-                "Terdapat laneId kosong."
-            )
-
-        # ====================================================
-        # APPROACH VALIDATION
-        # ====================================================
-
-        invalidApproaches = sorted(
-            set(dataFrame["approach"])
-            - set(EXPECTED_APPROACHES)
-        )
-
-        if invalidApproaches:
-            raise ValueError(
-                "Approach tidak valid: "
-                f"{invalidApproaches}. "
-                f"Approach yang diperbolehkan: "
-                f"{EXPECTED_APPROACHES}"
-            )
-
-        # ====================================================
-        # NUMERIC CONVERSION
-        # ====================================================
-
-        for column in NUMERIC_COLUMNS:
-            dataFrame[column] = pd.to_numeric(
-                dataFrame[column],
-                errors="coerce",
-            )
-
-        if dataFrame[list(NUMERIC_COLUMNS)].isna().any().any():
-            invalidColumns = [
-                column
-                for column in NUMERIC_COLUMNS
-                if dataFrame[column].isna().any()
-            ]
-
-            raise ValueError(
-                "Terdapat nilai numerik yang tidak valid "
-                f"atau kosong pada kolom: {invalidColumns}"
-            )
-
-        # ====================================================
-        # INTEGER VALIDATION
-        # ====================================================
-
+        # Integer validation
         integerColumns = (
             "vehicleCount",
             "carCount",
@@ -247,67 +207,10 @@ class TrafficStateBuilder:
             "truckCount",
             "queueLengthVeh",
         )
+        for col in integerColumns:
+            merged[col] = merged[col].round().astype(int)
 
-        for column in integerColumns:
-            if (
-                dataFrame[column] % 1 != 0
-            ).any():
-                raise ValueError(
-                    f"Kolom {column} harus berupa bilangan bulat."
-                )
-
-            dataFrame[column] = (
-                dataFrame[column].astype(int)
-            )
-
-        # ====================================================
-        # NEGATIVE VALUES
-        # ====================================================
-
-        negativeMask = (
-            dataFrame[list(NUMERIC_COLUMNS)] < 0
-        ).any(axis=1)
-
-        if negativeMask.any():
-            raise ValueError(
-                "Terdapat nilai negatif pada metric traffic."
-            )
-
-        # ====================================================
-        # VEHICLE CLASSIFICATION CONSISTENCY
-        # ====================================================
-
-        classificationTotal = (
-            dataFrame["carCount"]
-            + dataFrame["motorcycleCount"]
-            + dataFrame["busCount"]
-            + dataFrame["truckCount"]
-        )
-
-        inconsistentMask = (
-            dataFrame["vehicleCount"]
-            != classificationTotal
-        )
-
-        if inconsistentMask.any():
-            firstInvalid = dataFrame.loc[
-                inconsistentMask
-            ].iloc[0]
-
-            raise ValueError(
-                "vehicleCount tidak konsisten dengan "
-                "jumlah klasifikasi kendaraan pada "
-                "setidaknya satu row. "
-                f"Timestamp: {firstInvalid['timestamp']}, "
-                f"approach: {firstInvalid['approach']}, "
-                f"lane: {firstInvalid['laneId']}"
-            )
-
-        # ====================================================
-        # SORT
-        # ====================================================
-
-        dataFrame = dataFrame.sort_values(
+        merged = merged.sort_values(
             by=[
                 "timestamp",
                 "intersectionId",
@@ -316,7 +219,7 @@ class TrafficStateBuilder:
             ]
         ).reset_index(drop=True)
 
-        return dataFrame
+        return merged
 
     # ========================================================
     # TIME WINDOW
@@ -359,27 +262,27 @@ class TrafficStateBuilder:
         )
 
         volume = int(
-            group["vehicleCount"].sum()
+            group["vehicleCount"].iloc[-1]
         )
 
         carCount = int(
-            group["carCount"].sum()
+            group["carCount"].iloc[-1]
         )
 
         motorcycleCount = int(
-            group["motorcycleCount"].sum()
+            group["motorcycleCount"].iloc[-1]
         )
 
         busCount = int(
-            group["busCount"].sum()
+            group["busCount"].iloc[-1]
         )
 
         truckCount = int(
-            group["truckCount"].sum()
+            group["truckCount"].iloc[-1]
         )
 
         queueLengthVeh = int(
-            group["queueLengthVeh"].sum()
+            group["queueLengthVeh"].iloc[-1]
         )
 
         queueLengthMEst = float(
@@ -656,14 +559,34 @@ class TrafficStateBuilder:
     # BUILD FROM CSV
     # ========================================================
 
-    def buildFromCsv(
+    def buildFromCvOutput(
         self,
-        csvPath: str | Path,
+        crossPath: str | Path,
+        densityPath: str | Path,
+        video_time: float | None = None,
     ) -> list[TrafficState]:
 
-        dataFrame = self.loadCsv(
-            csvPath
+        dataFrame = self.loadCvOutput(
+            crossPath,
+            densityPath
         )
+
+        if video_time is not None and not dataFrame.empty and "frame_number" in dataFrame.columns:
+            target_frame = video_time * 30.0
+            dataFrame["frame_diff"] = (dataFrame["frame_number"] - target_frame).abs()
+            min_diff_timestamp = dataFrame.groupby("timestamp")["frame_diff"].mean().idxmin()
+            
+            matched_df = dataFrame[dataFrame["timestamp"] == min_diff_timestamp]
+            matched_frame = matched_df["frame_number"].iloc[0]
+            matched_video_time = matched_frame / 30.0
+            
+            self.last_matched_video_time = matched_video_time
+            
+            print(f"\nREQUEST {video_time:.2f}")
+            print(f"MATCHED {matched_video_time:.2f}")
+            print(f"TIMESTAMP {min_diff_timestamp}\n")
+            
+            dataFrame = matched_df
 
         return self.buildFromDataFrame(
             dataFrame
@@ -674,21 +597,17 @@ class TrafficStateBuilder:
 # DEFAULT CSV PATH
 # ============================================================
 
-def getDefaultCsvPath() -> Path:
+# ============================================================
+# DEFAULT CV PATHS
+# ============================================================
 
-    projectRoot = (
-        Path(__file__)
-        .resolve()
-        .parents[3]
-    )
+def getDefaultCrossPath() -> Path:
+    projectRoot = Path(__file__).resolve().parents[3]
+    return projectRoot / "cv" / "output" / "crossing_simpang.csv"
 
-    return (
-        projectRoot
-        / "cv"
-        / "output"
-        / "smarttwin_traffic_data.csv"
-    )
-
+def getDefaultDensityPath() -> Path:
+    projectRoot = Path(__file__).resolve().parents[3]
+    return projectRoot / "cv" / "output" / "percobaan_logic_simpang.csv"
 
 # ============================================================
 # CLI
@@ -696,7 +615,8 @@ def getDefaultCsvPath() -> Path:
 
 def main() -> None:
 
-    csvPath = getDefaultCsvPath()
+    crossPath = getDefaultCrossPath()
+    densityPath = getDefaultDensityPath()
 
     builder = TrafficStateBuilder(
         TrafficStateBuilderConfig(
@@ -704,28 +624,29 @@ def main() -> None:
         )
     )
 
-    states = builder.buildFromCsv(
-        csvPath
+    states = builder.buildFromCvOutput(
+        crossPath,
+        densityPath
     )
 
     print("=" * 60)
     print("TRAFFIC STATE BUILDER")
     print("=" * 60)
 
-    print(f"CSV    : {csvPath}")
-    print(f"States : {len(states)}")
+    print(f"Cross CSV   : {crossPath}")
+    print(f"Density CSV : {densityPath}")
+    print(f"States      : {len(states)}")
     print()
 
     if states:
-
         import json
-
         print(
             json.dumps(
                 states[0].model_dump(
                     mode="json"
                 ),
                 indent=2,
+                default=str
             )
         )
 

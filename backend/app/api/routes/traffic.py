@@ -19,6 +19,7 @@ from app.schemas.traffic_response import (
     TrafficListResponse,
 )
 from app.services.ws_manager import traffic_ws_manager
+from app.pipeline.traffic_state_builder import TrafficStateBuilder, getDefaultCrossPath, getDefaultDensityPath
 
 
 router = APIRouter(
@@ -32,6 +33,35 @@ legacy_router = APIRouter(
 )
 
 traffic_service = TrafficService()
+
+
+# ============================================================
+# DIRECT CV OUTPUT BRPASS SUPABASE
+# ============================================================
+
+@router.get("/live-csv")
+def get_live_csv(video_time: float | None = Query(default=None)):
+    try:
+        from app.pipeline.traffic_state_builder import TrafficStateBuilderConfig
+        builder = TrafficStateBuilder(TrafficStateBuilderConfig(windowSeconds=1))
+        states = builder.buildFromCvOutput(
+            getDefaultCrossPath(),
+            getDefaultDensityPath(),
+            video_time=video_time
+        )
+        if not states:
+            raise HTTPException(status_code=404, detail="No data in CSV")
+            
+        matched_time = getattr(builder, "last_matched_video_time", None)
+        
+        return {
+            "success": True, 
+            "data": states[-1].model_dump(mode="json"),
+            "timestamp": matched_time,
+            "requestedVideoTime": video_time
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # ============================================================

@@ -261,9 +261,11 @@ export default function StatsRow({
    * CONGESTION
    * =========================================================
    */
+  const hasData = approaches.length > 0;
 
-  const congestion =
-    congestionFromDensity(avgDensity);
+  const congestion = hasData
+    ? congestionFromDensity(avgDensity)
+    : { label: "N/A", color: "green" as const };
 
   const c = colorClasses[congestion.color];
 
@@ -277,13 +279,13 @@ export default function StatsRow({
    * BUKAN occupancy fisik.
    */
 
-  const congestionPct = Math.min(
+  const congestionPct = hasData ? Math.min(
     Math.max(
       Math.round((avgDensity / 180) * 100),
       0
     ),
     100
-  );
+  ) : 0;
 
   return (
     <div className="grid grid-cols-2 gap-3 px-6 py-4 md:grid-cols-3 xl:grid-cols-6">
@@ -295,7 +297,7 @@ export default function StatsRow({
       <StatCard
         icon={<Car className="h-4 w-4" />}
         label="Total Kendaraan"
-        value={totalVolume.toLocaleString("id-ID")}
+        value={hasData ? totalVolume.toLocaleString("id-ID") : "No data"}
       />
 
       {/* =====================================================
@@ -306,12 +308,12 @@ export default function StatsRow({
         icon={<Gauge className="h-4 w-4" />}
         label="Kecepatan Rata-rata"
         value={
-          avgSpeed === null
+          !hasData || avgSpeed === null
             ? "N/A"
             : avgSpeed.toFixed(0)
         }
         unit={
-          avgSpeed === null
+          !hasData || avgSpeed === null
             ? undefined
             : "km/jam"
         }
@@ -324,8 +326,8 @@ export default function StatsRow({
       <StatCard
         icon={<Milestone className="h-4 w-4" />}
         label="Antrean Terpanjang"
-        value={maxQueue.toFixed(1)}
-        unit="m"
+        value={hasData ? maxQueue.toFixed(1) : "No data"}
+        unit={hasData ? "m" : undefined}
       />
 
       {/* =====================================================
@@ -335,7 +337,7 @@ export default function StatsRow({
       <StatCard
         icon={<PieChart className="h-4 w-4" />}
         label="Indeks Kepadatan"
-        value={avgDensity.toFixed(1)}
+        value={hasData ? avgDensity.toFixed(1) : "No data"}
       />
 
       {/* =====================================================

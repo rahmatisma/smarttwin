@@ -13,29 +13,17 @@ export default function Header({
   coords,
   selectedApproach,
   onApproachChange,
+  lastUpdated,
 }: {
   locationName: string;
   coords: string;
   selectedApproach?: ApproachSelection;
   onApproachChange?: (selection: ApproachSelection) => void;
+  lastUpdated?: string | number;
 }) {
   const router = useRouter();
-  const [time, setTime] = useState<string>("");
 
-  useEffect(() => {
-    const tick = () => {
-      setTime(
-        new Date().toLocaleTimeString("id-ID", {
-          hour: "2-digit",
-          minute: "2-digit",
-          second: "2-digit",
-        })
-      );
-    };
-    tick();
-    const id = setInterval(tick, 1000);
-    return () => clearInterval(id);
-  }, []);
+  // Local clock removed in favor of CV data Last Updated timestamp
 
   return (
     <header className="flex items-center justify-between gap-6 border-b border-border px-6 py-4">
@@ -71,9 +59,23 @@ export default function Header({
       </div>
 
       <div className="flex items-center gap-4">
-        <span className="font-mono text-sm tabular-nums text-text-secondary">
-          {time || "--:--:--"}
-        </span>
+        {lastUpdated !== undefined ? (
+          <span className="font-mono text-sm tabular-nums text-text-secondary">
+            {typeof lastUpdated === "number" ? (
+              `Last Updated: ${Math.floor(lastUpdated / 60).toString().padStart(2, "0")}:${(lastUpdated % 60).toFixed(2).padStart(5, "0")}`
+            ) : (
+              `Last Updated: ${new Date(lastUpdated).toLocaleTimeString("id-ID", {
+                hour: "2-digit",
+                minute: "2-digit",
+                second: "2-digit",
+              })}`
+            )}
+          </span>
+        ) : (
+          <span className="font-mono text-sm tabular-nums text-text-secondary">
+            Data belum tersedia
+          </span>
+        )}
         <button
           type="button"
           onClick={() => router.push("/settings?section=notifications")}

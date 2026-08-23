@@ -80,32 +80,13 @@ class TrafficIngestionService:
 
     def buildStates(
         self,
-        csvPath: str | Path,
+        crossPath: str | Path,
+        densityPath: str | Path,
     ) -> list[TrafficState]:
 
-        dataFrame = pd.read_csv(
-            csvPath
-        ).rename(
-            columns={
-                "intersection_id": "intersectionId",
-                "lane_id": "laneId",
-                "vehicle_count": "vehicleCount",
-                "car_count": "carCount",
-                "motorcycle_count": "motorcycleCount",
-                "bus_count": "busCount",
-                "truck_count": "truckCount",
-                "queue_length_veh": "queueLengthVeh",
-                "queue_length_m_est": "queueLengthMEst",
-                "density_index": "densityIndex",
-            }
-        )
-        dataFrame["timestamp"] = pd.to_datetime(
-            dataFrame["timestamp"],
-            errors="raise",
-        )
-
-        return self.builder.buildFromDataFrame(
-            dataFrame
+        return self.builder.buildFromCvOutput(
+            crossPath,
+            densityPath
         )
 
     # ========================================================
@@ -151,18 +132,21 @@ class TrafficIngestionService:
     # INGEST CSV
     # ========================================================
 
-    def ingestCsv(
+    def ingestCvOutput(
         self,
-        csvPath: str | Path,
+        crossPath: str | Path,
+        densityPath: str | Path,
         *,
         source: str = "cv",
         processingJobId: int | None = None,
     ) -> TrafficIngestionResult:
 
-        csvPath = Path(csvPath)
+        crossPath = Path(crossPath)
+        densityPath = Path(densityPath)
 
         states = self.buildStates(
-            csvPath
+            crossPath,
+            densityPath
         )
 
         processedStates = self.ingestStates(
@@ -172,7 +156,7 @@ class TrafficIngestionService:
         )
 
         return TrafficIngestionResult(
-            csvPath=str(csvPath),
+            csvPath=f"{crossPath.name} & {densityPath.name}",
             totalStates=len(states),
             processedStates=processedStates,
         )

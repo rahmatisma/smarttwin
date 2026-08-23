@@ -59,12 +59,44 @@ export async function fetchIntersectionCoords(
  * ========================================================= */
 
 export async function fetchTrafficState(
-  intersectionId: string = DEFAULT_INTERSECTION_ID
+  intersectionId: string = DEFAULT_INTERSECTION_ID,
+  videoTime?: number
 ): Promise<TrafficState | null> {
   const rowId = await getIntersectionRowId(intersectionId);
 
   if (rowId === null) {
     return null;
+  }
+
+  // [HACK] Bypass Supabase for traffic state to read directly from CSV via Backend API
+  try {
+    const url = new URL("http://127.0.0.1:8000/api/v1/traffic/live-csv");
+    if (videoTime !== undefined) {
+      url.searchParams.append("video_time", videoTime.toString());
+    }
+    const res = await fetch(url.toString(), { cache: "no-store" });
+    if (res.ok) {
+      const json = await res.json();
+      if (json.success && json.data) {
+        // Development logging as requested
+        const totalVehicles = json.data.approaches?.reduce((sum: number, a: any) => sum + a.volume, 0) ?? 0;
+        console.log("CV:", {
+          requestedVideoTime: videoTime,
+          matchedCvTime: json.timestamp,
+          vehicleCount: totalVehicles
+        });
+
+        return {
+          intersectionId,
+          windowStart: json.data.windowStart,
+          windowEnd: json.data.windowEnd,
+          matchedCvTime: json.timestamp,
+          approaches: json.data.approaches ?? [],
+        };
+      }
+    }
+  } catch (e) {
+    console.warn("Gagal fetch live-csv:", e);
   }
 
   const { data: state, error: stateError } = await supabase

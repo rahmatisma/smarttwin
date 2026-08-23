@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useMemo, useRef } from "react";
 
 import Sidebar from "@/components/Sidebar";
 import Header from "@/components/Header";
@@ -376,6 +376,9 @@ export default function DashboardPage() {
    */
 
   const selectedIntersection: IntersectionSelection = "all";
+  
+  const videoTimeRef = useRef<number>(0);
+  const requestIdRef = useRef<number>(0);
 
   /*
    * simpang4-pingit adalah SATU simpang 4 lengan, bukan 4 simpang
@@ -467,7 +470,7 @@ export default function DashboardPage() {
                   forecast,
                   coords,
                 ] = await Promise.all([
-                  fetchTrafficState(inter.databaseId),
+                  fetchTrafficState(inter.databaseId, videoTimeRef.current),
                   fetchSignalStatus(inter.databaseId),
                   fetchRecommendation(inter.databaseId),
                   fetchForecast(inter.databaseId),
@@ -540,9 +543,12 @@ export default function DashboardPage() {
     let socket: WebSocket | null = null;
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
     let cancelled = false;
+    const currentRequestId = ++requestIdRef.current;
 
     async function refetchAllData() {
       if (cancelled) return;
+      const fetchId = ++requestIdRef.current;
+      
       try {
         const results = await Promise.all(
           ALL_INTERSECTIONS.map(async (inter) => {
@@ -553,7 +559,7 @@ export default function DashboardPage() {
                 recommendation,
                 forecast,
               ] = await Promise.all([
-                fetchTrafficState(inter.databaseId),
+                fetchTrafficState(inter.databaseId, videoTimeRef.current),
                 fetchSignalStatus(inter.databaseId),
                 fetchRecommendation(inter.databaseId),
                 fetchForecast(inter.databaseId),
@@ -572,7 +578,7 @@ export default function DashboardPage() {
           })
         );
 
-        if (cancelled) return;
+        if (cancelled || fetchId !== requestIdRef.current) return;
 
         setAllTrafficStates((prev) => {
           const next = { ...prev };
@@ -627,9 +633,14 @@ export default function DashboardPage() {
 
     connect();
 
+    const pollInterval = setInterval(() => {
+      if (!cancelled) refetchAllData();
+    }, 1000);
+
     return () => {
       cancelled = true;
       if (reconnectTimer) clearTimeout(reconnectTimer);
+      clearInterval(pollInterval);
       socket?.close();
     };
 
@@ -789,12 +800,14 @@ export default function DashboardPage() {
    * =========================================================
    */
 
+  const hasTrafficData = lenganFilteredApproaches.length > 0;
+
   const vehicleClassCounts: VehicleClassCount[] = [
 
     {
       vehicleClass: "motorcycle",
 
-      count: activeTrafficState.approaches.reduce(
+      count: lenganFilteredApproaches.reduce(
         (sum, approach) =>
           sum + approach.motorcycleCount,
         0
@@ -804,7 +817,7 @@ export default function DashboardPage() {
     {
       vehicleClass: "car",
 
-      count: activeTrafficState.approaches.reduce(
+      count: lenganFilteredApproaches.reduce(
         (sum, approach) =>
           sum + approach.carCount,
         0
@@ -814,7 +827,7 @@ export default function DashboardPage() {
     {
       vehicleClass: "bus",
 
-      count: activeTrafficState.approaches.reduce(
+      count: lenganFilteredApproaches.reduce(
         (sum, approach) =>
           sum + approach.busCount,
         0
@@ -824,7 +837,7 @@ export default function DashboardPage() {
     {
       vehicleClass: "truck",
 
-      count: activeTrafficState.approaches.reduce(
+      count: lenganFilteredApproaches.reduce(
         (sum, approach) =>
           sum + approach.truckCount,
         0
@@ -874,6 +887,11 @@ export default function DashboardPage() {
             }
             return "Koordinat belum tersedia";
           })()}
+          lastUpdated={
+            hasTrafficData 
+              ? (activeTrafficState.matchedCvTime ?? activeTrafficState.windowEnd) 
+              : undefined
+          }
         />
 
         {/* ===================================================
@@ -907,9 +925,12 @@ export default function DashboardPage() {
               {/* CAMERA */}
 
               <CameraFeedPanel
-                counts={vehicleClassCounts}
+                counts={hasTrafficData ? vehicleClassCounts : []}
                 selectedApproach={selectedApproach}
                 onApproachChange={setSelectedApproach}
+                onTimeUpdate={(time) => {
+                  videoTimeRef.current = time;
+                }}
               />
 
               {/* SIGNAL STATUS */}

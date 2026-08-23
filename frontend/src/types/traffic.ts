@@ -55,6 +55,8 @@ export interface TrafficState {
   windowStart: string;
   windowEnd: string;
 
+  matchedCvTime?: number;
+
   approaches: ApproachState[];
 }
 

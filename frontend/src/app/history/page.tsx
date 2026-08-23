@@ -312,7 +312,7 @@ export default function HistoryPage() {
     completed.length;
 
   return (
-    <div className="flex min-h-screen bg-[#f7f8fa] text-slate-900">
+    <div className="flex min-h-screen bg-bg text-text">
       <Sidebar />
 
       <main className="min-w-0 flex-1 px-6 py-6">
@@ -321,21 +321,21 @@ export default function HistoryPage() {
         <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           <div>
             <div className="mb-2 flex items-center gap-2">
-              <HistoryIcon className="h-6 w-6 text-slate-700" />
+              <HistoryIcon className="h-6 w-6 text-text" />
 
               <h1 className="text-2xl font-bold tracking-tight">
                 History
               </h1>
             </div>
 
-            <p className="text-sm text-slate-500">
+            <p className="text-sm text-text-muted">
               Riwayat simulasi dan pengambilan keputusan Digital Twin.
             </p>
           </div>
 
           <button
             type="button"
-            className="flex h-10 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700 shadow-sm transition hover:bg-slate-50"
+            className="flex h-10 items-center justify-center gap-2 rounded-xl border border-border bg-surface px-4 text-sm font-medium text-text shadow-sm transition hover:bg-bg"
           >
             <CalendarDays className="h-4 w-4" />
             Last 24 Hours
@@ -377,9 +377,9 @@ export default function HistoryPage() {
         </div>
 
         {/* FILTER */}
-        <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="rounded-2xl border border-border bg-surface p-4 shadow-sm">
           <div className="mb-4 flex items-center gap-2">
-            <SlidersHorizontal className="h-4 w-4 text-slate-500" />
+            <SlidersHorizontal className="h-4 w-4 text-text-muted" />
 
             <h2 className="text-sm font-semibold">
               Filter History
@@ -389,13 +389,13 @@ export default function HistoryPage() {
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-5">
             {/* SEARCH */}
             <div className="relative xl:col-span-2">
-              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-text-muted" />
 
               <input
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
                 placeholder="Search simulation, intersection..."
-                className="h-10 w-full rounded-xl border border-slate-200 bg-slate-50 pl-10 pr-3 text-sm outline-none transition placeholder:text-slate-400 focus:border-slate-400 focus:bg-white"
+                className="h-10 w-full rounded-xl border border-border bg-bg pl-10 pr-3 text-sm outline-none transition placeholder:text-text-muted focus:border-slate-400 focus:bg-surface"
               />
             </div>
 
@@ -437,21 +437,21 @@ export default function HistoryPage() {
         </div>
 
         {/* TABLE */}
-        <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-          <div className="flex flex-col gap-3 border-b border-slate-200 px-5 py-4 md:flex-row md:items-center md:justify-between">
+        <div className="overflow-hidden rounded-2xl border border-border bg-surface shadow-sm">
+          <div className="flex flex-col gap-3 border-b border-border px-5 py-4 md:flex-row md:items-center md:justify-between">
             <div>
               <h2 className="font-semibold">
                 Simulation History
               </h2>
 
-              <p className="mt-1 text-xs text-slate-500">
+              <p className="mt-1 text-xs text-text-muted">
                 Showing {filteredData.length} of {HISTORY_DATA.length} records
               </p>
             </div>
 
             <button
               type="button"
-              className="flex h-9 items-center gap-2 self-start rounded-lg border border-slate-200 px-3 text-xs font-medium text-slate-600 hover:bg-slate-50"
+              className="flex h-9 items-center gap-2 self-start rounded-lg border border-border px-3 text-xs font-medium text-text-secondary hover:bg-bg"
             >
               <Filter className="h-3.5 w-3.5" />
               Advanced Filter
@@ -461,40 +461,40 @@ export default function HistoryPage() {
           <div className="overflow-x-auto">
             <table className="w-full min-w-[1100px]">
               <thead>
-                <tr className="border-b border-slate-200 bg-slate-50/70 text-left">
-                  <th className="px-5 py-3 text-xs font-semibold text-slate-500">
+                <tr className="border-b border-border bg-bg text-left">
+                  <th className="px-5 py-3 text-xs font-semibold text-text-muted">
                     Time
                   </th>
 
-                  <th className="px-5 py-3 text-xs font-semibold text-slate-500">
+                  <th className="px-5 py-3 text-xs font-semibold text-text-muted">
                     Intersection
                   </th>
 
-                  <th className="px-5 py-3 text-xs font-semibold text-slate-500">
+                  <th className="px-5 py-3 text-xs font-semibold text-text-muted">
                     Traffic
                   </th>
 
-                  <th className="px-5 py-3 text-xs font-semibold text-slate-500">
+                  <th className="px-5 py-3 text-xs font-semibold text-text-muted">
                     AI Decision
                   </th>
 
-                  <th className="px-5 py-3 text-xs font-semibold text-slate-500">
+                  <th className="px-5 py-3 text-xs font-semibold text-text-muted">
                     Signal
                   </th>
 
-                  <th className="px-5 py-3 text-xs font-semibold text-slate-500">
+                  <th className="px-5 py-3 text-xs font-semibold text-text-muted">
                     Result
                   </th>
 
-                  <th className="px-5 py-3 text-xs font-semibold text-slate-500">
+                  <th className="px-5 py-3 text-xs font-semibold text-text-muted">
                     Improvement
                   </th>
 
-                  <th className="px-5 py-3 text-xs font-semibold text-slate-500">
+                  <th className="px-5 py-3 text-xs font-semibold text-text-muted">
                     Status
                   </th>
 
-                  <th className="px-5 py-3 text-right text-xs font-semibold text-slate-500">
+                  <th className="px-5 py-3 text-right text-xs font-semibold text-text-muted">
                     Action
                   </th>
                 </tr>
@@ -513,13 +513,13 @@ export default function HistoryPage() {
 
             {filteredData.length === 0 && (
               <div className="flex flex-col items-center justify-center px-6 py-16 text-center">
-                <Search className="mb-3 h-8 w-8 text-slate-300" />
+                <Search className="mb-3 h-8 w-8 text-text-muted/50" />
 
-                <h3 className="font-semibold text-slate-700">
+                <h3 className="font-semibold text-text">
                   No history found
                 </h3>
 
-                <p className="mt-1 text-sm text-slate-400">
+                <p className="mt-1 text-sm text-text-muted">
                   Coba ubah kata pencarian atau filter.
                 </p>
               </div>
@@ -560,10 +560,10 @@ function SummaryCard({
   positive,
 }: SummaryCardProps) {
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+    <div className="rounded-2xl border border-border bg-surface p-5 shadow-sm">
       <div className="flex items-start justify-between">
         <div>
-          <p className="text-sm font-medium text-slate-500">
+          <p className="text-sm font-medium text-text-muted">
             {title}
           </p>
 
@@ -573,14 +573,14 @@ function SummaryCard({
 
           <p
             className={`mt-1 text-xs ${
-              positive ? "text-emerald-600" : "text-slate-400"
+              positive ? "text-emerald-600" : "text-text-muted"
             }`}
           >
             {subtitle}
           </p>
         </div>
 
-        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-100 text-slate-600">
+        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-bg text-text-secondary">
           {icon}
         </div>
       </div>
@@ -608,7 +608,7 @@ function SelectFilter({
       <select
         value={value}
         onChange={(event) => onChange(event.target.value)}
-        className="h-10 w-full appearance-none rounded-xl border border-slate-200 bg-slate-50 px-3 pr-9 text-sm text-slate-600 outline-none transition focus:border-slate-400 focus:bg-white"
+        className="h-10 w-full appearance-none rounded-xl border border-border bg-bg px-3 pr-9 text-sm text-text-secondary outline-none transition focus:border-slate-400 focus:bg-surface"
       >
         {options.map((option) => (
           <option key={option} value={option}>
@@ -617,7 +617,7 @@ function SelectFilter({
         ))}
       </select>
 
-      <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+      <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-text-muted" />
     </div>
   );
 }
@@ -633,17 +633,17 @@ interface HistoryRowProps {
 
 function HistoryRow({ item, onView }: HistoryRowProps) {
   return (
-    <tr className="border-b border-slate-100 transition hover:bg-slate-50/70">
+    <tr className="border-b border-border transition hover:bg-bg">
       <td className="px-5 py-4">
         <div className="flex items-center gap-2">
-          <Clock3 className="h-4 w-4 text-slate-400" />
+          <Clock3 className="h-4 w-4 text-text-muted" />
 
           <div>
-            <p className="whitespace-nowrap text-sm font-medium text-slate-700">
+            <p className="whitespace-nowrap text-sm font-medium text-text">
               {item.timestamp}
             </p>
 
-            <p className="mt-0.5 font-mono text-[10px] text-slate-400">
+            <p className="mt-0.5 font-mono text-[10px] text-text-muted">
               {item.id}
             </p>
           </div>
@@ -652,9 +652,9 @@ function HistoryRow({ item, onView }: HistoryRowProps) {
 
       <td className="px-5 py-4">
         <div className="flex items-center gap-2">
-          <TrafficCone className="h-4 w-4 text-slate-400" />
+          <TrafficCone className="h-4 w-4 text-text-muted" />
 
-          <span className="whitespace-nowrap text-sm font-medium text-slate-700">
+          <span className="whitespace-nowrap text-sm font-medium text-text">
             {item.intersection}
           </span>
         </div>
@@ -666,11 +666,11 @@ function HistoryRow({ item, onView }: HistoryRowProps) {
 
       <td className="px-5 py-4">
         <div>
-          <p className="whitespace-nowrap text-sm font-semibold text-slate-700">
+          <p className="whitespace-nowrap text-sm font-semibold text-text">
             {item.decision}
           </p>
 
-          <p className="mt-1 max-w-[220px] truncate text-xs text-slate-400">
+          <p className="mt-1 max-w-[220px] truncate text-xs text-text-muted">
             {item.decisionDescription}
           </p>
         </div>
@@ -678,13 +678,13 @@ function HistoryRow({ item, onView }: HistoryRowProps) {
 
       <td className="px-5 py-4">
         <div className="flex items-center gap-2">
-          <span className="text-xs text-slate-400">
+          <span className="text-xs text-text-muted">
             {item.currentGreen}s
           </span>
 
-          <ArrowUp className="h-3.5 w-3.5 text-slate-400" />
+          <ArrowUp className="h-3.5 w-3.5 text-text-muted" />
 
-          <span className="text-sm font-semibold text-slate-700">
+          <span className="text-sm font-semibold text-text">
             {item.recommendedGreen}s
           </span>
         </div>
@@ -692,11 +692,11 @@ function HistoryRow({ item, onView }: HistoryRowProps) {
 
       <td className="px-5 py-4">
         <div>
-          <p className="text-sm font-semibold text-slate-700">
+          <p className="text-sm font-semibold text-text">
             Queue ↓ {item.queueReduction}%
           </p>
 
-          <p className="mt-1 text-xs text-slate-400">
+          <p className="mt-1 text-xs text-text-muted">
             Wait ↓ {item.waitingReduction}%
           </p>
         </div>
@@ -720,7 +720,7 @@ function HistoryRow({ item, onView }: HistoryRowProps) {
         <button
           type="button"
           onClick={onView}
-          className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-slate-200 px-3 text-xs font-semibold text-slate-600 transition hover:bg-slate-100"
+          className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border px-3 text-xs font-semibold text-text-secondary transition hover:bg-bg"
         >
           <Eye className="h-3.5 w-3.5" />
           View
@@ -740,7 +740,7 @@ function TrafficBadge({
   level: TrafficLevel;
 }) {
   const styles = {
-    Low: "bg-slate-100 text-slate-600",
+    Low: "bg-bg text-text-secondary",
     Medium: "bg-amber-50 text-amber-700",
     High: "bg-red-50 text-red-600",
   };
@@ -791,7 +791,7 @@ function StatusBadge({
   }
 
   return (
-    <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-semibold text-slate-500">
+    <span className="inline-flex items-center gap-1.5 rounded-full bg-bg px-2.5 py-1 text-[11px] font-semibold text-text-muted">
       <AlertCircle className="h-3 w-3" />
       Cancelled
     </span>
@@ -813,13 +813,13 @@ function HistoryDetailModal({
 }: HistoryDetailModalProps) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 p-4 backdrop-blur-sm">
-      <div className="flex max-h-[92vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
+      <div className="flex max-h-[92vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-border bg-surface shadow-2xl">
         {/* MODAL HEADER */}
-        <div className="flex items-start justify-between border-b border-slate-200 px-6 py-5">
+        <div className="flex items-start justify-between border-b border-border px-6 py-5">
           <div>
             <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-100">
-                <HistoryIcon className="h-5 w-5 text-slate-600" />
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-bg">
+                <HistoryIcon className="h-5 w-5 text-text-secondary" />
               </div>
 
               <div>
@@ -827,7 +827,7 @@ function HistoryDetailModal({
                   Simulation Details
                 </h2>
 
-                <p className="mt-0.5 font-mono text-xs text-slate-400">
+                <p className="mt-0.5 font-mono text-xs text-text-muted">
                   {record.id}
                 </p>
               </div>
@@ -837,7 +837,7 @@ function HistoryDetailModal({
           <button
             type="button"
             onClick={onClose}
-            className="flex h-9 w-9 items-center justify-center rounded-lg text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"
+            className="flex h-9 w-9 items-center justify-center rounded-lg text-text-muted transition hover:bg-bg hover:text-text"
           >
             <X className="h-5 w-5" />
           </button>
@@ -921,10 +921,10 @@ function HistoryDetailModal({
                 title="AI Decision"
               />
 
-              <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 p-5">
+              <div className="mt-3 rounded-xl border border-border bg-bg p-5">
                 <div className="flex flex-col gap-5 md:flex-row md:items-start md:justify-between">
                   <div>
-                    <p className="text-xs font-medium uppercase tracking-wider text-slate-400">
+                    <p className="text-xs font-medium uppercase tracking-wider text-text-muted">
                       Recommended Action
                     </p>
 
@@ -932,16 +932,16 @@ function HistoryDetailModal({
                       {record.decision}
                     </h3>
 
-                    <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500">
+                    <p className="mt-2 max-w-2xl text-sm leading-6 text-text-muted">
                       {record.decisionDescription}
                     </p>
                   </div>
 
-                  <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-3">
-                    <Sparkles className="h-4 w-4 text-slate-500" />
+                  <div className="flex items-center gap-2 rounded-xl border border-border bg-surface px-4 py-3">
+                    <Sparkles className="h-4 w-4 text-text-muted" />
 
                     <div>
-                      <p className="text-[10px] uppercase tracking-wider text-slate-400">
+                      <p className="text-[10px] uppercase tracking-wider text-text-muted">
                         Confidence
                       </p>
 
@@ -988,12 +988,12 @@ function HistoryDetailModal({
                 title="Forecast"
               />
 
-              <div className="mt-3 rounded-xl border border-slate-200 bg-white p-4">
-                <p className="text-sm text-slate-600">
+              <div className="mt-3 rounded-xl border border-border bg-surface p-4">
+                <p className="text-sm text-text-secondary">
                   {record.forecast}
                 </p>
 
-                <div className="mt-3 flex items-center gap-2 text-xs text-slate-400">
+                <div className="mt-3 flex items-center gap-2 text-xs text-text-muted">
                   <Brain className="h-3.5 w-3.5" />
                   LSTM Forecast Model
                 </div>
@@ -1007,23 +1007,23 @@ function HistoryDetailModal({
                 title="Simulation Result"
               />
 
-              <div className="mt-3 overflow-hidden rounded-xl border border-slate-200">
+              <div className="mt-3 overflow-hidden rounded-xl border border-border">
                 <table className="w-full">
                   <thead>
-                    <tr className="bg-slate-50 text-left">
-                      <th className="px-4 py-3 text-xs font-semibold text-slate-500">
+                    <tr className="bg-bg text-left">
+                      <th className="px-4 py-3 text-xs font-semibold text-text-muted">
                         Metric
                       </th>
 
-                      <th className="px-4 py-3 text-xs font-semibold text-slate-500">
+                      <th className="px-4 py-3 text-xs font-semibold text-text-muted">
                         Before
                       </th>
 
-                      <th className="px-4 py-3 text-xs font-semibold text-slate-500">
+                      <th className="px-4 py-3 text-xs font-semibold text-text-muted">
                         After
                       </th>
 
-                      <th className="px-4 py-3 text-xs font-semibold text-slate-500">
+                      <th className="px-4 py-3 text-xs font-semibold text-text-muted">
                         Change
                       </th>
                     </tr>
@@ -1123,7 +1123,7 @@ function HistoryDetailModal({
         </div>
 
         {/* MODAL FOOTER */}
-        <div className="flex items-center justify-between border-t border-slate-200 bg-slate-50 px-6 py-4">
+        <div className="flex items-center justify-between border-t border-border bg-bg px-6 py-4">
           <StatusBadge status={record.status} />
 
           <button
@@ -1152,7 +1152,7 @@ function SectionTitle({
 }) {
   return (
     <div className="flex items-center gap-2">
-      <div className="text-slate-500">{icon}</div>
+      <div className="text-text-muted">{icon}</div>
 
       <h3 className="text-sm font-bold text-slate-800">
         {title}
@@ -1173,12 +1173,12 @@ function InfoBox({
   value: string;
 }) {
   return (
-    <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
-      <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+    <div className="rounded-xl border border-border bg-bg p-4">
+      <p className="text-[10px] font-semibold uppercase tracking-wider text-text-muted">
         {label}
       </p>
 
-      <p className="mt-1 text-sm font-semibold text-slate-700">
+      <p className="mt-1 text-sm font-semibold text-text">
         {value}
       </p>
     </div>
@@ -1201,8 +1201,8 @@ function MetricBox({
   icon: React.ReactNode;
 }) {
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-4">
-      <div className="flex items-center gap-2 text-slate-400">
+    <div className="rounded-xl border border-border bg-surface p-4">
+      <div className="flex items-center gap-2 text-text-muted">
         {icon}
 
         <span className="text-xs font-medium">
@@ -1215,7 +1215,7 @@ function MetricBox({
           {value}
         </span>
 
-        <span className="mb-0.5 text-xs text-slate-400">
+        <span className="mb-0.5 text-xs text-text-muted">
           {suffix}
         </span>
       </div>
@@ -1240,19 +1240,19 @@ function SignalCard({
     <div
       className={`rounded-xl border p-4 ${
         highlight
-          ? "border-slate-300 bg-white"
-          : "border-slate-200 bg-white"
+          ? "border-slate-300 bg-surface"
+          : "border-border bg-surface"
       }`}
     >
-      <p className="text-xs text-slate-400">
+      <p className="text-xs text-text-muted">
         {label}
       </p>
 
       <p
         className={`mt-1 text-lg font-bold ${
           highlight
-            ? "text-slate-900"
-            : "text-slate-700"
+            ? "text-text"
+            : "text-text"
         }`}
       >
         {value}
@@ -1277,16 +1277,16 @@ function ComparisonRow({
   change: string;
 }) {
   return (
-    <tr className="border-t border-slate-100">
-      <td className="px-4 py-3 text-sm font-medium text-slate-700">
+    <tr className="border-t border-border">
+      <td className="px-4 py-3 text-sm font-medium text-text">
         {label}
       </td>
 
-      <td className="px-4 py-3 text-sm text-slate-500">
+      <td className="px-4 py-3 text-sm text-text-muted">
         {before}
       </td>
 
-      <td className="px-4 py-3 text-sm font-semibold text-slate-700">
+      <td className="px-4 py-3 text-sm font-semibold text-text">
         {after}
       </td>
 
@@ -1320,11 +1320,11 @@ function PipelineStep({
       </div>
 
       <div className="md:text-center">
-        <p className="text-xs font-bold text-slate-700">
+        <p className="text-xs font-bold text-text">
           {title}
         </p>
 
-        <p className="mt-0.5 text-[10px] text-slate-400">
+        <p className="mt-0.5 text-[10px] text-text-muted">
           {description}
         </p>
       </div>
