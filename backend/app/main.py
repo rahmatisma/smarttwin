@@ -6,6 +6,7 @@ from app.api.routes.cctv import close_hf_client, router as cctv_router
 from app.api.routes.signal import router as signal_router
 from app.api.routes.forecast import router as forecast_router
 from app.api.routes.recommendation import router as recommendation_router
+from app.api.routes.simulation import router as simulation_router
 
 
 app = FastAPI(
@@ -54,6 +55,10 @@ app.include_router(
 app.include_router(
     recommendation_router,
     prefix="/api/v1",
+)
+
+app.include_router(
+    simulation_router
 )
 
 
