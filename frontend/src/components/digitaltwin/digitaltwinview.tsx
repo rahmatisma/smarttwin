@@ -213,89 +213,52 @@ export default function DigitalTwinView() {
 
                         <div className="relative h-[460px] overflow-hidden bg-[var(--color-canvas)]">
 
-                            {/* Grid */}
+                            {/* Intersection SVG Map */}
+                            <svg viewBox="0 0 400 400" width="100%" height="100%" className="absolute inset-0">
+                                {/* North road */}
+                                <rect x={165} y={0} width={70} height={165} fill="#171c27" />
+                                {/* South road */}
+                                <rect x={165} y={235} width={70} height={165} fill="#171c27" />
+                                {/* West road */}
+                                <rect x={0} y={165} width={165} height={70} fill="#171c27" />
+                                {/* East road */}
+                                <rect x={235} y={165} width={165} height={70} fill="#171c27" />
+                                {/* Intersection center */}
+                                <rect x={165} y={165} width={70} height={70} fill="#1c212d" />
 
-                            <div
-                                className="absolute inset-0 opacity-30"
-                                style={{
-                                    backgroundImage:
-                                        "linear-gradient(var(--color-canvas-grid) 1px, transparent 1px), linear-gradient(90deg, var(--color-canvas-grid) 1px, transparent 1px)",
-                                    backgroundSize: "32px 32px",
-                                }}
-                            />
+                                {/* Lane markings */}
+                                <line x1={200} y1={0} x2={200} y2={165} stroke="#2c3340" strokeWidth={2} strokeDasharray="10 8" />
+                                <line x1={200} y1={235} x2={200} y2={400} stroke="#2c3340" strokeWidth={2} strokeDasharray="10 8" />
+                                <line x1={0} y1={200} x2={165} y2={200} stroke="#2c3340" strokeWidth={2} strokeDasharray="10 8" />
+                                <line x1={235} y1={200} x2={400} y2={200} stroke="#2c3340" strokeWidth={2} strokeDasharray="10 8" />
 
-                            {/* Road horizontal */}
+                                {/* Direction Labels */}
+                                <text x={200} y={18} textAnchor="middle" fill="#5b6472" fontSize={11} fontFamily="var(--font-sans)">UTARA</text>
+                                <text x={200} y={392} textAnchor="middle" fill="#5b6472" fontSize={11} fontFamily="var(--font-sans)">SELATAN</text>
+                                <text x={382} y={205} textAnchor="middle" fill="#5b6472" fontSize={11} fontFamily="var(--font-sans)">TIMUR</text>
+                                <text x={18} y={205} textAnchor="middle" fill="#5b6472" fontSize={11} fontFamily="var(--font-sans)">BARAT</text>
 
-                            <div className="absolute left-0 right-0 top-1/2 h-40 -translate-y-1/2 bg-[var(--color-road)]" />
+                                {/* Dynamic Vehicles */}
+                                {vehicles.map((v) => {
+                                    // Map SUMO coords to this 400x400 SVG
+                                    // SUMO Center is ~ (310.63, 519.01), SVG Center is (200, 200), Scale ~ 3.0
+                                    const svgX = 200 + (v.x - 310.63) * 3.0;
+                                    const svgY = 200 - (v.y - 519.01) * 3.0;
+                                    const angle = v.angle;
 
-                            {/* Road vertical */}
-
-                            <div className="absolute bottom-0 left-1/2 top-0 w-40 -translate-x-1/2 bg-[var(--color-road)]" />
-
-                            {/* Horizontal road markings */}
-
-                            <div className="absolute left-0 right-0 top-[calc(50%-1px)] border-t-2 border-dashed border-white/30" />
-
-                            <div className="absolute left-0 right-0 top-[calc(50%+1px)] border-t-2 border-dashed border-white/30" />
-
-                            {/* Vertical road markings */}
-
-                            <div className="absolute bottom-0 left-[calc(50%-1px)] top-0 border-l-2 border-dashed border-white/30" />
-
-                            <div className="absolute bottom-0 left-[calc(50%+1px)] top-0 border-l-2 border-dashed border-white/30" />
-
-                            {/* Intersection center */}
-
-                            <div className="absolute left-1/2 top-1/2 h-40 w-40 -translate-x-1/2 -translate-y-1/2 bg-[var(--color-road-center)]" />
-
-                            {/* Traffic lights */}
-
-                            <TrafficLight
-                                position="top"
-                                color="green"
-                            />
-
-                            <TrafficLight
-                                position="right"
-                                color="red"
-                            />
-
-                            <TrafficLight
-                                position="bottom"
-                                color="green"
-                            />
-
-                            <TrafficLight
-                                position="left"
-                                color="red"
-                            />
-
-                            {/* Dynamic Vehicles */}
-                            
-                            {vehicles.map((v) => {
-                                const { minX, maxX, minY, maxY } = boundsRef.current;
-                                
-                                // Default to center if bounds not established
-                                let left = 50;
-                                let top = 50;
-                                
-                                if (minX !== Infinity && maxX > minX && maxY > minY) {
-                                    // Calculate percentage with 5% padding so they stay in view
-                                    left = ((v.x - minX) / (maxX - minX)) * 90 + 5;
-                                    // SUMO Y is bottom-to-top, CSS top is top-to-bottom
-                                    top = (1 - (v.y - minY) / (maxY - minY)) * 90 + 5;
-                                }
-
-                                return (
-                                    <DynamicVehicle
-                                        key={v.id}
-                                        left={left}
-                                        top={top}
-                                        angle={v.angle}
-                                        type={v.type}
-                                    />
-                                );
-                            })}
+                                    return (
+                                        <g key={v.id} transform={`translate(${svgX}, ${svgY}) rotate(${angle})`}>
+                                            {v.type.includes("motorcycle") ? (
+                                                <rect x={-1.5} y={-3} width={3} height={6} fill="#6366f1" rx={1} />
+                                            ) : v.type.includes("bus") || v.type.includes("truck") ? (
+                                                <rect x={-3} y={-7} width={6} height={14} fill="#f59e0b" rx={1} />
+                                            ) : (
+                                                <rect x={-2.5} y={-4.5} width={5} height={9} fill="#3b82f6" rx={1} />
+                                            )}
+                                        </g>
+                                    );
+                                })}
+                            </svg>
 
                             {/* Simulation label */}
 
