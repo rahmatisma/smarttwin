@@ -3,9 +3,13 @@ from __future__ import annotations
 import random
 import threading
 import time
+import logging
+import os
 from collections import defaultdict
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 
 class SumoController:
@@ -179,6 +183,8 @@ class SumoController:
         config_file: str | Path | None = None,
         seed: int | None = None,
     ) -> None:
+    
+        os.makedirs("cache/simulation", exist_ok=True)
 
         # --------------------------------------------------------
         # SUMO BINARY
@@ -213,6 +219,7 @@ class SumoController:
         # --------------------------------------------------------
 
         self.running = False
+        self.is_gui = False
 
         self._stop_event = (
             threading.Event()
@@ -255,6 +262,10 @@ class SumoController:
         self.last_simulation_time = 0.0
 
         self.last_error: str | None = None
+
+        self.active_vehicles_data: list[dict[str, Any]] = []
+        
+        self.active_signals_data: list[dict[str, Any]] = []
 
         # --------------------------------------------------------
         # VEHICLE COUNTER
@@ -470,8 +481,21 @@ class SumoController:
             )
 
         # ========================================================
-        # LOG
+        # PATH RESOLUTION & LOGGING
         # ========================================================
+
+        config_path = Path(self.config_file)
+        
+        logger.info("STEP 1: Starting SUMO")
+        logger.info(f"SUMO binary: {binary}")
+        logger.info(f"SUMO config: {config_path}")
+        logger.info(f"Exists: {config_path.exists()}")
+        logger.info(f"Absolute: {config_path.resolve()}")
+
+        if not config_path.exists():
+            raise RuntimeError(
+                f"Failed to start SUMO: sumocfg file not found at {config_path.resolve()}"
+            )
 
         print()
         print("=" * 70)
@@ -479,33 +503,33 @@ class SumoController:
         print("=" * 70)
 
         print(
-            f"Binary : {binary}"
-        )
-
-        print(
-            f"Config : {self.config_file}"
-        )
-
-        print(
             "Command:",
             " ".join(command),
         )
 
         print("=" * 70)
-
-        # ========================================================
-        # START TRACI
-        # ========================================================
-
+        
+        # Cleanup any stuck connection in the default label
         try:
-
+            import traci
+            traci.close()
+        except Exception:
+            pass
+            
+        try:
             traci.start(
-                command,
-                label="smarttwin",
+                command
             )
-
+            logger.info("STEP 2: TraCI connected")
+            
+            tls_ids = traci.trafficlight.getIDList()
+            logger.info(f"STEP 3: Traffic lights = {tls_ids}")
+            
+            traci.simulationStep()
+            logger.info("STEP 4: Simulation step successful")
+            
         except Exception as exc:
-
+            logger.exception("Failed to start SUMO through TraCI")
             try:
                 traci.close()
             except Exception:
@@ -516,11 +540,10 @@ class SumoController:
             self.last_error = str(exc)
 
             raise RuntimeError(
-                "Gagal menjalankan SUMO melalui TraCI.\n\n"
+                f"Failed to start SUMO: {exc}\n\n"
                 f"Binary : {binary}\n"
                 f"Config : {self.config_file}\n"
                 f"Command: {' '.join(command)}\n"
-                f"Error  : {exc}"
             ) from exc
 
         # ========================================================
@@ -529,6 +552,7 @@ class SumoController:
 
         self.traci = traci
         self.running = True
+        self.is_gui = gui
         self.last_error = None
         self._stop_event.clear()
 
@@ -1038,6 +1062,50 @@ class SumoController:
                     self.active_vehicles_data = current_vehicles_data
 
                     # ==========================================
+                    # TRAFFIC LIGHT STATE
+                    # ==========================================
+                    
+                    current_signals_data = []
+                    
+                    for tls_id in self.traci.trafficlight.getIDList():
+                        try:
+                            state_str = self.traci.trafficlight.getRedYellowGreenState(tls_id)
+                            phase = self.traci.trafficlight.getPhase(tls_id)
+                            next_switch = self.traci.trafficlight.getNextSwitch(tls_id)
+                            
+                            remaining_seconds = max(0, next_switch - self.last_simulation_time)
+                            
+                            # Determine dominant state (Red or Green, ignoring yellow as requested by user)
+                            dominant_state = "RED"
+                            if 'g' in state_str or 'G' in state_str:
+                                dominant_state = "GREEN"
+                                
+                            current_signals_data.append({
+                                "trafficLightId": tls_id,
+                                "state": dominant_state,
+                                "phase": phase,
+                                "remainingSeconds": remaining_seconds,
+                                "rawState": state_str,
+                            })
+                        except self.traci.TraCIException:
+                            pass
+                            
+                    self.active_signals_data = current_signals_data
+
+                    # ==========================================
+                    # SCREENSHOT (MJPEG STREAM)
+                    # ==========================================
+                    if self.is_gui:
+                        try:
+                            self.traci.gui.screenshot("View #0", "cache/simulation/frame.jpg")
+                        except Exception:
+                            pass
+
+                    # ==========================================
+                    # SLEEP FOR NEXT STEP
+                    # ==========================================
+                    
+                    # ==========================================
                     # DEBUG
                     # ==========================================
 
@@ -1435,6 +1503,8 @@ class SumoController:
         self.current_demand.clear()
 
         self.last_error = None
+        self.active_vehicles_data.clear()
+        self.active_signals_data.clear()
 
         print(
             "SUMO realtime controller closed."

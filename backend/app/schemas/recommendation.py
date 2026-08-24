@@ -26,6 +26,7 @@ class SignalRecommendation(BaseModel):
     recommended_phase: str
     recommended_green_seconds: int = Field(ge=0)
     current_green_seconds: int = Field(ge=0)
+    green_per_approach: Dict[str, int] = Field(default_factory=dict)
 
     expected_delay_reduction_percent: float
 

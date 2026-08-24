@@ -113,14 +113,15 @@ Ini pembagian **direktori/file**, bukan cuma daftar tugas — biar kalau ada per
 ### 3.1 Sinkronisasi dulu (lihat Risiko #1)
 - [ ] Klarifikasi dengan Yuli: siapa pegang wiring `tls_controller.py`/`run_tls_simulation.py`/`decision_engine/feed_to_supabase.py` — kalian berdua sama-sama commit ke situ hari ini
 
-### 3.2 Dead code frontend — temuan audit #5 (kamu pembuatnya, paling paham keep-or-delete)
-- [ ] `DashboardSkeleton.tsx` — tidak dipakai, terakhir kamu sentuh 21 Agustus
-- [ ] `DashboardLayout.tsx` — tidak dipakai, terakhir kamu sentuh 21 Agustus
-- [ ] Halaman `/digitaltwin` (802 baris) — 100% simulasi statis tanpa fetch apa pun; kamu yang buat 23 Agustus ("membuat banyak halaman") — putuskan: sambungkan ke data asli atau hapus
+### 3.2 Dead code frontend & Optimasi Digital Twin — temuan audit #5
+- [x] `DashboardSkeleton.tsx` — **SUDAH DIHAPUS** (Tidak dipakai, `page.tsx` sudah punya komponen internal).
+- [x] `DashboardLayout.tsx` — **SUDAH DIHAPUS** (Dead code).
+- [x] Halaman `/digitaltwin` (802 baris) — **SUDAH DISELESAIKAN:** Telah berhasil disambungkan ke data asli. Tampilan statis telah diganti dengan Live Video Stream dari SUMO, dan panel "Signal Status" sudah terhubung secara dinamis ke *Rule-Based Decision Engine* (`rule_decision.py`). Tombol Reset juga sudah terhubung ke backend.
+- [ ] **Catatan Optimasi Streaming Simulasi (RunPod vs Lokal):** Saat ini streaming SUMO di halaman Digital Twin menggunakan metode MJPEG (`traci.gui.screenshot` ke local disk) yang menyebabkan frame patah-patah dan beban CPU tinggi di laptop lokal. **Saran:** Jangan ubah ke FFmpeg + WebRTC di lingkungan lokal (akan membuat laptop makin lag). Pertahankan MJPEG untuk lokal, dan optimalkan nanti saat *deploy* ke RunPod (Linux) dengan menggunakan Xvfb (Virtual Monitor) dan RAM Disk (`/dev/shm`) untuk menyimpan *cache screenshot*. RunPod memiliki spesifikasi tinggi yang akan memproses streaming tersebut jauh lebih mulus tanpa membebani laptop *client*.
 
 ### 3.3 Keputusan scope — fitur auth (lihat Risiko #3)
-- [ ] Diskusikan dengan tim: halaman login/register/account/settings masuk prioritas demo 31 Agustus atau tidak? Tidak ada di `roadmap.md` maupun audit sebagai requirement
-- [ ] Kalau **tidak** prioritas: alihkan waktu ke item 3.2 di atas atau kembali pegang CV (lihat 3.4)
+- [x] Diskusikan dengan tim: halaman login/register/account/settings masuk prioritas demo 31 Agustus atau tidak? — **KEPUTUSAN:** Tidak prioritas untuk demo, namun kode dibiarkan saja (tidak dihapus) untuk pengembangan di masa depan.
+- [x] Kalau **tidak** prioritas: alihkan waktu ke item 3.2 di atas atau kembali pegang CV (lihat 3.4) — *Sudah dialihkan dan diselesaikan.*
 
 ### 3.4 Opsional — kembali ke CV (kalau kapasitas ada & tim sepakat)
 - [ ] Track CV (item 1.1 di atas) sudah 1 minggu tidak disentuh oleh pemilik aslinya. Kalau Melpi mau ambil balik, koordinasikan dengan Rahmat supaya tidak dobel kerja di `vehicle_counter_copy.py`

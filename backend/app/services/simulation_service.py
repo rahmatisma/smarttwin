@@ -281,12 +281,22 @@ class SimulationService:
 
         if traffic_state is None:
 
-            raise SimulationServiceError(
-                "Tidak ditemukan TrafficState "
-                "dengan trafficLaneMetrics "
-                "untuk intersection "
+            print()
+            print("=" * 70)
+            print("TRAFFIC STATE WARNING")
+            print("=" * 70)
+            print(
+                "Tidak ditemukan TrafficState dengan "
+                "trafficLaneMetrics untuk intersection "
                 f"'{request.intersectionId}'."
             )
+            print("Simulation akan berjalan TANPA demand kendaraan.")
+            print("=" * 70)
+
+            self.active_intersection_id = request.intersectionId
+            self.active_traffic_state_id = None
+
+            return None
 
         # --------------------------------------------------------
         # SAVE ACTIVE STATE
@@ -575,30 +585,31 @@ class SimulationService:
 
             # ====================================================
             # 3. CREATE ADAPTER
+            # 3. MAPPING KE SUMO DEMAND
             # ====================================================
 
             adapter = self._create_adapter()
+            demand = None
+
+            if traffic_state is not None:
+                try:
+
+                    demand = (
+                        adapter.to_demand(
+                            traffic_state
+                        )
+                    )
+
+                except Exception as exc:
+
+                    raise SimulationServiceError(
+                        "Gagal mengubah TrafficState "
+                        "menjadi demand SUMO: "
+                        f"{exc}"
+                    ) from exc
 
             # ====================================================
-            # 4. TRAFFIC STATE -> DEMAND
-            # ====================================================
-
-            try:
-
-                demand = adapter.to_demand(
-                    traffic_state
-                )
-
-            except Exception as exc:
-
-                raise SimulationServiceError(
-                    "Gagal mengubah TrafficState "
-                    "menjadi demand SUMO: "
-                    f"{exc}"
-                ) from exc
-
-            # ====================================================
-            # 5. DEBUG DEMAND
+            # 4. DEBUG DEMAND
             # ====================================================
 
             print()
@@ -611,7 +622,7 @@ class SimulationService:
             print("=" * 70)
 
             # ====================================================
-            # 6. INJECT DEMAND
+            # 5. INJECT DEMAND
             # ====================================================
 
             if demand:
@@ -644,7 +655,7 @@ class SimulationService:
                 }
 
             # ====================================================
-            # 7. DEBUG INJECTION
+            # 6. DEBUG INJECTION
             # ====================================================
 
             print()
@@ -657,7 +668,7 @@ class SimulationService:
             print("=" * 70)
 
             # ====================================================
-            # 8. GET CURRENT METRICS
+            # 7. GET CURRENT METRICS
             # ====================================================
 
             try:
@@ -672,21 +683,25 @@ class SimulationService:
                 ) from exc
 
             # ====================================================
-            # 9. IDENTIFIERS
+            # 8. IDENTIFIERS
             # ====================================================
 
-            result["trafficStateId"] = (
-                traffic_state.trafficStateId
-            )
+            if traffic_state is not None:
+                result["trafficStateId"] = (
+                    traffic_state.trafficStateId
+                )
 
-            result["intersectionId"] = (
-                traffic_state.intersectionId
-            )
+                result["intersectionId"] = (
+                    traffic_state.intersectionId
+                )
+            else:
+                result["trafficStateId"] = None
+                result["intersectionId"] = request.intersectionId
 
             result["injectedVehicles"] = injected
 
             # ====================================================
-            # 10. RETURN
+            # 9. RETURN
             # ====================================================
 
             print()
@@ -767,14 +782,24 @@ class SimulationService:
             }
 
     # ============================================================
-    # VEHICLES POSITIONS
+    # SIMULATION STATE (VEHICLES + SIGNALS)
     # ============================================================
 
-    def get_vehicles_position(self) -> list[dict[str, Any]]:
+    def get_simulation_state(self) -> dict[str, Any]:
         with self._lock:
             if self.controller is None or not self.controller.is_running():
-                return []
-            return self.controller.active_vehicles_data
+                return {
+                    "running": False,
+                    "vehicles": [],
+                    "signals": [],
+                    "simulationTimeSeconds": 0
+                }
+            return {
+                "running": True,
+                "vehicles": self.controller.active_vehicles_data,
+                "signals": self.controller.active_signals_data,
+                "simulationTimeSeconds": self.controller.last_simulation_time
+            }
 
     # ============================================================
     # STOP

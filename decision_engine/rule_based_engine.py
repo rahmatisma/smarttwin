@@ -168,6 +168,7 @@ class RuleBasedEngine(DecisionEngine):
             recommended_phase=top_approach,
             recommended_green_seconds=top_green,
             current_green_seconds=current_green,
+            green_per_approach=green_per_approach,
             expected_delay_reduction_percent=self._estimasi_pengurangan_delay(
                 top_green, current_green
             ),

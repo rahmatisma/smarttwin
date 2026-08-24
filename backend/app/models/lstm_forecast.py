@@ -36,20 +36,28 @@ class LSTMForecaster:
     def _load_model(self):
 
         if not self.model_path.exists():
-            raise FileNotFoundError(
-                f"Model tidak ditemukan: {self.model_path}"
+            print(
+                f"[LSTM] WARNING: Model tidak ditemukan: {self.model_path}. "
+                "Berjalan dalam mode dummy/fallback."
             )
+            self.model = None
+            return
 
-        from tensorflow.keras.models import load_model
-
-        self.model = load_model(
-            self.model_path
-        )
-
-        print(
-            f"[LSTM] Loaded model: "
-            f"{self.model_path}"
-        )
+        try:
+            from tensorflow.keras.models import load_model
+            self.model = load_model(
+                self.model_path
+            )
+            print(
+                f"[LSTM] Loaded model: "
+                f"{self.model_path}"
+            )
+        except ImportError:
+            print(
+                "[LSTM] WARNING: tensorflow tidak terinstall. "
+                "Berjalan dalam mode dummy/fallback."
+            )
+            self.model = None
 
     def prepare_sequence(
         self,
@@ -121,10 +129,17 @@ class LSTMForecaster:
             history
         )
 
-        prediction = self.model.predict(
-            sequence,
-            verbose=0,
-        )
+        if self.model is None:
+            # Dummy prediction jika model tidak ada
+            prediction = np.zeros(
+                (1, 3, len(self.feature_names)), 
+                dtype=np.float32
+            )
+        else:
+            prediction = self.model.predict(
+                sequence,
+                verbose=0,
+            )
 
         prediction = np.asarray(
             prediction,

@@ -34,25 +34,79 @@ export default function DigitalTwinView() {
         useState<SimulationStatus>("idle");
     const [loading, setLoading] = useState(false);
     const [vehicles, setVehicles] = useState<VehicleData[]>([]);
+
+    interface SignalStatusData {
+        direction: string;
+        state: "GREEN" | "RED" | "YELLOW";
+        time: number;
+    }
+    const [signalStatuses, setSignalStatuses] = useState<SignalStatusData[]>([
+        { direction: "North", state: "GREEN", time: 32 },
+        { direction: "East", state: "RED", time: 18 },
+        { direction: "South", state: "GREEN", time: 32 },
+        { direction: "West", state: "RED", time: 18 },
+    ]);
     
     // Auto-calibration bounds
     const boundsRef = useRef({ minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity });
 
     const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
 
+    interface SignalData {
+        trafficLightId: string;
+        state: "GREEN" | "RED" | "YELLOW";
+        phase: number;
+        remainingSeconds: number;
+        rawState: string;
+    }
+
+    const [simulationTime, setSimulationTime] = useState(0);
+    const [signals, setSignals] = useState<SignalData[]>([]);
+
     useEffect(() => {
         if (status !== "running") return;
 
         const interval = setInterval(async () => {
             try {
-                const res = await fetch(`${API_BASE_URL}/api/v1/simulation/positions`);
+                const res = await fetch(`${API_BASE_URL}/api/v1/simulation/state`);
                 if (!res.ok) return;
-                const data: VehicleData[] = await res.json();
+                const data = await res.json();
+                
+                if (data.vehicles) {
+                    setVehicles(data.vehicles);
+                }
+                if (data.signals && data.signals.length > 0) {
+                    setSignals(data.signals);
+
+                    // Parse rawState for the 4 directions (assuming simpang4-pingit layout)
+                    const rawState = data.signals[0].rawState;
+                    if (rawState && rawState.length === 20) {
+                        const remaining = Math.floor(data.signals[0].remainingSeconds);
+                        const isGreen = (slice: string) => slice.includes('G') || slice.includes('g');
+                        const isYellow = (slice: string) => slice.includes('y') || slice.includes('Y');
+
+                        const getState = (slice: string) => {
+                            if (isGreen(slice)) return "GREEN";
+                            if (isYellow(slice)) return "YELLOW";
+                            return "RED";
+                        };
+
+                        setSignalStatuses([
+                            { direction: "North", state: getState(rawState.slice(10, 15)), time: remaining },
+                            { direction: "East",  state: getState(rawState.slice(5, 10)),  time: remaining },
+                            { direction: "South", state: getState(rawState.slice(0, 5)),   time: remaining },
+                            { direction: "West",  state: getState(rawState.slice(15, 20)), time: remaining }
+                        ]);
+                    }
+                }
+                if (data.simulationTimeSeconds !== undefined) {
+                    setSimulationTime(data.simulationTimeSeconds);
+                }
                 
                 // Update bounds
                 let { minX, maxX, minY, maxY } = boundsRef.current;
                 let changed = false;
-                data.forEach(v => {
+                (data.vehicles || []).forEach((v: VehicleData) => {
                     if (v.x < minX) { minX = v.x; changed = true; }
                     if (v.x > maxX) { maxX = v.x; changed = true; }
                     if (v.y < minY) { minY = v.y; changed = true; }
@@ -64,7 +118,6 @@ export default function DigitalTwinView() {
                     boundsRef.current = { minX, maxX, minY, maxY };
                 }
 
-                setVehicles(data);
             } catch (err) {
                 console.error("Failed to fetch positions:", err);
             }
@@ -82,7 +135,7 @@ export default function DigitalTwinView() {
                 body: JSON.stringify({
                     intersectionId: "simpang4-pingit",
                     durationSeconds: 60,
-                    gui: false,
+                    gui: true,
                     guiDelayMs: 100,
                     seed: 42
                 }),
@@ -98,6 +151,23 @@ export default function DigitalTwinView() {
         } catch (error) {
             console.error(error);
             alert(error instanceof Error ? error.message : "Terjadi kesalahan saat memulai simulasi");
+        } finally {
+            setLoading(false);
+        }
+    }
+
+    async function handleReset() {
+        setLoading(true);
+        try {
+            await fetch(`${API_BASE_URL}/api/v1/simulation/stop`, {
+                method: "POST"
+            });
+            setStatus("idle");
+            setVehicles([]);
+            setSignals([]);
+            setSimulationTime(0);
+        } catch (error) {
+            console.error("Failed to stop simulation", error);
         } finally {
             setLoading(false);
         }
@@ -213,52 +283,18 @@ export default function DigitalTwinView() {
 
                         <div className="relative h-[460px] overflow-hidden bg-[var(--color-canvas)]">
 
-                            {/* Intersection SVG Map */}
-                            <svg viewBox="0 0 400 400" width="100%" height="100%" className="absolute inset-0">
-                                {/* North road */}
-                                <rect x={165} y={0} width={70} height={165} fill="#171c27" />
-                                {/* South road */}
-                                <rect x={165} y={235} width={70} height={165} fill="#171c27" />
-                                {/* West road */}
-                                <rect x={0} y={165} width={165} height={70} fill="#171c27" />
-                                {/* East road */}
-                                <rect x={235} y={165} width={165} height={70} fill="#171c27" />
-                                {/* Intersection center */}
-                                <rect x={165} y={165} width={70} height={70} fill="#1c212d" />
-
-                                {/* Lane markings */}
-                                <line x1={200} y1={0} x2={200} y2={165} stroke="#2c3340" strokeWidth={2} strokeDasharray="10 8" />
-                                <line x1={200} y1={235} x2={200} y2={400} stroke="#2c3340" strokeWidth={2} strokeDasharray="10 8" />
-                                <line x1={0} y1={200} x2={165} y2={200} stroke="#2c3340" strokeWidth={2} strokeDasharray="10 8" />
-                                <line x1={235} y1={200} x2={400} y2={200} stroke="#2c3340" strokeWidth={2} strokeDasharray="10 8" />
-
-                                {/* Direction Labels */}
-                                <text x={200} y={18} textAnchor="middle" fill="#5b6472" fontSize={11} fontFamily="var(--font-sans)">UTARA</text>
-                                <text x={200} y={392} textAnchor="middle" fill="#5b6472" fontSize={11} fontFamily="var(--font-sans)">SELATAN</text>
-                                <text x={382} y={205} textAnchor="middle" fill="#5b6472" fontSize={11} fontFamily="var(--font-sans)">TIMUR</text>
-                                <text x={18} y={205} textAnchor="middle" fill="#5b6472" fontSize={11} fontFamily="var(--font-sans)">BARAT</text>
-
-                                {/* Dynamic Vehicles */}
-                                {vehicles.map((v) => {
-                                    // Map SUMO coords to this 400x400 SVG
-                                    // SUMO Center is ~ (310.63, 519.01), SVG Center is (200, 200), Scale ~ 3.0
-                                    const svgX = 200 + (v.x - 310.63) * 3.0;
-                                    const svgY = 200 - (v.y - 519.01) * 3.0;
-                                    const angle = v.angle;
-
-                                    return (
-                                        <g key={v.id} transform={`translate(${svgX}, ${svgY}) rotate(${angle})`}>
-                                            {v.type.includes("motorcycle") ? (
-                                                <rect x={-1.5} y={-3} width={3} height={6} fill="#6366f1" rx={1} />
-                                            ) : v.type.includes("bus") || v.type.includes("truck") ? (
-                                                <rect x={-3} y={-7} width={6} height={14} fill="#f59e0b" rx={1} />
-                                            ) : (
-                                                <rect x={-2.5} y={-4.5} width={5} height={9} fill="#3b82f6" rx={1} />
-                                            )}
-                                        </g>
-                                    );
-                                })}
-                            </svg>
+                            {/* SUMO-GUI Live Stream */}
+                            {status === "running" ? (
+                                <img
+                                    src={`${API_BASE_URL}/api/v1/simulation/stream?t=${Date.now()}`}
+                                    alt="Live SUMO Simulation Stream"
+                                    className="absolute inset-0 h-full w-full object-contain"
+                                />
+                            ) : (
+                                <div className="absolute inset-0 flex items-center justify-center">
+                                    <p className="text-sm text-text-muted">Simulation Not Running</p>
+                                </div>
+                            )}
 
                             {/* Simulation label */}
 
@@ -283,7 +319,7 @@ export default function DigitalTwinView() {
                                 </p>
 
                                 <p className="mt-0.5 font-mono text-sm font-medium text-white">
-                                    00:02:34
+                                    {Math.floor(simulationTime / 60).toString().padStart(2, '0')}:{(Math.floor(simulationTime) % 60).toString().padStart(2, '0')}
                                 </p>
 
                             </div>
@@ -327,13 +363,13 @@ export default function DigitalTwinView() {
 
                                 <MetricRow
                                     label="Simulation Time"
-                                    value="02:34"
+                                    value={`${Math.floor(simulationTime / 60).toString().padStart(2, '0')}:${(Math.floor(simulationTime) % 60).toString().padStart(2, '0')}`}
                                     icon={<Clock3 size={15} />}
                                 />
 
                                 <MetricRow
                                     label="Vehicles"
-                                    value="128"
+                                    value={vehicles.length.toString()}
                                     icon={<Car size={15} />}
                                 />
 
@@ -355,45 +391,34 @@ export default function DigitalTwinView() {
 
                         {/* Current phase */}
 
-                        <div className="rounded-2xl border border-border bg-surface p-5 shadow-sm">
-
-                            <div className="mb-4 flex items-center justify-between">
-
-                                <div>
-                                    <h2 className="text-sm font-semibold">
-                                        Current Phase
-                                    </h2>
-
-                                    <p className="mt-1 text-xs text-text-muted">
-                                        North — South
-                                    </p>
+                        {signals.length > 0 && (
+                            <div className="rounded-2xl border border-border bg-surface p-5 shadow-sm">
+                                <div className="mb-4 flex items-center justify-between">
+                                    <div>
+                                        <h2 className="text-sm font-semibold">
+                                            Phase {signals[0].phase}
+                                        </h2>
+                                        <p className="mt-1 text-xs text-text-muted">
+                                            Traffic Light: {signals[0].trafficLightId}
+                                        </p>
+                                    </div>
+                                    <span className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] font-medium ${signals[0].state === 'GREEN' ? 'bg-signal-green/10 text-signal-green' : 'bg-signal-red/10 text-signal-red'}`}>
+                                        <Circle
+                                            size={7}
+                                            fill="currentColor"
+                                        />
+                                        {signals[0].state}
+                                    </span>
                                 </div>
-
-                                <span className="flex items-center gap-1.5 rounded-full bg-signal-green/10 px-2.5 py-1 text-[10px] font-medium text-signal-green">
-                                    <Circle
-                                        size={7}
-                                        fill="currentColor"
-                                    />
-                                    GREEN
-                                </span>
-
+                                <div className="h-2 overflow-hidden rounded-full bg-surface-2">
+                                    <div className={`h-full rounded-full transition-all duration-500 ${signals[0].state === 'GREEN' ? 'bg-signal-green' : 'bg-signal-red'}`} style={{width: `${Math.min(100, Math.max(0, (signals[0].remainingSeconds / 60) * 100))}%`}} />
+                                </div>
+                                <div className="mt-2 flex justify-between text-[10px] text-text-muted">
+                                    <span className="font-mono">{Math.floor(signals[0].remainingSeconds)}s</span>
+                                    <span>Remaining</span>
+                                </div>
                             </div>
-
-                            <div className="h-2 overflow-hidden rounded-full bg-surface-2">
-
-                                <div className="h-full w-[64%] rounded-full bg-signal-green" />
-
-                            </div>
-
-                            <div className="mt-2 flex justify-between text-[10px] text-text-muted">
-
-                                <span>00:32</span>
-
-                                <span>Remaining</span>
-
-                            </div>
-
-                        </div>
+                        )}
 
                     </div>
 
@@ -581,10 +606,9 @@ export default function DigitalTwinView() {
 
                             <button
                                 type="button"
-                                onClick={() =>
-                                    setStatus("idle")
-                                }
-                                className="flex items-center gap-2 rounded-xl border border-border px-5 py-2.5 text-xs font-medium text-text-secondary transition hover:bg-surface-2"
+                                onClick={handleReset}
+                                disabled={loading}
+                                className={`flex items-center gap-2 rounded-xl border border-border px-5 py-2.5 text-xs font-medium text-text-secondary transition hover:bg-surface-2 ${loading ? 'opacity-50 cursor-not-allowed' : ''}`}
                             >
                                 <RotateCcw size={15} />
                                 Reset
@@ -618,32 +642,15 @@ export default function DigitalTwinView() {
 
                         </div>
 
-                        <div className="space-y-3">
-
-                            <SignalRow
-                                direction="North"
-                                state="GREEN"
-                                time="32s"
-                            />
-
-                            <SignalRow
-                                direction="East"
-                                state="RED"
-                                time="18s"
-                            />
-
-                            <SignalRow
-                                direction="South"
-                                state="GREEN"
-                                time="32s"
-                            />
-
-                            <SignalRow
-                                direction="West"
-                                state="RED"
-                                time="18s"
-                            />
-
+                        <div className="space-y-2">
+                            {signalStatuses.map((s, i) => (
+                                <SignalRow
+                                    key={i}
+                                    direction={s.direction}
+                                    state={s.state}
+                                    time={status === "running" ? `${s.time}s` : "--"}
+                                />
+                            ))}
                         </div>
 
                     </div>
@@ -776,74 +783,4 @@ function SignalRow({
         </div>
     );
 }
-
-function TrafficLight({
-    position,
-    color,
-}: {
-    position: "top" | "right" | "bottom" | "left";
-    color: "red" | "yellow" | "green";
-}) {
-    const positionClass = {
-        top: "left-1/2 top-[calc(50%-115px)] -translate-x-1/2",
-        right: "right-[calc(50%-115px)] top-1/2 -translate-y-1/2",
-        bottom: "bottom-[calc(50%-115px)] left-1/2 -translate-x-1/2",
-        left: "left-[calc(50%-115px)] top-1/2 -translate-y-1/2",
-    }[position];
-
-    const colorClass = {
-        red: "bg-red-500",
-        yellow: "bg-yellow-400",
-        green: "bg-signal-green",
-    }[color];
-
-    return (
-        <div
-            className={`absolute z-20 ${positionClass} flex h-10 w-5 items-center justify-center rounded-full bg-black p-1`}
-        >
-            <span
-                className={`h-3 w-3 rounded-full ${colorClass} shadow-sm`}
-            />
-        </div>
-    );
-}
-
-function DynamicVehicle({
-    left,
-    top,
-    angle,
-    type,
-}: {
-    left: number;
-    top: number;
-    angle: number;
-    type: string;
-}) {
-    // SUMO angle is clockwise from North (0 = UP)
-    // CSS rotate is clockwise from element's natural orientation (which we can set as UP)
-    const cssRotation = angle;
-    
-    // Customize color based on type
-    let colorClass = "bg-blue-500";
-    if (type === "motorcycle") colorClass = "bg-purple-500";
-    if (type === "bus" || type === "truck") colorClass = "bg-orange-500";
-
-    return (
-        <div
-            className={`absolute z-10 flex h-5 w-9 items-center justify-center rounded-md ${colorClass} shadow-sm transition-all duration-500 ease-linear`}
-            style={{
-                left: `${left}%`,
-                top: `${top}%`,
-                transform: `translate(-50%, -50%) rotate(${cssRotation}deg)`
-            }}
-        >
-            <Car
-                size={13}
-                className="text-white"
-                fill="currentColor"
-                // Counter-rotate the icon so it faces the direction of travel
-                style={{ transform: "rotate(-90deg)" }}
-            />
-        </div>
-    );
-}
+
