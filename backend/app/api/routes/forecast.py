@@ -1,41 +1,42 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter
 
-from app.schemas.forecast import ForecastResult
-from app.services.forecast_service import (
-    forecast_service,
-)
+from app.services.forecast_service import forecast_service
+from app.schemas.traffic import TrafficState
 
 
 router = APIRouter(
-    prefix="/api/forecast",
+    prefix="/forecast",
     tags=["Forecast"],
 )
 
 
-@router.get(
-    "/latest/{intersection_id}",
-    response_model=ForecastResult,
-)
-async def get_latest_forecast(
-    intersection_id: str,
+@router.post("/predict")
+def predict(
+    state: TrafficState,
 ):
+    """
+    Menerima TrafficState terbaru,
+    memasukkannya ke history LSTM,
+    lalu menjalankan forecast jika
+    sequence sudah mencukupi.
+    """
 
-    result = (
-        forecast_service
-        .get_latest(
-            intersection_id
-        )
-    )
+    result = forecast_service.add_traffic_state(state)
 
     if result is None:
-
-        raise HTTPException(
-            status_code=404,
-            detail=(
-                "Forecast belum tersedia."
+        return {
+            "status": "warming_up",
+            "message": (
+                "History traffic belum cukup "
+                "untuk menjalankan LSTM."
             ),
-        )
+            "requiredTimesteps": (
+                forecast_service
+                .forecaster
+                .sequence_length
+            ),
+        }
 
     return result

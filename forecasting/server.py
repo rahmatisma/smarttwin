@@ -4,13 +4,17 @@ import json
 import random
 from pathlib import Path
 
+import joblib
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import torch
 import torch.nn as nn
 
-from sklearn.metrics import mean_absolute_error, mean_squared_error
+from sklearn.metrics import (
+    mean_absolute_error,
+    mean_squared_error,
+)
 from sklearn.preprocessing import MinMaxScaler
 from torch.optim import Adam
 from torch.utils.data import DataLoader, Dataset
@@ -20,23 +24,23 @@ from torch.utils.data import DataLoader, Dataset
 # PATH
 # ============================================================
 
-# Struktur:
-#
-# smarttwin/
+# File:
 #
 # forecasting/
 # ├── data/
 # │   └── percobaan_logic_simpang.csv
-# │
 # ├── scripts/
 # │   └── yolo/
 # │       └── 5_train.py
-# │
 # └── outputs/
 #     └── yolo/
 #
-# backend/
-# └── app/
+# __file__:
+# forecasting/scripts/yolo/5_train.py
+#
+# parents[0] = yolo
+# parents[1] = scripts
+# parents[2] = forecasting
 
 BASE_DIR = Path(__file__).resolve().parents[2]
 
@@ -50,9 +54,7 @@ DATA_FILE = DATA_DIR / "percobaan_logic_simpang.csv"
 
 MODEL_FILE = OUTPUT_DIR / "traffic_lstm.pt"
 
-ONNX_MODEL_FILE = OUTPUT_DIR / "traffic_lstm.onnx"
-
-SCALER_FILE = OUTPUT_DIR / "scaler.json"
+SCALER_FILE = OUTPUT_DIR / "scaler.pkl"
 
 METADATA_FILE = OUTPUT_DIR / "metadata.json"
 
@@ -61,9 +63,15 @@ HISTORY_FILE = OUTPUT_DIR / "training_history.json"
 PREDICTIONS_FILE = OUTPUT_DIR / "predictions.csv"
 
 
-OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+OUTPUT_DIR.mkdir(
+    parents=True,
+    exist_ok=True,
+)
 
-PLOT_DIR.mkdir(parents=True, exist_ok=True)
+PLOT_DIR.mkdir(
+    parents=True,
+    exist_ok=True,
+)
 
 
 # ============================================================
@@ -103,10 +111,6 @@ DROPOUT = 0.2
 # FEATURES
 # ============================================================
 
-# INI ADALAH KONTRAK MODEL.
-#
-# Jangan mengubah urutan ini tanpa training ulang model.
-
 FEATURE_COLUMNS = [
     "total_di_zona",
     "motor_di_zona",
@@ -140,7 +144,9 @@ def set_seed(seed: int = RANDOM_SEED):
 # ============================================================
 
 def get_device():
+
     if torch.cuda.is_available():
+
         device = torch.device("cuda")
 
         print(
@@ -150,7 +156,9 @@ def get_device():
 
         return device
 
-    print("CUDA tidak tersedia. Menggunakan CPU.")
+    print(
+        "CUDA tidak tersedia. Menggunakan CPU."
+    )
 
     return torch.device("cpu")
 
@@ -166,6 +174,7 @@ class TrafficDataset(Dataset):
         X: np.ndarray,
         y: np.ndarray,
     ):
+
         self.X = torch.tensor(
             X,
             dtype=torch.float32,
@@ -177,9 +186,11 @@ class TrafficDataset(Dataset):
         )
 
     def __len__(self):
+
         return len(self.X)
 
     def __getitem__(self, index):
+
         return (
             self.X[index],
             self.y[index],
@@ -201,6 +212,7 @@ class TrafficLSTM(nn.Module):
         output_size: int,
         dropout: float,
     ):
+
         super().__init__()
 
         self.horizon = horizon
@@ -227,15 +239,15 @@ class TrafficLSTM(nn.Module):
     def forward(self, x):
 
         # x:
-        # [batch, 12, 5]
+        # [batch, lookback, features]
 
         output, _ = self.lstm(x)
 
         last_output = output[:, -1, :]
 
-        prediction = self.fc(last_output)
-
-        # [batch, 3, 5]
+        prediction = self.fc(
+            last_output
+        )
 
         prediction = prediction.view(
             -1,
@@ -257,10 +269,24 @@ def load_data():
     if not DATA_FILE.exists():
 
         raise FileNotFoundError(
-            f"Dataset tidak ditemukan:\n{DATA_FILE}"
+            f"\nDataset tidak ditemukan:\n\n"
+            f"{DATA_FILE}\n"
         )
 
-    df = pd.read_csv(DATA_FILE)
+    print(
+        "Dataset ditemukan:",
+        DATA_FILE,
+    )
+
+    df = pd.read_csv(
+        DATA_FILE
+    )
+
+    print("\nKolom dataset:")
+
+    print(
+        list(df.columns)
+    )
 
     required_columns = [
         "timestamp",
@@ -278,7 +304,7 @@ def load_data():
     if missing_columns:
 
         raise ValueError(
-            "Kolom berikut tidak ditemukan:\n"
+            "\nKolom berikut tidak ditemukan:\n"
             + "\n".join(
                 f"- {column}"
                 for column in missing_columns
@@ -307,17 +333,21 @@ def load_data():
     )
 
     df = (
-        df.sort_values("timestamp")
+        df
+        .sort_values("timestamp")
         .reset_index(drop=True)
     )
 
     print(
-        "Raw rows:",
+        "\nJumlah raw rows:",
         len(df),
     )
 
     print(
-        "Time:",
+        "\nRange waktu:"
+    )
+
+    print(
         df["timestamp"].min(),
         "->",
         df["timestamp"].max(),
@@ -330,13 +360,16 @@ def load_data():
 # AGGREGATE
 # ============================================================
 
-def prepare_timeseries(df: pd.DataFrame):
-
-    print("\n[2] Preparing time series...")
+def prepare_timeseries(
+    df: pd.DataFrame,
+):
 
     print(
-        "Menggabungkan seluruh kamera/lengan "
-        "pada timestamp yang sama."
+        "\n[2] Preparing time series..."
+    )
+
+    print(
+        "Data diagregasi berdasarkan timestamp."
     )
 
     ts_df = (
@@ -354,12 +387,19 @@ def prepare_timeseries(df: pd.DataFrame):
     )
 
     print(
-        "\nJumlah timestep:",
+        "\nJumlah timestep setelah agregasi:",
         len(ts_df),
     )
 
     print(
-        "\nContoh hasil agregasi:"
+        "Range waktu:",
+        ts_df["timestamp"].min(),
+        "->",
+        ts_df["timestamp"].max(),
+    )
+
+    print(
+        "\nContoh data:"
     )
 
     print(
@@ -435,104 +475,26 @@ def create_sequences(
             values[end:target_end]
         )
 
-    return (
-        np.asarray(
-            X,
-            dtype=np.float32,
-        ),
-        np.asarray(
-            y,
-            dtype=np.float32,
-        ),
+    X = np.asarray(
+        X,
+        dtype=np.float32,
     )
 
-
-# ============================================================
-# SAVE SCALER AS JSON
-# ============================================================
-
-def save_scaler(scaler: MinMaxScaler):
-
-    scaler_data = {
-        "feature_names": FEATURE_COLUMNS,
-        "min": scaler.min_.tolist(),
-        "scale": scaler.scale_.tolist(),
-        "data_min": scaler.data_min_.tolist(),
-        "data_max": scaler.data_max_.tolist(),
-        "data_range": scaler.data_range_.tolist(),
-    }
-
-    with open(
-        SCALER_FILE,
-        "w",
-        encoding="utf-8",
-    ) as file:
-
-        json.dump(
-            scaler_data,
-            file,
-            indent=4,
-        )
-
-    print(
-        "Scaler saved:",
-        SCALER_FILE,
+    y = np.asarray(
+        y,
+        dtype=np.float32,
     )
 
+    return X, y
+
 
 # ============================================================
-# EXPORT ONNX
+# PLOT TRAINING LOSS
 # ============================================================
 
-def export_onnx(
-    model,
-    device,
+def plot_training_validation_loss(
+    history,
 ):
-
-    print("\n[12] Exporting ONNX model...")
-
-    model.eval()
-
-    dummy_input = torch.zeros(
-        (
-            1,
-            LOOKBACK,
-            len(FEATURE_COLUMNS),
-        ),
-        dtype=torch.float32,
-        device=device,
-    )
-
-    torch.onnx.export(
-        model,
-        dummy_input,
-        ONNX_MODEL_FILE,
-        export_params=True,
-        opset_version=17,
-        do_constant_folding=True,
-        input_names=["input"],
-        output_names=["prediction"],
-        dynamic_axes={
-            "input": {
-                0: "batch"
-            },
-            "prediction": {
-                0: "batch"
-            },
-        },
-    )
-
-    print(
-        "ONNX model saved:",
-        ONNX_MODEL_FILE,
-    )
-
-
-# ============================================================
-# PLOT LOSS
-# ============================================================
-
-def plot_training_validation_loss(history):
 
     plt.figure(
         figsize=(10, 6)
@@ -540,7 +502,9 @@ def plot_training_validation_loss(history):
 
     epochs = range(
         1,
-        len(history["train_loss"]) + 1,
+        len(
+            history["train_loss"]
+        ) + 1,
     )
 
     plt.plot(
@@ -589,6 +553,270 @@ def plot_training_validation_loss(history):
 
 
 # ============================================================
+# PLOT ACTUAL VS PREDICTED
+# ============================================================
+
+def plot_actual_vs_predicted(
+    timestamps,
+    actual,
+    predicted,
+):
+
+    actual_first = actual[:, 0, :]
+
+    predicted_first = (
+        predicted[:, 0, :]
+    )
+
+    total_actual = (
+        actual_first.sum(axis=1)
+    )
+
+    total_predicted = (
+        predicted_first.sum(axis=1)
+    )
+
+    plt.figure(
+        figsize=(14, 6)
+    )
+
+    plt.plot(
+        timestamps,
+        total_actual,
+        label="Actual",
+        linewidth=2,
+    )
+
+    plt.plot(
+        timestamps,
+        total_predicted,
+        label="Predicted",
+        linewidth=2,
+        linestyle="--",
+    )
+
+    plt.title(
+        "Actual vs Predicted Traffic"
+    )
+
+    plt.xlabel("Time")
+
+    plt.ylabel(
+        "Total Vehicles"
+    )
+
+    plt.legend()
+
+    plt.grid(
+        True,
+        alpha=0.3,
+    )
+
+    plt.xticks(
+        rotation=30
+    )
+
+    plt.tight_layout()
+
+    output_file = (
+        PLOT_DIR
+        / "actual_vs_predicted.png"
+    )
+
+    plt.savefig(
+        output_file,
+        dpi=200,
+        bbox_inches="tight",
+    )
+
+    plt.close()
+
+
+# ============================================================
+# PLOT SPLIT
+# ============================================================
+
+def plot_train_val_test_split(
+    df,
+    train_end,
+    val_end,
+):
+
+    timestamps = df["timestamp"]
+
+    total = df[
+        FEATURE_COLUMNS
+    ].sum(axis=1)
+
+    plt.figure(
+        figsize=(14, 6)
+    )
+
+    plt.plot(
+        timestamps,
+        total,
+        linewidth=1.8,
+        label="Traffic",
+    )
+
+    if train_end > 0:
+
+        plt.axvline(
+            timestamps.iloc[
+                train_end - 1
+            ],
+            linestyle="--",
+            linewidth=2,
+            label="Train / Validation",
+        )
+
+    if val_end > 0:
+
+        plt.axvline(
+            timestamps.iloc[
+                val_end - 1
+            ],
+            linestyle="--",
+            linewidth=2,
+            label="Validation / Test",
+        )
+
+    plt.title(
+        "Chronological Train / Validation / Test Split"
+    )
+
+    plt.xlabel("Time")
+
+    plt.ylabel(
+        "Total Vehicles"
+    )
+
+    plt.legend()
+
+    plt.grid(
+        True,
+        alpha=0.3,
+    )
+
+    plt.xticks(
+        rotation=30
+    )
+
+    plt.tight_layout()
+
+    output_file = (
+        PLOT_DIR
+        / "train_val_test_split.png"
+    )
+
+    plt.savefig(
+        output_file,
+        dpi=200,
+        bbox_inches="tight",
+    )
+
+    plt.close()
+
+
+# ============================================================
+# PLOT FEATURE
+# ============================================================
+
+def plot_feature_prediction(
+    timestamps,
+    actual,
+    predicted,
+):
+
+    actual_first = actual[:, 0, :]
+
+    predicted_first = (
+        predicted[:, 0, :]
+    )
+
+    feature_names = [
+        "Total Vehicles",
+        "Motorcycles",
+        "Cars",
+        "Trucks",
+        "Buses",
+    ]
+
+    fig, axes = plt.subplots(
+        len(FEATURE_COLUMNS),
+        1,
+        figsize=(14, 16),
+    )
+
+    for i, ax in enumerate(axes):
+
+        ax.plot(
+            timestamps,
+            actual_first[:, i],
+            label="Actual",
+            linewidth=1.8,
+        )
+
+        ax.plot(
+            timestamps,
+            predicted_first[:, i],
+            label="Predicted",
+            linewidth=1.8,
+            linestyle="--",
+        )
+
+        ax.set_title(
+            feature_names[i]
+        )
+
+        ax.set_ylabel(
+            "Vehicles"
+        )
+
+        ax.grid(
+            True,
+            alpha=0.3,
+        )
+
+        ax.legend()
+
+    axes[-1].set_xlabel(
+        "Time"
+    )
+
+    plt.suptitle(
+        "Actual vs Predicted by Vehicle Type",
+        fontsize=16,
+    )
+
+    plt.xticks(
+        rotation=30
+    )
+
+    plt.tight_layout(
+        rect=[
+            0,
+            0,
+            1,
+            0.97,
+        ]
+    )
+
+    output_file = (
+        PLOT_DIR
+        / "feature_prediction.png"
+    )
+
+    plt.savefig(
+        output_file,
+        dpi=200,
+        bbox_inches="tight",
+    )
+
+    plt.close()
+
+
+# ============================================================
 # SAVE PREDICTIONS
 # ============================================================
 
@@ -600,7 +828,9 @@ def save_predictions(
 
     rows = []
 
-    for i in range(len(timestamps)):
+    for i in range(
+        len(timestamps)
+    ):
 
         row = {
             "timestamp": timestamps[i]
@@ -632,7 +862,9 @@ def save_predictions(
 
         rows.append(row)
 
-    predictions_df = pd.DataFrame(rows)
+    predictions_df = pd.DataFrame(
+        rows
+    )
 
     predictions_df.to_csv(
         PREDICTIONS_FILE,
@@ -650,15 +882,17 @@ def main():
 
     device = get_device()
 
-    print("\n" + "=" * 70)
+    print()
+
+    print("=" * 70)
 
     print(
-        "SMARTTWIN - TRAFFIC LSTM TRAINING"
+        "SMARTTWIN - YOLO TRAFFIC FORECASTING"
     )
 
     print("=" * 70)
 
-    print("\nMODEL CONTRACT")
+    print("\nConfiguration:")
 
     print(
         "Features:",
@@ -666,26 +900,39 @@ def main():
     )
 
     print(
-        "Input:",
-        f"{LOOKBACK} timestep × "
-        f"{len(FEATURE_COLUMNS)} features",
+        "LOOKBACK:",
+        LOOKBACK,
+        f"({LOOKBACK * INTERVAL_SECONDS} detik)",
     )
 
     print(
-        "History:",
-        f"{LOOKBACK * INTERVAL_SECONDS} seconds",
+        "HORIZON:",
+        HORIZON,
+        f"({HORIZON * INTERVAL_SECONDS} detik)",
     )
 
     print(
-        "Output:",
-        f"{HORIZON} timestep × "
-        f"{len(FEATURE_COLUMNS)} features",
+        "TRAIN:",
+        f"{TRAIN_RATIO * 100:.0f}%",
     )
 
     print(
-        "Forecast:",
-        f"{HORIZON * INTERVAL_SECONDS} seconds",
+        "VALIDATION:",
+        f"{VAL_RATIO * 100:.0f}%",
     )
+
+    print(
+        "TEST:",
+        f"{TEST_RATIO * 100:.0f}%",
+    )
+
+    print("\nDataset:")
+
+    print(DATA_FILE)
+
+    print("\nOutput:")
+
+    print(OUTPUT_DIR)
 
     # ========================================================
     # LOAD
@@ -694,7 +941,7 @@ def main():
     raw_df = load_data()
 
     # ========================================================
-    # AGGREGATE
+    # PREPARE
     # ========================================================
 
     df = prepare_timeseries(
@@ -714,16 +961,18 @@ def main():
     if len(df) < minimum_required:
 
         raise ValueError(
-            f"Data terlalu sedikit.\n"
+            "\nData terlalu sedikit.\n"
             f"Jumlah timestep: {len(df)}\n"
-            f"Minimal: {minimum_required}"
+            f"Minimal: {minimum_required}\n"
         )
 
     # ========================================================
     # SPLIT
     # ========================================================
 
-    print("\n[3] Chronological split...")
+    print(
+        "\n[3] Chronological split..."
+    )
 
     n = len(df)
 
@@ -752,48 +1001,69 @@ def main():
 
     print(
         "Train:",
-        len(train_df)
+        len(train_df),
+        "timesteps",
     )
 
     print(
         "Validation:",
-        len(val_df)
+        len(val_df),
+        "timesteps",
     )
 
     print(
         "Test:",
-        len(test_df)
+        len(test_df),
+        "timesteps",
+    )
+
+    plot_train_val_test_split(
+        df,
+        train_end,
+        val_end,
     )
 
     # ========================================================
     # SCALER
     # ========================================================
 
-    print("\n[4] Fitting scaler...")
+    print(
+        "\n[4] Fitting scaler..."
+    )
 
     scaler = MinMaxScaler()
 
     scaler.fit(
-        train_df[FEATURE_COLUMNS]
+        train_df[
+            FEATURE_COLUMNS
+        ]
     )
 
     train_values = scaler.transform(
-        train_df[FEATURE_COLUMNS]
+        train_df[
+            FEATURE_COLUMNS
+        ]
     )
 
     val_values = scaler.transform(
-        val_df[FEATURE_COLUMNS]
+        val_df[
+            FEATURE_COLUMNS
+        ]
     )
 
     test_values = scaler.transform(
-        test_df[FEATURE_COLUMNS]
+        test_df[
+            FEATURE_COLUMNS
+        ]
     )
 
     # ========================================================
     # SEQUENCES
     # ========================================================
 
-    print("\n[5] Creating sequences...")
+    print(
+        "\n[5] Creating LSTM sequences..."
+    )
 
     X_train, y_train = create_sequences(
         train_values,
@@ -815,32 +1085,32 @@ def main():
 
     print(
         "X_train:",
-        X_train.shape
+        X_train.shape,
     )
 
     print(
         "y_train:",
-        y_train.shape
+        y_train.shape,
     )
 
     print(
         "X_val:",
-        X_val.shape
+        X_val.shape,
     )
 
     print(
         "y_val:",
-        y_val.shape
+        y_val.shape,
     )
 
     print(
         "X_test:",
-        X_test.shape
+        X_test.shape,
     )
 
     print(
         "y_test:",
-        y_test.shape
+        y_test.shape,
     )
 
     # ========================================================
@@ -904,7 +1174,7 @@ def main():
     print(model)
 
     # ========================================================
-    # OPTIMIZER
+    # LOSS
     # ========================================================
 
     criterion = nn.MSELoss()
@@ -919,6 +1189,8 @@ def main():
     # ========================================================
 
     print("\n[7] Training...")
+
+    print("=" * 70)
 
     best_val_loss = float("inf")
 
@@ -1024,7 +1296,7 @@ def main():
         )
 
         # ----------------------------------------------------
-        # BEST MODEL
+        # SAVE BEST
         # ----------------------------------------------------
 
         if val_loss < best_val_loss:
@@ -1056,7 +1328,7 @@ def main():
                     "dropout":
                         DROPOUT,
 
-                    "feature_names":
+                    "feature_columns":
                         FEATURE_COLUMNS,
 
                     "lookback":
@@ -1072,7 +1344,10 @@ def main():
 
             patience_counter += 1
 
-        if patience_counter >= PATIENCE:
+        if (
+            patience_counter
+            >= PATIENCE
+        ):
 
             print(
                 "\nEarly stopping."
@@ -1080,8 +1355,10 @@ def main():
 
             break
 
+    print("=" * 70)
+
     # ========================================================
-    # SAVE HISTORY
+    # HISTORY
     # ========================================================
 
     with open(
@@ -1096,13 +1373,22 @@ def main():
             indent=4,
         )
 
+    plot_training_validation_loss(
+        history
+    )
+
     # ========================================================
     # LOAD BEST MODEL
     # ========================================================
 
+    print(
+        "\n[8] Loading best model..."
+    )
+
     checkpoint = torch.load(
         MODEL_FILE,
         map_location=device,
+        weights_only=False,
     )
 
     model.load_state_dict(
@@ -1116,6 +1402,10 @@ def main():
     # ========================================================
     # TEST
     # ========================================================
+
+    print(
+        "\n[9] Testing..."
+    )
 
     predictions = []
 
@@ -1247,6 +1537,10 @@ def main():
 
     feature_metrics = {}
 
+    print(
+        "\nMetrics per feature:"
+    )
+
     for i, feature in enumerate(
         FEATURE_COLUMNS
     ):
@@ -1263,9 +1557,11 @@ def main():
             ].reshape(-1)
         )
 
-        feature_mae = mean_absolute_error(
-            feature_actual,
-            feature_predicted,
+        feature_mae = (
+            mean_absolute_error(
+                feature_actual,
+                feature_predicted,
+            )
         )
 
         feature_rmse = np.sqrt(
@@ -1278,25 +1574,32 @@ def main():
         feature_metrics[
             feature
         ] = {
-            "mae": float(
-                feature_mae
-            ),
-            "rmse": float(
-                feature_rmse
-            ),
+            "mae":
+                float(feature_mae),
+
+            "rmse":
+                float(feature_rmse),
         }
 
+        print(
+            f"{feature:20s} "
+            f"MAE={feature_mae:.4f} "
+            f"RMSE={feature_rmse:.4f}"
+        )
+
     # ========================================================
-    # TEST TIMESTAMP
+    # TEST TIMESTAMPS
     # ========================================================
 
-    test_timestamps = test_df[
-        "timestamp"
-    ].iloc[
-        LOOKBACK:
-        LOOKBACK + len(actuals_original)
-    ].reset_index(
-        drop=True
+    test_timestamps = (
+        test_df[
+            "timestamp"
+        ]
+        .iloc[
+            LOOKBACK:
+            LOOKBACK + len(actuals_original)
+        ]
+        .reset_index(drop=True)
     )
 
     # ========================================================
@@ -1310,11 +1613,28 @@ def main():
     )
 
     # ========================================================
+    # PLOTS
+    # ========================================================
+
+    plot_actual_vs_predicted(
+        test_timestamps,
+        actuals_original,
+        predictions_original,
+    )
+
+    plot_feature_prediction(
+        test_timestamps,
+        actuals_original,
+        predictions_original,
+    )
+
+    # ========================================================
     # SAVE SCALER
     # ========================================================
 
-    save_scaler(
-        scaler
+    joblib.dump(
+        scaler,
+        SCALER_FILE,
     )
 
     # ========================================================
@@ -1323,14 +1643,8 @@ def main():
 
     metadata = {
 
-        "model_name":
-            "SmartTwin Traffic LSTM",
-
-        "framework":
-            "PyTorch",
-
-        "export_format":
-            "ONNX",
+        "dataset":
+            str(DATA_FILE),
 
         "features":
             FEATURE_COLUMNS,
@@ -1353,6 +1667,27 @@ def main():
         "interval_seconds":
             INTERVAL_SECONDS,
 
+        "train_ratio":
+            TRAIN_RATIO,
+
+        "validation_ratio":
+            VAL_RATIO,
+
+        "test_ratio":
+            TEST_RATIO,
+
+        "batch_size":
+            BATCH_SIZE,
+
+        "epochs":
+            EPOCHS,
+
+        "learning_rate":
+            LEARNING_RATE,
+
+        "patience":
+            PATIENCE,
+
         "hidden_size":
             HIDDEN_SIZE,
 
@@ -1361,6 +1696,9 @@ def main():
 
         "dropout":
             DROPOUT,
+
+        "random_seed":
+            RANDOM_SEED,
 
         "best_val_loss":
             float(best_val_loss),
@@ -1406,62 +1744,45 @@ def main():
         )
 
     # ========================================================
-    # EXPORT ONNX
-    # ========================================================
-
-    export_onnx(
-        model,
-        device,
-    )
-
-    # ========================================================
     # FINAL
     # ========================================================
 
     print("\n" + "=" * 70)
 
-    print("TRAINING SELESAI")
+    print(
+        "TRAINING SELESAI"
+    )
 
     print("=" * 70)
 
     print(
-        "\nModel PyTorch:"
+        "\nModel:",
+        MODEL_FILE,
     )
 
     print(
-        MODEL_FILE
+        "\nScaler:",
+        SCALER_FILE,
     )
 
     print(
-        "\nModel ONNX:"
+        "\nMetadata:",
+        METADATA_FILE,
     )
 
     print(
-        ONNX_MODEL_FILE
+        "\nTraining history:",
+        HISTORY_FILE,
     )
 
     print(
-        "\nScaler:"
+        "\nPredictions:",
+        PREDICTIONS_FILE,
     )
 
     print(
-        SCALER_FILE
-    )
-
-    print(
-        "\nMetadata:"
-    )
-
-    print(
-        METADATA_FILE
-    )
-
-    print(
-        "\nPredictions:"
-    )
-
-    print(
-        PREDICTIONS_FILE
+        "\nPlots:",
+        PLOT_DIR,
     )
 
     print("=" * 70)

@@ -1,59 +1,62 @@
+from __future__ import annotations
+
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, Field
-
-from app.schemas.traffic import Approach
-
-
-class ForecastPoint(BaseModel):
-    approach: Approach
-
-    horizonMinutes: int = Field(ge=0)
-
-    predictedVolume: float = Field(ge=0)
+from pydantic import BaseModel, Field
 
 
 # ============================================================
-# LSTM LIVE FORECAST (WIP -- lihat app/services/forecast_service.py)
+# FORECAST PREDICTION
 # ============================================================
-#
-# Bentuk di bawah ini disalin persis dari cara forecast_service.py
-# mengkonstruksi objeknya (per-approach breakdown per titik prediksi).
-# CATATAN: frontend/src/types/traffic.ts punya ForecastResponse/
-# ForecastPrediction dengan bentuk BERBEDA TOTAL (flat, tanpa
-# breakdown per-approach, nama field juga beda). Belum direkonsiliasi
-# -- ini cuma menutup ImportError yang bikin seluruh backend gagal
-# start, bukan menyelesaikan desainnya.
-
-class ForecastApproach(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
-    approach: Approach
-
-    queueLengthVeh: float = Field(default=0.0, alias="queueLengthVeh", ge=0.0)
-
 
 class ForecastPrediction(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
 
-    predictionTime: datetime = Field(alias="predictionTime")
+    predictionTime: datetime
 
-    horizonSeconds: int = Field(alias="horizonSeconds", ge=0)
+    horizonSeconds: int
 
-    approaches: list[ForecastApproach]
+    totalDiZona: float = Field(
+        default=0.0,
+        ge=0,
+    )
 
+    motorDiZona: float = Field(
+        default=0.0,
+        ge=0,
+    )
+
+    mobilDiZona: float = Field(
+        default=0.0,
+        ge=0,
+    )
+
+    trukDiZona: float = Field(
+        default=0.0,
+        ge=0,
+    )
+
+    busDiZona: float = Field(
+        default=0.0,
+        ge=0,
+    )
+
+
+# ============================================================
+# FORECAST RESULT
+# ============================================================
 
 class ForecastResult(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
 
-    intersectionId: str = Field(alias="intersectionId")
+    intersectionId: str
 
-    generatedAt: datetime = Field(alias="generatedAt")
+    generatedAt: datetime
 
-    sourceWindowStart: datetime = Field(alias="sourceWindowStart")
-    sourceWindowEnd: datetime = Field(alias="sourceWindowEnd")
+    sourceWindowStart: datetime
 
-    modelName: str = Field(alias="modelName")
-    modelVersion: str = Field(alias="modelVersion")
+    sourceWindowEnd: datetime
+
+    modelName: str
+
+    modelVersion: str
 
     predictions: list[ForecastPrediction]

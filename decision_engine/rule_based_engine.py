@@ -67,7 +67,7 @@ BOBOT_KENDARAAN_BESAR = 2  # pengali skor untuk truk dan bus
 
 
 # ============================================================
-# INTERFACE
+# ABSTRAKSI ENGINE KEPUTUSAN
 # ============================================================
 
 class DecisionEngine:

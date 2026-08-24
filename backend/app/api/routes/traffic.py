@@ -48,7 +48,7 @@ traffic_service = TrafficService()
 
 
 # ============================================================
-# DIRECT CV OUTPUT -> SUPABASE
+# LIVE TRAFFIC
 # ============================================================
 
 @router.get("/live-csv")
@@ -60,38 +60,45 @@ def get_live_csv(
     """
     Mengambil traffic state terbaru dari Supabase.
 
-    Endpoint ini TIDAK bergantung pada koneksi SUMO/TraCI.
+    Flow:
 
-    Alur:
-
-        CV
-         ↓
         Supabase
-         ↓
+            ↓
         TrafficStateBuilder
-         ↓
-        /api/v1/traffic/live-csv
-         ↓
-        Frontend
+            ↓
+        BuiltTrafficState
+            ↓
+        Frontend / SUMO
 
-    SUMO boleh sedang berjalan ataupun sudah ditutup.
+    Tidak membaca CSV.
+
+    Tidak menjalankan LSTM.
+
+    Tidak membutuhkan koneksi SUMO.
     """
 
     try:
 
         # ----------------------------------------------------
-        # BUILD TRAFFIC STATE
+        # BUILDER
         # ----------------------------------------------------
 
         builder = TrafficStateBuilder(
             TrafficStateBuilderConfig(
-                windowSeconds=1,
+                windowSeconds=5,
             )
         )
 
-        states = builder.buildFromSupabase(
-            intersectionId="simpang4-pingit",
-            limit=1,
+        # ----------------------------------------------------
+        # BUILD DARI SUPABASE
+        # ----------------------------------------------------
+
+        states = (
+            builder.buildFromSupabase(
+                intersectionId="simpang4-pingit",
+                limit=1,
+                save=True,
+            )
         )
 
         # ----------------------------------------------------
@@ -105,7 +112,11 @@ def get_live_csv(
                 "data": None,
                 "timestamp": None,
                 "requestedVideoTime": video_time,
-                "message": "No traffic state data found.",
+                "source": "supabase",
+                "message": (
+                    "Belum ada traffic state "
+                    "yang memiliki trafficLaneMetrics."
+                ),
             }
 
         # ----------------------------------------------------
@@ -121,57 +132,27 @@ def get_live_csv(
                 mode="json"
             ),
 
-            "timestamp": getattr(
-                builder,
-                "last_matched_video_time",
-                None,
+            "timestamp": (
+                latest_state.windowEnd.isoformat()
             ),
 
             "requestedVideoTime": video_time,
+
+            "source": "supabase",
         }
+
+    except ValueError as exc:
+
+        raise HTTPException(
+            status_code=404,
+            detail=str(exc),
+        ) from exc
 
     except Exception as exc:
 
-        # ----------------------------------------------------
-        # IMPORTANT
-        #
-        # Jangan membuat API traffic bergantung pada SUMO.
-        #
-        # Kalau SUMO ditutup dan ada error koneksi yang
-        # ikut terlempar dari pipeline, API tetap memberi
-        # response yang aman.
-        # ----------------------------------------------------
-
-        error_message = str(exc)
-
-        if (
-            "Connection closed by SUMO"
-            in error_message
-            or "TraCI"
-            in error_message
-            or "SUMO" in error_message
-        ):
-
-            return {
-                "success": True,
-                "data": None,
-                "timestamp": None,
-                "requestedVideoTime": video_time,
-                "sumoConnected": False,
-                "message": (
-                    "SUMO tidak sedang terhubung. "
-                    "Traffic API tetap berjalan "
-                    "tanpa koneksi SUMO."
-                ),
-            }
-
-        # ----------------------------------------------------
-        # ERROR LAIN
-        # ----------------------------------------------------
-
         raise HTTPException(
             status_code=500,
-            detail=error_message,
+            detail=str(exc),
         ) from exc
 
 
@@ -185,34 +166,49 @@ def get_live_csv(
 )
 def get_latest_traffic(
     intersectionId: str,
+
     limit: int = Query(
         default=20,
         ge=1,
         le=100,
     ),
 ):
+
     """
     Mengambil traffic state terbaru
     untuk satu intersection.
 
-    Endpoint ini hanya membaca data dari
-    TrafficService -> Repository -> Supabase.
+    Endpoint ini membaca:
 
-    Tidak bergantung pada SUMO.
+        TrafficService
+            ↓
+        Repository
+            ↓
+        Supabase
     """
 
     try:
 
-        data = traffic_service.get_latest_traffic(
-            intersection_id=intersectionId,
-            limit=limit,
+        data = (
+            traffic_service
+            .get_latest_traffic(
+                intersection_id=
+                    intersectionId,
+                limit=limit,
+            )
         )
 
         return {
             "success": True,
-            "intersectionId": intersectionId,
-            "count": len(data),
-            "data": data,
+
+            "intersectionId":
+                intersectionId,
+
+            "count":
+                len(data),
+
+            "data":
+                data,
         }
 
     except TrafficServiceError as exc:
@@ -250,11 +246,6 @@ async def traffic_websocket(
 
     except Exception:
 
-        # ----------------------------------------------------
-        # Client / connection error tidak boleh membuat
-        # server crash.
-        # ----------------------------------------------------
-
         traffic_ws_manager.disconnect(
             websocket
         )
@@ -290,15 +281,22 @@ def get_traffic_state(
     intersectionId: str,
     trafficStateId: int,
 ):
+
     """
     Mengambil satu traffic state lengkap.
     """
 
     try:
 
-        data = traffic_service.get_traffic_state(
-            intersection_id=intersectionId,
-            traffic_state_id=trafficStateId,
+        data = (
+            traffic_service
+            .get_traffic_state(
+                intersection_id=
+                    intersectionId,
+
+                traffic_state_id=
+                    trafficStateId,
+            )
         )
 
         if data is None:
@@ -306,14 +304,19 @@ def get_traffic_state(
             raise HTTPException(
                 status_code=404,
                 detail=(
-                    "Traffic state tidak ditemukan."
+                    "Traffic state "
+                    "tidak ditemukan."
                 ),
             )
 
         return {
             "success": True,
-            "intersectionId": intersectionId,
-            "data": data,
+
+            "intersectionId":
+                intersectionId,
+
+            "data":
+                data,
         }
 
     except TrafficServiceError as exc:
