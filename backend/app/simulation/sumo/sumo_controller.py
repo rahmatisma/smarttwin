@@ -56,16 +56,12 @@ class SumoController:
     # dibuat, walau backend/.venv sendiri sudah punya SUMO lengkap.
     SUMO_VENV_DIR = Path(sys.prefix)
 
-    SUMO_SCRIPTS_DIR = (
-        SUMO_VENV_DIR / "Scripts"
-    )
+    SUMO_SCRIPTS_DIR = SUMO_VENV_DIR / "Scripts"
 
-    SUMO_BIN_DIR = (
-        SUMO_VENV_DIR
-        / "Lib"
-        / "site-packages"
-        / "sumo"
-        / "bin"
+    SIMULATION_VENV_DIR = SIMULATION_DIR / ".venv"
+
+    SIMULATION_SCRIPTS_DIR = (
+        SIMULATION_VENV_DIR / "Scripts"
     )
 
     NETWORK_DIR = (

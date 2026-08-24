@@ -9,31 +9,29 @@ from app.api.routes.signal import router as signal_router
 from app.api.routes.recommendation import router as recommendation_router
 from app.api.routes.simulation import router as simulation_router
 from app.api.routes.health import router as health_router
-<<<<<<< HEAD
-# from app.api.routes.forecast import router as forecast_router
-=======
+
 
 logger = logging.getLogger("uvicorn.error")
 
-# forecast_router SENGAJA dibungkus try/except -- fitur LSTM ini masih
-# aktif berkembang (dependency baru/modul baru bisa muncul kapan saja)
-# dan sudah 3x malam ini (25 Agustus 2026) bikin backend gagal start
-# TOTAL gara-gara satu import di sini rusak, mematikan endpoint
-# cctv/traffic/signal/simulation yang tidak ada hubungannya sama
-# sekali. Kalau forecast_router gagal di-import, backend tetap nyala
-# normal dengan endpoint lain -- cuma /api/forecast/* yang hilang,
-# bukan seluruh backend. Cek log start-up (baris "forecast_router
-# gagal dimuat") kalau /api/forecast/* ternyata 404.
+
+# =========================================================
+# FORECAST ROUTER
+# =========================================================
+# Forecast masih dalam pengembangan.
+# Jika import forecast gagal, backend tetap bisa berjalan
+# dengan endpoint traffic/cctv/signal/recommendation/simulation.
 try:
     from app.api.routes.forecast import router as forecast_router
 except Exception as exc:  # noqa: BLE001
     forecast_router = None
+
     logger.warning(
-        "forecast_router gagal dimuat, /api/forecast/* tidak tersedia "
+        "forecast_router gagal dimuat, "
+        "/api/forecast/* tidak tersedia "
         "(endpoint lain tetap jalan normal): %s",
         exc,
     )
->>>>>>> f35e8811ea27d7764c1b8160462c4814106ddaf1
+
 
 app = FastAPI(
     title="SmartTwin Backend",
@@ -44,7 +42,6 @@ app = FastAPI(
 # =========================================================
 # CORS
 # =========================================================
-
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -60,25 +57,20 @@ app.add_middleware(
 # =========================================================
 # ROUTERS
 # =========================================================
-
 app.include_router(traffic_router)
 app.include_router(cctv_router)
 app.include_router(signal_router)
 app.include_router(recommendation_router)
 app.include_router(simulation_router)
 app.include_router(health_router)
-<<<<<<< HEAD
-# app.include_router(forecast_router)
-=======
+
 if forecast_router is not None:
     app.include_router(forecast_router)
->>>>>>> f35e8811ea27d7764c1b8160462c4814106ddaf1
 
 
 # =========================================================
 # ROOT
 # =========================================================
-
 @app.get("/")
 async def root():
     return {
@@ -90,7 +82,6 @@ async def root():
 # =========================================================
 # SHUTDOWN
 # =========================================================
-
 @app.on_event("shutdown")
 async def shutdown_hf_client():
     await close_hf_client()
