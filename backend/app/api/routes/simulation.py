@@ -19,3 +19,12 @@ def run_simulation(request: SimulationRequest) -> SimulationResult:
 		return simulation_service.run(request)
 	except SimulationServiceError as exc:
 		raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.get("/positions")
+def get_positions():
+	try:
+		return simulation_service.get_vehicles_position()
+	except Exception as exc:
+		raise HTTPException(status_code=500, detail=str(exc)) from exc
+

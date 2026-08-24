@@ -280,6 +280,14 @@ class SumoController:
             dict[str, int],
         ] = {}
 
+        # --------------------------------------------------------
+        # ACTIVE VEHICLES POSITIONS
+        # --------------------------------------------------------
+
+        self.active_vehicles_data: list[
+            dict[str, Any]
+        ] = []
+
     # ============================================================
     # DEFAULT SUMO BINARY
     # ============================================================
@@ -1004,6 +1012,30 @@ class SumoController:
                         self.arrived_total[
                             approach
                         ] += 1
+
+                    # ==========================================
+                    # ACTIVE VEHICLES POSITIONS
+                    # ==========================================
+                    
+                    current_vehicles_data = []
+                    
+                    for vehicle_id in self.traci.vehicle.getIDList():
+                        try:
+                            x, y = self.traci.vehicle.getPosition(vehicle_id)
+                            angle = self.traci.vehicle.getAngle(vehicle_id)
+                            vclass = self.traci.vehicle.getVehicleClass(vehicle_id)
+                            
+                            current_vehicles_data.append({
+                                "id": vehicle_id,
+                                "x": x,
+                                "y": y,
+                                "angle": angle,
+                                "type": vclass,
+                            })
+                        except self.traci.TraCIException:
+                            pass
+                            
+                    self.active_vehicles_data = current_vehicles_data
 
                     # ==========================================
                     # DEBUG
