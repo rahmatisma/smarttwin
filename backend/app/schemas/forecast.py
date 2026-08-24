@@ -1,63 +1,118 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import List
 
 from pydantic import BaseModel, Field
 
 
 # ============================================================
-# FORECAST REQUEST
+# MODEL CONTRACT
 # ============================================================
 
-class ForecastRequest(BaseModel):
+FEATURES = [
+    "vehicleCount",
+    "queueLengthVeh",
+    "queueLengthMEst",
+    "densityIndex",
+]
+
+
+# ============================================================
+# APPROACH STATE
+# ============================================================
+
+class ForecastApproachState(BaseModel):
+    approach: str
+
+    vehicleCount: float = Field(default=0.0, ge=0.0)
+
+    queueLengthVeh: float = Field(default=0.0, ge=0.0)
+
+    queueLengthMEst: float = Field(default=0.0, ge=0.0)
+
+    densityIndex: float = Field(default=0.0, ge=0.0)
+
+
+# ============================================================
+# TRAFFIC STATE INPUT
+# ============================================================
+
+class TrafficStateInput(BaseModel):
     intersectionId: str
 
-    horizonMinutes: int = Field(
-        default=15,
-        ge=1,
-        le=60,
-    )
+    timestamp: datetime
+
+    approaches: List[ForecastApproachState]
 
 
 # ============================================================
-# FORECAST PREDICTION
+# AGGREGATED FORECAST INPUT
+# ============================================================
+
+class ForecastInput(BaseModel):
+    intersectionId: str
+
+    timestamp: datetime
+
+    vehicleCount: float = Field(default=0.0, ge=0.0)
+
+    queueLengthVeh: float = Field(default=0.0, ge=0.0)
+
+    queueLengthMEst: float = Field(default=0.0, ge=0.0)
+
+    densityIndex: float = Field(default=0.0, ge=0.0)
+
+
+# ============================================================
+# SINGLE FORECAST
 # ============================================================
 
 class ForecastPrediction(BaseModel):
     timestamp: datetime
 
-    predictedVehicleCount: float = Field(
-        ge=0,
-    )
+    vehicleCount: float
 
-    predictedQueueLengthVeh: float = Field(
-        ge=0,
-    )
+    queueLengthVeh: float
 
-    predictedQueueLengthMEst: float = Field(
-        ge=0,
-    )
+    queueLengthMEst: float
 
-    predictedDensityIndex: float = Field(
-        ge=0,
-        le=1,
-    )
-
-    predictedSpeedKmh: float | None = Field(
-        default=None,
-        ge=0,
-    )
+    densityIndex: float
 
 
 # ============================================================
-# FORECAST RESULT
+# FORECAST RESPONSE
 # ============================================================
 
-class ForecastResult(BaseModel):
+class ForecastResponse(BaseModel):
     intersectionId: str
 
-    horizonMinutes: int
+    generatedAt: datetime
 
-    model: str
+    historyTimestep: int
 
-    predictions: list[ForecastPrediction]
+    timestepSeconds: int
+
+    forecastHorizonSeconds: int
+
+    predictions: List[ForecastPrediction]
+
+
+# ============================================================
+# STATUS
+# ============================================================
+
+class ForecastStatusResponse(BaseModel):
+    status: str
+
+    modelLoaded: bool
+
+    device: str
+
+    inputTimestep: int
+
+    outputTimestep: int
+
+    featureCount: int
+
+    features: List[str]

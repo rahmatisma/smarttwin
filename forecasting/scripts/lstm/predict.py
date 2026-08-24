@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import argparse
 import json
-import sys
 from pathlib import Path
 from typing import Any
 
+import joblib
 import numpy as np
 import pandas as pd
 import torch
@@ -12,17 +13,8 @@ import torch.nn as nn
 
 
 # ============================================================
-# PATH
+# CONFIGURATION
 # ============================================================
-
-SCRIPT_DIR = Path(__file__).resolve().parent
-FORECASTING_ROOT = SCRIPT_DIR.parents[1]
-
-OUTPUT_DIR = FORECASTING_ROOT / "outputs" / "lstm"
-
-MODEL_PATH = OUTPUT_DIR / "traffic_lstm.pt"
-SCALER_PATH = OUTPUT_DIR / "scaler.json"
-METADATA_PATH = OUTPUT_DIR / "metadata.json"
 
 FEATURES = [
     "vehicleCount",
@@ -34,6 +26,20 @@ FEATURES = [
 INPUT_TIMESTEPS = 12
 OUTPUT_TIMESTEPS = 3
 
+HIDDEN_SIZE = 64
+NUM_LAYERS = 2
+DROPOUT = 0.2
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+OUTPUT_DIR = PROJECT_ROOT / "outputs" / "lstm"
+
+MODEL_PATH = OUTPUT_DIR / "traffic_lstm.pt"
+SCALER_PATH = OUTPUT_DIR / "scaler.json"
+METADATA_PATH = OUTPUT_DIR / "metadata.json"
+
+PREDICTION_OUTPUT = OUTPUT_DIR / "live_forecast.csv"
+
 
 # ============================================================
 # DEVICE
@@ -44,7 +50,7 @@ DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Device: {DEVICE}")
 
 if torch.cuda.is_available():
-    print(f"CUDA device: {torch.cuda.get_device_name(0)}")
+    print("CUDA tersedia. Menggunakan GPU.")
 else:
     print("CUDA tidak tersedia. Menggunakan CPU.")
 
@@ -55,13 +61,13 @@ else:
 
 class TrafficLSTM(nn.Module):
     """
-    Model LSTM untuk forecasting traffic.
+    SmartTwin Traffic Forecasting LSTM
 
     Input:
-        batch × 12 × 4
+        [batch, 12, 4]
 
     Output:
-        batch × 3 × 4
+        [batch, 3, 4]
     """
 
     def __init__(
@@ -71,7 +77,7 @@ class TrafficLSTM(nn.Module):
         num_layers: int = 2,
         output_timesteps: int = 3,
         dropout: float = 0.2,
-    ) -> None:
+    ):
         super().__init__()
 
         self.input_size = input_size
@@ -93,6 +99,7 @@ class TrafficLSTM(nn.Module):
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+
         output, _ = self.lstm(x)
 
         last_hidden = output[:, -1, :]
@@ -109,49 +116,286 @@ class TrafficLSTM(nn.Module):
 
 
 # ============================================================
-# JSON UTILITIES
+# ARGUMENTS
 # ============================================================
 
-def load_json(path: Path) -> dict[str, Any]:
-    if not path.exists():
-        raise FileNotFoundError(
-            f"File tidak ditemukan:\n{path}"
+def parse_args():
+
+    parser = argparse.ArgumentParser(
+        description="SmartTwin LSTM Traffic Forecast"
+    )
+
+    parser.add_argument(
+        "--input",
+        type=str,
+        required=True,
+        help="Path CSV dataset gabungan",
+    )
+
+    parser.add_argument(
+        "--output",
+        type=str,
+        default=None,
+        help="Path output forecast CSV",
+    )
+
+    return parser.parse_args()
+
+
+# ============================================================
+# METADATA
+# ============================================================
+
+def load_metadata() -> dict[str, Any]:
+
+    if not METADATA_PATH.exists():
+
+        print(
+            "WARNING: metadata.json tidak ditemukan."
         )
 
-    with path.open("r", encoding="utf-8") as file:
-        return json.load(file)
+        return {
+            "features": FEATURES,
+            "input_timesteps": INPUT_TIMESTEPS,
+            "output_timesteps": OUTPUT_TIMESTEPS,
+            "hidden_size": HIDDEN_SIZE,
+            "num_layers": NUM_LAYERS,
+            "dropout": DROPOUT,
+        }
+
+    try:
+
+        with open(
+            METADATA_PATH,
+            "r",
+            encoding="utf-8",
+        ) as file:
+
+            metadata = json.load(file)
+
+    except Exception as error:
+
+        print(
+            f"WARNING: gagal membaca metadata.json: {error}"
+        )
+
+        return {
+            "features": FEATURES,
+            "input_timesteps": INPUT_TIMESTEPS,
+            "output_timesteps": OUTPUT_TIMESTEPS,
+            "hidden_size": HIDDEN_SIZE,
+            "num_layers": NUM_LAYERS,
+            "dropout": DROPOUT,
+        }
+
+    if not isinstance(metadata, dict):
+
+        print(
+            "WARNING: metadata.json bukan object/dictionary."
+        )
+
+        return {
+            "features": FEATURES,
+            "input_timesteps": INPUT_TIMESTEPS,
+            "output_timesteps": OUTPUT_TIMESTEPS,
+            "hidden_size": HIDDEN_SIZE,
+            "num_layers": NUM_LAYERS,
+            "dropout": DROPOUT,
+        }
+
+    return metadata
 
 
 # ============================================================
-# LOAD MODEL
+# SCALER
 # ============================================================
 
-def load_model() -> TrafficLSTM:
+class SimpleMinMaxScaler:
+    """
+    Scaler sederhana yang kompatibel dengan scaler.json
+    """
+
+    def __init__(
+        self,
+        data_min: np.ndarray,
+        data_max: np.ndarray,
+    ):
+
+        self.data_min_ = np.asarray(
+            data_min,
+            dtype=np.float64,
+        )
+
+        self.data_max_ = np.asarray(
+            data_max,
+            dtype=np.float64,
+        )
+
+        self.scale_ = np.where(
+            self.data_max_ - self.data_min_ == 0,
+            1.0,
+            self.data_max_ - self.data_min_,
+        )
+
+    def transform(
+        self,
+        data: np.ndarray,
+    ) -> np.ndarray:
+
+        return (
+            data - self.data_min_
+        ) / self.scale_
+
+    def inverse_transform(
+        self,
+        data: np.ndarray,
+    ) -> np.ndarray:
+
+        return (
+            data * self.scale_
+        ) + self.data_min_
+
+
+def load_scaler() -> SimpleMinMaxScaler:
+
+    if not SCALER_PATH.exists():
+
+        raise FileNotFoundError(
+            f"""
+Scaler tidak ditemukan:
+
+{SCALER_PATH}
+
+Jalankan training terlebih dahulu:
+
+py scripts/lstm/train.py
+"""
+        )
+
+    with open(
+        SCALER_PATH,
+        "r",
+        encoding="utf-8",
+    ) as file:
+
+        scaler_data = json.load(file)
+
+    # --------------------------------------------------------
+    # Format scaler dari train.py
+    # --------------------------------------------------------
+
+    if isinstance(scaler_data, dict):
+
+        data_min = None
+        data_max = None
+
+        # format umum
+        if "data_min" in scaler_data:
+            data_min = scaler_data["data_min"]
+
+        elif "data_min_" in scaler_data:
+            data_min = scaler_data["data_min_"]
+
+        if "data_max" in scaler_data:
+            data_max = scaler_data["data_max"]
+
+        elif "data_max_" in scaler_data:
+            data_max = scaler_data["data_max_"]
+
+        # format nested
+        if data_min is None and "scaler" in scaler_data:
+
+            nested = scaler_data["scaler"]
+
+            if isinstance(nested, dict):
+
+                data_min = nested.get(
+                    "data_min",
+                    nested.get("data_min_"),
+                )
+
+                data_max = nested.get(
+                    "data_max",
+                    nested.get("data_max_"),
+                )
+
+        if data_min is not None and data_max is not None:
+
+            return SimpleMinMaxScaler(
+                np.asarray(data_min),
+                np.asarray(data_max),
+            )
+
+    raise ValueError(
+        f"""
+Format scaler.json tidak dikenali.
+
+File:
+
+{SCALER_PATH}
+"""
+    )
+
+
+# ============================================================
+# MODEL LOADING
+# ============================================================
+
+def load_model(
+    metadata: dict[str, Any],
+) -> TrafficLSTM:
+
     if not MODEL_PATH.exists():
+
         raise FileNotFoundError(
-            f"Model tidak ditemukan:\n{MODEL_PATH}"
+            f"""
+Model tidak ditemukan:
+
+{MODEL_PATH}
+
+Jalankan:
+
+py scripts/lstm/train.py
+"""
         )
 
-    metadata = load_json(METADATA_PATH)
+    # --------------------------------------------------------
+    # Ambil konfigurasi dengan aman
+    # --------------------------------------------------------
 
-    model_config = metadata.get("model", {})
-
-    hidden_size = int(
-        model_config.get("hidden_size", 64)
+    hidden_size = metadata.get(
+        "hidden_size",
+        HIDDEN_SIZE,
     )
 
-    num_layers = int(
-        model_config.get("num_layers", 2)
+    num_layers = metadata.get(
+        "num_layers",
+        NUM_LAYERS,
     )
 
-    dropout = float(
-        model_config.get("dropout", 0.2)
+    dropout = metadata.get(
+        "dropout",
+        DROPOUT,
     )
 
-    input_size = len(FEATURES)
+    # Pastikan bukan string
+    try:
+        hidden_size = int(hidden_size)
+    except Exception:
+        hidden_size = HIDDEN_SIZE
+
+    try:
+        num_layers = int(num_layers)
+    except Exception:
+        num_layers = NUM_LAYERS
+
+    try:
+        dropout = float(dropout)
+    except Exception:
+        dropout = DROPOUT
 
     model = TrafficLSTM(
-        input_size=input_size,
+        input_size=len(FEATURES),
         hidden_size=hidden_size,
         num_layers=num_layers,
         output_timesteps=OUTPUT_TIMESTEPS,
@@ -161,400 +405,200 @@ def load_model() -> TrafficLSTM:
     checkpoint = torch.load(
         MODEL_PATH,
         map_location=DEVICE,
+        weights_only=False,
     )
 
     # --------------------------------------------------------
-    # Support beberapa format penyimpanan model
+    # Handle berbagai format checkpoint
     # --------------------------------------------------------
 
     if isinstance(checkpoint, dict):
 
         if "model_state_dict" in checkpoint:
-            state_dict = checkpoint["model_state_dict"]
+
+            state_dict = checkpoint[
+                "model_state_dict"
+            ]
 
         elif "state_dict" in checkpoint:
-            state_dict = checkpoint["state_dict"]
+
+            state_dict = checkpoint[
+                "state_dict"
+            ]
 
         else:
+
+            # Bisa jadi checkpoint langsung state_dict
             state_dict = checkpoint
 
     else:
+
         state_dict = checkpoint
 
-    model.load_state_dict(state_dict)
+    model.load_state_dict(
+        state_dict,
+        strict=True,
+    )
 
     model.to(DEVICE)
+
     model.eval()
 
     print()
-    print("Model berhasil dimuat.")
-    print(f"Model : {MODEL_PATH}")
-    print(f"Device: {DEVICE}")
+    print("Model berhasil dimuat:")
+    print(f"  Path       : {MODEL_PATH}")
+    print(f"  Hidden     : {hidden_size}")
+    print(f"  Layers     : {num_layers}")
+    print(f"  Dropout    : {dropout}")
 
     return model
 
 
 # ============================================================
-# SCALER
+# INPUT CSV
 # ============================================================
 
-class FeatureScaler:
-    """
-    Scaler kompatibel dengan scaler.json hasil training.
+def load_input_csv(
+    input_path: str,
+) -> pd.DataFrame:
 
-    Mendukung:
-    - StandardScaler-style
-    - MinMaxScaler-style
-    """
+    path = Path(input_path)
 
-    def __init__(
-        self,
-        scaler_data: dict[str, Any],
-    ) -> None:
+    if not path.is_absolute():
 
-        self.data = scaler_data
+        path = PROJECT_ROOT / path
 
-        self.scaler_type = (
-            scaler_data.get("type")
-            or scaler_data.get("scaler_type")
-            or scaler_data.get("name")
-            or "standard"
-        ).lower()
+    path = path.resolve()
 
-        # ----------------------------------------------------
-        # Format per-feature
-        # ----------------------------------------------------
+    if not path.exists():
 
-        self.feature_data = scaler_data.get(
-            "features",
-            {}
+        raise FileNotFoundError(
+            f"""
+File input tidak ditemukan:
+
+{path}
+
+Contoh penggunaan:
+
+py scripts/lstm/predict.py --input "outputs/lstm/data_gabungan.csv"
+"""
         )
 
-        # ----------------------------------------------------
-        # Format sklearn-like
-        # ----------------------------------------------------
-
-        self.mean = np.asarray(
-            scaler_data.get("mean", []),
-            dtype=np.float32,
-        )
-
-        self.scale = np.asarray(
-            scaler_data.get("scale", []),
-            dtype=np.float32,
-        )
-
-        self.min_value = np.asarray(
-            scaler_data.get("min", []),
-            dtype=np.float32,
-        )
-
-        self.data_min = np.asarray(
-            scaler_data.get("data_min", []),
-            dtype=np.float32,
-        )
-
-        self.data_max = np.asarray(
-            scaler_data.get("data_max", []),
-            dtype=np.float32,
-        )
-
-        self.feature_names = scaler_data.get(
-            "feature_names",
-            FEATURES,
-        )
-
-    def _feature_arrays(self) -> tuple[np.ndarray, np.ndarray]:
-        """
-        Mengambil parameter scaler untuk setiap fitur.
-        """
-
-        # ====================================================
-        # FORMAT:
-        #
-        # {
-        #   "features": {
-        #       "vehicleCount": {
-        #           "mean": ...,
-        #           "scale": ...
-        #       }
-        #   }
-        # }
-        # ====================================================
-
-        if self.feature_data:
-
-            first_feature = next(
-                iter(self.feature_data.values())
-            )
-
-            if isinstance(first_feature, dict):
-
-                if (
-                    "mean" in first_feature
-                    and "scale" in first_feature
-                ):
-                    means = []
-                    scales = []
-
-                    for feature in FEATURES:
-
-                        info = self.feature_data[feature]
-
-                        means.append(
-                            float(info["mean"])
-                        )
-
-                        scales.append(
-                            float(info["scale"])
-                        )
-
-                    return (
-                        np.asarray(
-                            means,
-                            dtype=np.float32,
-                        ),
-                        np.asarray(
-                            scales,
-                            dtype=np.float32,
-                        ),
-                    )
-
-                if (
-                    "data_min" in first_feature
-                    and "data_max" in first_feature
-                ):
-                    mins = []
-                    maxs = []
-
-                    for feature in FEATURES:
-
-                        info = self.feature_data[feature]
-
-                        mins.append(
-                            float(info["data_min"])
-                        )
-
-                        maxs.append(
-                            float(info["data_max"])
-                        )
-
-                    return (
-                        np.asarray(
-                            mins,
-                            dtype=np.float32,
-                        ),
-                        np.asarray(
-                            maxs,
-                            dtype=np.float32,
-                        ),
-                    )
-
-        # ====================================================
-        # FORMAT SKLEARN STANDARD SCALER
-        # ====================================================
-
-        if (
-            self.mean.size == len(FEATURES)
-            and self.scale.size == len(FEATURES)
-        ):
-            return self.mean, self.scale
-
-        # ====================================================
-        # FORMAT SKLEARN MINMAX
-        # ====================================================
-
-        if (
-            self.data_min.size == len(FEATURES)
-            and self.data_max.size == len(FEATURES)
-        ):
-            return self.data_min, self.data_max
-
-        raise ValueError(
-            "Format scaler.json tidak dikenali.\n"
-            f"Isi scaler.json:\n{self.data}"
-        )
-
-    def transform(
-        self,
-        values: np.ndarray,
-    ) -> np.ndarray:
-
-        values = np.asarray(
-            values,
-            dtype=np.float32,
-        )
-
-        if values.ndim == 1:
-            values = values.reshape(1, -1)
-
-        # ----------------------------------------------------
-        # StandardScaler
-        # ----------------------------------------------------
-
-        if self.scaler_type in {
-            "standard",
-            "standardscaler",
-        }:
-
-            mean, scale = self._feature_arrays()
-
-            return (values - mean) / scale
-
-        # ----------------------------------------------------
-        # MinMaxScaler
-        # ----------------------------------------------------
-
-        if self.scaler_type in {
-            "minmax",
-            "minmaxscaler",
-        }:
-
-            data_min, data_max = self._feature_arrays()
-
-            denominator = data_max - data_min
-
-            denominator = np.where(
-                denominator == 0,
-                1.0,
-                denominator,
-            )
-
-            return (
-                (values - data_min)
-                / denominator
-            )
-
-        raise ValueError(
-            f"Scaler type tidak didukung: "
-            f"{self.scaler_type}"
-        )
-
-    def inverse_transform(
-        self,
-        values: np.ndarray,
-    ) -> np.ndarray:
-
-        values = np.asarray(
-            values,
-            dtype=np.float32,
-        )
-
-        original_shape = values.shape
-
-        if values.ndim == 3:
-
-            batch, timesteps, features = values.shape
-
-            flat = values.reshape(
-                -1,
-                features,
-            )
-
-            restored = self._inverse_2d(flat)
-
-            return restored.reshape(
-                original_shape
-            )
-
-        if values.ndim == 2:
-
-            return self._inverse_2d(values)
-
-        if values.ndim == 1:
-
-            return self._inverse_2d(
-                values.reshape(1, -1)
-            ).reshape(-1)
-
-        raise ValueError(
-            "Dimensi data tidak didukung."
-        )
-
-    def _inverse_2d(
-        self,
-        values: np.ndarray,
-    ) -> np.ndarray:
-
-        if self.scaler_type in {
-            "standard",
-            "standardscaler",
-        }:
-
-            mean, scale = self._feature_arrays()
-
-            return (
-                values * scale
-                + mean
-            )
-
-        if self.scaler_type in {
-            "minmax",
-            "minmaxscaler",
-        }:
-
-            data_min, data_max = self._feature_arrays()
-
-            return (
-                values
-                * (data_max - data_min)
-                + data_min
-            )
-
-        raise ValueError(
-            f"Scaler type tidak didukung: "
-            f"{self.scaler_type}"
-        )
-
-
-# ============================================================
-# LOAD SCALER
-# ============================================================
-
-def load_scaler() -> FeatureScaler:
-
-    scaler_data = load_json(
-        SCALER_PATH
-    )
-
-    scaler = FeatureScaler(
-        scaler_data
-    )
+    dataframe = pd.read_csv(path)
 
     print()
-    print("Scaler berhasil dimuat.")
-    print(f"Scaler: {SCALER_PATH}")
+    print(f"Input file : {path}")
+    print(f"Jumlah row : {len(dataframe)}")
 
-    return scaler
+    # --------------------------------------------------------
+    # Timestamp
+    # --------------------------------------------------------
+
+    if "timestamp" not in dataframe.columns:
+
+        raise ValueError(
+            "CSV wajib mempunyai kolom timestamp."
+        )
+
+    dataframe["timestamp"] = pd.to_datetime(
+        dataframe["timestamp"],
+        errors="coerce",
+    )
+
+    dataframe = dataframe.dropna(
+        subset=["timestamp"]
+    )
+
+    # --------------------------------------------------------
+    # Features
+    # --------------------------------------------------------
+
+    missing_features = [
+        feature
+        for feature in FEATURES
+        if feature not in dataframe.columns
+    ]
+
+    if missing_features:
+
+        raise ValueError(
+            "Feature berikut tidak ditemukan:\n"
+            + "\n".join(
+                f"  - {feature}"
+                for feature in missing_features
+            )
+        )
+
+    # --------------------------------------------------------
+    # Numeric conversion
+    # --------------------------------------------------------
+
+    for feature in FEATURES:
+
+        dataframe[feature] = pd.to_numeric(
+            dataframe[feature],
+            errors="coerce",
+        )
+
+    dataframe = dataframe.dropna(
+        subset=FEATURES
+    )
+
+    dataframe = dataframe.sort_values(
+        "timestamp"
+    ).reset_index(drop=True)
+
+    return dataframe
 
 
 # ============================================================
-# VALIDATE INPUT
+# INPUT VALIDATION
 # ============================================================
 
 def validate_input(
     dataframe: pd.DataFrame,
 ) -> None:
 
-    missing = [
-        feature
-        for feature in FEATURES
-        if feature not in dataframe.columns
-    ]
-
-    if missing:
-        raise ValueError(
-            "Feature input tidak lengkap.\n"
-            f"Feature yang hilang: {missing}"
-        )
-
     if len(dataframe) < INPUT_TIMESTEPS:
+
         raise ValueError(
-            f"Data input hanya memiliki "
-            f"{len(dataframe)} timestep.\n"
-            f"Minimal diperlukan "
-            f"{INPUT_TIMESTEPS} timestep."
+            f"""
+Data tidak cukup.
+
+Dibutuhkan minimal:
+{INPUT_TIMESTEPS} timestep
+
+Tersedia:
+{len(dataframe)} timestep
+"""
         )
+
+    print()
+    print("Validasi input:")
+
+    print(
+        f"  timestamp : {dataframe['timestamp'].min()}"
+    )
+
+    print(
+        f"  sampai    : {dataframe['timestamp'].max()}"
+    )
+
+    print(
+        f"  timestep  : {len(dataframe)}"
+    )
+
+    print()
+
+    print("Fitur terakhir:")
+
+    print(
+        dataframe[
+            ["timestamp"] + FEATURES
+        ].tail(INPUT_TIMESTEPS).to_string(
+            index=False
+        )
+    )
 
 
 # ============================================================
@@ -563,222 +607,183 @@ def validate_input(
 
 def prepare_input(
     dataframe: pd.DataFrame,
-    scaler: FeatureScaler,
+    scaler: SimpleMinMaxScaler,
 ) -> np.ndarray:
 
-    validate_input(dataframe)
-
-    latest = dataframe[
+    # Ambil 12 timestep terakhir
+    recent = dataframe[
         FEATURES
-    ].tail(INPUT_TIMESTEPS).copy()
+    ].tail(INPUT_TIMESTEPS)
 
-    latest = latest.astype(
-        np.float32
+    values = recent.to_numpy(
+        dtype=np.float32
     )
 
-    values = latest.values
-
+    # Scaling
     scaled = scaler.transform(
         values
     )
 
-    x = scaled.reshape(
-        1,
-        INPUT_TIMESTEPS,
-        len(FEATURES),
+    scaled = scaled.astype(
+        np.float32
     )
 
-    return x
-
-
-# ============================================================
-# FORECAST
-# ============================================================
-
-@torch.no_grad()
-def forecast(
-    model: TrafficLSTM,
-    input_data: np.ndarray,
-    scaler: FeatureScaler,
-) -> np.ndarray:
-
+    # [1, 12, 4]
     tensor = torch.tensor(
-        input_data,
+        scaled,
         dtype=torch.float32,
         device=DEVICE,
+    ).unsqueeze(0)
+
+    print()
+    print("Input tensor:")
+    print(f"  Shape: {tuple(tensor.shape)}")
+
+    return tensor
+
+
+# ============================================================
+# PREDICTION
+# ============================================================
+
+def run_prediction(
+    dataframe: pd.DataFrame,
+    model: TrafficLSTM,
+    scaler: SimpleMinMaxScaler,
+) -> pd.DataFrame:
+
+    input_tensor = prepare_input(
+        dataframe,
+        scaler,
     )
 
-    prediction_scaled = model(
-        tensor
-    )
+    with torch.no_grad():
+
+        prediction_scaled = model(
+            input_tensor
+        )
 
     prediction_scaled = (
         prediction_scaled
-        .detach()
+        .squeeze(0)
         .cpu()
         .numpy()
     )
 
-    prediction = (
-        scaler.inverse_transform(
-            prediction_scaled
-        )
-    )
+    # [3, 4]
 
-    return prediction[0]
-
-
-# ============================================================
-# CLEAN PREDICTION
-# ============================================================
-
-def clean_predictions(
-    predictions: np.ndarray,
-) -> np.ndarray:
-
-    predictions = np.asarray(
-        predictions,
-        dtype=np.float32,
+    prediction = scaler.inverse_transform(
+        prediction_scaled
     )
 
     # --------------------------------------------------------
-    # Nilai tidak boleh negatif
+    # Safety constraints
     # --------------------------------------------------------
 
-    predictions[:, 0] = np.maximum(
-        predictions[:, 0],
+    # vehicle count tidak boleh negatif
+    prediction[:, 0] = np.maximum(
+        prediction[:, 0],
         0,
     )
 
-    predictions[:, 1] = np.maximum(
-        predictions[:, 1],
+    # queue kendaraan tidak boleh negatif
+    prediction[:, 1] = np.maximum(
+        prediction[:, 1],
         0,
     )
 
-    predictions[:, 2] = np.maximum(
-        predictions[:, 2],
+    # queue meter tidak boleh negatif
+    prediction[:, 2] = np.maximum(
+        prediction[:, 2],
         0,
     )
 
-    predictions[:, 3] = np.clip(
-        predictions[:, 3],
+    # density 0..1
+    prediction[:, 3] = np.clip(
+        prediction[:, 3],
         0,
         1,
     )
 
-    return predictions
-
-
-# ============================================================
-# FORMAT RESULT
-# ============================================================
-
-def create_prediction_dataframe(
-    predictions: np.ndarray,
-    last_timestamp: pd.Timestamp | None = None,
-) -> pd.DataFrame:
-
     # --------------------------------------------------------
-    # Horizon
+    # Forecast timestamps
     # --------------------------------------------------------
 
-    horizons = [
-        5,
-        10,
-        15,
+    last_timestamp = dataframe[
+        "timestamp"
+    ].iloc[-1]
+
+    timestamps = [
+        last_timestamp
+        + pd.Timedelta(
+            seconds=5 * (index + 1)
+        )
+        for index in range(
+            OUTPUT_TIMESTEPS
+        )
     ]
 
-    rows = []
+    result = pd.DataFrame(
+        prediction,
+        columns=FEATURES,
+    )
 
-    for index, horizon in enumerate(horizons):
+    result.insert(
+        0,
+        "timestamp",
+        timestamps,
+    )
 
-        row = {
-            "horizonSeconds": horizon,
-
-            "vehicleCount": float(
-                predictions[index, 0]
-            ),
-
-            "queueLengthVeh": float(
-                predictions[index, 1]
-            ),
-
-            "queueLengthMEst": float(
-                predictions[index, 2]
-            ),
-
-            "densityIndex": float(
-                predictions[index, 3]
-            ),
-        }
-
-        if last_timestamp is not None:
-
-            row["forecastTimestamp"] = (
-                last_timestamp
-                + pd.Timedelta(
-                    seconds=horizon
-                )
-            )
-
-        rows.append(row)
-
-    return pd.DataFrame(rows)
+    return result
 
 
 # ============================================================
 # PRINT RESULT
 # ============================================================
 
-def print_predictions(
-    dataframe: pd.DataFrame,
+def print_forecast(
+    result: pd.DataFrame,
 ) -> None:
 
     print()
-    print("=" * 70)
-    print("HASIL FORECAST LSTM")
-    print("=" * 70)
+    print(
+        "=" * 70
+    )
 
-    for _, row in dataframe.iterrows():
+    print(
+        "FORECAST 15 DETIK KE DEPAN"
+    )
 
-        horizon = int(
-            row["horizonSeconds"]
-        )
-
-        print()
-        print(
-            f"Prediksi +{horizon} detik"
-        )
-
-        if "forecastTimestamp" in row:
-
-            print(
-                "Timestamp : "
-                f"{row['forecastTimestamp']}"
-            )
-
-        print(
-            "vehicleCount      : "
-            f"{row['vehicleCount']:.2f}"
-        )
-
-        print(
-            "queueLengthVeh    : "
-            f"{row['queueLengthVeh']:.2f}"
-        )
-
-        print(
-            "queueLengthMEst   : "
-            f"{row['queueLengthMEst']:.2f}"
-        )
-
-        print(
-            "densityIndex      : "
-            f"{row['densityIndex']:.4f}"
-        )
+    print(
+        "=" * 70
+    )
 
     print()
-    print("=" * 70)
+
+    print(
+        result.to_string(
+            index=False,
+            float_format=lambda value: (
+                f"{value:.4f}"
+            ),
+        )
+    )
+
+    print()
+
+    print(
+        "Forecast timestep:"
+    )
+
+    for index, row in result.iterrows():
+
+        print(
+            f"  +{(index + 1) * 5:02d} detik"
+            f" | vehicle={row['vehicleCount']:.2f}"
+            f" | queueVeh={row['queueLengthVeh']:.2f}"
+            f" | queueM={row['queueLengthMEst']:.2f}"
+            f" | density={row['densityIndex']:.4f}"
+        )
 
 
 # ============================================================
@@ -786,134 +791,179 @@ def print_predictions(
 # ============================================================
 
 def save_prediction(
-    dataframe: pd.DataFrame,
-    output_path: Path,
-) -> None:
+    result: pd.DataFrame,
+    output_path: str | None,
+) -> Path:
 
-    output_path.parent.mkdir(
+    if output_path is None:
+
+        path = PREDICTION_OUTPUT
+
+    else:
+
+        path = Path(output_path)
+
+        if not path.is_absolute():
+
+            path = PROJECT_ROOT / path
+
+        path = path.resolve()
+
+    path.parent.mkdir(
         parents=True,
         exist_ok=True,
     )
 
-    dataframe.to_csv(
-        output_path,
+    result.to_csv(
+        path,
         index=False,
     )
 
+    print()
     print(
-        f"Prediction disimpan ke:\n"
-        f"{output_path}"
+        f"Prediction saved:"
     )
 
-
-# ============================================================
-# LOAD INPUT CSV
-# ============================================================
-
-def load_input_csv(
-    path: Path,
-) -> pd.DataFrame:
-
-    if not path.exists():
-
-        raise FileNotFoundError(
-            f"File input tidak ditemukan:\n"
-            f"{path}"
-        )
-
-    dataframe = pd.read_csv(
+    print(
         path
     )
 
-    if "timestamp" in dataframe.columns:
+    return path
 
-        dataframe["timestamp"] = (
-            pd.to_datetime(
-                dataframe["timestamp"],
-                errors="coerce",
-            )
-        )
 
-        dataframe = dataframe.sort_values(
-            "timestamp"
-        )
+# ============================================================
+# JSON RESULT
+# ============================================================
 
-    dataframe = dataframe.reset_index(
-        drop=True
+def save_json_result(
+    result: pd.DataFrame,
+) -> Path:
+
+    path = OUTPUT_DIR / "latest_forecast.json"
+
+    path.parent.mkdir(
+        parents=True,
+        exist_ok=True,
     )
 
-    return dataframe
+    payload = {
+        "model": "traffic_lstm",
+        "input_timesteps": INPUT_TIMESTEPS,
+        "output_timesteps": OUTPUT_TIMESTEPS,
+        "forecast_seconds": 15,
+        "features": FEATURES,
+        "predictions": [],
+    }
 
+    for _, row in result.iterrows():
 
-# ============================================================
-# DEMO INPUT DARI PREDICTIONS / DATASET
-# ============================================================
+        payload["predictions"].append(
+            {
+                "timestamp": row[
+                    "timestamp"
+                ].isoformat(),
 
-def create_demo_input_from_training_data() -> pd.DataFrame:
-    """
-    Fungsi demo.
+                "vehicleCount": float(
+                    row["vehicleCount"]
+                ),
 
-    Membaca dataset gabungan jika tersedia.
+                "queueLengthVeh": float(
+                    row["queueLengthVeh"]
+                ),
 
-    Prioritas:
-        outputs/lstm/merged_training_data.csv
+                "queueLengthMEst": float(
+                    row["queueLengthMEst"]
+                ),
 
-    Kalau file tersebut belum ada, fungsi mencoba
-    beberapa lokasi dataset umum.
-    """
+                "densityIndex": float(
+                    row["densityIndex"]
+                ),
+            }
+        )
 
-    candidates = [
+    with open(
+        path,
+        "w",
+        encoding="utf-8",
+    ) as file:
 
-        FORECASTING_ROOT
-        / "data"
-        / "merged_training_data.csv",
+        json.dump(
+            payload,
+            file,
+            indent=2,
+        )
 
-        FORECASTING_ROOT
-        / "data"
-        / "traffic_training.csv",
-
-        FORECASTING_ROOT
-        / "datasets"
-        / "merged_training_data.csv",
-
-        FORECASTING_ROOT
-        / "outputs"
-        / "lstm"
-        / "merged_training_data.csv",
-    ]
-
-    for path in candidates:
-
-        if path.exists():
-
-            print()
-            print(
-                "Input dataset ditemukan:"
-            )
-            print(path)
-
-            return load_input_csv(
-                path
-            )
-
-    raise FileNotFoundError(
-        "\nTidak menemukan dataset input demo.\n\n"
-        "Gunakan mode file CSV:\n"
-        "python scripts/lstm/predict.py "
-        "--input path/to/data.csv\n"
+    print(
+        f"JSON forecast saved:"
     )
 
+    print(
+        path
+    )
+
+    return path
+
 
 # ============================================================
-# MAIN PREDICTION
+# MAIN
 # ============================================================
 
-def run_prediction(
-    dataframe: pd.DataFrame,
-    output_path: Path | None = None,
-) -> pd.DataFrame:
+def main():
+
+    args = parse_args()
 
     print()
+    print(
+        "=" * 70
+    )
+
+    print(
+        "SMARTTWIN - LSTM TRAFFIC FORECAST"
+    )
+
+    print(
+        "=" * 70
+    )
+
+    print()
+    print("MODEL CONTRACT")
+    print(
+        "Input : "
+        f"{INPUT_TIMESTEPS} timestep × "
+        f"{len(FEATURES)} fitur"
+    )
+
+    print(
+        "Output: "
+        f"{OUTPUT_TIMESTEPS} timestep × "
+        f"{len(FEATURES)} fitur"
+    )
+
+    print()
+    print("Features:")
+
+    for feature in FEATURES:
+
+        print(
+            f"  - {feature}"
+        )
+
+    # --------------------------------------------------------
+    # Metadata
+    # --------------------------------------------------------
+
+    metadata = load_metadata()
+
+    # --------------------------------------------------------
+    # Input
+    # --------------------------------------------------------
+
+    dataframe = load_input_csv(
+        args.input
+    )
+
+    print()
+
     print(
         f"Jumlah timestep input: "
         f"{len(dataframe)}"
@@ -925,83 +975,56 @@ def run_prediction(
     )
 
     # --------------------------------------------------------
-    # Load model
+    # Validation
     # --------------------------------------------------------
 
-    model = load_model()
+    validate_input(
+        dataframe
+    )
 
     # --------------------------------------------------------
-    # Load scaler
+    # Scaler
     # --------------------------------------------------------
 
     scaler = load_scaler()
 
+    print()
+    print(
+        "Scaler berhasil dimuat:"
+    )
+
+    print(
+        f"  {SCALER_PATH}"
+    )
+
     # --------------------------------------------------------
-    # Prepare input
+    # Model
     # --------------------------------------------------------
 
-    input_data = prepare_input(
-        dataframe,
-        scaler,
+    model = load_model(
+        metadata
     )
+
+    # --------------------------------------------------------
+    # Prediction
+    # --------------------------------------------------------
 
     print()
     print(
-        "Shape input model:",
-        input_data.shape,
+        "[1] Running prediction..."
     )
 
-    # --------------------------------------------------------
-    # Forecast
-    # --------------------------------------------------------
-
-    predictions = forecast(
+    result = run_prediction(
+        dataframe=dataframe,
         model=model,
-        input_data=input_data,
         scaler=scaler,
     )
 
     # --------------------------------------------------------
-    # Clean
+    # Result
     # --------------------------------------------------------
 
-    predictions = clean_predictions(
-        predictions
-    )
-
-    # --------------------------------------------------------
-    # Timestamp terakhir
-    # --------------------------------------------------------
-
-    last_timestamp = None
-
-    if "timestamp" in dataframe.columns:
-
-        valid_timestamp = (
-            dataframe["timestamp"]
-            .dropna()
-        )
-
-        if not valid_timestamp.empty:
-
-            last_timestamp = (
-                valid_timestamp.iloc[-1]
-            )
-
-    # --------------------------------------------------------
-    # Create result
-    # --------------------------------------------------------
-
-    result = create_prediction_dataframe(
-        predictions=predictions,
-        last_timestamp=last_timestamp,
-    )
-
-    # --------------------------------------------------------
-    # Print
-    # --------------------------------------------------------
-
-    print_predictions(
+    print_forecast(
         result
     )
 
@@ -1009,205 +1032,51 @@ def run_prediction(
     # Save
     # --------------------------------------------------------
 
-    if output_path is not None:
-
-        save_prediction(
-            dataframe=result,
-            output_path=output_path,
-        )
-
-    return result
-
-
-# ============================================================
-# CLI
-# ============================================================
-
-def parse_arguments() -> tuple[Path | None, Path | None]:
-
-    input_path = None
-    output_path = (
-        OUTPUT_DIR
-        / "latest_forecast.csv"
+    save_prediction(
+        result,
+        args.output,
     )
 
-    args = sys.argv[1:]
+    save_json_result(
+        result
+    )
 
-    index = 0
-
-    while index < len(args):
-
-        argument = args[index]
-
-        if argument == "--input":
-
-            if index + 1 >= len(args):
-
-                raise ValueError(
-                    "--input membutuhkan path CSV."
-                )
-
-            input_path = Path(
-                args[index + 1]
-            ).resolve()
-
-            index += 2
-            continue
-
-        if argument == "--output":
-
-            if index + 1 >= len(args):
-
-                raise ValueError(
-                    "--output membutuhkan path."
-                )
-
-            output_path = Path(
-                args[index + 1]
-            ).resolve()
-
-            index += 2
-            continue
-
-        if argument in {
-            "--help",
-            "-h",
-        }:
-
-            print(
-                """
-SMARTTWIN LSTM PREDICTION
-
-Penggunaan:
-
-python scripts/lstm/predict.py --input data.csv
-
-Atau:
-
-python scripts/lstm/predict.py ^
-    --input data.csv ^
-    --output outputs/lstm/latest_forecast.csv
-
-CSV harus memiliki kolom:
-
-timestamp
-vehicleCount
-queueLengthVeh
-queueLengthMEst
-densityIndex
-
-Minimal 12 timestep.
-"""
-            )
-
-            raise SystemExit(0)
-
-        raise ValueError(
-            f"Argument tidak dikenal: {argument}"
-        )
-
-    return input_path, output_path
-
-
-# ============================================================
-# MAIN
-# ============================================================
-
-def main() -> None:
+    # --------------------------------------------------------
+    # Finish
+    # --------------------------------------------------------
 
     print()
-    print("=" * 70)
-    print("SMARTTWIN - LSTM TRAFFIC FORECAST")
-    print("=" * 70)
-
-    print()
-    print("MODEL CONTRACT")
     print(
-        f"Input : "
-        f"{INPUT_TIMESTEPS} timestep × "
-        f"{len(FEATURES)} fitur"
+        "=" * 70
     )
 
     print(
-        f"Output: "
-        f"{OUTPUT_TIMESTEPS} timestep × "
-        f"{len(FEATURES)} fitur"
+        "FORECAST SELESAI"
+    )
+
+    print(
+        "=" * 70
     )
 
     print()
     print(
-        "Features:"
+        "Output CSV:"
     )
 
-    for feature in FEATURES:
-
-        print(
-            f"  - {feature}"
-        )
-
-    # --------------------------------------------------------
-    # Parse CLI
-    # --------------------------------------------------------
-
-    input_path, output_path = (
-        parse_arguments()
-    )
-
-    # --------------------------------------------------------
-    # Input
-    # --------------------------------------------------------
-
-    if input_path is not None:
-
-        dataframe = load_input_csv(
-            input_path
-        )
-
-    else:
-
-        dataframe = (
-            create_demo_input_from_training_data()
-        )
-
-    # --------------------------------------------------------
-    # Prediction
-    # --------------------------------------------------------
-
-    result = run_prediction(
-        dataframe=dataframe,
-        output_path=output_path,
-    )
-
-    # --------------------------------------------------------
-    # Final
-    # --------------------------------------------------------
-
-    print()
-    print("=" * 70)
-    print("PREDICTION SELESAI")
-    print("=" * 70)
-
-    print()
     print(
-        f"Output:\n{output_path}"
+        PREDICTION_OUTPUT
     )
 
     print()
     print(
-        "Forecast horizon:"
+        "Output JSON:"
     )
 
     print(
-        "  +5 detik"
+        OUTPUT_DIR / "latest_forecast.json"
     )
 
-    print(
-        "  +10 detik"
-    )
-
-    print(
-        "  +15 detik"
-    )
+    print()
 
 
 if __name__ == "__main__":
