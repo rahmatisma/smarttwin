@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import random
+import sys
 import threading
 import time
 import logging
@@ -44,9 +45,16 @@ class SumoController:
 
     SIMULATION_DIR = PROJECT_ROOT / "simulation"
 
-    SUMO_VENV_DIR = (
-        SIMULATION_DIR / ".venv"
-    )
+    # SENGAJA pakai sys.prefix (root venv Python yang lagi jalan),
+    # BUKAN simulation/.venv -- backend/requirements.txt sudah
+    # mendeklarasikan traci/sumolib/eclipse-sumo sebagai dependency
+    # backend sendiri (dipasang 25 Agustus 2026), dan simulation/.venv
+    # tidak selalu ada di tiap mesin dev (CLAUDE.md: venv itu dibuat
+    # terpisah, khusus buat script simulation/, bukan backend). Hardcode
+    # ke simulation/.venv sebelumnya bikin SumoController gagal cari
+    # binary SUMO di mesin mana pun yang venv simulation/-nya belum
+    # dibuat, walau backend/.venv sendiri sudah punya SUMO lengkap.
+    SUMO_VENV_DIR = Path(sys.prefix)
 
     SUMO_SCRIPTS_DIR = (
         SUMO_VENV_DIR / "Scripts"

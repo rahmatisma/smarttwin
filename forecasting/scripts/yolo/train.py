@@ -3,97 +3,199 @@ from __future__ import annotations
 import json
 import random
 from pathlib import Path
+from typing import Dict, List, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import torch
 import torch.nn as nn
+
 from sklearn.metrics import mean_absolute_error, mean_squared_error
 from sklearn.preprocessing import MinMaxScaler
+
 from torch.optim import Adam
-from torch.utils.data import DataLoader, Dataset
+from torch.utils.data import Dataset, DataLoader
 
 
 # ============================================================
 # PATH
 # ============================================================
-#
+
 # smarttwin/
 #
-# ├── forecasting/
-# │   ├── data/
-# │   │   └── percobaan_logic_simpang.csv
-# │   │
-# │   ├── scripts/
-# │   │   └── yolo/
-# │   │       └── train.py
-# │   │
-# │   └── outputs/
-# │       └── yolo/
+# forecasting/
+# ├── data/
+# │   └── percobaan_logic_simpang.csv
 # │
-# └── backend/
-#     └── app/
+# ├── scripts/
+# │   └── yolo/
+# │       └── train.py
+# │
+# └── outputs/
+#     └── yolo/
 #
+# backend/
+# └── app/
 
 baseDir = Path(__file__).resolve().parents[2]
 
 dataDir = baseDir / "data"
+
 outputDir = baseDir / "outputs" / "yolo"
+
 plotDir = outputDir / "plots"
 
-dataFile = dataDir / "percobaan_logic_simpang.csv"
+dataFile = (
+    dataDir
+    / "percobaan_logic_simpang.csv"
+)
 
-modelFile = outputDir / "traffic_lstm.pt"
-onnxModelFile = outputDir / "traffic_lstm.onnx"
-scalerFile = outputDir / "scaler.json"
-metadataFile = outputDir / "metadata.json"
-historyFile = outputDir / "training_history.json"
-predictionsFile = outputDir / "predictions.csv"
+modelFile = (
+    outputDir
+    / "traffic_lstm.pt"
+)
 
-outputDir.mkdir(parents=True, exist_ok=True)
-plotDir.mkdir(parents=True, exist_ok=True)
+onnxModelFile = (
+    outputDir
+    / "traffic_lstm.onnx"
+)
+
+scalerFile = (
+    outputDir
+    / "scaler.json"
+)
+
+metadataFile = (
+    outputDir
+    / "metadata.json"
+)
+
+historyFile = (
+    outputDir
+    / "training_history.json"
+)
+
+predictionsFile = (
+    outputDir
+    / "predictions.csv"
+)
+
+plotLossFile = (
+    plotDir
+    / "training_validation_loss.png"
+)
+
+plotPredictionFile = (
+    plotDir
+    / "test_predictions.png"
+)
+
+outputDir.mkdir(
+    parents=True,
+    exist_ok=True,
+)
+
+plotDir.mkdir(
+    parents=True,
+    exist_ok=True,
+)
 
 
 # ============================================================
 # CONFIGURATION
 # ============================================================
 
-randomSeed = 42
+RANDOM_SEED = 42
 
-# Data CSV berasal dari YOLO dengan interval target 5 detik.
-intervalSeconds = 5
+INTERVAL_SECONDS = 5
 
-# 12 timestep x 5 detik = 60 detik history
-lookback = 12
+LOOKBACK = 12
 
-# 3 timestep x 5 detik = 15 detik forecast
-horizon = 3
+HORIZON = 3
 
-trainRatio = 0.70
-valRatio = 0.15
-testRatio = 0.15
+TRAIN_RATIO = 0.70
 
-batchSize = 32
-epochs = 100
-learningRate = 0.001
-patience = 15
+VAL_RATIO = 0.15
 
-hiddenSize = 64
-numLayers = 2
-dropout = 0.2
+TEST_RATIO = 0.15
+
+BATCH_SIZE = 16
+
+EPOCHS = 150
+
+LEARNING_RATE = 0.001
+
+PATIENCE = 20
+
+HIDDEN_SIZE = 64
+
+NUM_LAYERS = 2
+
+DROPOUT = 0.20
+
+GRADIENT_CLIP = 1.0
+
+
+# ============================================================
+# APPROACH CONTRACT
+# ============================================================
+
+# IMPORTANT:
+#
+# Dataset FINAL harus mempunyai empat approach:
+#
+# north
+# south
+# east
+# west
+#
+# "simpang_tengah" BUKAN approach.
+#
+# Kalau data north tidak ada, training dihentikan.
+# Kita tidak akan mengarang data north.
+
+APPROACHES = [
+    "north",
+    "south",
+    "east",
+    "west",
+]
+
+
+# ============================================================
+# APPROACH ALIASES
+# ============================================================
+
+APPROACH_ALIASES = {
+
+    "north": {
+        "north",
+        "utara",
+    },
+
+    "south": {
+        "south",
+        "selatan",
+    },
+
+    "east": {
+        "east",
+        "timur",
+    },
+
+    "west": {
+        "west",
+        "barat",
+    },
+}
 
 
 # ============================================================
 # CSV FEATURES
 # ============================================================
-#
-# Nama di bawah adalah NAMA ASLI KOLOM CSV.
-#
-# Jangan mengubah nama ini kalau kolom CSV memang seperti ini.
-#
 
-csvFeatureColumns = [
+CSV_FEATURES = [
     "total_di_zona",
     "motor_di_zona",
     "mobil_di_zona",
@@ -103,15 +205,65 @@ csvFeatureColumns = [
 
 
 # ============================================================
-# DATA CONTRACT MAPPING
+# CONTRACT MAPPING
 # ============================================================
 
-contractFeatureMapping = {
-    "total_di_zona": "volume",
-    "motor_di_zona": "motorcycleCount",
-    "mobil_di_zona": "carCount",
-    "truk_di_zona": "truckCount",
-    "bus_di_zona": "busCount",
+CONTRACT_FEATURE_MAPPING = {
+
+    "total_di_zona":
+        "volume",
+
+    "motor_di_zona":
+        "motorcycleCount",
+
+    "mobil_di_zona":
+        "carCount",
+
+    "truk_di_zona":
+        "truckCount",
+
+    "bus_di_zona":
+        "busCount",
+}
+
+
+# ============================================================
+# CONGESTION CONFIGURATION
+# ============================================================
+
+# CSV TIDAK mempunyai kolom congestion aktual.
+#
+# Maka model TIDAK dilatih langsung terhadap congestion label.
+#
+# Kita prediksi volume kendaraan terlebih dahulu.
+#
+# Setelah itu:
+#
+# congestionIndex =
+# predictedVolume / APPROACH_CAPACITY
+#
+# Nilai dibatasi 0..1.
+#
+# Interpretasi:
+#
+# 0.00 - 0.29 = Lancar
+# 0.30 - 0.59 = Ramai
+# 0.60 - 0.79 = Padat
+# 0.80 - 1.00 = Macet
+#
+# CAPACITY harus dikalibrasi lagi berdasarkan simpang nyata.
+#
+# Ini hanya proxy congestion, bukan ground truth.
+
+APPROACH_CAPACITY = {
+
+    "north": 15.0,
+
+    "south": 15.0,
+
+    "east": 15.0,
+
+    "west": 15.0,
 }
 
 
@@ -119,15 +271,24 @@ contractFeatureMapping = {
 # RANDOM SEED
 # ============================================================
 
-def setSeed(seed: int = randomSeed) -> None:
+def setSeed(
+    seed: int = RANDOM_SEED,
+) -> None:
+
     random.seed(seed)
+
     np.random.seed(seed)
+
     torch.manual_seed(seed)
 
     if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(seed)
+
+        torch.cuda.manual_seed_all(
+            seed
+        )
 
     torch.backends.cudnn.deterministic = True
+
     torch.backends.cudnn.benchmark = False
 
 
@@ -136,8 +297,12 @@ def setSeed(seed: int = randomSeed) -> None:
 # ============================================================
 
 def getDevice():
+
     if torch.cuda.is_available():
-        device = torch.device("cuda")
+
+        device = torch.device(
+            "cuda"
+        )
 
         print(
             "CUDA tersedia:",
@@ -146,7 +311,10 @@ def getDevice():
 
         return device
 
-    print("CUDA tidak tersedia. Menggunakan CPU.")
+    print(
+        "CUDA tidak tersedia. "
+        "Menggunakan CPU."
+    )
 
     return torch.device("cpu")
 
@@ -162,6 +330,7 @@ class TrafficDataset(Dataset):
         inputData: np.ndarray,
         targetData: np.ndarray,
     ):
+
         self.inputData = torch.tensor(
             inputData,
             dtype=torch.float32,
@@ -173,9 +342,16 @@ class TrafficDataset(Dataset):
         )
 
     def __len__(self):
-        return len(self.inputData)
 
-    def __getitem__(self, index):
+        return len(
+            self.inputData
+        )
+
+    def __getitem__(
+        self,
+        index,
+    ):
+
         return (
             self.inputData[index],
             self.targetData[index],
@@ -186,7 +362,9 @@ class TrafficDataset(Dataset):
 # LSTM MODEL
 # ============================================================
 
-class TrafficLSTM(nn.Module):
+class TrafficLSTM(
+    nn.Module
+):
 
     def __init__(
         self,
@@ -197,16 +375,23 @@ class TrafficLSTM(nn.Module):
         outputSize: int,
         dropout: float,
     ):
+
         super().__init__()
 
         self.horizon = horizon
+
         self.outputSize = outputSize
 
         self.lstm = nn.LSTM(
+
             input_size=inputSize,
+
             hidden_size=hiddenSize,
+
             num_layers=numLayers,
+
             batch_first=True,
+
             dropout=(
                 dropout
                 if numLayers > 1
@@ -214,29 +399,41 @@ class TrafficLSTM(nn.Module):
             ),
         )
 
-        self.fc = nn.Linear(
-            hiddenSize,
-            horizon * outputSize,
+        self.fc = nn.Sequential(
+
+            nn.Linear(
+                hiddenSize,
+                hiddenSize,
+            ),
+
+            nn.ReLU(),
+
+            nn.Dropout(
+                dropout
+            ),
+
+            nn.Linear(
+                hiddenSize,
+                horizon * outputSize,
+            ),
         )
 
-    def forward(self, inputData):
+    def forward(
+        self,
+        inputData,
+    ):
 
-        # Input:
-        #
-        # [batch, 12, 5]
-        #
-        # 12 = lookback
-        # 5  = features
+        output, _ = self.lstm(
+            inputData
+        )
 
-        output, _ = self.lstm(inputData)
+        lastOutput = (
+            output[:, -1, :]
+        )
 
-        lastOutput = output[:, -1, :]
-
-        prediction = self.fc(lastOutput)
-
-        # Output:
-        #
-        # [batch, 3, 5]
+        prediction = self.fc(
+            lastOutput
+        )
 
         prediction = prediction.view(
             -1,
@@ -248,41 +445,102 @@ class TrafficLSTM(nn.Module):
 
 
 # ============================================================
+# NORMALIZE APPROACH
+# ============================================================
+
+def normalizeApproach(
+    value: str,
+) -> str:
+
+    value = (
+        str(value)
+        .strip()
+        .lower()
+    )
+
+    for canonical, aliases in (
+        APPROACH_ALIASES.items()
+    ):
+
+        if value in aliases:
+
+            return canonical
+
+    return value
+
+
+# ============================================================
 # LOAD DATA
 # ============================================================
 
 def loadData():
 
-    print("\n[1] Loading dataset...")
+    print()
+    print(
+        "=" * 70
+    )
+    print(
+        "[1] LOADING DATASET"
+    )
+    print(
+        "=" * 70
+    )
 
     if not dataFile.exists():
+
         raise FileNotFoundError(
-            f"Dataset tidak ditemukan:\n{dataFile}"
+            "Dataset tidak ditemukan:\n"
+            f"{dataFile}"
         )
 
-    dataFrame = pd.read_csv(dataFile)
+    dataFrame = pd.read_csv(
+        dataFile
+    )
+
+    print(
+        "Dataset:",
+        dataFile
+    )
+
+    print(
+        "Raw rows:",
+        len(dataFrame)
+    )
 
     requiredColumns = [
+
         "timestamp",
+
         "kamera",
+
         "lengan",
-        *csvFeatureColumns,
+
+        *CSV_FEATURES,
     ]
 
     missingColumns = [
+
         column
+
         for column in requiredColumns
+
         if column not in dataFrame.columns
     ]
 
     if missingColumns:
+
         raise ValueError(
-            "Kolom berikut tidak ditemukan:\n"
+            "Kolom CSV yang diperlukan "
+            "tidak ditemukan:\n"
             + "\n".join(
                 f"- {column}"
                 for column in missingColumns
             )
         )
+
+    # --------------------------------------------------------
+    # TIMESTAMP
+    # --------------------------------------------------------
 
     dataFrame["timestamp"] = pd.to_datetime(
         dataFrame["timestamp"],
@@ -290,87 +548,341 @@ def loadData():
     )
 
     dataFrame = dataFrame.dropna(
-        subset=["timestamp"]
+        subset=[
+            "timestamp"
+        ]
     )
 
-    for column in csvFeatureColumns:
+    # --------------------------------------------------------
+    # APPROACH
+    # --------------------------------------------------------
+
+    dataFrame["approach"] = (
+        dataFrame["lengan"]
+        .apply(
+            normalizeApproach
+        )
+    )
+
+    # --------------------------------------------------------
+    # FEATURES NUMERIC
+    # --------------------------------------------------------
+
+    for column in CSV_FEATURES:
 
         dataFrame[column] = pd.to_numeric(
             dataFrame[column],
             errors="coerce",
         )
 
-    dataFrame[csvFeatureColumns] = (
-        dataFrame[csvFeatureColumns]
-        .fillna(0)
+    dataFrame[CSV_FEATURES] = (
+        dataFrame[
+            CSV_FEATURES
+        ]
+        .fillna(0.0)
+        .clip(lower=0.0)
     )
+
+    # --------------------------------------------------------
+    # SORT
+    # --------------------------------------------------------
 
     dataFrame = (
         dataFrame
-        .sort_values("timestamp")
-        .reset_index(drop=True)
+        .sort_values(
+            [
+                "timestamp",
+                "approach",
+            ]
+        )
+        .reset_index(
+            drop=True
+        )
     )
 
+    # --------------------------------------------------------
+    # REPORT APPROACH
+    # --------------------------------------------------------
+
+    print()
     print(
-        "Raw rows:",
-        len(dataFrame),
+        "Approach ditemukan:"
     )
 
-    print(
-        "Time:",
-        dataFrame["timestamp"].min(),
-        "->",
-        dataFrame["timestamp"].max(),
+    for approach in sorted(
+        dataFrame["approach"]
+        .unique()
+    ):
+
+        count = int(
+            (
+                dataFrame["approach"]
+                == approach
+            ).sum()
+        )
+
+        print(
+            f"  {approach:<20} "
+            f"{count} rows"
+        )
+
+    # --------------------------------------------------------
+    # REMOVE NON APPROACH
+    # --------------------------------------------------------
+
+    validApproaches = set(
+        APPROACHES
     )
+
+    beforeRows = len(
+        dataFrame
+    )
+
+    dataFrame = dataFrame[
+        dataFrame["approach"]
+        .isin(
+            validApproaches
+        )
+    ].copy()
+
+    removedRows = (
+        beforeRows
+        - len(dataFrame)
+    )
+
+    print()
+    print(
+        "Rows non-approach dibuang:",
+        removedRows
+    )
+
+    # --------------------------------------------------------
+    # REQUIRED APPROACH CHECK
+    # --------------------------------------------------------
+
+    foundApproaches = set(
+        dataFrame["approach"]
+        .unique()
+    )
+
+    missingApproaches = [
+        approach
+
+        for approach in APPROACHES
+
+        if approach not in foundApproaches
+    ]
+
+    if missingApproaches:
+
+        raise ValueError(
+
+            "\nDATASET TIDAK VALID "
+            "UNTUK MODEL 4 APPROACH.\n\n"
+
+            "Approach yang diwajibkan:\n"
+
+            + "\n".join(
+                f"  - {a}"
+                for a in APPROACHES
+            )
+
+            + "\n\n"
+            "Approach yang belum tersedia:\n"
+
+            + "\n".join(
+                f"  - {a}"
+                for a in missingApproaches
+            )
+
+            + "\n\n"
+            "JANGAN menganggap "
+            "'simpang_tengah' sebagai north.\n"
+            "Tambahkan data north/utara "
+            "yang sebenarnya ke CSV."
+        )
 
     return dataFrame
 
 
 # ============================================================
-# PREPARE TIME SERIES
+# BUILD COMPLETE TIMESTEPS
 # ============================================================
 
-def prepareTimeSeries(
+def buildApproachTimeSeries(
     dataFrame: pd.DataFrame,
 ):
 
-    print("\n[2] Preparing time series...")
-
+    print()
     print(
-        "Menggabungkan seluruh kamera/lengan "
-        "pada timestamp yang sama."
+        "=" * 70
+    )
+    print(
+        "[2] BUILDING 4-APPROACH TIME SERIES"
+    )
+    print(
+        "=" * 70
     )
 
-    timeSeriesData = (
+    # --------------------------------------------------------
+    # DUPLICATE APPROACH / TIMESTAMP
+    # --------------------------------------------------------
+
+    duplicateMask = (
         dataFrame
-        .groupby("timestamp")[csvFeatureColumns]
-        .sum()
-        .reset_index()
+        .duplicated(
+            subset=[
+                "timestamp",
+                "approach",
+            ],
+            keep=False,
+        )
     )
+
+    duplicateRows = dataFrame[
+        duplicateMask
+    ]
+
+    if len(duplicateRows) > 0:
+
+        print(
+            "WARNING:"
+        )
+
+        print(
+            "Ditemukan duplicate "
+            "timestamp + approach:"
+        )
+
+        print(
+            duplicateRows[
+                [
+                    "timestamp",
+                    "approach",
+                ]
+            ]
+            .head(20)
+            .to_string(
+                index=False
+            )
+        )
+
+        # ----------------------------------------------------
+        # Aggregate duplicate rows
+        # ----------------------------------------------------
+
+        dataFrame = (
+            dataFrame
+            .groupby(
+                [
+                    "timestamp",
+                    "approach",
+                ],
+                as_index=False,
+            )[CSV_FEATURES]
+            .sum()
+        )
+
+    # --------------------------------------------------------
+    # PIVOT
+    # --------------------------------------------------------
+
+    rows = []
+
+    grouped = dataFrame.groupby(
+        "timestamp"
+    )
+
+    incompleteTimestamps = 0
+
+    for timestamp, group in grouped:
+
+        row = {
+            "timestamp": timestamp
+        }
+
+        approachesPresent = set(
+            group["approach"]
+        )
+
+        if not all(
+            approach in approachesPresent
+            for approach in APPROACHES
+        ):
+
+            incompleteTimestamps += 1
+
+            continue
+
+        for approach in APPROACHES:
+
+            approachData = group[
+                group["approach"]
+                == approach
+            ]
+
+            values = (
+                approachData[
+                    CSV_FEATURES
+                ]
+                .iloc[0]
+                .to_dict()
+            )
+
+            for feature in CSV_FEATURES:
+
+                key = (
+                    f"{approach}__"
+                    f"{feature}"
+                )
+
+                row[key] = float(
+                    values[feature]
+                )
+
+        rows.append(
+            row
+        )
+
+    timeSeriesData = pd.DataFrame(
+        rows
+    )
+
+    if timeSeriesData.empty:
+
+        raise ValueError(
+            "Tidak ada timestamp lengkap "
+            "yang memiliki keempat approach."
+        )
 
     timeSeriesData = (
         timeSeriesData
-        .sort_values("timestamp")
-        .reset_index(drop=True)
+        .sort_values(
+            "timestamp"
+        )
+        .reset_index(
+            drop=True
+        )
     )
 
     print(
-        "\nJumlah timestep:",
-        len(timeSeriesData),
+        "Timestamp lengkap:",
+        len(timeSeriesData)
     )
 
     print(
-        "\nContoh hasil agregasi:"
+        "Timestamp tidak lengkap:",
+        incompleteTimestamps
     )
 
-    print(
-        timeSeriesData
-        .head(10)
-        .to_string(index=False)
-    )
+    # --------------------------------------------------------
+    # CHECK INTERVAL
+    # --------------------------------------------------------
 
     intervals = (
-        timeSeriesData["timestamp"]
+        timeSeriesData[
+            "timestamp"
+        ]
         .diff()
         .dt.total_seconds()
         .dropna()
@@ -378,25 +890,53 @@ def prepareTimeSeries(
 
     if len(intervals) > 0:
 
+        print()
         print(
-            "\nInterval median:",
+            "Interval median:",
             intervals.median(),
-            "detik",
+            "seconds"
         )
 
         print(
             "Interval minimum:",
             intervals.min(),
-            "detik",
+            "seconds"
         )
 
         print(
-            "Interval maksimum:",
+            "Interval maximum:",
             intervals.max(),
-            "detik",
+            "seconds"
         )
 
-    return timeSeriesData
+        wrongIntervals = (
+            intervals
+            != INTERVAL_SECONDS
+        ).sum()
+
+        print(
+            "Interval bukan 5 detik:",
+            int(wrongIntervals)
+        )
+
+    # --------------------------------------------------------
+    # FEATURE ORDER
+    # --------------------------------------------------------
+
+    featureNames = []
+
+    for approach in APPROACHES:
+
+        for feature in CSV_FEATURES:
+
+            featureNames.append(
+                f"{approach}__{feature}"
+            )
+
+    return (
+        timeSeriesData,
+        featureNames,
+    )
 
 
 # ============================================================
@@ -410,9 +950,12 @@ def createSequences(
 ):
 
     inputSequences = []
+
     targetSequences = []
 
-    totalLength = len(values)
+    totalLength = len(
+        values
+    )
 
     maxStart = (
         totalLength
@@ -421,9 +964,14 @@ def createSequences(
         + 1
     )
 
-    for start in range(maxStart):
+    for start in range(
+        maxStart
+    ):
 
-        end = start + lookbackValue
+        end = (
+            start
+            + lookbackValue
+        )
 
         targetEnd = (
             end
@@ -431,18 +979,24 @@ def createSequences(
         )
 
         inputSequences.append(
-            values[start:end]
+            values[
+                start:end
+            ]
         )
 
         targetSequences.append(
-            values[end:targetEnd]
+            values[
+                end:targetEnd
+            ]
         )
 
     return (
+
         np.asarray(
             inputSequences,
             dtype=np.float32,
         ),
+
         np.asarray(
             targetSequences,
             dtype=np.float32,
@@ -456,20 +1010,28 @@ def createSequences(
 
 def saveScaler(
     scaler: MinMaxScaler,
+    featureNames: List[str],
 ) -> None:
 
     scalerData = {
-        "featureNames": csvFeatureColumns,
 
-        "min": scaler.min_.tolist(),
+        "featureNames":
+            featureNames,
 
-        "scale": scaler.scale_.tolist(),
+        "min":
+            scaler.min_.tolist(),
 
-        "dataMin": scaler.data_min_.tolist(),
+        "scale":
+            scaler.scale_.tolist(),
 
-        "dataMax": scaler.data_max_.tolist(),
+        "dataMin":
+            scaler.data_min_.tolist(),
 
-        "dataRange": scaler.data_range_.tolist(),
+        "dataMax":
+            scaler.data_max_.tolist(),
+
+        "dataRange":
+            scaler.data_range_.tolist(),
     }
 
     with open(
@@ -486,130 +1048,220 @@ def saveScaler(
 
     print(
         "Scaler saved:",
-        scalerFile,
+        scalerFile
     )
 
 
 # ============================================================
-# EXPORT ONNX
+# CONGESTION CALCULATION
 # ============================================================
 
-def exportOnnx(
-    model,
-    device,
+def calculateCongestion(
+    approach: str,
+    volume: float,
+) -> Tuple[float, str]:
+
+    capacity = (
+        APPROACH_CAPACITY[
+            approach
+        ]
+    )
+
+    if capacity <= 0:
+
+        return (
+            0.0,
+            "unknown"
+        )
+
+    congestionIndex = (
+        volume
+        / capacity
+    )
+
+    congestionIndex = float(
+        np.clip(
+            congestionIndex,
+            0.0,
+            1.0,
+        )
+    )
+
+    if congestionIndex < 0.30:
+
+        level = "lancar"
+
+    elif congestionIndex < 0.60:
+
+        level = "ramai"
+
+    elif congestionIndex < 0.80:
+
+        level = "padat"
+
+    else:
+
+        level = "macet"
+
+    return (
+        congestionIndex,
+        level,
+    )
+
+
+# ============================================================
+# SAVE PREDICTIONS
+# ============================================================
+
+def savePredictions(
+    timestamps,
+    actualValues,
+    predictedValues,
+    featureNames,
 ):
 
-    print("\n[12] Exporting ONNX model...")
+    rows = []
 
-    model.eval()
+    for sampleIndex in range(
+        len(timestamps)
+    ):
 
-    dummyInput = torch.zeros(
-        (
-            1,
-            lookback,
-            len(csvFeatureColumns),
-        ),
-        dtype=torch.float32,
-        device=device,
+        timestamp = timestamps[
+            sampleIndex
+        ]
+
+        for horizonIndex in range(
+            HORIZON
+        ):
+
+            forecastTimestamp = (
+                pd.Timestamp(timestamp)
+                + pd.Timedelta(
+                    seconds=(
+                        (
+                            horizonIndex
+                            + 1
+                        )
+                        * INTERVAL_SECONDS
+                    )
+                )
+            )
+
+            row = {
+
+                "timestamp":
+                    timestamp,
+
+                "forecast_timestamp":
+                    forecastTimestamp,
+
+                "horizon_step":
+                    horizonIndex + 1,
+            }
+
+            for approachIndex, approach in enumerate(
+                APPROACHES
+            ):
+
+                baseIndex = (
+                    approachIndex
+                    * len(
+                        CSV_FEATURES
+                    )
+                )
+
+                actualVolume = float(
+                    actualValues[
+                        sampleIndex,
+                        horizonIndex,
+                        baseIndex,
+                    ]
+                )
+
+                predictedVolume = float(
+                    predictedValues[
+                        sampleIndex,
+                        horizonIndex,
+                        baseIndex,
+                    ]
+                )
+
+                predictedVolume = max(
+                    0.0,
+                    predictedVolume,
+                )
+
+                congestionIndex, congestionLevel = (
+                    calculateCongestion(
+                        approach,
+                        predictedVolume,
+                    )
+                )
+
+                row[
+                    f"{approach}_actual_volume"
+                ] = actualVolume
+
+                row[
+                    f"{approach}_predicted_volume"
+                ] = predictedVolume
+
+                row[
+                    f"{approach}_congestion_index"
+                ] = congestionIndex
+
+                row[
+                    f"{approach}_congestion_level"
+                ] = congestionLevel
+
+                for featureIndex, featureName in enumerate(
+                    CSV_FEATURES
+                ):
+
+                    absoluteIndex = (
+                        baseIndex
+                        + featureIndex
+                    )
+
+                    row[
+                        f"{approach}_actual_{featureName}"
+                    ] = float(
+                        actualValues[
+                            sampleIndex,
+                            horizonIndex,
+                            absoluteIndex,
+                        ]
+                    )
+
+                    row[
+                        f"{approach}_predicted_{featureName}"
+                    ] = max(
+                        0.0,
+                        float(
+                            predictedValues[
+                                sampleIndex,
+                                horizonIndex,
+                                absoluteIndex,
+                            ]
+                        ),
+                    )
+
+            rows.append(
+                row
+            )
+
+    predictionsDataFrame = pd.DataFrame(
+        rows
     )
 
-    try:
-
-        # ====================================================
-        # IMPORTANT
-        # ====================================================
-        #
-        # PyTorch versi baru dapat menggunakan ONNX exporter
-        # berbasis dynamo secara default.
-        #
-        # Exporter tersebut membutuhkan package onnxscript.
-        #
-        # Kita TIDAK menggunakan TensorFlow.
-        #
-        # Dengan dynamo=False kita menggunakan legacy exporter
-        # PyTorch sehingga onnxscript tidak diperlukan.
-        #
-        # ====================================================
-
-        torch.onnx.export(
-
-            model,
-
-            dummyInput,
-
-            onnxModelFile,
-
-            export_params=True,
-
-            opset_version=17,
-
-            do_constant_folding=True,
-
-            input_names=[
-                "input"
-            ],
-
-            output_names=[
-                "prediction"
-            ],
-
-            dynamic_axes={
-                "input": {
-                    0: "batch",
-                },
-
-                "prediction": {
-                    0: "batch",
-                },
-            },
-
-            dynamo=False,
-        )
-
-        print(
-            "ONNX model saved:",
-            onnxModelFile,
-        )
-
-    except Exception as error:
-
-        print(
-            "\nERROR saat export ONNX:"
-        )
-
-        print(error)
-
-        raise RuntimeError(
-            "Export ONNX gagal. "
-            "Training dan evaluasi model sudah selesai, "
-            "tetapi file ONNX belum berhasil dibuat."
-        ) from error
-
-    # ========================================================
-    # VERIFY FILE
-    # ========================================================
-
-    if not onnxModelFile.exists():
-
-        raise RuntimeError(
-            "Exporter tidak menghasilkan file ONNX."
-        )
-
-    fileSize = onnxModelFile.stat().st_size
-
-    print(
-        "ONNX file size:",
-        f"{fileSize / 1024:.2f} KB",
+    predictionsDataFrame.to_csv(
+        predictionsFile,
+        index=False,
     )
 
-    if fileSize <= 0:
-
-        raise RuntimeError(
-            "File ONNX kosong."
-        )
-
     print(
-        "ONNX export berhasil."
+        "Predictions saved:",
+        predictionsFile
     )
 
 
@@ -647,12 +1299,16 @@ def plotTrainingValidationLoss(
     )
 
     plt.title(
-        "SmartTwin LSTM Training vs Validation Loss"
+        "SmartTwin LSTM - Training vs Validation"
     )
 
-    plt.xlabel("Epoch")
+    plt.xlabel(
+        "Epoch"
+    )
 
-    plt.ylabel("MSE Loss")
+    plt.ylabel(
+        "MSE Loss"
+    )
 
     plt.legend()
 
@@ -663,13 +1319,8 @@ def plotTrainingValidationLoss(
 
     plt.tight_layout()
 
-    outputFile = (
-        plotDir
-        / "training_validation_loss.png"
-    )
-
     plt.savefig(
-        outputFile,
+        plotLossFile,
         dpi=200,
         bbox_inches="tight",
     )
@@ -677,69 +1328,214 @@ def plotTrainingValidationLoss(
     plt.close()
 
     print(
-        "Training plot saved:",
-        outputFile,
+        "Loss plot saved:",
+        plotLossFile
     )
 
 
 # ============================================================
-# SAVE PREDICTIONS
+# PLOT TEST PREDICTIONS
 # ============================================================
 
-def savePredictions(
-    timestamps,
+def plotTestPredictions(
     actualValues,
     predictedValues,
 ):
 
-    rows = []
-
-    for index in range(
-        len(timestamps)
-    ):
-
-        row = {
-            "timestamp": timestamps[index],
-        }
-
-        for featureIndex, featureName in enumerate(
-            csvFeatureColumns
-        ):
-
-            row[
-                f"actual_{featureName}"
-            ] = float(
-                actualValues[
-                    index,
-                    0,
-                    featureIndex,
-                ]
-            )
-
-            row[
-                f"predicted_{featureName}"
-            ] = float(
-                predictedValues[
-                    index,
-                    0,
-                    featureIndex,
-                ]
-            )
-
-        rows.append(row)
-
-    predictionsDataFrame = pd.DataFrame(
-        rows
+    plt.figure(
+        figsize=(14, 7)
     )
 
-    predictionsDataFrame.to_csv(
-        predictionsFile,
-        index=False,
+    maxSamples = min(
+        30,
+        len(actualValues)
+    )
+
+    # South volume sebagai contoh visual.
+    # Ini bukan berarti model hanya memprediksi south.
+
+    southVolumeIndex = (
+        APPROACHES.index("south")
+        * len(CSV_FEATURES)
+    )
+
+    actual = (
+        actualValues[
+            :maxSamples,
+            0,
+            southVolumeIndex,
+        ]
+    )
+
+    predicted = (
+        predictedValues[
+            :maxSamples,
+            0,
+            southVolumeIndex,
+        ]
+    )
+
+    plt.plot(
+        range(maxSamples),
+        actual,
+        label="Actual South Volume",
+        linewidth=2,
+    )
+
+    plt.plot(
+        range(maxSamples),
+        predicted,
+        label="Predicted South Volume",
+        linewidth=2,
+    )
+
+    plt.title(
+        "SmartTwin LSTM - South Approach Volume"
+    )
+
+    plt.xlabel(
+        "Test Sample"
+    )
+
+    plt.ylabel(
+        "Vehicle Count"
+    )
+
+    plt.legend()
+
+    plt.grid(
+        True,
+        alpha=0.3,
+    )
+
+    plt.tight_layout()
+
+    plt.savefig(
+        plotPredictionFile,
+        dpi=200,
+        bbox_inches="tight",
+    )
+
+    plt.close()
+
+    print(
+        "Prediction plot saved:",
+        plotPredictionFile
+    )
+
+
+# ============================================================
+# EXPORT ONNX
+# ============================================================
+
+def exportOnnx(
+    model,
+    device,
+    inputSize,
+):
+
+    print()
+    print(
+        "=" * 70
+    )
+    print(
+        "[11] EXPORTING ONNX"
+    )
+    print(
+        "=" * 70
+    )
+
+    model.eval()
+
+    dummyInput = torch.zeros(
+        (
+            1,
+            LOOKBACK,
+            inputSize,
+        ),
+        dtype=torch.float32,
+        device=device,
+    )
+
+    try:
+
+        torch.onnx.export(
+
+            model,
+
+            dummyInput,
+
+            onnxModelFile,
+
+            export_params=True,
+
+            opset_version=17,
+
+            do_constant_folding=True,
+
+            input_names=[
+                "input"
+            ],
+
+            output_names=[
+                "prediction"
+            ],
+
+            dynamic_axes={
+
+                "input": {
+                    0: "batch"
+                },
+
+                "prediction": {
+                    0: "batch"
+                },
+            },
+
+            dynamo=False,
+        )
+
+    except Exception as error:
+
+        print(
+            "ONNX export gagal:"
+        )
+
+        print(
+            error
+        )
+
+        raise RuntimeError(
+            "Training selesai tetapi "
+            "ONNX export gagal."
+        ) from error
+
+    if not onnxModelFile.exists():
+
+        raise RuntimeError(
+            "File ONNX tidak dibuat."
+        )
+
+    fileSize = (
+        onnxModelFile
+        .stat()
+        .st_size
+    )
+
+    if fileSize <= 0:
+
+        raise RuntimeError(
+            "File ONNX kosong."
+        )
+
+    print(
+        "ONNX saved:",
+        onnxModelFile
     )
 
     print(
-        "Predictions saved:",
-        predictionsFile,
+        "ONNX size:",
+        f"{fileSize / 1024:.2f} KB"
     )
 
 
@@ -749,23 +1545,17 @@ def savePredictions(
 
 def main():
 
-    # ========================================================
-    # SETUP
-    # ========================================================
-
     setSeed()
 
     device = getDevice()
 
+    print()
     print(
-        "\n"
-        + "=" * 70
+        "=" * 70
     )
-
     print(
-        "SMARTTWIN - TRAFFIC LSTM TRAINING"
+        "SMARTTWIN - MULTI-APPROACH TRAFFIC LSTM TRAINING"
     )
-
     print(
         "=" * 70
     )
@@ -774,49 +1564,67 @@ def main():
     # MODEL CONTRACT
     # ========================================================
 
+    inputSize = (
+        len(APPROACHES)
+        * len(CSV_FEATURES)
+    )
+
+    outputSize = inputSize
+
+    print()
     print(
-        "\nMODEL CONTRACT"
+        "MODEL CONTRACT"
     )
 
     print(
-        "CSV Features:",
-        csvFeatureColumns,
+        "Approaches:",
+        APPROACHES
+    )
+
+    print(
+        "Features:",
+        CSV_FEATURES
     )
 
     print(
         "Input:",
-        f"{lookback} timestep × "
-        f"{len(csvFeatureColumns)} features",
+        f"{LOOKBACK} timestep × "
+        f"{inputSize} features"
     )
 
     print(
         "History:",
-        f"{lookback * intervalSeconds} seconds",
+        f"{LOOKBACK * INTERVAL_SECONDS}s"
     )
 
     print(
         "Output:",
-        f"{horizon} timestep × "
-        f"{len(csvFeatureColumns)} features",
+        f"{HORIZON} timestep × "
+        f"{outputSize} features"
     )
 
     print(
         "Forecast:",
-        f"{horizon * intervalSeconds} seconds",
+        f"{HORIZON * INTERVAL_SECONDS}s"
     )
 
+    print()
     print(
-        "\nCSV → Data Contract mapping:"
+        "Per timestep:"
     )
 
-    for (
-        csvName,
-        contractName,
-    ) in contractFeatureMapping.items():
+    for approach in APPROACHES:
 
         print(
-            f"  {csvName} → {contractName}"
+            f"  {approach:<6} → "
+            f"{len(CSV_FEATURES)} features"
         )
+
+    print()
+    print(
+        "TOTAL INPUT FEATURES:",
+        inputSize
+    )
 
     # ========================================================
     # LOAD
@@ -825,10 +1633,13 @@ def main():
     rawDataFrame = loadData()
 
     # ========================================================
-    # AGGREGATE
+    # BUILD TIME SERIES
     # ========================================================
 
-    timeSeriesData = prepareTimeSeries(
+    (
+        timeSeriesData,
+        featureNames,
+    ) = buildApproachTimeSeries(
         rawDataFrame
     )
 
@@ -837,26 +1648,44 @@ def main():
     # ========================================================
 
     minimumRequired = (
-        lookback
-        + horizon
-        + 10
+        LOOKBACK
+        + HORIZON
+        + 20
     )
 
-    if len(timeSeriesData) < minimumRequired:
+    if len(
+        timeSeriesData
+    ) < minimumRequired:
 
         raise ValueError(
-            f"Data terlalu sedikit.\n"
-            f"Jumlah timestep: "
+
+            "Data terlalu sedikit "
+            "untuk training multi-approach.\n\n"
+
+            f"Timestep lengkap: "
             f"{len(timeSeriesData)}\n"
-            f"Minimal: {minimumRequired}"
+
+            f"Minimal: "
+            f"{minimumRequired}\n\n"
+
+            "Butuh lebih banyak data "
+            "4 approach dengan interval "
+            "5 detik."
         )
 
     # ========================================================
     # CHRONOLOGICAL SPLIT
     # ========================================================
 
+    print()
     print(
-        "\n[3] Chronological split..."
+        "=" * 70
+    )
+    print(
+        "[3] CHRONOLOGICAL SPLIT"
+    )
+    print(
+        "=" * 70
     )
 
     totalRows = len(
@@ -865,14 +1694,14 @@ def main():
 
     trainEnd = int(
         totalRows
-        * trainRatio
+        * TRAIN_RATIO
     )
 
     valEnd = int(
         totalRows
         * (
-            trainRatio
-            + valRatio
+            TRAIN_RATIO
+            + VAL_RATIO
         )
     )
 
@@ -915,60 +1744,83 @@ def main():
     # SCALER
     # ========================================================
 
+    print()
     print(
-        "\n[4] Fitting scaler..."
+        "=" * 70
+    )
+    print(
+        "[4] FITTING SCALER"
+    )
+    print(
+        "=" * 70
     )
 
     scaler = MinMaxScaler()
 
     scaler.fit(
         trainDataFrame[
-            csvFeatureColumns
+            featureNames
         ]
     )
 
     trainValues = scaler.transform(
         trainDataFrame[
-            csvFeatureColumns
+            featureNames
         ]
     )
 
     valValues = scaler.transform(
         valDataFrame[
-            csvFeatureColumns
+            featureNames
         ]
     )
 
     testValues = scaler.transform(
         testDataFrame[
-            csvFeatureColumns
+            featureNames
         ]
     )
 
     # ========================================================
-    # CREATE SEQUENCES
+    # SEQUENCES
     # ========================================================
 
+    print()
     print(
-        "\n[5] Creating sequences..."
+        "=" * 70
+    )
+    print(
+        "[5] CREATING SEQUENCES"
+    )
+    print(
+        "=" * 70
     )
 
-    xTrain, yTrain = createSequences(
+    (
+        xTrain,
+        yTrain,
+    ) = createSequences(
         trainValues,
-        lookback,
-        horizon,
+        LOOKBACK,
+        HORIZON,
     )
 
-    xVal, yVal = createSequences(
+    (
+        xVal,
+        yVal,
+    ) = createSequences(
         valValues,
-        lookback,
-        horizon,
+        LOOKBACK,
+        HORIZON,
     )
 
-    xTest, yTest = createSequences(
+    (
+        xTest,
+        yTest,
+    ) = createSequences(
         testValues,
-        lookback,
-        horizon,
+        LOOKBACK,
+        HORIZON,
     )
 
     print(
@@ -1002,16 +1854,19 @@ def main():
     )
 
     if len(xTrain) == 0:
+
         raise ValueError(
             "Training sequence kosong."
         )
 
     if len(xVal) == 0:
+
         raise ValueError(
             "Validation sequence kosong."
         )
 
     if len(xTest) == 0:
+
         raise ValueError(
             "Test sequence kosong."
         )
@@ -1037,19 +1892,19 @@ def main():
 
     trainLoader = DataLoader(
         trainDataset,
-        batch_size=batchSize,
+        batch_size=BATCH_SIZE,
         shuffle=True,
     )
 
     valLoader = DataLoader(
         valDataset,
-        batch_size=batchSize,
+        batch_size=BATCH_SIZE,
         shuffle=False,
     )
 
     testLoader = DataLoader(
         testDataset,
-        batch_size=batchSize,
+        batch_size=BATCH_SIZE,
         shuffle=False,
     )
 
@@ -1057,26 +1912,39 @@ def main():
     # MODEL
     # ========================================================
 
-    inputSize = len(
-        csvFeatureColumns
-    )
-
     model = TrafficLSTM(
+
         inputSize=inputSize,
-        hiddenSize=hiddenSize,
-        numLayers=numLayers,
-        horizon=horizon,
-        outputSize=inputSize,
-        dropout=dropout,
+
+        hiddenSize=HIDDEN_SIZE,
+
+        numLayers=NUM_LAYERS,
+
+        horizon=HORIZON,
+
+        outputSize=outputSize,
+
+        dropout=DROPOUT,
     )
 
-    model = model.to(device)
+    model = model.to(
+        device
+    )
+
+    print()
+    print(
+        "=" * 70
+    )
+    print(
+        "[6] MODEL"
+    )
+    print(
+        "=" * 70
+    )
 
     print(
-        "\n[6] Model:"
+        model
     )
-
-    print(model)
 
     # ========================================================
     # OPTIMIZER
@@ -1086,29 +1954,40 @@ def main():
 
     optimizer = Adam(
         model.parameters(),
-        lr=learningRate,
+        lr=LEARNING_RATE,
     )
 
     # ========================================================
     # TRAINING
     # ========================================================
 
+    print()
     print(
-        "\n[7] Training..."
+        "=" * 70
+    )
+    print(
+        "[7] TRAINING"
+    )
+    print(
+        "=" * 70
     )
 
-    bestValLoss = float("inf")
+    bestValLoss = float(
+        "inf"
+    )
 
     patienceCounter = 0
 
     history = {
+
         "trainLoss": [],
+
         "valLoss": [],
     }
 
     for epoch in range(
         1,
-        epochs + 1,
+        EPOCHS + 1,
     ):
 
         # ----------------------------------------------------
@@ -1124,12 +2003,16 @@ def main():
             targetBatch,
         ) in trainLoader:
 
-            inputBatch = inputBatch.to(
-                device
+            inputBatch = (
+                inputBatch.to(
+                    device
+                )
             )
 
-            targetBatch = targetBatch.to(
-                device
+            targetBatch = (
+                targetBatch.to(
+                    device
+                )
             )
 
             optimizer.zero_grad()
@@ -1147,7 +2030,7 @@ def main():
 
             torch.nn.utils.clip_grad_norm_(
                 model.parameters(),
-                max_norm=1.0,
+                max_norm=GRADIENT_CLIP,
             )
 
             optimizer.step()
@@ -1157,7 +2040,9 @@ def main():
             )
 
         trainLoss = float(
-            np.mean(trainLosses)
+            np.mean(
+                trainLosses
+            )
         )
 
         # ----------------------------------------------------
@@ -1175,12 +2060,16 @@ def main():
                 targetBatch,
             ) in valLoader:
 
-                inputBatch = inputBatch.to(
-                    device
+                inputBatch = (
+                    inputBatch.to(
+                        device
+                    )
                 )
 
-                targetBatch = targetBatch.to(
-                    device
+                targetBatch = (
+                    targetBatch.to(
+                        device
+                    )
                 )
 
                 prediction = model(
@@ -1197,7 +2086,9 @@ def main():
                 )
 
         valLoss = float(
-            np.mean(valLosses)
+            np.mean(
+                valLosses
+            )
         )
 
         history[
@@ -1213,13 +2104,13 @@ def main():
         )
 
         print(
-            f"Epoch {epoch:03d}/{epochs} | "
-            f"Train Loss: {trainLoss:.6f} | "
-            f"Val Loss: {valLoss:.6f}"
+            f"Epoch {epoch:03d}/{EPOCHS} | "
+            f"Train={trainLoss:.6f} | "
+            f"Val={valLoss:.6f}"
         )
 
         # ----------------------------------------------------
-        # SAVE BEST MODEL
+        # BEST MODEL
         # ----------------------------------------------------
 
         if valLoss < bestValLoss:
@@ -1230,6 +2121,7 @@ def main():
 
             torch.save(
                 {
+
                     "modelStateDict":
                         model.state_dict(),
 
@@ -1237,28 +2129,38 @@ def main():
                         inputSize,
 
                     "hiddenSize":
-                        hiddenSize,
+                        HIDDEN_SIZE,
 
                     "numLayers":
-                        numLayers,
+                        NUM_LAYERS,
 
                     "horizon":
-                        horizon,
+                        HORIZON,
 
                     "outputSize":
-                        inputSize,
+                        outputSize,
 
                     "dropout":
-                        dropout,
+                        DROPOUT,
 
                     "featureNames":
-                        csvFeatureColumns,
+                        featureNames,
+
+                    "approaches":
+                        APPROACHES,
+
+                    "csvFeatureNames":
+                        CSV_FEATURES,
 
                     "lookback":
-                        lookback,
+                        LOOKBACK,
 
                     "intervalSeconds":
-                        intervalSeconds,
+                        INTERVAL_SECONDS,
+
+                    "horizonSeconds":
+                        HORIZON
+                        * INTERVAL_SECONDS,
                 },
                 modelFile,
             )
@@ -1267,10 +2169,14 @@ def main():
 
             patienceCounter += 1
 
-        if patienceCounter >= patience:
+        if (
+            patienceCounter
+            >= PATIENCE
+        ):
 
+            print()
             print(
-                "\nEarly stopping."
+                "Early stopping."
             )
 
             break
@@ -1327,8 +2233,10 @@ def main():
             targetBatch,
         ) in testLoader:
 
-            inputBatch = inputBatch.to(
-                device
+            inputBatch = (
+                inputBatch.to(
+                    device
+                )
             )
 
             prediction = model(
@@ -1342,7 +2250,8 @@ def main():
             )
 
             actuals.append(
-                targetBatch.numpy()
+                targetBatch
+                .numpy()
             )
 
     predictions = np.concatenate(
@@ -1356,17 +2265,23 @@ def main():
     )
 
     # ========================================================
-    # INVERSE TRANSFORM
+    # INVERSE SCALE
     # ========================================================
 
-    predictionsFlat = predictions.reshape(
-        -1,
-        inputSize,
+    predictionsFlat = (
+        predictions
+        .reshape(
+            -1,
+            inputSize,
+        )
     )
 
-    actualsFlat = actuals.reshape(
-        -1,
-        inputSize,
+    actualsFlat = (
+        actuals
+        .reshape(
+            -1,
+            inputSize,
+        )
     )
 
     predictionsOriginal = (
@@ -1382,123 +2297,275 @@ def main():
     )
 
     predictionsOriginal = (
-        predictionsOriginal.reshape(
+        predictionsOriginal
+        .reshape(
             predictions.shape
         )
     )
 
     actualsOriginal = (
-        actualsOriginal.reshape(
+        actualsOriginal
+        .reshape(
             actuals.shape
         )
     )
 
     # ========================================================
-    # VEHICLE COUNT TIDAK BOLEH NEGATIF
+    # VEHICLES CANNOT BE NEGATIVE
     # ========================================================
 
     predictionsOriginal = np.maximum(
         predictionsOriginal,
-        0,
+        0.0,
     )
 
     # ========================================================
-    # METRICS
+    # METRICS GLOBAL
     # ========================================================
 
+    globalActual = (
+        actualsOriginal
+        .reshape(
+            -1,
+            inputSize,
+        )
+    )
+
+    globalPredicted = (
+        predictionsOriginal
+        .reshape(
+            -1,
+            inputSize,
+        )
+    )
+
     mae = mean_absolute_error(
-        actualsOriginal.reshape(
-            -1,
-            inputSize,
-        ),
-        predictionsOriginal.reshape(
-            -1,
-            inputSize,
-        ),
+        globalActual,
+        globalPredicted,
     )
 
     mse = mean_squared_error(
-        actualsOriginal.reshape(
-            -1,
-            inputSize,
-        ),
-        predictionsOriginal.reshape(
-            -1,
-            inputSize,
-        ),
+        globalActual,
+        globalPredicted,
     )
 
-    rmse = np.sqrt(mse)
-
-    print(
-        "\nTest MAE:",
-        f"{mae:.4f}",
+    rmse = np.sqrt(
+        mse
     )
 
+    print()
     print(
-        "Test MSE:",
-        f"{mse:.4f}",
+        "=" * 70
+    )
+    print(
+        "[8] GLOBAL TEST METRICS"
+    )
+    print(
+        "=" * 70
     )
 
     print(
-        "Test RMSE:",
-        f"{rmse:.4f}",
+        "MAE :",
+        f"{mae:.4f}"
+    )
+
+    print(
+        "MSE :",
+        f"{mse:.4f}"
+    )
+
+    print(
+        "RMSE:",
+        f"{rmse:.4f}"
     )
 
     # ========================================================
-    # FEATURE METRICS
+    # APPROACH METRICS
     # ========================================================
+
+    approachMetrics = {}
 
     featureMetrics = {}
 
-    for (
-        featureIndex,
-        featureName,
-    ) in enumerate(
-        csvFeatureColumns
+    for approachIndex, approach in enumerate(
+        APPROACHES
     ):
 
-        featureActual = (
+        startIndex = (
+            approachIndex
+            * len(CSV_FEATURES)
+        )
+
+        endIndex = (
+            startIndex
+            + len(CSV_FEATURES)
+        )
+
+        approachActual = (
             actualsOriginal[
                 :,
                 :,
-                featureIndex,
+                startIndex:endIndex,
             ]
-            .reshape(-1)
-        )
-
-        featurePredicted = (
-            predictionsOriginal[
-                :,
-                :,
-                featureIndex,
-            ]
-            .reshape(-1)
-        )
-
-        featureMae = mean_absolute_error(
-            featureActual,
-            featurePredicted,
-        )
-
-        featureRmse = np.sqrt(
-            mean_squared_error(
-                featureActual,
-                featurePredicted,
+            .reshape(
+                -1,
+                len(CSV_FEATURES),
             )
         )
 
-        featureMetrics[
-            featureName
-        ] = {
-            "mae": float(
-                featureMae
-            ),
+        approachPredicted = (
+            predictionsOriginal[
+                :,
+                :,
+                startIndex:endIndex,
+            ]
+            .reshape(
+                -1,
+                len(CSV_FEATURES),
+            )
+        )
 
-            "rmse": float(
-                featureRmse
-            ),
+        approachMae = mean_absolute_error(
+            approachActual,
+            approachPredicted,
+        )
+
+        approachMse = mean_squared_error(
+            approachActual,
+            approachPredicted,
+        )
+
+        approachRmse = np.sqrt(
+            approachMse
+        )
+
+        volumeActual = (
+            approachActual[
+                :,
+                0
+            ]
+        )
+
+        volumePredicted = (
+            approachPredicted[
+                :,
+                0
+            ]
+        )
+
+        volumeMae = mean_absolute_error(
+            volumeActual,
+            volumePredicted,
+        )
+
+        volumeRmse = np.sqrt(
+            mean_squared_error(
+                volumeActual,
+                volumePredicted,
+            )
+        )
+
+        approachMetrics[
+            approach
+        ] = {
+
+            "mae":
+                float(
+                    approachMae
+                ),
+
+            "rmse":
+                float(
+                    approachRmse
+                ),
+
+            "volumeMae":
+                float(
+                    volumeMae
+                ),
+
+            "volumeRmse":
+                float(
+                    volumeRmse
+                ),
         }
+
+        featureMetrics[
+            approach
+        ] = {}
+
+        for featureIndex, featureName in enumerate(
+            CSV_FEATURES
+        ):
+
+            actualFeature = (
+                approachActual[
+                    :,
+                    featureIndex
+                ]
+            )
+
+            predictedFeature = (
+                approachPredicted[
+                    :,
+                    featureIndex
+                ]
+            )
+
+            featureMae = mean_absolute_error(
+                actualFeature,
+                predictedFeature,
+            )
+
+            featureRmse = np.sqrt(
+                mean_squared_error(
+                    actualFeature,
+                    predictedFeature,
+                )
+            )
+
+            featureMetrics[
+                approach
+            ][
+                featureName
+            ] = {
+
+                "mae":
+                    float(
+                        featureMae
+                    ),
+
+                "rmse":
+                    float(
+                        featureRmse
+                    ),
+            }
+
+    print()
+    print(
+        "=" * 70
+    )
+    print(
+        "[9] APPROACH METRICS"
+    )
+    print(
+        "=" * 70
+    )
+
+    for approach in APPROACHES:
+
+        metrics = (
+            approachMetrics[
+                approach
+            ]
+        )
+
+        print(
+            f"{approach.upper():<8} "
+            f"MAE={metrics['mae']:.4f} "
+            f"RMSE={metrics['rmse']:.4f} "
+            f"Volume MAE={metrics['volumeMae']:.4f}"
+        )
 
     # ========================================================
     # TEST TIMESTAMPS
@@ -1509,9 +2576,11 @@ def main():
             "timestamp"
         ]
         .iloc[
-            lookback:
-            lookback
-            + len(actualsOriginal)
+            LOOKBACK:
+            LOOKBACK
+            + len(
+                actualsOriginal
+            )
         ]
         .reset_index(
             drop=True
@@ -1523,7 +2592,21 @@ def main():
     # ========================================================
 
     savePredictions(
+
         testTimestamps,
+
+        actualsOriginal,
+
+        predictionsOriginal,
+
+        featureNames,
+    )
+
+    # ========================================================
+    # PLOT
+    # ========================================================
+
+    plotTestPredictions(
         actualsOriginal,
         predictionsOriginal,
     )
@@ -1533,7 +2616,8 @@ def main():
     # ========================================================
 
     saveScaler(
-        scaler
+        scaler,
+        featureNames,
     )
 
     # ========================================================
@@ -1543,7 +2627,7 @@ def main():
     metadata = {
 
         "modelName":
-            "SmartTwin Traffic LSTM",
+            "SmartTwin Multi-Approach Traffic LSTM",
 
         "framework":
             "PyTorch",
@@ -1551,79 +2635,140 @@ def main():
         "exportFormat":
             "ONNX",
 
+        "modelVersion":
+            "2.0",
+
+        "approaches":
+            APPROACHES,
+
         "csvFeatureNames":
-            csvFeatureColumns,
+            CSV_FEATURES,
 
         "contractFeatureMapping":
-            contractFeatureMapping,
+            CONTRACT_FEATURE_MAPPING,
 
         "inputSize":
             inputSize,
 
+        "inputShape": [
+            LOOKBACK,
+            inputSize,
+        ],
+
+        "outputShape": [
+            HORIZON,
+            inputSize,
+        ],
+
         "lookback":
-            lookback,
+            LOOKBACK,
 
         "lookbackSeconds":
-            lookback
-            * intervalSeconds,
+            LOOKBACK
+            * INTERVAL_SECONDS,
 
         "horizon":
-            horizon,
+            HORIZON,
 
         "horizonSeconds":
-            horizon
-            * intervalSeconds,
+            HORIZON
+            * INTERVAL_SECONDS,
 
         "intervalSeconds":
-            intervalSeconds,
+            INTERVAL_SECONDS,
 
         "hiddenSize":
-            hiddenSize,
+            HIDDEN_SIZE,
 
         "numLayers":
-            numLayers,
+            NUM_LAYERS,
 
         "dropout":
-            dropout,
+            DROPOUT,
 
         "bestValLoss":
-            float(bestValLoss),
+            float(
+                bestValLoss
+            ),
 
         "testMae":
-            float(mae),
+            float(
+                mae
+            ),
 
         "testMse":
-            float(mse),
+            float(
+                mse
+            ),
 
         "testRmse":
-            float(rmse),
+            float(
+                rmse
+            ),
+
+        "approachMetrics":
+            approachMetrics,
 
         "featureMetrics":
             featureMetrics,
 
+        "congestionMethod":
+            "derived_from_predicted_volume",
+
+        "congestionFormula":
+            "predicted_volume / approach_capacity",
+
+        "congestionLevels": {
+
+            "lancar":
+                "0.00-0.29",
+
+            "ramai":
+                "0.30-0.59",
+
+            "padat":
+                "0.60-0.79",
+
+            "macet":
+                "0.80-1.00",
+        },
+
+        "approachCapacity":
+            APPROACH_CAPACITY,
+
         "numRawRows":
             int(
-                len(rawDataFrame)
+                len(
+                    rawDataFrame
+                )
             ),
 
-        "numTimesteps":
+        "numCompleteTimesteps":
             int(
-                len(timeSeriesData)
+                len(
+                    timeSeriesData
+                )
             ),
 
         "numTrainSequences":
             int(
-                len(xTrain)
+                len(
+                    xTrain
+                )
             ),
 
         "numValidationSequences":
             int(
-                len(xVal)
+                len(
+                    xVal
+                )
             ),
 
         "numTestSequences":
             int(
-                len(xTest)
+                len(
+                    xTest
+                )
             ),
     }
 
@@ -1639,9 +2784,10 @@ def main():
             indent=4,
         )
 
+    print()
     print(
-        "\nMetadata saved:",
-        metadataFile,
+        "Metadata saved:",
+        metadataFile
     )
 
     # ========================================================
@@ -1651,85 +2797,98 @@ def main():
     exportOnnx(
         model,
         device,
+        inputSize,
     )
 
     # ========================================================
     # FINAL
     # ========================================================
 
+    print()
     print(
-        "\n"
-        + "=" * 70
+        "=" * 70
     )
-
     print(
         "TRAINING SELESAI"
     )
-
     print(
         "=" * 70
     )
 
+    print()
     print(
-        "\nModel PyTorch:"
+        "MODEL:"
     )
 
     print(
         modelFile
     )
 
+    print()
     print(
-        "\nModel ONNX:"
+        "ONNX:"
     )
 
     print(
         onnxModelFile
     )
 
+    print()
     print(
-        "\nScaler:"
+        "SCALER:"
     )
 
     print(
         scalerFile
     )
 
+    print()
     print(
-        "\nMetadata:"
+        "METADATA:"
     )
 
     print(
         metadataFile
     )
 
+    print()
     print(
-        "\nPredictions:"
+        "PREDICTIONS:"
     )
 
     print(
         predictionsFile
     )
 
+    print()
     print(
-        "\nTraining history:"
+        "TRAINING HISTORY:"
     )
 
     print(
         historyFile
     )
 
+    print()
     print(
-        "\nTraining plot:"
+        "PLOTS:"
     )
 
     print(
         plotDir
-        / "training_validation_loss.png"
+    )
+
+    print()
+    print(
+        "=" * 70
     )
 
     print(
-        "\n"
-        + "=" * 70
+        "SMARTTWIN FORECASTING READY"
+    )
+
+    print(
+        "=" * 70
     )
 
 
@@ -1738,4 +2897,5 @@ def main():
 # ============================================================
 
 if __name__ == "__main__":
+
     main()
