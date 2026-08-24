@@ -1,23 +1,35 @@
 """
 run_decision.py
 Membaca percobaan_logic_simpang.csv (zona, rata-rata per 5 detik)
-→ feed ke RuleBasedEngine → simpan signal_decisions.csv
+→ feed ke RuleBasedEngine (kontrak TrafficState/SignalRecommendation
+resmi, lihat rule_based_engine.py) → simpan signal_decisions.csv
 
 Format kolom input (percobaan_logic_simpang.csv):
   timestamp, kamera, lengan, total_di_zona, motor_di_zona,
   mobil_di_zona, truk_di_zona, bus_di_zona, frame_number
 
 Fallback: smarttwin_traffic_data.csv (crossing-based, sementara)
+
+Satu baris output = SATU rekomendasi per timestamp (lengan yang
+direkomendasikan jadi hijau berikutnya), BUKAN alokasi keempat lengan
+sekaligus -- itu sengaja, lihat catatan di rule_based_engine.py soal
+kenapa SignalRecommendation cuma satu recommended_phase per panggilan.
 """
 
 import csv
 import sys
 import os
 from collections import defaultdict
+from datetime import datetime, timezone
 
 # Pastikan bisa import rule_based_engine dari direktori yang sama
 sys.path.insert(0, os.path.dirname(__file__))
 from rule_based_engine import RuleBasedEngine
+
+sys.path.insert(
+    0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "backend")
+)
+from app.schemas.traffic import ApproachState, TrafficState  # noqa: E402
 
 # ─── Konfigurasi Path ─────────────────────────────────────────────────────────
 BASE_DIR       = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -34,6 +46,18 @@ APPROACH_MAP_FALLBACK = {
     "south": "selatan",
     "east":  "timur",
     "north": "simpang_tengah",
+}
+
+# lengan (Indonesia, dipakai CSV CV) -> approach (Inggris, dipakai
+# TrafficState/ApproachState resmi). Sama persis dengan
+# backend/app/pipeline/cv_csv_bridge.py::DENSITY_LENGAN_MAP, disalin
+# di sini supaya run_decision.py tidak perlu bergantung pada modul
+# backend selain schemas.
+LENGAN_KE_APPROACH = {
+    "selatan": "south",
+    "barat": "west",
+    "timur": "east",
+    "simpang_tengah": "north",
 }
 
 # ─── Baca percobaan_logic_simpang.csv (zona) ─────────────────────────────────
@@ -91,49 +115,67 @@ def baca_fallback_csv(path: str):
 # ─── Jalankan Engine per Timestamp ───────────────────────────────────────────
 def run(engine, data: dict):
     """
-    Iterasi setiap timestamp, feed ke engine, kumpulkan keputusan.
-    Return list of result rows.
+    Iterasi setiap timestamp, susun TrafficState, feed ke engine.
+
+    current_green_seconds TIDAK diisi (biarkan default WAKTU_HIJAU_MIN
+    di rule_based_engine.py) -- CSV historis ini tidak merekam fase mana
+    yang sungguh sedang hijau di dunia nyata pada tiap timestamp, jadi
+    memalsukan kontinuitas antar-baris cuma akan menghasilkan angka
+    expected_delay_reduction_percent yang kelihatan presisi padahal
+    tidak. Sesi live (lewat TraCI, bukan replay CSV) yang punya state
+    sinyal sungguhan wajib mengisi parameter ini.
+
+    Return list of result rows (satu baris = satu SignalRecommendation).
     """
     results = []
     timestamps = sorted(data.keys())
 
     for ts in timestamps:
-        # Susun traffic_state yang diharapkan RuleBasedEngine
-        traffic_state = {}
-        for lengan, agg in data[ts].items():
-            traffic_state[lengan] = {
-                "total": agg["total"],
-                "motor": agg["motor"],
-                "mobil": agg["mobil"],
-                "truk":  agg["truk"],
-                "bus":   agg["bus"],
-            }
-
-        # Pastikan semua 4 lengan ada (isi 0 jika tidak muncul di timestamp ini)
+        approach_states = []
         for lengan in LENGAN_VALID:
-            if lengan not in traffic_state:
-                traffic_state[lengan] = {
-                    "total": 0, "motor": 0, "mobil": 0, "truk": 0, "bus": 0
-                }
+            agg = data[ts].get(
+                lengan, {"total": 0, "motor": 0, "mobil": 0, "truk": 0, "bus": 0}
+            )
+            approach_states.append(
+                ApproachState(
+                    approach=LENGAN_KE_APPROACH[lengan],
+                    volume=agg["total"],
+                    motorcycleCount=agg["motor"],
+                    carCount=agg["mobil"],
+                    truckCount=agg["truk"],
+                    busCount=agg["bus"],
+                )
+            )
 
-        keputusan = engine.decide(traffic_state)
+        traffic_state = TrafficState(
+            intersectionId="simpang4-pingit",
+            windowStart=datetime.now(timezone.utc),
+            windowEnd=datetime.now(timezone.utc),
+            approaches=approach_states,
+        )
 
-        for lengan, info in keputusan.items():
-            results.append({
-                "timestamp":   ts,
-                "lengan":      lengan,
-                "green_time":  info["green_duration"],
-                "prioritas":   info["prioritas"],
-                "skor":        info["skor"],
-                "total_kend":  traffic_state[lengan]["total"],
-            })
+        rekomendasi = engine.decide(traffic_state)
+
+        results.append({
+            "timestamp": ts,
+            "recommended_phase": rekomendasi.recommended_phase,
+            "green_time": rekomendasi.recommended_green_seconds,
+            "current_green_seconds": rekomendasi.current_green_seconds,
+            "confidence": rekomendasi.confidence,
+            "expected_delay_reduction_percent": rekomendasi.expected_delay_reduction_percent,
+            "reason": rekomendasi.reason,
+        })
 
     return results
 
 # ─── Tulis Output CSV ─────────────────────────────────────────────────────────
 def tulis_csv(path: str, rows: list):
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    fieldnames = ["timestamp", "lengan", "green_time", "prioritas", "skor", "total_kend"]
+    fieldnames = [
+        "timestamp", "recommended_phase", "green_time",
+        "current_green_seconds", "confidence",
+        "expected_delay_reduction_percent", "reason",
+    ]
     with open(path, "w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
@@ -175,14 +217,16 @@ if __name__ == "__main__":
 
     # --- Preview 10 baris pertama -------------------------------------
     print("\n[SmartTwin] --- Preview 10 Baris Pertama ---")
-    print(f"{'Timestamp':<25} {'Lengan':<18} {'Green':>6} {'Prioritas':<10} {'Skor':>6} {'Total':>6}")
-    print("-" * 75)
+    print(
+        f"{'Timestamp':<25} {'Phase':<8} {'Green':>6} "
+        f"{'Confidence':>10} {'Reason'}"
+    )
+    print("-" * 100)
     for row in results[:10]:
         print(
             f"{row['timestamp']:<25} "
-            f"{row['lengan']:<18} "
+            f"{row['recommended_phase']:<8} "
             f"{row['green_time']:>5}s "
-            f"{row['prioritas']:<10} "
-            f"{row['skor']:>6} "
-            f"{row['total_kend']:>6}"
+            f"{row['confidence']:>10} "
+            f"{row['reason']}"
         )
