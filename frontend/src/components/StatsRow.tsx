@@ -29,20 +29,31 @@ import DonutRing from "./DonutRing";
  *
  * Threshold ini hanya digunakan untuk indikator visual
  * dashboard.
+ *
+ * Dikalibrasi ulang 25 Agustus 2026 ke skala densityIndex yang
+ * SEBENARNYA (rata-rata kendaraan di zona per window, dari
+ * snapshot_zona.csv -- lihat cv_csv_bridge.py). Threshold lama
+ * (90/130) dirancang untuk skala yang jauh lebih besar dari data
+ * asli: seluruh dataset 15 Agustus cuma berkisar 0-13,4 (median 4,
+ * p90 9,4, p95 10,6) -- dengan threshold lama, Congestion Level
+ * SELALU "Rendah" apa pun kondisinya, tidak pernah kelihatan
+ * "Sedang"/"Tinggi" walau simpang penuh sesak. Threshold baru
+ * mengikuti distribusi nyata: >=10 (sekitar p90 ke atas) = Tinggi,
+ * >=5 (sekitar median ke atas) = Sedang.
  */
 
 function congestionFromDensity(avgDensity: number): {
   label: string;
   color: "red" | "amber" | "green";
 } {
-  if (avgDensity >= 130) {
+  if (avgDensity >= 10) {
     return {
       label: "Tinggi",
       color: "red",
     };
   }
 
-  if (avgDensity >= 90) {
+  if (avgDensity >= 5) {
     return {
       label: "Sedang",
       color: "amber",
@@ -184,15 +195,25 @@ export default function StatsRow({
 }) {
   /*
    * =========================================================
-   * TOTAL VOLUME
+   * TOTAL VEHICLES (di zona, KEHADIRAN -- bukan crossing)
    * =========================================================
    *
-   * Total kendaraan dari seluruh approach.
+   * SENGAJA pakai densityIndex (dari snapshot_zona.csv, dibulatkan),
+   * BUKAN volume (dari crossing_simpang.csv). volume = berapa
+   * kendaraan MELINTASI garis hitung dalam window 5 detik itu (bisa
+   * kecil walau jalan padat, misal cuma 2 kalau macet/kendaraan
+   * banyak yang diam). densityIndex = rata-rata kendaraan yang benar-
+   * benar ADA di zona saat itu -- ini yang dimaksud pengguna dashboard
+   * saat baca "Total Vehicles", dikonfirmasi langsung 25 Agustus 2026
+   * setelah dibandingkan ke overlay debug CV (vehicle_counter_copy.py)
+   * yang nunjukin angka zona, bukan crossing.
    */
 
-  const totalVolume = approaches.reduce(
-    (sum, approach) => sum + approach.volume,
-    0
+  const totalVolume = Math.round(
+    approaches.reduce(
+      (sum, approach) => sum + approach.densityIndex,
+      0
+    )
   );
 
   /*
@@ -277,11 +298,18 @@ export default function StatsRow({
    * Ini hanya normalisasi visual untuk DonutRing.
    *
    * BUKAN occupancy fisik.
+   *
+   * Dibagi 15 (bukan 180 seperti sebelumnya) -- dikalibrasi ke skala
+   * densityIndex asli (maks observasi 13,4 di seluruh dataset 15
+   * Agustus). /180 bikin ring selalu kelihatan nyaris kosong (maks
+   * ~7%) apa pun kondisinya; /15 bikin density tinggi (~10 ke atas,
+   * sama seperti threshold "Tinggi" di atas) kelihatan mendekati
+   * penuh di ring.
    */
 
   const congestionPct = hasData ? Math.min(
     Math.max(
-      Math.round((avgDensity / 180) * 100),
+      Math.round((avgDensity / 15) * 100),
       0
     ),
     100

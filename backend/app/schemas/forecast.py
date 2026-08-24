@@ -1,59 +1,63 @@
+from __future__ import annotations
+
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, Field
-
-from app.schemas.traffic import Approach
-
-
-class ForecastPoint(BaseModel):
-    approach: Approach
-
-    horizonMinutes: int = Field(ge=0)
-
-    predictedVolume: float = Field(ge=0)
+from pydantic import BaseModel, Field
 
 
 # ============================================================
-# LSTM LIVE FORECAST (WIP -- lihat app/services/forecast_service.py)
+# FORECAST REQUEST
 # ============================================================
-#
-# Bentuk di bawah ini disalin persis dari cara forecast_service.py
-# mengkonstruksi objeknya (per-approach breakdown per titik prediksi).
-# CATATAN: frontend/src/types/traffic.ts punya ForecastResponse/
-# ForecastPrediction dengan bentuk BERBEDA TOTAL (flat, tanpa
-# breakdown per-approach, nama field juga beda). Belum direkonsiliasi
-# -- ini cuma menutup ImportError yang bikin seluruh backend gagal
-# start, bukan menyelesaikan desainnya.
 
-class ForecastApproach(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
+class ForecastRequest(BaseModel):
+    intersectionId: str
 
-    approach: Approach
+    horizonMinutes: int = Field(
+        default=15,
+        ge=1,
+        le=60,
+    )
 
-    queueLengthVeh: float = Field(default=0.0, alias="queueLengthVeh", ge=0.0)
 
+# ============================================================
+# FORECAST PREDICTION
+# ============================================================
 
 class ForecastPrediction(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
+    timestamp: datetime
 
-    predictionTime: datetime = Field(alias="predictionTime")
+    predictedVehicleCount: float = Field(
+        ge=0,
+    )
 
-    horizonSeconds: int = Field(alias="horizonSeconds", ge=0)
+    predictedQueueLengthVeh: float = Field(
+        ge=0,
+    )
 
-    approaches: list[ForecastApproach]
+    predictedQueueLengthMEst: float = Field(
+        ge=0,
+    )
 
+    predictedDensityIndex: float = Field(
+        ge=0,
+        le=1,
+    )
+
+    predictedSpeedKmh: float | None = Field(
+        default=None,
+        ge=0,
+    )
+
+
+# ============================================================
+# FORECAST RESULT
+# ============================================================
 
 class ForecastResult(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
+    intersectionId: str
 
-    intersectionId: str = Field(alias="intersectionId")
+    horizonMinutes: int
 
-    generatedAt: datetime = Field(alias="generatedAt")
-
-    sourceWindowStart: datetime = Field(alias="sourceWindowStart")
-    sourceWindowEnd: datetime = Field(alias="sourceWindowEnd")
-
-    modelName: str = Field(alias="modelName")
-    modelVersion: str = Field(alias="modelVersion")
+    model: str
 
     predictions: list[ForecastPrediction]

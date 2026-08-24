@@ -158,12 +158,31 @@ Checklist singkat kalau RunPod sudah siap dan mau lanjut ke live-push:
 
 5. **`source: "cv_test"` mencemari tabel produksi** — `backend/tests/test_traffic_pipeline.py` menulis ke Supabase yang sama dengan yang dipakai dashboard (bukan database tes terpisah). Kalau lihat baris aneh dengan `source = 'cv_test'` di `trafficStates`, itu sampah dari test suite, bukan data CV asli.
 
+6. **`densityIndex` sumbernya salah CSV, dan threshold Congestion Level tidak sesuai skala (25 Agustus 2026).** Dua masalah terpisah yang ditemukan bareng lewat perbandingan manual ke overlay "ZONA MONITOR" `vehicle_counter_copy.py`:
+   - `cv_csv_bridge.py::get_default_density_path()` awalnya baca `percobaan_logic_simpang.csv` (sudah dirata-rata SENDIRI oleh CV per window 5 detik) — angkanya kadang meleset cukup jauh dari apa yang kelihatan di video pada detik tertentu. Diganti ke `snapshot_zona.csv` (bacaan mentah PER DETIK, tidak dirata-rata CV, baru diagregasi ke window 5 detik di `_load_merged()` lewat `.dt.floor("5s")`) — hasilnya jauh lebih presisi ke video. `carCount`/`motorcycleCount`/`busCount`/`truckCount` juga ikut dipindah ke sumber zona yang sama (tadinya dari `crossing_simpang.csv`) supaya breakdown "Vehicle Detection" di dashboard konsisten jumlahnya sama `densityIndex`/"Total Vehicles" (`vehicleCount`/`volume` TETAP dari crossing, itu representasi arus yang beda tujuan, bukan salah).
+   - `StatsRow.tsx::congestionFromDensity()` threshold-nya (`>=90` Sedang, `>=130` Tinggi) dirancang untuk skala yang jauh lebih besar dari `densityIndex` asli (seluruh dataset 15 Agustus cuma 0-13,4, median 4). Akibatnya Congestion Level **selalu** "Rendah" apa pun kondisi lalu lintasnya. Dikalibrasi ulang ke `>=5` Sedang / `>=10` Tinggi (sekitar median dan p90 data asli). `congestionPct` (buat DonutRing) juga diganti pembaginya dari `/180` ke `/15`.
+   - **"Total Vehicles" card sengaja diganti sumbernya** dari `volume` (crossing) ke `densityIndex` (zona) — disepakati langsung sama pemilik dashboard: yang dimaksud "Total Vehicles" itu "berapa kendaraan ADA sekarang" (KEHADIRAN), bukan "berapa yang lewat garis" (ALIRAN). Kalau nanti ada card/fitur baru yang butuh angka arus, pakai `volume`, bukan bikin bingung lagi dengan nama "Total Vehicles".
+
 ## Keterbatasan yang MEMANG belum ada (bukan bug, jangan dikejar sebagai bug)
 
 - **Longest Queue selalu 0.0 m** — `vehicle_counter_copy.py` tidak pernah menghitung antrean dalam meter (beda dengan `vehicle_counter.py` lama yang punya `QUEUE_SPACE_M`, tapi logika itu sengaja tidak dibawa pas pindah ke pendekatan zona). `queueLengthVeh`/`queueLengthMEst` di-hardcode 0 di `loadCvOutput()`.
 - **Average Speed selalu N/A** — belum ada logika hitung kecepatan sama sekali di CV manapun. Butuh kalibrasi jarak piksel-ke-dunia-nyata + tracking kecepatan antar-frame, belum pernah dibangun.
 
 Dua-duanya butuh kerja CV baru (bukan backend/frontend), dan tidak otomatis kepenuhan cuma dengan pindah ke server yang lebih kuat (RunPod menyelesaikan masalah **kecepatan**, bukan menambah **logika** yang belum ada).
+
+### Detail teknis kalau nanti ada yang mau kerjakan (dicatat 25 Agustus 2026)
+
+Bukan "tidak mungkin dikerjakan" — cuma butuh **proses ulang video penuh** (bukan sekadar query ulang data yang sudah ada), dan itu baru masuk akal dilakukan setelah RunPod siap (lihat estimasi waktu di bawah).
+
+**Longest Queue (lebih achievable dari dua-duanya):**
+`vehicle_counter.py` LAMA (referensi, bukan yang aktif) sudah punya logika lengkap yang bisa diadaptasi ke `vehicle_counter_copy.py`:
+- Kendaraan dianggap "antre" kalau posisinya nyaris tidak bergerak (`STOPPED_PIXEL_THRESHOLD = 3.0` piksel) selama minimal `MIN_STOPPED_FRAMES = 5` frame berturut-turut, DAN berada di area dekat garis hitung (`QUEUE_ZONE_Y_RATIO = 0.65`)
+- Dikonversi ke meter lewat `QUEUE_SPACE_M = {motor: 2, mobil: 5, bus/truk: 10}` (estimasi kesepakatan tim, bukan kutipan PKJI 2023 — lihat catatan bagian 9 file lama)
+- Butuh tracking posisi per-`track_id` antar-frame — data ini TIDAK ADA di CSV manapun yang sudah dihasilkan sekarang (`percobaan_logic_simpang.csv`/`crossing_simpang.csv`/`snapshot_zona.csv` semuanya agregat per-window, bukan per-kendaraan), jadi tidak bisa dihitung dari data yang sudah ada — wajib proses ulang video dengan logika ini ditambahkan ke script.
+
+**Average Speed (lebih berat):** butuh kalibrasi piksel-ke-jarak-dunia-nyata (belum pernah dibangun sama sekali, beda dari queue yang setidaknya punya referensi kode lama) plus tracking kecepatan antar-frame. Diperkirakan kerja CV paling besar dari semua gap yang tersisa.
+
+**Kenapa ditunda, bukan dikerjakan sekarang (keputusan 25 Agustus 2026):** proses ulang video 49 menit di CPU lokal diperkirakan **~5 jam** (berdasarkan diagnosa "30 detik video = 3+ menit wall-clock" di bagian "Kenapa bukan live-push" di atas) — tidak realistis dengan sisa waktu H-6. Diputuskan: **biarkan N/A/0.0 apa adanya** (jujur, sesuai konvensi `avgSpeedKmh=None` di repo ini — lebih baik kosong daripada angka kira-kira yang menyesatkan), fokus ke item lain yang lebih kritis untuk demo, dan kerjakan queue/speed setelah RunPod (GPU) siap sehingga proses ulang video jadi masuk akal durasinya. Congestion Level **tidak** kena masalah yang sama — dia turunan dari `densityIndex` yang sudah ada, cuma butuh threshold-nya dikalibrasi ulang (lihat bug #6 di bawah), bukan butuh data baru.
 
 ## Gotcha operasional yang sempat bikin bingung
 

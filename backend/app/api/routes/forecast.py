@@ -1,41 +1,58 @@
-from __future__ import annotations
-
 from fastapi import APIRouter, HTTPException
 
-from app.schemas.forecast import ForecastResult
-from app.services.forecast_service import (
-    forecast_service,
+from app.schemas.forecast import (
+    ForecastRequest,
+    ForecastResult,
+)
+
+from app.services.realtime_forecast_service import (
+    RealtimeForecastService,
 )
 
 
 router = APIRouter(
-    prefix="/api/forecast",
+    prefix="/api",
     tags=["Forecast"],
 )
 
 
-@router.get(
-    "/latest/{intersection_id}",
+@router.post(
+    "/forecast",
     response_model=ForecastResult,
 )
-async def get_latest_forecast(
-    intersection_id: str,
+def forecast(
+    request: ForecastRequest,
 ):
 
-    result = (
-        forecast_service
-        .get_latest(
-            intersection_id
-        )
-    )
+    try:
 
-    if result is None:
+        service = RealtimeForecastService()
+
+        return service.forecast(
+            intersection_id=request.intersectionId,
+            horizon_minutes=request.horizonMinutes,
+        )
+
+    except ValueError as exc:
 
         raise HTTPException(
-            status_code=404,
-            detail=(
-                "Forecast belum tersedia."
-            ),
+            status_code=422,
+            detail=str(exc),
         )
 
-    return result
+    except FileNotFoundError as exc:
+
+        raise HTTPException(
+            status_code=500,
+            detail=str(exc),
+        )
+
+    except Exception as exc:
+
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                "Gagal menjalankan realtime forecast: "
+                f"{exc}"
+            ),
+        )

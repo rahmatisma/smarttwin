@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
 
 import numpy as np
 
@@ -13,67 +13,227 @@ class ForecastOutput:
 
 
 class LSTMForecaster:
+    """
+    ONNX inference wrapper untuk SmartTwin Traffic LSTM.
+
+    Model contract:
+        input  = [batch, lookback, features]
+        output = [batch, horizon, features]
+
+    Feature model:
+        totalDiZona
+        motorDiZona
+        mobilDiZona
+        trukDiZona
+        busDiZona
+    """
 
     def __init__(
         self,
-        model_path: str | Path,
-        feature_names: list[str],
-        sequence_length: int,
-        scaler=None,
+        modelPath: str | Path,
+        scalerPath: str | Path,
+        metadataPath: str | Path,
+        featureNames: list[str],
+        sequenceLength: int,
     ):
-        self.model_path = Path(model_path)
+        self.modelPath = Path(modelPath)
+        self.scalerPath = Path(scalerPath)
+        self.metadataPath = Path(metadataPath)
 
-        self.feature_names = feature_names
+        self.featureNames = featureNames
+        self.sequenceLength = sequenceLength
 
-        self.sequence_length = sequence_length
+        self.session = None
+        self.inputName = None
+        self.outputName = None
 
-        self.scaler = scaler
+        self.scalerMin = None
+        self.scalerScale = None
 
-        self.model = None
+        self.metadata = {}
 
-        self._load_model()
+        self._loadMetadata()
+        self._loadScaler()
+        self._loadModel()
 
-    def _load_model(self):
+    # =========================================================
+    # METADATA
+    # =========================================================
 
-        if not self.model_path.exists():
-            print(
-                f"[LSTM] WARNING: Model tidak ditemukan: {self.model_path}. "
-                "Berjalan dalam mode dummy/fallback."
+    def _loadMetadata(self) -> None:
+        if not self.metadataPath.exists():
+            raise FileNotFoundError(
+                f"Metadata tidak ditemukan: {self.metadataPath}"
             )
-            self.model = None
-            return
+
+        with open(
+            self.metadataPath,
+            "r",
+            encoding="utf-8",
+        ) as file:
+            self.metadata = json.load(file)
+
+        trainedFeatures = self.metadata.get(
+            "features",
+            [],
+        )
+
+        if trainedFeatures != self.featureNames:
+            raise ValueError(
+                "\nKontrak feature LSTM tidak cocok.\n\n"
+                f"Model   : {trainedFeatures}\n"
+                f"Backend : {self.featureNames}\n"
+            )
+
+        trainedLookback = self.metadata.get(
+            "lookback"
+        )
+
+        if trainedLookback != self.sequenceLength:
+            raise ValueError(
+                "\nSequence length tidak cocok.\n\n"
+                f"Model   : {trainedLookback}\n"
+                f"Backend : {self.sequenceLength}\n"
+            )
+
+    # =========================================================
+    # SCALER
+    # =========================================================
+
+    def _loadScaler(self) -> None:
+        if not self.scalerPath.exists():
+            raise FileNotFoundError(
+                f"Scaler tidak ditemukan: {self.scalerPath}"
+            )
+
+        with open(
+            self.scalerPath,
+            "r",
+            encoding="utf-8",
+        ) as file:
+            scalerData = json.load(file)
+
+        self.scalerMin = np.asarray(
+            scalerData["min"],
+            dtype=np.float32,
+        )
+
+        self.scalerScale = np.asarray(
+            scalerData["scale"],
+            dtype=np.float32,
+        )
+
+        if len(self.scalerMin) != len(self.featureNames):
+            raise ValueError(
+                "Jumlah scaler feature tidak cocok dengan model."
+            )
+
+        if len(self.scalerScale) != len(self.featureNames):
+            raise ValueError(
+                "Jumlah scaler scale tidak cocok dengan model."
+            )
+
+    # =========================================================
+    # MODEL
+    # =========================================================
+
+    def _loadModel(self) -> None:
+        if not self.modelPath.exists():
+            raise FileNotFoundError(
+                f"Model ONNX tidak ditemukan: {self.modelPath}"
+            )
 
         try:
-            from tensorflow.keras.models import load_model
-            self.model = load_model(
-                self.model_path
-            )
-            print(
-                f"[LSTM] Loaded model: "
-                f"{self.model_path}"
-            )
+            import onnxruntime as ort
         except ImportError:
-            print(
-                "[LSTM] WARNING: tensorflow tidak terinstall. "
-                "Berjalan dalam mode dummy/fallback."
-            )
-            self.model = None
+            raise RuntimeError(
+                "onnxruntime belum tersedia. "
+                "Install dengan: pip install onnxruntime"
+            ) from None
 
-    def prepare_sequence(
+        self.session = ort.InferenceSession(
+            str(self.modelPath),
+            providers=[
+                "CPUExecutionProvider"
+            ],
+        )
+
+        inputs = self.session.get_inputs()
+        outputs = self.session.get_outputs()
+
+        if not inputs:
+            raise RuntimeError(
+                "ONNX model tidak memiliki input."
+            )
+
+        if not outputs:
+            raise RuntimeError(
+                "ONNX model tidak memiliki output."
+            )
+
+        self.inputName = inputs[0].name
+        self.outputName = outputs[0].name
+
+        print(
+            "[LSTM] ONNX model loaded:",
+            self.modelPath,
+        )
+
+        print(
+            "[LSTM] Input:",
+            self.inputName,
+        )
+
+        print(
+            "[LSTM] Output:",
+            self.outputName,
+        )
+
+    # =========================================================
+    # SCALE
+    # =========================================================
+
+    def _transform(
+        self,
+        values: np.ndarray,
+    ) -> np.ndarray:
+
+        return (
+            values * self.scalerScale
+            + self.scalerMin
+        )
+
+    # =========================================================
+    # INVERSE SCALE
+    # =========================================================
+
+    def _inverseTransform(
+        self,
+        values: np.ndarray,
+    ) -> np.ndarray:
+
+        return (
+            values - self.scalerMin
+        ) / self.scalerScale
+
+    # =========================================================
+    # PREPARE SEQUENCE
+    # =========================================================
+
+    def prepareSequence(
         self,
         history: list[dict],
     ) -> np.ndarray:
 
-        if len(history) < self.sequence_length:
+        if len(history) < self.sequenceLength:
             raise ValueError(
-                f"History membutuhkan "
-                f"{self.sequence_length} timestep, "
-                f"tetapi hanya tersedia "
-                f"{len(history)}."
+                "History belum cukup untuk LSTM. "
+                f"Dibutuhkan {self.sequenceLength} timestep, "
+                f"tersedia {len(history)}."
             )
 
         history = history[
-            -self.sequence_length:
+            -self.sequenceLength:
         ]
 
         values = []
@@ -82,7 +242,7 @@ class LSTMForecaster:
 
             timestep = []
 
-            for feature in self.feature_names:
+            for feature in self.featureNames:
 
                 value = row.get(
                     feature,
@@ -96,71 +256,86 @@ class LSTMForecaster:
                     float(value)
                 )
 
-            values.append(timestep)
+            values.append(
+                timestep
+            )
 
         array = np.asarray(
             values,
             dtype=np.float32,
         )
 
-        if self.scaler is not None:
-
-            original_shape = array.shape
-
-            array = self.scaler.transform(
-                array
+        if array.shape != (
+            self.sequenceLength,
+            len(self.featureNames),
+        ):
+            raise ValueError(
+                "Shape sequence LSTM tidak sesuai. "
+                f"Shape: {array.shape}"
             )
 
-            array = array.reshape(
-                original_shape
-            )
+        # MinMaxScaler:
+        #
+        # X_scaled = X * scale + min
+        array = self._transform(
+            array
+        )
+
+        # [lookback, features]
+        #
+        # menjadi
+        #
+        # [1, lookback, features]
 
         return np.expand_dims(
             array,
             axis=0,
         )
 
+    # =========================================================
+    # PREDICT
+    # =========================================================
+
     def predict(
         self,
         history: list[dict],
     ) -> np.ndarray:
 
-        sequence = self.prepare_sequence(
+        sequence = self.prepareSequence(
             history
         )
 
-        if self.model is None:
-            # Dummy prediction jika model tidak ada
-            prediction = np.zeros(
-                (1, 3, len(self.feature_names)), 
-                dtype=np.float32
-            )
-        else:
-            prediction = self.model.predict(
-                sequence,
-                verbose=0,
-            )
+        prediction = self.session.run(
+            [self.outputName],
+            {
+                self.inputName: sequence
+            },
+        )[0]
 
         prediction = np.asarray(
             prediction,
             dtype=np.float32,
         )
 
-        if self.scaler is not None:
+        originalShape = prediction.shape
 
-            prediction_shape = prediction.shape
+        prediction = prediction.reshape(
+            -1,
+            len(self.featureNames),
+        )
 
-            prediction = prediction.reshape(
-                -1,
-                len(self.feature_names),
-            )
+        prediction = self._inverseTransform(
+            prediction
+        )
 
-            prediction = self.scaler.inverse_transform(
-                prediction
-            )
+        prediction = prediction.reshape(
+            originalShape
+        )
 
-            prediction = prediction.reshape(
-                prediction_shape
-            )
+        # Jumlah kendaraan tidak boleh negatif.
+        prediction = np.maximum(
+            prediction,
+            0,
+        )
 
         return prediction

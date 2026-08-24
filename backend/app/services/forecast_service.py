@@ -1,16 +1,26 @@
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 from app.models.lstm_forecast import LSTMForecaster
+from app.repositories.forecast_repository import (
+    ForecastRepository,
+)
 from app.schemas.forecast import (
-    ForecastApproach,
     ForecastPrediction,
     ForecastResult,
 )
-from app.schemas.traffic import (
-    TrafficState,
-)
+
+
+FEATURE_NAMES = [
+    "totalDiZona",
+    "motorDiZona",
+    "mobilDiZona",
+    "trukDiZona",
+    "busDiZona",
+]
+
+INTERVAL_SECONDS = 5
 
 
 class ForecastService:
@@ -18,213 +28,192 @@ class ForecastService:
     def __init__(
         self,
         forecaster: LSTMForecaster,
+        repository: ForecastRepository,
     ):
         self.forecaster = forecaster
+        self.repository = repository
 
-        self.history: dict[
-            str,
-            list[TrafficState]
-        ] = {}
+    # =========================================================
+    # FORECAST
+    # =========================================================
 
-    def add_traffic_state(
+    def forecast(
         self,
-        state: TrafficState,
-    ) -> ForecastResult | None:
-
-        intersection_id = (
-            state.intersectionId
-        )
-
-        if intersection_id not in self.history:
-            self.history[
-                intersection_id
-            ] = []
-
-        self.history[
-            intersection_id
-        ].append(state)
-
-        max_history = (
-            self.forecaster.sequence_length
-            + 20
-        )
-
-        self.history[
-            intersection_id
-        ] = self.history[
-            intersection_id
-        ][-max_history:]
-
-        if len(
-            self.history[intersection_id]
-        ) < self.forecaster.sequence_length:
-
-            print(
-                "[FORECAST] History belum cukup:"
-                f" {len(self.history[intersection_id])}/"
-                f"{self.forecaster.sequence_length}"
-            )
-
-            return None
-
-        return self._run_forecast(
-            intersection_id
-        )
-
-    def _state_to_features(
-        self,
-        state: TrafficState,
-    ) -> dict:
-
-        result = {}
-
-        for approach in state.approaches:
-
-            name = approach.approach.value
-
-            result[name] = (
-                approach.queueLengthVeh
-                or 0
-            )
-
-        return result
-
-    def _run_forecast(
-        self,
-        intersection_id: str,
+        intersectionId: str,
+        horizonMinutes: int,
     ) -> ForecastResult:
 
-        states = self.history[
-            intersection_id
-        ]
+        if horizonMinutes <= 0:
+            raise ValueError(
+                "horizonMinutes harus lebih besar dari 0."
+            )
 
-        history_features = [
-            self._state_to_features(state)
+        states = (
+            self.repository.getTrafficHistory(
+                intersectionId=intersectionId,
+                limit=self.forecaster.sequenceLength,
+            )
+        )
+
+        if len(states) < self.forecaster.sequenceLength:
+            raise ValueError(
+                "Data traffic belum cukup untuk forecast. "
+                f"Dibutuhkan "
+                f"{self.forecaster.sequenceLength} timestep, "
+                f"tersedia {len(states)}."
+            )
+
+        historyFeatures = [
+            self._stateToFeatures(state)
             for state in states
         ]
 
         prediction = (
             self.forecaster.predict(
-                history_features
+                historyFeatures
             )
         )
 
-        latest_state = states[-1]
+        if prediction.ndim == 3:
+            prediction = prediction[0]
 
-        generated_at = (
-            latest_state.windowEnd
-        )
-
-        prediction_values = (
-            prediction
-        )
-
-        if prediction_values.ndim == 3:
-
-            prediction_values = (
-                prediction_values[0]
+        if prediction.ndim != 2:
+            raise ValueError(
+                "Output LSTM tidak sesuai. "
+                f"Shape: {prediction.shape}"
             )
 
-        if prediction_values.ndim == 1:
+        latestState = states[-1]
 
-            prediction_values = [
-                prediction_values
-            ]
+        generatedAt = self._parseDatetime(
+            latestState["windowEnd"]
+        )
 
         predictions = []
 
-        for step_index, values in enumerate(
-            prediction_values
-        ):
+        maxSteps = min(
+            len(prediction),
+            horizonMinutes
+            * 60
+            // INTERVAL_SECONDS,
+        )
 
-            prediction_time = (
-                generated_at
+        for index in range(maxSteps):
+
+            values = prediction[index]
+
+            predictionTime = (
+                generatedAt
                 + timedelta(
-                    seconds=5 * (
-                        step_index + 1
+                    seconds=(
+                        INTERVAL_SECONDS
+                        * (index + 1)
                     )
                 )
             )
-
-            approaches = []
-
-            for index, approach in enumerate(
-                ["north", "south", "east", "west"]
-            ):
-
-                value = float(
-                    values[index]
-                )
-
-                approaches.append(
-                    ForecastApproach(
-                        approach=approach,
-                        queueLengthVeh=max(
-                            0,
-                            value,
-                        ),
-                    )
-                )
 
             predictions.append(
                 ForecastPrediction(
-                    predictionTime=(
-                        prediction_time
+                    timestamp=predictionTime,
+                    predictedVehicleCount=max(
+                        0.0,
+                        float(values[0]),
                     ),
-                    horizonSeconds=(
-                        5 * (step_index + 1)
-                    ),
-                    approaches=approaches,
+                    predictedQueueLengthVeh=0.0,
+                    predictedQueueLengthMEst=0.0,
+                    predictedDensityIndex=0.0,
+                    predictedSpeedKmh=None,
                 )
             )
 
-        result = ForecastResult(
-            intersectionId=(
-                intersection_id
-            ),
-            generatedAt=generated_at,
-            sourceWindowStart=(
-                latest_state.windowStart
-            ),
-            sourceWindowEnd=(
-                latest_state.windowEnd
-            ),
-            modelName="LSTM",
-            modelVersion="1.0",
+        return ForecastResult(
+            intersectionId=intersectionId,
+            horizonMinutes=horizonMinutes,
+            model="LSTM",
             predictions=predictions,
         )
 
-        print(
-            "\n========== FORECAST =========="
-        )
+    # =========================================================
+    # TRAFFIC STATE -> LSTM FEATURES
+    # =========================================================
 
-        print(
-            result.model_dump_json(
-                indent=2
+    def _stateToFeatures(
+        self,
+        state: dict,
+    ) -> dict:
+
+        total = 0.0
+        motorcycle = 0.0
+        car = 0.0
+        truck = 0.0
+        bus = 0.0
+
+        for approach in state.get(
+            "approaches",
+            [],
+        ):
+
+            total += float(
+                approach.get(
+                    "volume",
+                    0,
+                ) or 0
+            )
+
+            motorcycle += float(
+                approach.get(
+                    "motorcycleCount",
+                    0,
+                ) or 0
+            )
+
+            car += float(
+                approach.get(
+                    "carCount",
+                    0,
+                ) or 0
+            )
+
+            truck += float(
+                approach.get(
+                    "truckCount",
+                    0,
+                ) or 0
+            )
+
+            bus += float(
+                approach.get(
+                    "busCount",
+                    0,
+                ) or 0
+            )
+
+        return {
+            "totalDiZona": total,
+            "motorDiZona": motorcycle,
+            "mobilDiZona": car,
+            "trukDiZona": truck,
+            "busDiZona": bus,
+        }
+
+    # =========================================================
+    # DATETIME
+    # =========================================================
+
+    def _parseDatetime(
+        self,
+        value,
+    ) -> datetime:
+
+        if isinstance(
+            value,
+            datetime,
+        ):
+            return value
+
+        return datetime.fromisoformat(
+            value.replace(
+                "Z",
+                "+00:00",
             )
         )
-
-        print(
-            "==============================\n"
-        )
-
-        return result
-    
-FEATURE_NAMES = [
-    "north",
-    "south",
-    "east",
-    "west",
-]
-
-
-forecaster = LSTMForecaster(
-    model_path="models/traffic_lstm.keras",
-    feature_names=FEATURE_NAMES,
-    sequence_length=15,
-)
-
-
-forecast_service = ForecastService(
-    forecaster=forecaster,
-)

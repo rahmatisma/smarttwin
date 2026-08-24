@@ -13,6 +13,12 @@ forecasting/.venv/
 # pip cache — jangan pernah di-commit, ini cache lokal
 pip-cache/
 
+# Backup/scratch zip di root repo -- 24 Agustus 2026 ada backend.zip
+# (2,23 GB) ke-commit tanpa sengaja lewat `git add -A` pas resolve
+# conflict, bikin push gagal berulang kali (timeout). data/*.zip di
+# bawah tidak menutup ini karena file-nya ada di root, bukan di data/.
+*.zip
+
 # CCTV videos
 cv/videos/
 cv/models/
