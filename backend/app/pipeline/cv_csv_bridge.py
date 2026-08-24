@@ -80,8 +80,20 @@ def get_default_cross_path() -> Path:
 
 
 def get_default_density_path() -> Path:
+    # snapshot_zona.csv, BUKAN percobaan_logic_simpang.csv -- keduanya
+    # skema kolomnya identik (ditulis oleh vehicle_counter_copy.py yang
+    # sama), tapi beda tujuan. percobaan_logic_simpang.csv sudah
+    # dirata-rata per window 5 detik OLEH SCRIPT CV ITU SENDIRI --
+    # cukup halus tapi bisa meleset lumayan dari apa yang kelihatan di
+    # video pada satu detik tertentu (terverifikasi 25 Agustus: jam
+    # 16:31:20 percobaan_logic bilang total~9.8, padahal overlay CV
+    # asli di detik itu jelas menunjukkan 11 -- match persis dengan
+    # snapshot_zona.csv, bukan percobaan_logic). snapshot_zona.csv
+    # sengaja dibuat CV per DETIK, TIDAK dirata-rata, buat kasus
+    # "tampilan hidup" persis ini -- diagregasi ke window 5 detik di
+    # bawah (_load_merged) supaya tetap sinkron sama crossing CSV.
     project_root = Path(__file__).resolve().parents[3]
-    return project_root / "cv" / "output" / "percobaan_logic_simpang.csv"
+    return project_root / "cv" / "output" / "snapshot_zona.csv"
 
 
 def _load_merged(cross_path: Path, density_path: Path) -> pd.DataFrame:
@@ -100,27 +112,47 @@ def _load_merged(cross_path: Path, density_path: Path) -> pd.DataFrame:
     df_cross["timestamp"] = pd.to_datetime(df_cross["timestamp"], errors="coerce")
     df_density["timestamp"] = pd.to_datetime(df_density["timestamp"], errors="coerce")
 
+    # density_path (snapshot_zona.csv) dicatat per DETIK, sedangkan
+    # cross_path (crossing_simpang.csv) per 5 DETIK -- floor ke jendela
+    # 5 detik yang sama supaya baris bisa digabung nanti (kalau tidak,
+    # cuma 1 dari 5 baris snapshot yang match timestamp persis, 4
+    # sisanya jadi baris density-only yang tidak pernah ketemu crossing-nya).
+    df_density["timestamp"] = df_density["timestamp"].dt.floor("5s")
+
     df_cross["approach"] = df_cross["label_garis"].map(CROSS_LABEL_MAP)
     df_density["approach"] = df_density["lengan"].map(DENSITY_LENGAN_MAP)
 
     df_cross = df_cross.dropna(subset=["approach", "timestamp"])
     df_density = df_density.dropna(subset=["approach", "timestamp"])
 
+    # vehicleCount (volume) TETAP dari crossing -- itu representasi arus
+    # (berapa lewat garis), dipertahankan apa adanya karena mungkin
+    # dipakai bagian lain yang memang butuh arus, bukan kehadiran.
     cross_agg = df_cross.groupby(["timestamp", "approach"], as_index=False).agg(
         vehicleCount=("jumlah_crossing", "sum"),
-        carCount=("mobil_crossing", "sum"),
-        motorcycleCount=("motor_crossing", "sum"),
-        busCount=("bus_crossing", "sum"),
-        truckCount=("truk_crossing", "sum"),
     )
 
+    # carCount/motorcycleCount/busCount/truckCount SENGAJA dari ZONA
+    # (snapshot_zona.csv), BUKAN crossing lagi -- disepakati 25 Agustus
+    # 2026 supaya breakdown per-kelas di dashboard ("Vehicle Detection")
+    # konsisten dengan Total Vehicles/Density Index yang juga sudah zona,
+    # bukan campur dua populasi beda dalam satu panel yang sama.
+    #
+    # mean dari 5 bacaan per-detik dalam window itu -- masih rata-rata,
+    # tapi rata-rata dari sample MENTAH per detik (bukan pra-rata-rata
+    # internal CV), dan tiap sample individualnya presisi ke video.
     density_agg = df_density.groupby(["timestamp", "approach"], as_index=False).agg(
         densityIndex=("total_di_zona", "mean"),
+        carCount=("mobil_di_zona", "mean"),
+        motorcycleCount=("motor_di_zona", "mean"),
+        busCount=("bus_di_zona", "mean"),
+        truckCount=("truk_di_zona", "mean"),
     )
 
     merged = pd.merge(cross_agg, density_agg, on=["timestamp", "approach"], how="outer")
 
-    for col in ("vehicleCount", "carCount", "motorcycleCount", "busCount", "truckCount"):
+    merged["vehicleCount"] = merged["vehicleCount"].fillna(0).round().astype(int)
+    for col in ("carCount", "motorcycleCount", "busCount", "truckCount"):
         merged[col] = merged[col].fillna(0).round().astype(int)
     merged["densityIndex"] = merged["densityIndex"].fillna(0.0).astype(float)
 

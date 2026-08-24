@@ -10,6 +10,7 @@ import {
 
 import {
   useEffect,
+  useMemo,
   useState,
 } from "react";
 
@@ -186,6 +187,27 @@ export default function CameraFeedPanel({
     };
   }, [selectedApproach]);
 
+  // resolveVideoSrc() nambah cache-buster (?t=Date.now()) supaya browser
+  // tidak pakai response korup dari cache. Tapi kalau dipanggil LANGSUNG
+  // di JSX (bukan di-memoize), dia recompute tiap render -- termasuk
+  // render yang dipicu prop `counts` yang update tiap beberapa detik dari
+  // WebSocket/polling di page.tsx. Src video jadi berubah tiap render,
+  // browser terus-menerus reload videonya dari awal -> buffering selamanya,
+  // walau `cameras` sendiri (isi videonya) tidak berubah. Di-memoize di
+  // sini, key-nya `cameras` (cuma berubah kalau selectedApproach berubah
+  // atau ada kamera baru), supaya src stabil lintas render live-update.
+  const resolvedSrcByCamera = useMemo(() => {
+    const map = new Map<string, string>();
+
+    for (const camera of cameras) {
+      if (camera.source) {
+        map.set(camera.id, resolveVideoSrc(camera.source));
+      }
+    }
+
+    return map;
+  }, [cameras]);
+
   // ===================================================
   // RETURN
   // ===================================================
@@ -294,7 +316,7 @@ export default function CameraFeedPanel({
                   ------------------------------------- */
 
                   <video
-                    src={resolveVideoSrc(camera.source)}
+                    src={resolvedSrcByCamera.get(camera.id)}
                     muted
                     controls
                     playsInline
