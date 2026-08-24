@@ -1,83 +1,9 @@
 from __future__ import annotations
 
-import os
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Dict, Optional
 
-from dotenv import load_dotenv
-from supabase import Client, create_client
-
-
-# ============================================================
-# ENVIRONMENT
-# ============================================================
-
-def loadEnvironment() -> None:
-    """
-    Load environment variable dari backend/.env jika tersedia.
-    """
-
-    currentFile = os.path.abspath(__file__)
-
-    backendRoot = os.path.abspath(
-        os.path.join(
-            currentFile,
-            "..",
-            "..",
-        )
-    )
-
-    envFile = os.path.join(
-        backendRoot,
-        ".env",
-    )
-
-    if os.path.exists(envFile):
-        load_dotenv(
-            envFile,
-            override=False,
-        )
-
-
-# ============================================================
-# SUPABASE
-# ============================================================
-
-def getSupabase() -> Client:
-    """
-    Membuat Supabase client.
-
-    Tidak bergantung pada:
-        app.core.supabase
-
-    sehingga service ini bisa dipanggil langsung
-    oleh simulation/run_tls_simulation.py.
-    """
-
-    loadEnvironment()
-
-    supabaseUrl = os.getenv(
-        "SUPABASE_URL"
-    )
-
-    supabaseKey = os.getenv(
-        "SUPABASE_SERVICE_ROLE_KEY"
-    )
-
-    if not supabaseUrl:
-        raise RuntimeError(
-            "SUPABASE_URL tidak ditemukan."
-        )
-
-    if not supabaseKey:
-        raise RuntimeError(
-            "SUPABASE_SERVICE_ROLE_KEY tidak ditemukan."
-        )
-
-    return create_client(
-        supabaseUrl,
-        supabaseKey,
-    )
+from supabase import Client
 
 
 # ============================================================
@@ -86,369 +12,236 @@ def getSupabase() -> Client:
 
 class SimulationResultWriter:
     """
-    Menyimpan hasil simulasi SUMO ke Supabase.
+    Menyimpan hasil simulasi SUMO ke tabel:
 
-    Flow:
+        public.simulations
 
-        TrafficState
-             ↓
-        Decision Engine
-             ↓
-        SUMO
-             ↓
-        Simulation Metrics
-             ↓
-        simulationRuns
-             ↓
-        simulationMetrics
+    Schema database yang digunakan HARUS sesuai:
 
-    Semua payload menggunakan camelCase.
+        id                  int8
+        intersectionId      int8
+        trafficStateId      int8
+        recommendationId    int8
+        simulationName      varchar
+        simulationType      varchar
+        engine              varchar
+        status              varchar
+        startedAt           timestamptz
+        completedAt         timestamptz
+        createdAt           timestamptz
+
+    IMPORTANT:
+    Class ini TIDAK mengirim field lain ke tabel simulations.
+
+    Field seperti:
+        confidence
+        source
+        description
+        recommendedPhase
+        recommendedGreenSeconds
+        currentGreenSeconds
+        currentPhase
+        expectedDelayReductionPercent
+
+    boleh digunakan oleh simulation / decision engine,
+    tetapi TIDAK disimpan langsung ke tabel simulations.
     """
+
+    TABLE_NAME = "simulations"
+    INTERSECTIONS_TABLE = "intersections"
+
+    # ========================================================
+    # CONSTRUCTOR
+    # ========================================================
 
     def __init__(
         self,
-        supabaseClient: Client | None = None,
+        supabase: Client,
     ) -> None:
 
-        self.supabaseClient = (
-            supabaseClient
-            if supabaseClient is not None
-            else getSupabase()
-        )
-
-    # ========================================================
-    # SAVE RESULT
-    # ========================================================
-
-    def saveResult(
-        self,
-        trafficState: Any,
-        phasePlan: dict[str, Any],
-        simulationMetrics: dict[str, Any],
-    ) -> int:
-
-        intersectionId = self.getValue(
-            trafficState,
-            "intersectionId",
-        )
-
-        if not intersectionId:
+        if supabase is None:
             raise ValueError(
-                "TrafficState tidak memiliki intersectionId."
+                "Supabase client tidak boleh None."
             )
 
-        # ----------------------------------------------------
-        # TIMESTAMP
-        # ----------------------------------------------------
-
-        startedAt = self.getValue(
-            trafficState,
-            "windowStart",
-        )
-
-        endedAt = datetime.now(
-            timezone.utc
-        )
-
-        if startedAt is None:
-            startedAt = endedAt
-
-        # ----------------------------------------------------
-        # SIMULATION RUN
-        # ----------------------------------------------------
-
-        simulationRunPayload = {
-            "intersectionId": intersectionId,
-            "startedAt": self.toIsoString(
-                startedAt
-            ),
-            "endedAt": self.toIsoString(
-                endedAt
-            ),
-            "status": "completed",
-            "source": "rule-based",
-        }
-
-        print()
-        print(
-            "SimulationRun payload:"
-        )
-        print(
-            simulationRunPayload
-        )
-
-        try:
-
-            runResponse = (
-                self.supabaseClient
-                .table("simulationRuns")
-                .insert(
-                    simulationRunPayload
-                )
-                .execute()
-            )
-
-        except Exception as exc:
-
-            raise RuntimeError(
-                "Gagal insert ke tabel "
-                f"simulationRuns: {exc}"
-            ) from exc
-
-        if not runResponse.data:
-
-            raise RuntimeError(
-                "Insert simulationRuns tidak "
-                "mengembalikan data."
-            )
-
-        simulationRun = (
-            runResponse.data[0]
-        )
-
-        simulationRunId = (
-            simulationRun.get("id")
-        )
-
-        if simulationRunId is None:
-
-            raise RuntimeError(
-                "simulationRuns berhasil dibuat "
-                "tetapi id tidak ditemukan."
-            )
-
-        print()
-        print(
-            "SimulationRun berhasil disimpan."
-        )
-        print(
-            f"Simulation ID : {simulationRunId}"
-        )
-
-        # ----------------------------------------------------
-        # SIMULATION METRICS
-        # ----------------------------------------------------
-
-        metricsPayload = (
-            self.buildMetricsPayload(
-                simulationRunId=simulationRunId,
-                phasePlan=phasePlan,
-                simulationMetrics=simulationMetrics,
-            )
-        )
-
-        print()
-        print(
-            "SimulationMetrics payload:"
-        )
-        print(
-            metricsPayload
-        )
-
-        try:
-
-            metricsResponse = (
-                self.supabaseClient
-                .table("simulationMetrics")
-                .insert(
-                    metricsPayload
-                )
-                .execute()
-            )
-
-        except Exception as exc:
-
-            raise RuntimeError(
-                "Gagal insert ke tabel "
-                f"simulationMetrics: {exc}"
-            ) from exc
-
-        if not metricsResponse.data:
-
-            raise RuntimeError(
-                "Insert simulationMetrics tidak "
-                "mengembalikan data."
-            )
-
-        print()
-        print(
-            "SimulationMetrics berhasil disimpan."
-        )
-
-        return int(
-            simulationRunId
-        )
+        self.supabase = supabase
 
     # ========================================================
-    # BUILD METRICS PAYLOAD
+    # RESOLVE INTERSECTION ID
     # ========================================================
 
-    def buildMetricsPayload(
+    def _resolveIntersectionId(
         self,
-        simulationRunId: int,
-        phasePlan: dict[str, Any],
-        simulationMetrics: dict[str, Any],
-    ) -> dict[str, Any]:
+        intersectionIdentifier: Any,
+    ) -> int:
         """
-        Membentuk payload untuk simulationMetrics.
+        Mengubah intersection identifier menjadi
+        primary key numeric dari tabel intersections.
 
-        Seluruh field menggunakan camelCase.
+        Input yang didukung:
+
+            1
+            "1"
+            "simpang4-pingit"
+
+        Contoh:
+
+            intersections
+            --------------------------------
+            id = 1
+            intersectionId = simpang4-pingit
+
+        Maka:
+
+            "simpang4-pingit" -> 1
         """
 
-        return {
-            "simulationRunId": simulationRunId,
+        if intersectionIdentifier is None:
+            raise ValueError(
+                "intersectionId tidak boleh None."
+            )
 
-            "steps": self.toNumber(
-                simulationMetrics.get(
-                    "steps"
-                ),
-                default=0,
-            ),
-
-            "activeVehicles": self.toNumber(
-                simulationMetrics.get(
-                    "activeVehicles"
-                ),
-                default=0,
-            ),
-
-            "arrivedVehicles": self.toNumber(
-                simulationMetrics.get(
-                    "arrivedVehicles"
-                ),
-                default=0,
-            ),
-
-            "departedVehicles": self.toNumber(
-                simulationMetrics.get(
-                    "departedVehicles"
-                ),
-                default=0,
-            ),
-
-            "recommendedPhase": (
-                phasePlan.get(
-                    "approach"
-                )
-                or ""
-            ),
-
-            "sumoPhase": self.toNumber(
-                phasePlan.get(
-                    "sumoPhase"
-                ),
-                default=0,
-            ),
-
-            "greenDurationSeconds": self.toNumber(
-                phasePlan.get(
-                    "duration"
-                ),
-                default=0,
-            ),
-
-            "finalPhase": self.toNumber(
-                simulationMetrics.get(
-                    "finalPhase"
-                ),
-                default=0,
-            ),
-
-            "tlsState": (
-                simulationMetrics.get(
-                    "tlsState"
-                )
-                or ""
-            ),
-
-            "confidence": self.toNumber(
-                phasePlan.get(
-                    "confidence"
-                ),
-                default=0,
-            ),
-
-            "source": (
-                phasePlan.get(
-                    "source"
-                )
-                or "rule-based"
-            ),
-        }
-
-    # ========================================================
-    # VALUE HELPER
-    # ========================================================
-
-    @staticmethod
-    def getValue(
-        obj: Any,
-        fieldName: str,
-    ) -> Any:
-
-        if obj is None:
-            return None
+        # ----------------------------------------------------
+        # CASE 1: INTEGER
+        # ----------------------------------------------------
 
         if isinstance(
-            obj,
-            dict,
+            intersectionIdentifier,
+            int,
         ):
-            return obj.get(
-                fieldName
+            return intersectionIdentifier
+
+        # ----------------------------------------------------
+        # CASE 2: NUMERIC STRING
+        # ----------------------------------------------------
+
+        identifier = str(
+            intersectionIdentifier
+        ).strip()
+
+        if not identifier:
+            raise ValueError(
+                "intersectionId tidak boleh kosong."
             )
 
-        return getattr(
-            obj,
-            fieldName,
-            None,
-        )
+        if identifier.isdigit():
+            return int(identifier)
 
-    # ========================================================
-    # NUMBER HELPER
-    # ========================================================
-
-    @staticmethod
-    def toNumber(
-        value: Any,
-        default: int | float = 0,
-    ) -> int | float:
-
-        if value is None:
-            return default
+        # ----------------------------------------------------
+        # CASE 3:
+        # Cari berdasarkan intersectionId
+        #
+        # Ini adalah field identifier yang memang
+        # terlihat pada data Supabase kamu:
+        #
+        # intersectionId = "simpang4-pingit"
+        # ----------------------------------------------------
 
         try:
 
-            number = float(
-                value
+            response = (
+                self.supabase
+                .table(
+                    self.INTERSECTIONS_TABLE
+                )
+                .select("id")
+                .eq(
+                    "intersectionId",
+                    identifier,
+                )
+                .limit(1)
+                .execute()
             )
 
-            if number.is_integer():
+        except Exception as exc:
+
+            raise RuntimeError(
+                "Gagal mencari intersection "
+                f"'{identifier}' di tabel "
+                "intersections: "
+                f"{exc}"
+            ) from exc
+
+        rows = response.data or []
+
+        if rows:
+
+            return int(
+                rows[0]["id"]
+            )
+
+        # ----------------------------------------------------
+        # FALLBACK:
+        # Cari berdasarkan name
+        #
+        # Berguna jika caller mengirim:
+        #
+        # "Simpang 4 Pingit"
+        # ----------------------------------------------------
+
+        try:
+
+            response = (
+                self.supabase
+                .table(
+                    self.INTERSECTIONS_TABLE
+                )
+                .select("id")
+                .eq(
+                    "name",
+                    identifier,
+                )
+                .limit(1)
+                .execute()
+            )
+
+        except Exception:
+            response = None
+
+        if response is not None:
+
+            rows = response.data or []
+
+            if rows:
+
                 return int(
-                    number
+                    rows[0]["id"]
                 )
 
-            return number
+        # ----------------------------------------------------
+        # NOT FOUND
+        # ----------------------------------------------------
 
-        except (
-            TypeError,
-            ValueError,
-        ):
-
-            return default
+        raise ValueError(
+            "Intersection tidak ditemukan: "
+            f"{identifier}. "
+            "Pastikan nilainya cocok dengan "
+            "intersections.intersectionId "
+            "atau intersections.name."
+        )
 
     # ========================================================
-    # DATETIME HELPER
+    # NORMALIZE DATETIME
     # ========================================================
 
     @staticmethod
-    def toIsoString(
+    def _normalizeDatetime(
         value: Any,
-    ) -> str:
+    ) -> Optional[str]:
+        """
+        Normalisasi datetime untuk PostgreSQL timestamptz.
+        """
+
+        if value is None:
+            return None
 
         if isinstance(
             value,
             datetime,
         ):
+
+            # Jika datetime belum memiliki timezone,
+            # gunakan UTC.
 
             if value.tzinfo is None:
 
@@ -458,13 +251,406 @@ class SimulationResultWriter:
 
             return value.isoformat()
 
+        return str(value)
+
+    # ========================================================
+    # EXTRACT ID
+    # ========================================================
+
+    @staticmethod
+    def _extractId(
+        value: Any,
+    ) -> Optional[int]:
+        """
+        Mengambil numeric ID dari berbagai bentuk object.
+
+        Mendukung:
+
+            13784
+            "13784"
+            {"id": 13784}
+            object.id
+        """
+
+        if value is None:
+            return None
+
+        # ----------------------------------------------------
+        # INTEGER
+        # ----------------------------------------------------
+
+        if isinstance(
+            value,
+            int,
+        ):
+
+            return value
+
+        # ----------------------------------------------------
+        # STRING
+        # ----------------------------------------------------
+
         if isinstance(
             value,
             str,
         ):
 
-            return value
+            value = value.strip()
 
-        return datetime.now(
-            timezone.utc
-        ).isoformat()
+            if value.isdigit():
+                return int(value)
+
+            return None
+
+        # ----------------------------------------------------
+        # DICT
+        # ----------------------------------------------------
+
+        if isinstance(
+            value,
+            dict,
+        ):
+
+            rawId = value.get("id")
+
+            if rawId is None:
+                rawId = value.get(
+                    "trafficStateId"
+                )
+
+            if rawId is None:
+                rawId = value.get(
+                    "recommendationId"
+                )
+
+            if rawId is None:
+                return None
+
+            try:
+                return int(rawId)
+
+            except (
+                TypeError,
+                ValueError,
+            ):
+                return None
+
+        # ----------------------------------------------------
+        # OBJECT
+        # ----------------------------------------------------
+
+        rawId = getattr(
+            value,
+            "id",
+            None,
+        )
+
+        if rawId is None:
+
+            rawId = getattr(
+                value,
+                "trafficStateId",
+                None,
+            )
+
+        if rawId is None:
+
+            rawId = getattr(
+                value,
+                "recommendationId",
+                None,
+            )
+
+        if rawId is None:
+            return None
+
+        try:
+
+            return int(rawId)
+
+        except (
+            TypeError,
+            ValueError,
+        ):
+
+            return None
+
+    # ========================================================
+    # SAVE RESULT
+    # ========================================================
+
+    def saveResult(
+        self,
+        simulationPayload: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """
+        Menyimpan satu record ke tabel simulations.
+
+        HANYA field berikut yang dikirim:
+
+            intersectionId
+            trafficStateId
+            recommendationId
+            simulationName
+            simulationType
+            engine
+            status
+            startedAt
+            completedAt
+
+        createdAt TIDAK dikirim karena PostgreSQL
+        diharapkan mengisinya dengan DEFAULT now().
+        """
+
+        # ====================================================
+        # VALIDATE
+        # ====================================================
+
+        if not simulationPayload:
+
+            raise ValueError(
+                "simulationPayload kosong."
+            )
+
+        # ====================================================
+        # RAW INTERSECTION
+        # ====================================================
+
+        rawIntersectionId = (
+            simulationPayload.get(
+                "intersectionId"
+            )
+        )
+
+        # ====================================================
+        # RESOLVE INTERSECTION
+        # ====================================================
+
+        intersectionId = (
+            self._resolveIntersectionId(
+                rawIntersectionId
+            )
+        )
+
+        # ====================================================
+        # TRAFFIC STATE ID
+        # ====================================================
+
+        trafficStateId = (
+            self._extractId(
+                simulationPayload.get(
+                    "trafficStateId"
+                )
+            )
+        )
+
+        # ====================================================
+        # RECOMMENDATION ID
+        # ====================================================
+
+        recommendationId = (
+            self._extractId(
+                simulationPayload.get(
+                    "recommendationId"
+                )
+            )
+        )
+
+        # ====================================================
+        # REQUIRED VALUES
+        # ====================================================
+
+        simulationName = (
+            simulationPayload.get(
+                "simulationName"
+            )
+            or "SmartTwin Adaptive TLS"
+        )
+
+        simulationType = (
+            simulationPayload.get(
+                "simulationType"
+            )
+            or "traffic_signal"
+        )
+
+        engine = (
+            simulationPayload.get(
+                "engine"
+            )
+            or "SUMO"
+        )
+
+        status = (
+            simulationPayload.get(
+                "status"
+            )
+            or "completed"
+        )
+
+        # ====================================================
+        # DATETIME
+        # ====================================================
+
+        startedAt = (
+            self._normalizeDatetime(
+                simulationPayload.get(
+                    "startedAt"
+                )
+            )
+        )
+
+        completedAt = (
+            self._normalizeDatetime(
+                simulationPayload.get(
+                    "completedAt"
+                )
+            )
+        )
+
+        # ====================================================
+        # DATABASE PAYLOAD
+        #
+        # INI SENGAJA HANYA FIELD YANG ADA DI SCHEMA.
+        # ====================================================
+
+        payload: Dict[str, Any] = {
+
+            "intersectionId":
+                intersectionId,
+
+            "trafficStateId":
+                trafficStateId,
+
+            "recommendationId":
+                recommendationId,
+
+            "simulationName":
+                simulationName,
+
+            "simulationType":
+                simulationType,
+
+            "engine":
+                engine,
+
+            "status":
+                status,
+
+            "startedAt":
+                startedAt,
+
+            "completedAt":
+                completedAt,
+        }
+
+        # ====================================================
+        # DEBUG
+        # ====================================================
+
+        print()
+
+        print(
+            "======================================================================"
+        )
+
+        print(
+            "SAVING SIMULATION RESULT"
+        )
+
+        print(
+            "======================================================================"
+        )
+
+        print(
+            f"Raw intersectionId : "
+            f"{rawIntersectionId}"
+        )
+
+        print(
+            f"DB intersection ID : "
+            f"{intersectionId}"
+        )
+
+        print(
+            f"TrafficState ID    : "
+            f"{trafficStateId}"
+        )
+
+        print(
+            f"Recommendation ID  : "
+            f"{recommendationId}"
+        )
+
+        print(
+            "Simulation payload:"
+        )
+
+        print(
+            payload
+        )
+
+        # ====================================================
+        # INSERT
+        # ====================================================
+
+        try:
+
+            response = (
+                self.supabase
+                .table(
+                    self.TABLE_NAME
+                )
+                .insert(
+                    payload
+                )
+                .execute()
+            )
+
+        except Exception as exc:
+
+            raise RuntimeError(
+                "Gagal insert ke tabel "
+                f"{self.TABLE_NAME}: "
+                f"{exc}"
+            ) from exc
+
+        # ====================================================
+        # RESPONSE
+        # ====================================================
+
+        rows = (
+            response.data
+            or []
+        )
+
+        if not rows:
+
+            raise RuntimeError(
+                "Insert simulasi dipanggil "
+                "tetapi Supabase tidak "
+                "mengembalikan data."
+            )
+
+        simulation = rows[0]
+
+        # ====================================================
+        # SUCCESS
+        # ====================================================
+
+        print()
+
+        print(
+            "Simulation berhasil disimpan."
+        )
+
+        print(
+            f"Simulation DB ID: "
+            f"{simulation.get('id')}"
+        )
+
+        print(
+            "======================================================================"
+        )
+
+        return simulation

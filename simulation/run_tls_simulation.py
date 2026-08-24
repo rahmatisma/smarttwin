@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -13,75 +14,89 @@ from dotenv import load_dotenv
 # PATH
 # ============================================================
 
-simulationRoot = Path(__file__).resolve().parent
-projectRoot = simulationRoot.parent
-backendRoot = projectRoot / "backend"
-decisionEngineRoot = projectRoot / "decision_engine"
+simulationRoot = (
+    Path(__file__)
+    .resolve()
+    .parent
+)
 
-envFile = backendRoot / ".env"
+projectRoot = (
+    simulationRoot.parent
+)
+
+backendRoot = (
+    projectRoot
+    / "backend"
+)
+
+decisionEngineRoot = (
+    projectRoot
+    / "decision_engine"
+)
+
+envFile = (
+    backendRoot
+    / ".env"
+)
 
 
 # ============================================================
 # PYTHON PATH
 # ============================================================
 
-# smarttwin/
-# ├── backend/
-# ├── decision_engine/
-# └── simulation/
-#
-# Project root diperlukan agar:
-#
-# from decision_engine.rule_based_engine import RuleBasedEngine
-#
-# bisa ditemukan.
-
 if str(projectRoot) not in sys.path:
-    sys.path.insert(0, str(projectRoot))
 
-
-# Backend root diperlukan agar:
-#
-# from app....
-#
-# bisa ditemukan.
+    sys.path.insert(
+        0,
+        str(projectRoot),
+    )
 
 if str(backendRoot) not in sys.path:
-    sys.path.insert(0, str(backendRoot))
+
+    sys.path.insert(
+        0,
+        str(backendRoot)
+    )
 
 
 # ============================================================
-# VALIDATE PROJECT STRUCTURE
+# VALIDATE STRUCTURE
 # ============================================================
 
 if not backendRoot.exists():
+
     raise RuntimeError(
-        f"Backend tidak ditemukan:\n{backendRoot}"
+        "Backend tidak ditemukan:\n"
+        f"{backendRoot}"
     )
 
 
 if not decisionEngineRoot.exists():
+
     raise RuntimeError(
         "Decision engine tidak ditemukan:\n"
         f"{decisionEngineRoot}"
     )
 
 
-ruleBasedEngineFile = (
-    decisionEngineRoot / "rule_based_engine.py"
-)
-
-if not ruleBasedEngineFile.exists():
-    raise RuntimeError(
-        "Rule-based engine tidak ditemukan:\n"
-        f"{ruleBasedEngineFile}"
-    )
-
-
 if not envFile.exists():
+
     raise RuntimeError(
         "Backend .env tidak ditemukan:\n"
         f"{envFile}"
+    )
+
+
+ruleBasedEngineFile = (
+    decisionEngineRoot
+    / "rule_based_engine.py"
+)
+
+if not ruleBasedEngineFile.exists():
+
+    raise RuntimeError(
+        "Rule-based engine tidak ditemukan:\n"
+        f"{ruleBasedEngineFile}"
     )
 
 
@@ -91,7 +106,7 @@ if not envFile.exists():
 
 load_dotenv(
     dotenv_path=envFile,
-    override=False,
+    override=True,
 )
 
 
@@ -101,16 +116,11 @@ load_dotenv(
 
 def findSumo() -> tuple[Path, Path]:
     """
-    Mencari executable SUMO.
-
-    Prioritas:
-
-    1. simulation/.venv/Scripts/sumo.exe
-    2. SUMO_HOME/bin/sumo.exe
-    3. PATH
+    Mencari SUMO executable.
     """
 
     candidates = [
+
         simulationRoot
         / ".venv"
         / "Scripts"
@@ -156,11 +166,15 @@ def findSumo() -> tuple[Path, Path]:
     # SUMO_HOME
     # --------------------------------------------------------
 
-    sumoHome = os.environ.get("SUMO_HOME")
+    sumoHome = os.environ.get(
+        "SUMO_HOME"
+    )
 
     if sumoHome:
 
-        homePath = Path(sumoHome)
+        homePath = Path(
+            sumoHome
+        )
 
         executable = (
             homePath
@@ -187,42 +201,48 @@ def findSumo() -> tuple[Path, Path]:
     try:
 
         result = subprocess.run(
-            ["where", "sumo"],
+            [
+                "where",
+                "sumo",
+            ],
             capture_output=True,
             text=True,
             check=True,
         )
 
-        firstLine = (
+        lines = (
             result.stdout
             .strip()
-            .splitlines()[0]
+            .splitlines()
         )
 
-        executable = Path(firstLine)
+        if lines:
 
-        possibleHome = (
-            executable.parent.parent
-        )
+            executable = Path(
+                lines[0]
+            )
 
-        toolsDirectory = (
-            possibleHome / "tools"
-        )
+            possibleHome = (
+                executable
+                .parent
+                .parent
+            )
 
-        return (
-            executable,
-            toolsDirectory,
-        )
+            toolsDirectory = (
+                possibleHome
+                / "tools"
+            )
+
+            return (
+                executable,
+                toolsDirectory,
+            )
 
     except Exception:
         pass
 
     raise RuntimeError(
-        "SUMO tidak ditemukan.\n\n"
-        "Sudah dicoba:\n"
-        f"- {simulationRoot / '.venv' / 'Scripts' / 'sumo.exe'}\n"
-        "- SUMO_HOME\n"
-        "- PATH"
+        "SUMO tidak ditemukan."
     )
 
 
@@ -230,12 +250,17 @@ sumoBinary, sumoTools = findSumo()
 
 
 # ============================================================
-# BACKEND IMPORT
+# BACKEND IMPORTS
 # ============================================================
 
 from app.pipeline.traffic_state_builder import (
     TrafficStateBuilder,
     TrafficStateBuilderConfig,
+)
+
+
+from app.services.simulation_result_writer import (
+    SimulationResultWriter,
 )
 
 
@@ -245,6 +270,16 @@ from app.pipeline.traffic_state_builder import (
 
 from decision_engine.rule_based_engine import (
     RuleBasedEngine,
+)
+
+
+# ============================================================
+# SUPABASE
+# ============================================================
+
+from supabase import (
+    Client,
+    create_client,
 )
 
 
@@ -274,7 +309,9 @@ except ModuleNotFoundError:
 # CONFIGURATION
 # ============================================================
 
-intersectionId = "simpang4-pingit"
+intersectionId = (
+    "simpang4-pingit"
+)
 
 sumoConfig = (
     simulationRoot
@@ -282,7 +319,9 @@ sumoConfig = (
     / "simpang4_pingit.sumocfg"
 )
 
-tlsId = "SIMPANG_CENTER"
+tlsId = (
+    "SIMPANG_CENTER"
+)
 
 simulationStepLimit = 300
 
@@ -304,6 +343,13 @@ approachToPhase = {
 
 
 # ============================================================
+# GLOBAL SUPABASE CLIENT
+# ============================================================
+
+supabaseClient: Client | None = None
+
+
+# ============================================================
 # HEADER
 # ============================================================
 
@@ -313,11 +359,17 @@ def printHeader(
 
     print()
 
-    print("=" * 70)
+    print(
+        "=" * 70
+    )
 
-    print(title)
+    print(
+        title
+    )
 
-    print("=" * 70)
+    print(
+        "=" * 70
+    )
 
 
 # ============================================================
@@ -362,15 +414,96 @@ def printEnvironment() -> None:
 
     print(
         "SUPABASE_URL    : OK"
-        if os.getenv("SUPABASE_URL")
-        else "SUPABASE_URL    : MISSING"
+        if os.getenv(
+            "SUPABASE_URL"
+        )
+        else
+        "SUPABASE_URL    : MISSING"
     )
 
     print(
         "SUPABASE_KEY    : OK"
-        if os.getenv("SUPABASE_SERVICE_ROLE_KEY")
-        else "SUPABASE_KEY    : MISSING"
+        if os.getenv(
+            "SUPABASE_SERVICE_ROLE_KEY"
+        )
+        else
+        "SUPABASE_KEY    : MISSING"
     )
+
+
+# ============================================================
+# CONNECT SUPABASE
+# ============================================================
+
+def connectSupabase() -> Client:
+
+    global supabaseClient
+
+    printHeader(
+        "CONNECTING TO SUPABASE"
+    )
+
+    supabaseUrl = (
+        os.getenv(
+            "SUPABASE_URL"
+        )
+        or ""
+    ).strip()
+
+    supabaseKey = (
+        os.getenv(
+            "SUPABASE_SERVICE_ROLE_KEY"
+        )
+        or ""
+    ).strip()
+
+    if not supabaseUrl:
+
+        raise RuntimeError(
+            "SUPABASE_URL tidak ditemukan "
+            "di backend/.env"
+        )
+
+    if not supabaseKey:
+
+        raise RuntimeError(
+            "SUPABASE_SERVICE_ROLE_KEY "
+            "tidak ditemukan di backend/.env"
+        )
+
+    try:
+
+        supabaseClient = (
+            create_client(
+                supabaseUrl,
+                supabaseKey,
+            )
+        )
+
+        # ----------------------------------------------------
+        # Test connection
+        # ----------------------------------------------------
+
+        (
+            supabaseClient
+            .table("intersections")
+            .select("id")
+            .limit(1)
+            .execute()
+        )
+
+    except Exception as exc:
+
+        raise RuntimeError(
+            "Gagal terhubung ke Supabase: "
+            f"{exc}"
+        ) from exc
+
+    print(
+        "Supabase connection : OK"
+    )
+
+    return supabaseClient
 
 
 # ============================================================
@@ -383,14 +516,17 @@ def loadTrafficState():
         "LOADING TRAFFIC STATE"
     )
 
-    builder = TrafficStateBuilder(
-        TrafficStateBuilderConfig(
-            windowSeconds=5
+    builder = (
+        TrafficStateBuilder(
+            TrafficStateBuilderConfig(
+                windowSeconds=5
+            )
         )
     )
 
     trafficState = (
-        builder.build_latest_state_for_intersection(
+        builder
+        .build_latest_state_for_intersection(
             intersection_id=intersectionId,
             save=False,
         )
@@ -417,6 +553,190 @@ def loadTrafficState():
 
 
 # ============================================================
+# EXTRACT TRAFFIC STATE ID
+# ============================================================
+
+def getTrafficStateId(
+    trafficState: Any,
+) -> int | None:
+    """
+    Mengambil ID TrafficState.
+
+    Mendukung object maupun dict.
+    """
+
+    if trafficState is None:
+        return None
+
+    # --------------------------------------------------------
+    # DICT
+    # --------------------------------------------------------
+
+    if isinstance(
+        trafficState,
+        dict,
+    ):
+
+        rawId = (
+            trafficState.get(
+                "id"
+            )
+        )
+
+        if rawId is None:
+
+            rawId = (
+                trafficState.get(
+                    "trafficStateId"
+                )
+            )
+
+        if rawId is not None:
+
+            try:
+
+                return int(
+                    rawId
+                )
+
+            except (
+                TypeError,
+                ValueError,
+            ):
+
+                pass
+
+    # --------------------------------------------------------
+    # OBJECT
+    # --------------------------------------------------------
+
+    rawId = getattr(
+        trafficState,
+        "id",
+        None,
+    )
+
+    if rawId is None:
+
+        rawId = getattr(
+            trafficState,
+            "trafficStateId",
+            None,
+        )
+
+    if rawId is not None:
+
+        try:
+
+            return int(
+                rawId
+            )
+
+        except (
+            TypeError,
+            ValueError,
+        ):
+
+            pass
+
+    return None
+
+
+# ============================================================
+# GET RECOMMENDATION ID
+# ============================================================
+
+def getRecommendationId(
+    recommendation: Any,
+) -> int | None:
+    """
+    Mengambil recommendation.id jika decision engine
+    menghasilkan object recommendation yang memiliki ID.
+
+    Kalau decision engine hanya menghasilkan recommendation
+    tanpa ID database, maka None.
+
+    Ini aman karena recommendationId memang nullable.
+    """
+
+    if recommendation is None:
+        return None
+
+    # --------------------------------------------------------
+    # DICT
+    # --------------------------------------------------------
+
+    if isinstance(
+        recommendation,
+        dict,
+    ):
+
+        rawId = (
+            recommendation.get(
+                "id"
+            )
+        )
+
+        if rawId is None:
+
+            rawId = (
+                recommendation.get(
+                    "recommendationId"
+                )
+            )
+
+        if rawId is not None:
+
+            try:
+
+                return int(
+                    rawId
+                )
+
+            except (
+                TypeError,
+                ValueError,
+            ):
+
+                return None
+
+    # --------------------------------------------------------
+    # OBJECT
+    # --------------------------------------------------------
+
+    rawId = getattr(
+        recommendation,
+        "id",
+        None,
+    )
+
+    if rawId is None:
+
+        rawId = getattr(
+            recommendation,
+            "recommendationId",
+            None,
+        )
+
+    if rawId is not None:
+
+        try:
+
+            return int(
+                rawId
+            )
+
+        except (
+            TypeError,
+            ValueError,
+        ):
+
+            return None
+
+    return None
+
+
+# ============================================================
 # DECISION ENGINE
 # ============================================================
 
@@ -428,7 +748,9 @@ def createDecision(
         "RUNNING DECISION ENGINE"
     )
 
-    engine = RuleBasedEngine()
+    engine = (
+        RuleBasedEngine()
+    )
 
     recommendation = (
         engine.recommend(
@@ -455,8 +777,10 @@ def createDecision(
         recommendation.recommendedPhase
     )
 
-    sumoPhase = approachToPhase.get(
-        recommendedApproach
+    sumoPhase = (
+        approachToPhase.get(
+            recommendedApproach
+        )
     )
 
     if sumoPhase is None:
@@ -503,6 +827,31 @@ def createDecision(
     )
 
     # ========================================================
+    # RECOMMENDATION ID
+    # ========================================================
+
+    recommendationId = (
+        getRecommendationId(
+            recommendation
+        )
+    )
+
+    print()
+
+    print(
+        f"Recommendation ID     : "
+        f"{recommendationId}"
+    )
+
+    if recommendationId is None:
+
+        print(
+            "Recommendation belum memiliki "
+            "ID database. simulations."
+            "recommendationId akan NULL."
+        )
+
+    # ========================================================
     # PHASE PLAN
     # ========================================================
 
@@ -515,7 +864,8 @@ def createDecision(
             sumoPhase,
 
         "duration":
-            recommendation.recommendedGreenSeconds,
+            recommendation
+            .recommendedGreenSeconds,
 
         "reason":
             recommendation.reason,
@@ -525,6 +875,9 @@ def createDecision(
 
         "source":
             recommendation.source,
+
+        "recommendationId":
+            recommendationId,
     }
 
     print()
@@ -596,7 +949,8 @@ def startSumo():
     )
 
     trafficLightIds = (
-        traci.trafficlight
+        traci
+        .trafficlight
         .getIDList()
     )
 
@@ -636,7 +990,8 @@ def applyTls(
     )
 
     print(
-        f"TLS       : {tlsId}"
+        f"TLS       : "
+        f"{tlsId}"
     )
 
     print(
@@ -686,7 +1041,10 @@ def runSimulation():
 
     departedVehicles = 0
 
-    while steps < simulationStepLimit:
+    while (
+        steps
+        < simulationStepLimit
+    ):
 
         try:
 
@@ -706,22 +1064,26 @@ def runSimulation():
         try:
 
             arrivedVehicles = (
-                traci.simulation
+                traci
+                .simulation
                 .getArrivedNumber()
             )
 
             departedVehicles = (
-                traci.simulation
+                traci
+                .simulation
                 .getDepartedNumber()
             )
 
             activeVehicles = (
-                traci.vehicle
+                traci
+                .vehicle
                 .getIDCount()
             )
 
             expectedVehicles = (
-                traci.simulation
+                traci
+                .simulation
                 .getMinExpectedNumber()
             )
 
@@ -744,13 +1106,14 @@ def runSimulation():
             break
 
     # ========================================================
-    # FINAL VALUES
+    # FINAL ACTIVE VEHICLES
     # ========================================================
 
     try:
 
         activeVehicles = (
-            traci.vehicle
+            traci
+            .vehicle
             .getIDCount()
         )
 
@@ -783,14 +1146,16 @@ def getTlsResult(
 ):
 
     finalPhase = (
-        traci.trafficlight
+        traci
+        .trafficlight
         .getPhase(
             tlsId
         )
     )
 
     tlsState = (
-        traci.trafficlight
+        traci
+        .trafficlight
         .getRedYellowGreenState(
             tlsId
         )
@@ -813,7 +1178,7 @@ def getTlsResult(
 
 
 # ============================================================
-# BUILD SIMULATION RESULT
+# BUILD METRICS
 # ============================================================
 
 def buildSimulationMetrics(
@@ -824,22 +1189,34 @@ def buildSimulationMetrics(
     return {
 
         "steps":
-            simulationMetrics["steps"],
+            simulationMetrics[
+                "steps"
+            ],
 
         "activeVehicles":
-            simulationMetrics["activeVehicles"],
+            simulationMetrics[
+                "activeVehicles"
+            ],
 
         "arrivedVehicles":
-            simulationMetrics["arrivedVehicles"],
+            simulationMetrics[
+                "arrivedVehicles"
+            ],
 
         "departedVehicles":
-            simulationMetrics["departedVehicles"],
+            simulationMetrics[
+                "departedVehicles"
+            ],
 
         "finalPhase":
-            tlsResult["finalPhase"],
+            tlsResult[
+                "finalPhase"
+            ],
 
         "tlsState":
-            tlsResult["tlsState"],
+            tlsResult[
+                "tlsState"
+            ],
     }
 
 
@@ -898,7 +1275,7 @@ def printSimulationResult(
 
 
 # ============================================================
-# SAVE RESULT TO SUPABASE
+# SAVE SIMULATION RESULT
 # ============================================================
 
 def saveSimulationResult(
@@ -906,47 +1283,136 @@ def saveSimulationResult(
     phasePlan,
     simulationMetrics,
     tlsResult,
+    startedAt: datetime,
+    completedAt: datetime,
 ):
 
     printHeader(
         "SAVING SIMULATION RESULT"
     )
 
-    try:
+    if supabaseClient is None:
 
-        from app.services.simulation_result_writer import (
-            SimulationResultWriter,
+        raise RuntimeError(
+            "Supabase client belum terhubung."
         )
 
-    except Exception as exception:
+    # ========================================================
+    # TRAFFIC STATE ID
+    # ========================================================
 
-        print(
-            "SimulationResultWriter tidak dapat "
-            "di-import."
+    trafficStateId = (
+        getTrafficStateId(
+            trafficState
         )
+    )
 
-        print(
-            f"Error: {exception}"
+    # ========================================================
+    # RECOMMENDATION ID
+    # ========================================================
+
+    recommendationId = (
+        phasePlan.get(
+            "recommendationId"
         )
+    )
 
-        return None
+    # ========================================================
+    # BUILD PAYLOAD
+    #
+    # PERHATIKAN:
+    #
+    # HANYA FIELD YANG ADA DI TABLE simulations.
+    #
+    # ========================================================
+
+    simulationPayload = {
+
+        "intersectionId":
+            intersectionId,
+
+        "trafficStateId":
+            trafficStateId,
+
+        "recommendationId":
+            recommendationId,
+
+        "simulationName":
+            "SmartTwin Adaptive TLS",
+
+        "simulationType":
+            "traffic_signal",
+
+        "engine":
+            "SUMO",
+
+        "status":
+            "completed",
+
+        "startedAt":
+            startedAt,
+
+        "completedAt":
+            completedAt,
+    }
+
+    # ========================================================
+    # PRINT WHAT WILL BE SAVED
+    # ========================================================
+
+    print()
+
+    print(
+        "Simulation payload:"
+    )
+
+    print(
+        simulationPayload
+    )
+
+    # ========================================================
+    # WRITER
+    # ========================================================
 
     resultWriter = (
-        SimulationResultWriter()
-    )
-
-    metricsPayload = (
-        buildSimulationMetrics(
-            simulationMetrics,
-            tlsResult,
+        SimulationResultWriter(
+            supabase=supabaseClient
         )
     )
 
-    simulationRunId = (
-        resultWriter.saveResult(
-            trafficState=trafficState,
-            phasePlan=phasePlan,
-            simulationMetrics=metricsPayload,
+    # ========================================================
+    # SAVE
+    # ========================================================
+
+    try:
+
+        simulation = (
+            resultWriter.saveResult(
+                simulationPayload
+            )
+        )
+
+    except Exception as exc:
+
+        print()
+
+        print(
+            "Gagal menyimpan hasil simulasi."
+        )
+
+        print(
+            f"Error: {exc}"
+        )
+
+        raise
+
+    # ========================================================
+    # SUCCESS
+    # ========================================================
+
+    simulationId = (
+        simulation.get(
+            "id"
         )
     )
 
@@ -957,11 +1423,11 @@ def saveSimulationResult(
     )
 
     print(
-        f"Simulation run ID : "
-        f"{simulationRunId}"
+        f"Simulation DB ID : "
+        f"{simulationId}"
     )
 
-    return simulationRunId
+    return simulation
 
 
 # ============================================================
@@ -972,31 +1438,51 @@ def main():
 
     print()
 
-    print("=" * 70)
+    print(
+        "=" * 70
+    )
 
     print(
         "SMARTTWIN ADAPTIVE TLS SIMULATION"
     )
 
-    print("=" * 70)
+    print(
+        "=" * 70
+    )
 
-    # --------------------------------------------------------
+    # ========================================================
+    # START TIME
+    # ========================================================
+
+    startedAt = (
+        datetime.now(
+            timezone.utc
+        )
+    )
+
+    # ========================================================
     # ENVIRONMENT
-    # --------------------------------------------------------
+    # ========================================================
 
     printEnvironment()
 
-    # --------------------------------------------------------
+    # ========================================================
+    # SUPABASE
+    # ========================================================
+
+    connectSupabase()
+
+    # ========================================================
     # TRAFFIC STATE
-    # --------------------------------------------------------
+    # ========================================================
 
     trafficState = (
         loadTrafficState()
     )
 
-    # --------------------------------------------------------
+    # ========================================================
     # DECISION ENGINE
-    # --------------------------------------------------------
+    # ========================================================
 
     (
         recommendation,
@@ -1005,11 +1491,13 @@ def main():
         trafficState
     )
 
-    # --------------------------------------------------------
+    # ========================================================
     # START SUMO
-    # --------------------------------------------------------
+    # ========================================================
 
     startSumo()
+
+    simulationResult = None
 
     try:
 
@@ -1049,7 +1537,21 @@ def main():
         )
 
         # ----------------------------------------------------
-        # BUILD RESULT
+        # COMPLETED TIME
+        # ----------------------------------------------------
+
+        completedAt = (
+            datetime.now(
+                timezone.utc
+            )
+        )
+
+        # ----------------------------------------------------
+        # BUILD FINAL METRICS
+        #
+        # Metrics TIDAK dimasukkan ke simulations.
+        #
+        # Hanya untuk output terminal saat ini.
         # ----------------------------------------------------
 
         finalMetrics = (
@@ -1063,11 +1565,20 @@ def main():
         # SAVE TO SUPABASE
         # ----------------------------------------------------
 
-        saveSimulationResult(
-            trafficState=trafficState,
-            phasePlan=phasePlan,
-            simulationMetrics=finalMetrics,
-            tlsResult=tlsResult,
+        simulationResult = (
+            saveSimulationResult(
+                trafficState=trafficState,
+
+                phasePlan=phasePlan,
+
+                simulationMetrics=finalMetrics,
+
+                tlsResult=tlsResult,
+
+                startedAt=startedAt,
+
+                completedAt=completedAt,
+            )
         )
 
     finally:
@@ -1086,9 +1597,9 @@ def main():
 
             pass
 
-    # --------------------------------------------------------
+    # ========================================================
     # FINAL
-    # --------------------------------------------------------
+    # ========================================================
 
     printHeader(
         "SMARTTWIN TLS SIMULATION SELESAI"
@@ -1145,6 +1656,36 @@ def main():
     print(
         "Supabase"
     )
+
+    print()
+
+    print(
+        "STATUS: SUCCESS"
+    )
+
+    if simulationResult:
+
+        print()
+
+        print(
+            f"Simulation ID : "
+            f"{simulationResult.get('id')}"
+        )
+
+        print(
+            f"Intersection ID: "
+            f"{simulationResult.get('intersectionId')}"
+        )
+
+        print(
+            f"TrafficState ID: "
+            f"{simulationResult.get('trafficStateId')}"
+        )
+
+        print(
+            f"Recommendation : "
+            f"{simulationResult.get('recommendationId')}"
+        )
 
 
 # ============================================================

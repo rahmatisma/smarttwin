@@ -1,7 +1,11 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Any
+from typing import Any, Iterable
+
+from app.schemas.traffic import (
+    ApproachState,
+    TrafficState,
+)
 
 
 # ============================================================
@@ -11,247 +15,257 @@ from typing import Any
 MIN_GREEN_SECONDS = 15
 MAX_GREEN_SECONDS = 60
 
-# Bobot demand.
-# Queue dibuat paling penting karena queue menunjukkan kendaraan
-# yang sedang benar-benar menunggu di persimpangan.
-VOLUME_WEIGHT = 0.30
-QUEUE_WEIGHT = 0.50
-DENSITY_WEIGHT = 0.20
+# Nilai referensi untuk normalisasi demand.
+#
+# Artinya:
+# volume 30 kendaraan -> skor volume 1.0
+# queue 20 kendaraan  -> skor queue 1.0
+# density 10 kendaraan -> skor density 1.0
+#
+# Kita gunakan MAX dari tiga komponen supaya satu indikator
+# yang sangat tinggi tetap bisa membuat approach menjadi prioritas.
+REFERENCE_VOLUME = 30.0
+REFERENCE_QUEUE = 20.0
+REFERENCE_DENSITY = 10.0
 
 
 # ============================================================
-# RECOMMENDATION RESULT
+# RECOMMENDATION MODEL
 # ============================================================
 
-@dataclass
-class Recommendation:
-    """
-    Hasil keputusan Rule-Based Engine.
+try:
+    from pydantic import BaseModel, Field
 
-    Field dibuat mengikuti kebutuhan:
-        - simulation/run_tls_simulation.py
-        - backend tests
-        - simulation result writer
-    """
+    class Recommendation(BaseModel):
+        """
+        Hasil rekomendasi dari Decision Engine.
+        """
 
-    recommendedPhase: str
-    recommendedGreenSeconds: int
+        recommendedPhase: str
+        recommendedGreenSeconds: int
 
-    currentGreenSeconds: int
-    currentPhase: str
+        currentGreenSeconds: int
+        currentPhase: str
 
-    confidence: float
-    expectedDelayReductionPercent: float
+        confidence: float = Field(default=0.0)
+        expectedDelayReductionPercent: float = Field(default=0.0)
 
-    source: str
-    reason: str
+        source: str = "rule-based"
+        reason: str = ""
+
+except ImportError:
+    # Fallback supaya module tetap bisa di-import jika
+    # dependency pydantic belum tersedia.
+    from dataclasses import dataclass
+
+    @dataclass
+    class Recommendation:
+        recommendedPhase: str
+        recommendedGreenSeconds: int
+        currentGreenSeconds: int
+        currentPhase: str
+        confidence: float = 0.0
+        expectedDelayReductionPercent: float = 0.0
+        source: str = "rule-based"
+        reason: str = ""
 
 
 # ============================================================
-# RULE-BASED ENGINE
+# RULE BASED ENGINE
 # ============================================================
 
 class RuleBasedEngine:
     """
     Rule-Based Decision Engine untuk SmartTwin.
 
-    Input:
-        TrafficState
+    Fungsi utama:
 
-    Output:
+        TrafficState
+              ↓
+        Demand Score setiap approach
+              ↓
+        Approach dengan demand tertinggi
+              ↓
+        Green time 15 - 60 detik
+              ↓
         Recommendation
 
-    Prinsip:
-        1. Hitung demand setiap approach.
-        2. Pilih approach dengan demand tertinggi.
-        3. Hitung green time berdasarkan demand.
-        4. Berikan confidence.
-        5. Berikan alasan keputusan.
-
-    Method recommend() sengaja menerima dua nama parameter:
-
-        state=
-        trafficState=
-
-    supaya kompatibel dengan pipeline lama maupun baru.
+    Engine ini sengaja dibuat deterministic agar:
+    - mudah dites
+    - mudah dijelaskan ke juri
+    - tidak membutuhkan model ML
+    - dapat menjadi fallback ketika PPO belum tersedia
     """
+
+    def __init__(
+        self,
+        min_green_seconds: int = MIN_GREEN_SECONDS,
+        max_green_seconds: int = MAX_GREEN_SECONDS,
+    ) -> None:
+
+        self.min_green_seconds = int(min_green_seconds)
+        self.max_green_seconds = int(max_green_seconds)
+
+        if self.min_green_seconds <= 0:
+            raise ValueError(
+                "min_green_seconds harus lebih besar dari 0"
+            )
+
+        if self.max_green_seconds < self.min_green_seconds:
+            raise ValueError(
+                "max_green_seconds harus >= min_green_seconds"
+            )
 
     # ========================================================
     # DEMAND SCORE
     # ========================================================
 
-    def demand_score(
+    def calculate_demand_score(
         self,
-        approach: Any,
+        approach: ApproachState,
     ) -> float:
         """
-        Menghitung demand score satu approach.
+        Menghitung demand score approach.
 
-        Formula:
+        Komponen:
 
-            demand =
-                0.30 * volumeScore
-                + 0.50 * queueScore
-                + 0.20 * densityScore
+        volume
+        queueLengthVeh
+        densityIndex
 
-        Normalisasi dibuat sederhana dan stabil untuk rule-based
-        system sehingga tidak bergantung pada dataset tertentu.
+        Setiap komponen dinormalisasi ke 0..1.
+
+        Demand final menggunakan nilai maksimum dari
+        ketiga indikator agar kondisi ekstrem tidak
+        tertutup oleh indikator lain.
+
+        Contoh:
+
+        volume=30
+        queue=20
+        density=1
+
+        volume_score  = 30 / 30 = 1
+        queue_score   = 20 / 20 = 1
+        density_score = 1 / 10  = 0.1
+
+        demand = max(1, 1, 0.1)
+               = 1.0
         """
 
-        volume = self._number(
-            self._get(
-                approach,
-                "volume",
-                0,
-            )
+        volume = self._safe_float(
+            getattr(approach, "volume", 0)
         )
 
-        queue = self._number(
-            self._get(
-                approach,
-                "queueLengthVeh",
-                self._get(
-                    approach,
-                    "queue",
-                    0,
-                ),
-            )
+        queue = self._safe_float(
+            getattr(approach, "queueLengthVeh", 0)
         )
 
-        density = self._number(
-            self._get(
-                approach,
-                "densityIndex",
-                self._get(
-                    approach,
-                    "density",
-                    0,
-                ),
-            )
+        density = self._safe_float(
+            getattr(approach, "densityIndex", 0)
         )
 
-        # ----------------------------------------------------
-        # Normalisasi
-        # ----------------------------------------------------
-        #
-        # Volume:
-        # 0 kendaraan -> 0
-        # 50+ kendaraan -> 1
-        #
-        # Queue:
-        # 0 kendaraan -> 0
-        # 30+ kendaraan -> 1
-        #
-        # Density:
-        # 0 -> 0
-        # 10+ -> 1
-        #
         volume_score = self._normalize(
             volume,
-            50.0,
+            REFERENCE_VOLUME,
         )
 
         queue_score = self._normalize(
             queue,
-            30.0,
+            REFERENCE_QUEUE,
         )
 
         density_score = self._normalize(
             density,
-            10.0,
+            REFERENCE_DENSITY,
         )
 
-        score = (
-            VOLUME_WEIGHT * volume_score
-            + QUEUE_WEIGHT * queue_score
-            + DENSITY_WEIGHT * density_score
+        demand_score = max(
+            volume_score,
+            queue_score,
+            density_score,
         )
 
         return round(
-            score,
-            4,
+            self._clamp(demand_score, 0.0, 1.0),
+            2,
         )
 
-    # --------------------------------------------------------
-    # ALIAS
-    # --------------------------------------------------------
+    # ========================================================
+    # BACKWARD COMPATIBILITY
+    # ========================================================
 
-    def calculate_demand_score(
+    def _calculateDemandScore(
         self,
-        approach: Any,
+        approach: ApproachState,
     ) -> float:
         """
-        Alias supaya kompatibel dengan implementasi/test lama.
+        Compatibility method.
+
+        Test dan beberapa bagian project lama menggunakan:
+            _calculateDemandScore()
+
+        Jangan dihapus.
         """
 
-        return self.demand_score(
-            approach
-        )
+        return self.calculate_demand_score(approach)
 
     # ========================================================
     # GREEN TIME
     # ========================================================
 
-    def green_time(
-        self,
-        demandScore: float,
-    ) -> int:
-        """
-        Menentukan durasi green berdasarkan demand.
-
-        Demand 0.0  -> minimum green
-        Demand 1.0  -> maximum green
-
-        Formula linear:
-            15 + demand * (60 - 15)
-        """
-
-        try:
-            demand = float(
-                demandScore
-            )
-        except (
-            TypeError,
-            ValueError,
-        ):
-            demand = 0.0
-
-        demand = max(
-            0.0,
-            min(
-                1.0,
-                demand,
-            ),
-        )
-
-        duration = (
-            MIN_GREEN_SECONDS
-            + demand
-            * (
-                MAX_GREEN_SECONDS
-                - MIN_GREEN_SECONDS
-            )
-        )
-
-        return int(
-            round(duration)
-        )
-
-    # --------------------------------------------------------
-    # ALIAS
-    # --------------------------------------------------------
-
     def calculate_green_time(
         self,
-        demandScore: float,
+        demand_score: float,
     ) -> int:
         """
-        Alias untuk kompatibilitas.
+        Mengubah demand score menjadi green duration.
+
+        Formula linear:
+
+            green =
+                MIN_GREEN
+                +
+                demand * (MAX_GREEN - MIN_GREEN)
+
+        Dengan:
+
+            demand=0.0 -> 15 detik
+            demand=0.5 -> 37.5 -> 38 detik
+            demand=1.0 -> 60 detik
         """
 
-        return self.green_time(
-            demandScore
+        demand = self._clamp(
+            self._safe_float(demand_score),
+            0.0,
+            1.0,
         )
+
+        green = (
+            self.min_green_seconds
+            +
+            demand
+            * (
+                self.max_green_seconds
+                - self.min_green_seconds
+            )
+        )
+
+        return int(round(green))
+
+    # ========================================================
+    # BACKWARD COMPATIBILITY
+    # ========================================================
+
+    def _calculateGreenTime(
+        self,
+        demand_score: float,
+    ) -> int:
+        """
+        Compatibility method untuk test/project lama.
+        """
+
+        return self.calculate_green_time(demand_score)
 
     # ========================================================
     # RECOMMEND
@@ -259,51 +273,23 @@ class RuleBasedEngine:
 
     def recommend(
         self,
-        state: Any = None,
+        state: TrafficState,
         currentGreenSeconds: int = 15,
-        currentPhase: str = "south",
-        trafficState: Any = None,
+        currentPhase: str = "north",
     ) -> Recommendation:
         """
-        Menghasilkan rekomendasi adaptive traffic light.
+        Menghasilkan rekomendasi traffic signal.
 
-        Bisa dipanggil dengan:
-
-            engine.recommend(
-                state=trafficState,
-                currentGreenSeconds=15,
-                currentPhase="south",
-            )
-
-        maupun:
-
-            engine.recommend(
-                trafficState=trafficState,
-                currentGreenSeconds=15,
-                currentPhase="south",
-            )
-
-        Ini penting supaya seluruh pipeline lama dan baru
-        tetap kompatibel.
+        Parameter sengaja menggunakan camelCase karena
+        dipakai oleh integration test dan simulation runner.
         """
-
-        # ====================================================
-        # RESOLVE TRAFFIC STATE
-        # ====================================================
-
-        if state is None:
-            state = trafficState
 
         if state is None:
             raise ValueError(
-                "TrafficState tidak boleh kosong."
+                "TrafficState tidak boleh None"
             )
 
-        # ====================================================
-        # GET APPROACHES
-        # ====================================================
-
-        approaches = self._get(
+        approaches = getattr(
             state,
             "approaches",
             None,
@@ -311,166 +297,140 @@ class RuleBasedEngine:
 
         if approaches is None:
             raise ValueError(
-                "TrafficState tidak memiliki approaches."
+                "TrafficState tidak memiliki approach"
             )
 
-        approaches = list(
-            approaches
-        )
+        approaches = list(approaches)
 
         if len(approaches) == 0:
             raise ValueError(
-                "TrafficState tidak memiliki approach."
+                "TrafficState tidak memiliki approach"
             )
 
-        # ====================================================
-        # CALCULATE DEMAND
-        # ====================================================
+        # ----------------------------------------------------
+        # HITUNG DEMAND SETIAP APPROACH
+        # ----------------------------------------------------
 
-        scoredApproaches: list[
-            tuple[Any, float]
-        ] = []
+        scored: list[tuple[ApproachState, float]] = []
 
         for approach in approaches:
 
-            score = self.demand_score(
+            score = self._calculateDemandScore(
                 approach
             )
 
-            scoredApproaches.append(
+            scored.append(
                 (
                     approach,
                     score,
                 )
             )
 
-        # ====================================================
-        # SELECT HIGHEST DEMAND
-        # ====================================================
+        # ----------------------------------------------------
+        # PILIH DEMAND TERTINGGI
+        # ----------------------------------------------------
 
-        selectedApproach, selectedScore = max(
-            scoredApproaches,
+        selected_approach, selected_score = max(
+            scored,
             key=lambda item: item[1],
         )
 
-        # ====================================================
-        # APPROACH NAME
-        # ====================================================
-
-        recommendedPhase = self._approach_name(
-            selectedApproach
+        selected_phase = self._approach_to_string(
+            selected_approach
         )
 
-        # ====================================================
+        # ----------------------------------------------------
         # GREEN TIME
-        # ====================================================
+        # ----------------------------------------------------
 
-        recommendedGreenSeconds = (
-            self.green_time(
-                selectedScore
-            )
+        green_seconds = self._calculateGreenTime(
+            selected_score
         )
 
-        # ====================================================
-        # CURRENT GREEN
-        # ====================================================
-
-        try:
-            currentGreen = int(
-                currentGreenSeconds
-            )
-        except (
-            TypeError,
-            ValueError,
-        ):
-            currentGreen = MIN_GREEN_SECONDS
-
-        # ====================================================
+        # ----------------------------------------------------
         # CONFIDENCE
-        # ====================================================
+        # ----------------------------------------------------
 
         confidence = self._calculate_confidence(
-            scoredApproaches
+            scored
         )
 
-        # ====================================================
+        # ----------------------------------------------------
         # EXPECTED DELAY REDUCTION
-        # ====================================================
+        # ----------------------------------------------------
 
-        expectedDelayReductionPercent = round(
-            selectedScore * 100.0,
+        expected_delay_reduction = round(
+            selected_score * 50.0,
             2,
         )
 
-        # ====================================================
-        # SELECTED METRICS
-        # ====================================================
+        # ----------------------------------------------------
+        # TRAFFIC INFORMATION
+        # ----------------------------------------------------
 
-        volume = self._number(
-            self._get(
-                selectedApproach,
+        volume = self._safe_float(
+            getattr(
+                selected_approach,
                 "volume",
                 0,
             )
         )
 
-        queue = self._number(
-            self._get(
-                selectedApproach,
+        queue = self._safe_float(
+            getattr(
+                selected_approach,
                 "queueLengthVeh",
-                self._get(
-                    selectedApproach,
-                    "queue",
-                    0,
-                ),
+                0,
             )
         )
 
-        density = self._number(
-            self._get(
-                selectedApproach,
+        density = self._safe_float(
+            getattr(
+                selected_approach,
                 "densityIndex",
-                self._get(
-                    selectedApproach,
-                    "density",
-                    0,
-                ),
+                0,
             )
         )
 
-        # ====================================================
+        # ----------------------------------------------------
         # REASON
-        # ====================================================
+        # ----------------------------------------------------
 
         reason = (
-            f"Approach {recommendedPhase} memiliki "
+            f"Approach {selected_phase} memiliki "
             f"demand tertinggi dengan score "
-            f"{selectedScore:.2f}. "
-            f"Volume={self._format_number(volume)}, "
-            f"queue={self._format_number(queue)} kendaraan, "
+            f"{selected_score:.2f}. "
+            f"Volume={int(volume)}, "
+            f"queue={int(queue)} kendaraan, "
             f"density={density:.3f}. "
             f"Direkomendasikan green "
-            f"{recommendedGreenSeconds} detik."
+            f"{green_seconds} detik."
         )
 
-        # ====================================================
+        # ----------------------------------------------------
         # RESULT
-        # ====================================================
+        # ----------------------------------------------------
 
         return Recommendation(
-            recommendedPhase=recommendedPhase,
-            recommendedGreenSeconds=(
-                recommendedGreenSeconds
+            recommendedPhase=selected_phase,
+            recommendedGreenSeconds=green_seconds,
+
+            currentGreenSeconds=int(
+                currentGreenSeconds
             ),
-            currentGreenSeconds=currentGreen,
+
             currentPhase=str(
                 currentPhase
             ),
+
             confidence=confidence,
+
             expectedDelayReductionPercent=(
-                expectedDelayReductionPercent
+                expected_delay_reduction
             ),
+
             source="rule-based",
+
             reason=reason,
         )
 
@@ -480,215 +440,150 @@ class RuleBasedEngine:
 
     def _calculate_confidence(
         self,
-        scoredApproaches: list[
-            tuple[Any, float]
+        scored: Iterable[
+            tuple[ApproachState, float]
         ],
     ) -> float:
         """
         Confidence berdasarkan seberapa jelas approach
-        terbaik dibandingkan approach lainnya.
+        terbaik dibandingkan approach kedua.
 
-        Kalau demand terbaik jauh lebih tinggi:
-            confidence tinggi.
+        Jika hanya ada satu approach:
+            confidence = score
 
-        Kalau semua demand hampir sama:
-            confidence rendah.
+        Jika beberapa:
+            confidence = score_best - score_second
+
+        Tetapi minimal tetap mempertimbangkan demand
+        approach terbaik.
         """
 
-        scores = [
-            score
-            for _, score
-            in scoredApproaches
-        ]
-
-        if not scores:
-            return 0.0
-
-        highest = max(
-            scores
-        )
-
-        if len(scores) == 1:
-            return round(
-                highest,
-                2,
-            )
-
-        sortedScores = sorted(
-            scores,
+        values = sorted(
+            (
+                score
+                for _, score in scored
+            ),
             reverse=True,
         )
 
-        secondHighest = sortedScores[1]
+        if not values:
+            return 0.0
 
-        margin = (
-            highest
-            - secondHighest
+        best = values[0]
+
+        if len(values) == 1:
+            return round(
+                best,
+                2,
+            )
+
+        second = values[1]
+
+        # Selisih dominasi.
+        dominance = max(
+            0.0,
+            best - second,
         )
 
+        # Gabungkan demand dan dominasi.
         confidence = (
-            0.5 * highest
-            + 0.5 * margin
+            0.5 * best
+            +
+            0.5 * dominance
         )
 
         return round(
-            max(
+            self._clamp(
+                confidence,
                 0.0,
-                min(
-                    1.0,
-                    confidence,
-                ),
+                1.0,
             ),
             2,
         )
 
     # ========================================================
-    # APPROACH NAME
+    # HELPERS
     # ========================================================
 
     @staticmethod
-    def _approach_name(
-        approach: Any,
-    ) -> str:
-        """
-        Mengambil nama approach dari:
-
-            "north"
-
-        atau Enum:
-
-            Approach.NORTH
-
-        atau object:
-
-            approach.approach
-        """
-
-        value = approach
-
-        if not isinstance(
-            approach,
-            str,
-        ):
-            value = getattr(
-                approach,
-                "approach",
-                None,
-            )
-
-            if value is None:
-                value = getattr(
-                    approach,
-                    "name",
-                    None,
-                )
-
-        if value is None:
-            return "unknown"
-
-        # Enum value
-        enumValue = getattr(
-            value,
-            "value",
-            None,
-        )
-
-        if enumValue is not None:
-            value = enumValue
-
-        return str(
-            value
-        ).lower()
-
-    # ========================================================
-    # GENERIC GETTER
-    # ========================================================
-
-    @staticmethod
-    def _get(
-        obj: Any,
-        field: str,
-        default: Any = None,
-    ) -> Any:
-
-        if obj is None:
-            return default
-
-        if isinstance(
-            obj,
-            dict,
-        ):
-            return obj.get(
-                field,
-                default,
-            )
-
-        return getattr(
-            obj,
-            field,
-            default,
-        )
-
-    # ========================================================
-    # NUMBER
-    # ========================================================
-
-    @staticmethod
-    def _number(
+    def _safe_float(
         value: Any,
     ) -> float:
 
-        if value is None:
-            return 0.0
-
         try:
-            return float(
-                value
-            )
+
+            if value is None:
+                return 0.0
+
+            result = float(value)
+
+            if result != result:
+                return 0.0
+
+            return result
+
         except (
             TypeError,
             ValueError,
         ):
             return 0.0
 
-    # ========================================================
-    # NORMALIZE
-    # ========================================================
-
     @staticmethod
-    def _normalize(
+    def _clamp(
         value: float,
+        minimum: float,
         maximum: float,
     ) -> float:
 
-        if maximum <= 0:
-            return 0.0
-
-        result = (
-            value
-            / maximum
-        )
-
         return max(
-            0.0,
+            minimum,
             min(
-                1.0,
-                result,
+                maximum,
+                value,
             ),
         )
 
-    # ========================================================
-    # FORMAT NUMBER
-    # ========================================================
+    @classmethod
+    def _normalize(
+        cls,
+        value: float,
+        reference: float,
+    ) -> float:
+
+        if reference <= 0:
+            return 0.0
+
+        return cls._clamp(
+            value / reference,
+            0.0,
+            1.0,
+        )
 
     @staticmethod
-    def _format_number(
-        value: float,
+    def _approach_to_string(
+        approach: ApproachState,
     ) -> str:
 
-        if float(value).is_integer():
-            return str(
-                int(value)
-            )
+        value = getattr(
+            approach,
+            "approach",
+            "",
+        )
 
-        return f"{value:.2f}"
+        if hasattr(
+            value,
+            "value",
+        ):
+            value = value.value
+
+        return str(value).lower()
+
+
+# ============================================================
+# MODULE EXPORTS
+# ============================================================
+
+__all__ = [
+    "RuleBasedEngine",
+    "Recommendation",
+]
