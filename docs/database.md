@@ -1238,14 +1238,14 @@ SQL
 --
 -- DROP TABLE IF EXISTS
 --     "simulationMetrics",
---     "simulationRuns",
+--     "simulations",
 --     "recommendations",
 --     "forecastPredictions",
 --     "forecasts",
 --     "signalStatuses",
---     "approachStates",
+--     "trafficApproachStates",
 --     "trafficStates",
---     "videoUploads",
+--     "cameraVideos",
 --     "cameras",
 --     "lanes",
 --     "approaches",
@@ -1462,7 +1462,7 @@ CREATE TABLE "cameras" (
 -- 4 GB langsung di PostgreSQL.
 -- ============================================================
 
-CREATE TABLE "videoUploads" (
+CREATE TABLE "cameraVideos" (
     "id" BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
 
     "cameraId" BIGINT,
@@ -1602,7 +1602,7 @@ CREATE TABLE "trafficStates" (
 -- 0
 -- ============================================================
 
-CREATE TABLE "approachStates" (
+CREATE TABLE "trafficApproachStates" (
     "id" BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
 
     "trafficStateId" BIGINT NOT NULL,
@@ -1898,7 +1898,7 @@ CREATE TABLE "recommendations" (
 -- Hasilnya dapat dilihat di simulationMetrics.
 -- ============================================================
 
-CREATE TABLE "simulationRuns" (
+CREATE TABLE "simulations" (
     "id" BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
 
     "intersectionId" BIGINT NOT NULL,
@@ -1990,7 +1990,7 @@ CREATE TABLE "simulationMetrics" (
 
     CONSTRAINT "fkSimulationMetricRun"
         FOREIGN KEY ("simulationRunId")
-        REFERENCES "simulationRuns" ("id")
+        REFERENCES "simulations" ("id")
         ON DELETE CASCADE,
 
     CONSTRAINT "fkSimulationMetricApproach"
@@ -2048,13 +2048,13 @@ CREATE INDEX "idxCamerasIntersection"
 ON "cameras" ("intersectionId");
 
 CREATE INDEX "idxVideoUploadsIntersection"
-ON "videoUploads" ("intersectionId");
+ON "cameraVideos" ("intersectionId");
 
 CREATE INDEX "idxVideoUploadsCamera"
-ON "videoUploads" ("cameraId");
+ON "cameraVideos" ("cameraId");
 
 CREATE INDEX "idxVideoUploadsStatus"
-ON "videoUploads" ("status");
+ON "cameraVideos" ("status");
 
 
 -- ------------------------------------------------------------
@@ -2068,10 +2068,10 @@ ON "trafficStates" (
 );
 
 CREATE INDEX "idxApproachStatesTrafficState"
-ON "approachStates" ("trafficStateId");
+ON "trafficApproachStates" ("trafficStateId");
 
 CREATE INDEX "idxApproachStatesApproach"
-ON "approachStates" ("approachId");
+ON "trafficApproachStates" ("approachId");
 
 
 -- ------------------------------------------------------------
@@ -2118,7 +2118,7 @@ ON "recommendations" (
 -- ------------------------------------------------------------
 
 CREATE INDEX "idxSimulationRunsIntersectionTime"
-ON "simulationRuns" (
+ON "simulations" (
     "intersectionId",
     "createdAt" DESC
 );
