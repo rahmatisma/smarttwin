@@ -18,12 +18,12 @@ class SignalService:
     ) -> SignalStatus:
 
         status = SignalStatus(
-            intersection_id=update.intersection_id,
+            intersectionId=update.intersectionId,
             timestamp=datetime.now(timezone.utc),
-            current_phase=update.current_phase,
-            phase_name=update.phase_name,
-            remaining_seconds=update.remaining_seconds,
-            cycle_time_seconds=update.cycle_time_seconds,
+            currentPhase=update.currentPhase,
+            phaseName=update.phaseName,
+            remainingSeconds=update.remainingSeconds,
+            cycleTimeSeconds=update.cycleTimeSeconds,
             phases=update.phases,
             source="backend",
         )
@@ -37,36 +37,36 @@ class SignalService:
 
     def get_demo_status(self) -> SignalStatus:
         return SignalStatus(
-            intersection_id="intersection_01",
+            intersectionId="intersection_01",
             timestamp=datetime.now(timezone.utc),
-            current_phase="NS_GREEN",
-            phase_name="North-South Green",
-            remaining_seconds=24,
-            cycle_time_seconds=90,
+            currentPhase="NS_GREEN",
+            phaseName="North-South Green",
+            remainingSeconds=24,
+            cycleTimeSeconds=90,
             phases={
                 "NS_GREEN": SignalPhase(
-                    phase_id="NS_GREEN",
+                    phaseId="NS_GREEN",
                     state="green",
-                    duration_seconds=35,
-                    remaining_seconds=24,
+                    durationSeconds=35,
+                    remainingSeconds=24,
                 ),
                 "NS_YELLOW": SignalPhase(
-                    phase_id="NS_YELLOW",
+                    phaseId="NS_YELLOW",
                     state="yellow",
-                    duration_seconds=4,
-                    remaining_seconds=0,
+                    durationSeconds=4,
+                    remainingSeconds=0,
                 ),
                 "EW_GREEN": SignalPhase(
-                    phase_id="EW_GREEN",
+                    phaseId="EW_GREEN",
                     state="green",
-                    duration_seconds=35,
-                    remaining_seconds=0,
+                    durationSeconds=35,
+                    remainingSeconds=0,
                 ),
                 "EW_YELLOW": SignalPhase(
-                    phase_id="EW_YELLOW",
+                    phaseId="EW_YELLOW",
                     state="yellow",
-                    duration_seconds=4,
-                    remaining_seconds=0,
+                    durationSeconds=4,
+                    remainingSeconds=0,
                 ),
             },
             source="demo",

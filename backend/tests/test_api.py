@@ -9,12 +9,21 @@ client = TestClient(app)
 def test_get_traffic_state():
 
     response = client.get(
-        "/api/v1/traffic/state"
+        "/api/v1/traffic/live-csv"
     )
 
     assert response.status_code == 200
 
-    data = response.json()
+    body = response.json()
+
+    assert body["success"] is True
+
+    data = body["data"]
+
+    assert data is not None, (
+        "Belum ada traffic state di Supabase "
+        "-- jalankan ingest dulu sebelum test ini."
+    )
 
     # ========================================================
     # TRAFFIC STATE

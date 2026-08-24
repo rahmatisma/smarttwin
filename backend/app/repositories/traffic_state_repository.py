@@ -65,7 +65,6 @@ class TrafficStateRepository:
                 "approachId": approach_id,
                 **approach_state.model_dump(
                     by_alias=True,
-                    exclude={"approach"},
                 ),
             })
 

@@ -4,7 +4,7 @@ from datetime import datetime
 
 import pytest
 
-from backend.app.repositories.traffic_state_repository import TrafficStateRepository
+from app.repositories.traffic_state_repository import TrafficStateRepository
 from app.core.config import settings
 from app.services.supabase_client import get_supabase
 from app.schemas.traffic import (
