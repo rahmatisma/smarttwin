@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import timedelta
 
-from app.ml.lstm_forecaster import LSTMForecaster
+from app.models.lstm_forecast import LSTMForecaster
 from app.schemas.forecast import (
     ForecastApproach,
     ForecastPrediction,
