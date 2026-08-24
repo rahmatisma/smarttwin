@@ -219,6 +219,7 @@ class SumoController:
         # --------------------------------------------------------
 
         self.running = False
+        self.paused = False
         self.is_gui = False
 
         self._stop_event = (
@@ -449,6 +450,8 @@ class SumoController:
             "1",
 
             "--no-step-log",
+
+            "--start",
         ]
 
         # ========================================================
@@ -981,61 +984,64 @@ class SumoController:
                     # SIMULATION STEP
                     # ==========================================
 
-                    self.traci.simulationStep()
+                    if not self.paused:
+                        self.traci.simulationStep()
 
-                    # ==========================================
-                    # SIMULATION TIME
-                    # ==========================================
+                        # ==========================================
+                        # SIMULATION TIME
+                        # ==========================================
 
-                    self.last_simulation_time = (
-                        self.traci.simulation.getTime()
-                    )
+                        self.last_simulation_time = (
+                            self.traci.simulation.getTime()
+                        )
 
                     # ==========================================
                     # DEPARTED
                     # ==========================================
 
-                    departed_ids = (
-                        self.traci
-                        .simulation
-                        .getDepartedIDList()
-                    )
-
-                    for vehicle_id in departed_ids:
-
-                        approach = (
-                            self._vehicle_approach.get(
-                                vehicle_id,
-                                "unknown",
-                            )
+                    if not self.paused:
+                        departed_ids = (
+                            self.traci
+                            .simulation
+                            .getDepartedIDList()
                         )
 
-                        self.departed_total[
-                            approach
-                        ] += 1
+                        for vehicle_id in departed_ids:
+
+                            approach = (
+                                self._vehicle_approach.get(
+                                    vehicle_id,
+                                    "unknown",
+                                )
+                            )
+
+                            self.departed_total[
+                                approach
+                            ] += 1
 
                     # ==========================================
                     # ARRIVED
                     # ==========================================
 
-                    arrived_ids = (
-                        self.traci
-                        .simulation
-                        .getArrivedIDList()
-                    )
-
-                    for vehicle_id in arrived_ids:
-
-                        approach = (
-                            self._vehicle_approach.pop(
-                                vehicle_id,
-                                "unknown",
-                            )
+                    if not self.paused:
+                        arrived_ids = (
+                            self.traci
+                            .simulation
+                            .getArrivedIDList()
                         )
 
-                        self.arrived_total[
-                            approach
-                        ] += 1
+                        for vehicle_id in arrived_ids:
+
+                            approach = (
+                                self._vehicle_approach.pop(
+                                    vehicle_id,
+                                    "unknown",
+                                )
+                            )
+
+                            self.arrived_total[
+                                approach
+                            ] += 1
 
                     # ==========================================
                     # ACTIVE VEHICLES POSITIONS
@@ -1413,6 +1419,18 @@ class SumoController:
                         self.last_error
                     ),
                 }
+
+    # ============================================================
+    # PAUSE / RESUME
+    # ============================================================
+
+    def pause(self) -> None:
+        if self.running:
+            self.paused = True
+
+    def resume(self) -> None:
+        if self.running:
+            self.paused = False
 
     # ============================================================
     # IS RUNNING

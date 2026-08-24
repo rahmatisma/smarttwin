@@ -1,3 +1,4 @@
+import { useState, useEffect } from "react";
 import type {
   ApproachState,
   SignalStatus,
@@ -237,6 +238,30 @@ export default function DigitalTwinPanel({
   approaches: ApproachState[];
   signal: SignalStatus;
 }) {
+  const [simRunning, setSimRunning] = useState(false);
+  const [simTime, setSimTime] = useState(0);
+  const [vehiclesCount, setVehiclesCount] = useState(0);
+
+  const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
+
+  useEffect(() => {
+    const interval = setInterval(async () => {
+      try {
+        const res = await fetch(`${API_BASE_URL}/api/v1/simulation/state`);
+        if (!res.ok) return;
+        const data = await res.json();
+        
+        setSimRunning(data.running);
+        if (data.running) {
+          setSimTime(data.simulationTimeSeconds ?? 0);
+          setVehiclesCount(data.vehicles?.length ?? 0);
+        }
+      } catch (err) {
+        setSimRunning(false);
+      }
+    }, 500);
+    return () => clearInterval(interval);
+  }, [API_BASE_URL]);
   /*
    * Mapping approach berdasarkan arah.
    */
@@ -286,7 +311,9 @@ export default function DigitalTwinPanel({
         <span className="flex items-center gap-1.5 text-xs">
           <span
             className={`h-1.5 w-1.5 rounded-full ${
-              signal.source === "mock"
+              simRunning
+                ? "bg-signal-green"
+                : signal.source === "mock"
                 ? "bg-signal-amber"
                 : "bg-signal-green"
             }`}
@@ -294,14 +321,14 @@ export default function DigitalTwinPanel({
 
           <span
             className={
-              signal.source === "mock"
+              simRunning
+                ? "text-signal-green font-bold"
+                : signal.source === "mock"
                 ? "text-signal-amber"
                 : "text-signal-green"
             }
           >
-            {signal.source === "mock"
-              ? "Simulated"
-              : "Synced"}
+            {simRunning ? "LIVE ●" : signal.source === "mock" ? "Simulated" : "Synced"}
           </span>
         </span>
       </div>
@@ -321,239 +348,247 @@ export default function DigitalTwinPanel({
       </div>
 
       {/* =====================================================
-          SVG INTERSECTION
+          SVG INTERSECTION OR LIVE STREAM
           ===================================================== */}
 
-      <svg
-        viewBox="0 0 400 400"
-        width={400}
-        height={400}
-        className="aspect-square w-full"
-      >
-        {/* North road */}
+      <div className="relative aspect-video w-full overflow-hidden rounded-md bg-[var(--color-canvas)]">
+        {simRunning ? (
+          <>
+            <img
+              src={`${API_BASE_URL}/api/v1/simulation/stream?t=${Date.now()}`}
+              alt="Live SUMO Simulation Stream"
+              className="absolute inset-0 h-full w-full object-contain"
+            />
+            <div className="absolute bottom-2 right-2 rounded-lg border border-white/10 bg-black/50 px-2 py-1 backdrop-blur-sm">
+              <p className="font-mono text-xs font-medium text-white">
+                {Math.floor(simTime / 60).toString().padStart(2, '0')}:{(Math.floor(simTime) % 60).toString().padStart(2, '0')}
+              </p>
+            </div>
+            <div className="absolute bottom-2 left-2 rounded-lg border border-white/10 bg-black/50 px-2 py-1 backdrop-blur-sm">
+              <p className="font-mono text-xs font-medium text-white">
+                Vehicles: {vehiclesCount}
+              </p>
+            </div>
+          </>
+        ) : (
+          <svg
+            viewBox="0 0 400 400"
+            className="absolute inset-0 h-full w-full"
+          >
+            {/* North road */}
 
-        <rect
-          x={165}
-          y={0}
-          width={70}
-          height={165}
-          fill="#171c27"
-        />
+            <rect
+              x={165}
+              y={0}
+              width={70}
+              height={165}
+              fill="#171c27"
+            />
 
-        {/* South road */}
+            {/* South road */}
 
-        <rect
-          x={165}
-          y={235}
-          width={70}
-          height={165}
-          fill="#171c27"
-        />
+            <rect
+              x={165}
+              y={235}
+              width={70}
+              height={165}
+              fill="#171c27"
+            />
 
-        {/* West road */}
+            {/* West road */}
 
-        <rect
-          x={0}
-          y={165}
-          width={165}
-          height={70}
-          fill="#171c27"
-        />
+            <rect
+              x={0}
+              y={165}
+              width={165}
+              height={70}
+              fill="#171c27"
+            />
 
-        {/* East road */}
+            {/* East road */}
 
-        <rect
-          x={235}
-          y={165}
-          width={165}
-          height={70}
-          fill="#171c27"
-        />
+            <rect
+              x={235}
+              y={165}
+              width={165}
+              height={70}
+              fill="#171c27"
+            />
 
-        {/* Intersection */}
+            {/* Intersection */}
 
-        <rect
-          x={165}
-          y={165}
-          width={70}
-          height={70}
-          fill="#1c212d"
-        />
+            <rect
+              x={165}
+              y={165}
+              width={70}
+              height={70}
+              fill="#1c212d"
+            />
 
-        {/* Lane markings */}
+            {/* Lane markings */}
 
-        <line
-          x1={200}
-          y1={0}
-          x2={200}
-          y2={165}
-          stroke="#2c3340"
-          strokeWidth={2}
-          strokeDasharray="10 8"
-        />
+            <line
+              x1={200}
+              y1={0}
+              x2={200}
+              y2={165}
+              stroke="#2c3340"
+              strokeWidth={2}
+              strokeDasharray="10 8"
+            />
 
-        <line
-          x1={200}
-          y1={235}
-          x2={200}
-          y2={400}
-          stroke="#2c3340"
-          strokeWidth={2}
-          strokeDasharray="10 8"
-        />
+            <line
+              x1={200}
+              y1={235}
+              x2={200}
+              y2={400}
+              stroke="#2c3340"
+              strokeWidth={2}
+              strokeDasharray="10 8"
+            />
 
-        <line
-          x1={0}
-          y1={200}
-          x2={165}
-          y2={200}
-          stroke="#2c3340"
-          strokeWidth={2}
-          strokeDasharray="10 8"
-        />
+            <line
+              x1={0}
+              y1={200}
+              x2={165}
+              y2={200}
+              stroke="#2c3340"
+              strokeWidth={2}
+              strokeDasharray="10 8"
+            />
 
-        <line
-          x1={235}
-          y1={200}
-          x2={400}
-          y2={200}
-          stroke="#2c3340"
-          strokeWidth={2}
-          strokeDasharray="10 8"
-        />
+            <line
+              x1={235}
+              y1={200}
+              x2={400}
+              y2={200}
+              stroke="#2c3340"
+              strokeWidth={2}
+              strokeDasharray="10 8"
+            />
 
-        {/* =================================================
-            DIRECTION LABELS
-            ================================================= */}
+            {/* =================================================
+                DIRECTION LABELS
+                ================================================= */}
 
-        <text
-          x={200}
-          y={18}
-          textAnchor="middle"
-          fill="#5b6472"
-          fontSize={11}
-          fontFamily="var(--font-sans)"
-        >
-          UTARA
-        </text>
+            <text
+              x={200}
+              y={18}
+              textAnchor="middle"
+              fill="#5b6472"
+              fontSize={11}
+              fontFamily="var(--font-sans)"
+            >
+              UTARA
+            </text>
 
-        <text
-          x={200}
-          y={392}
-          textAnchor="middle"
-          fill="#5b6472"
-          fontSize={11}
-          fontFamily="var(--font-sans)"
-        >
-          SELATAN
-        </text>
+            <text
+              x={200}
+              y={392}
+              textAnchor="middle"
+              fill="#5b6472"
+              fontSize={11}
+              fontFamily="var(--font-sans)"
+            >
+              SELATAN
+            </text>
 
-        <text
-          x={382}
-          y={205}
-          textAnchor="middle"
-          fill="#5b6472"
-          fontSize={11}
-          fontFamily="var(--font-sans)"
-        >
-          TIMUR
-        </text>
+            <text
+              x={375}
+              y={204}
+              textAnchor="middle"
+              fill="#5b6472"
+              fontSize={11}
+              fontFamily="var(--font-sans)"
+            >
+              TIMUR
+            </text>
 
-        <text
-          x={18}
-          y={205}
-          textAnchor="middle"
-          fill="#5b6472"
-          fontSize={11}
-          fontFamily="var(--font-sans)"
-        >
-          BARAT
-        </text>
+            <text
+              x={25}
+              y={204}
+              textAnchor="middle"
+              fill="#5b6472"
+              fontSize={11}
+              fontFamily="var(--font-sans)"
+            >
+              BARAT
+            </text>
 
-        {/* =================================================
-            QUEUE VISUALIZATION
-            ================================================= */}
+            {/* =================================================
+                QUEUE DOTS
+                ================================================= */}
 
-        {byApproach.north && (
-          <QueueDots
-            count={queueDotCount(
-              byApproach.north.volume
-            )}
-            axis="y"
-            from={150}
-            step={-16}
-            fixed={200}
-          />
+            <QueueDots
+              count={queueDotCount(byApproach.north.queueLengthVeh)}
+              axis="y"
+              fixed={180}
+              from={150}
+              step={-10}
+            />
+
+            <QueueDots
+              count={queueDotCount(byApproach.south.queueLengthVeh)}
+              axis="y"
+              fixed={220}
+              from={250}
+              step={10}
+            />
+
+            <QueueDots
+              count={queueDotCount(byApproach.east.queueLengthVeh)}
+              axis="x"
+              fixed={180}
+              from={250}
+              step={10}
+            />
+
+            <QueueDots
+              count={queueDotCount(byApproach.west.queueLengthVeh)}
+              axis="x"
+              fixed={220}
+              from={150}
+              step={-10}
+            />
+
+            {/* =================================================
+                SIGNAL HEADS
+                ================================================= */}
+
+            {/* North */}
+            <SignalHead
+              x={152}
+              y={150}
+              vertical={false}
+              active={northColor}
+            />
+
+            {/* South */}
+            <SignalHead
+              x={248}
+              y={250}
+              vertical={false}
+              active={southColor}
+            />
+
+            {/* East */}
+            <SignalHead
+              x={248}
+              y={150}
+              vertical={true}
+              active={eastColor}
+            />
+
+            {/* West */}
+            <SignalHead
+              x={152}
+              y={200}
+              vertical={true}
+              active={westColor}
+            />
+          </svg>
         )}
-
-        {byApproach.south && (
-          <QueueDots
-            count={queueDotCount(
-              byApproach.south.volume
-            )}
-            axis="y"
-            from={250}
-            step={16}
-            fixed={200}
-          />
-        )}
-
-        {byApproach.east && (
-          <QueueDots
-            count={queueDotCount(
-              byApproach.east.volume
-            )}
-            axis="x"
-            from={250}
-            step={16}
-            fixed={200}
-          />
-        )}
-
-        {byApproach.west && (
-          <QueueDots
-            count={queueDotCount(
-              byApproach.west.volume
-            )}
-            axis="x"
-            from={150}
-            step={-16}
-            fixed={200}
-          />
-        )}
-
-        {/* =================================================
-            SIGNAL HEADS
-            ================================================= */}
-
-        <SignalHead
-          x={200}
-          y={152}
-          vertical
-          active={northColor}
-        />
-
-        <SignalHead
-          x={200}
-          y={248}
-          vertical
-          active={southColor}
-        />
-
-        <SignalHead
-          x={248}
-          y={200}
-          vertical={false}
-          active={eastColor}
-        />
-
-        <SignalHead
-          x={152}
-          y={200}
-          vertical={false}
-          active={westColor}
-        />
-      </svg>
+      </div>
 
       {/* =====================================================
           FOOTER

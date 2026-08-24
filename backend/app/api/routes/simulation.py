@@ -30,6 +30,22 @@ def stop_simulation():
 		raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
+@router.post("/pause")
+def pause_simulation():
+	try:
+		return simulation_service.pause()
+	except Exception as exc:
+		raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.post("/resume")
+def resume_simulation():
+	try:
+		return simulation_service.resume()
+	except Exception as exc:
+		raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
 @router.get("/state")
 def get_simulation_state():
 	try:

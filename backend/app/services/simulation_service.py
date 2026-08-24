@@ -772,6 +772,9 @@ class SimulationService:
                 "running": (
                     self.controller.is_running()
                 ),
+                "paused": (
+                    self.controller.paused
+                ),
                 "intersectionId": (
                     self.active_intersection_id
                 ),
@@ -790,16 +793,34 @@ class SimulationService:
             if self.controller is None or not self.controller.is_running():
                 return {
                     "running": False,
+                    "paused": False,
                     "vehicles": [],
                     "signals": [],
                     "simulationTimeSeconds": 0
                 }
             return {
                 "running": True,
+                "paused": self.controller.paused,
                 "vehicles": self.controller.active_vehicles_data,
                 "signals": self.controller.active_signals_data,
                 "simulationTimeSeconds": self.controller.last_simulation_time
             }
+
+    # ============================================================
+    # PAUSE / RESUME
+    # ============================================================
+
+    def pause(self) -> dict:
+        with self._lock:
+            if self.controller is not None and self.controller.is_running():
+                self.controller.pause()
+            return {"status": "paused"}
+
+    def resume(self) -> dict:
+        with self._lock:
+            if self.controller is not None and self.controller.is_running():
+                self.controller.resume()
+            return {"status": "running"}
 
     # ============================================================
     # STOP

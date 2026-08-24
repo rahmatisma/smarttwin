@@ -686,15 +686,35 @@ export default function DashboardPage() {
   }, [selectedIntersection, allTrafficStates]);
 
   const activeSignal = useMemo(() => {
-    if (selectedIntersection !== "all") {
-      return allSignalStatuses[selectedIntersection] ?? simulatedSignal;
+    // 1. Single Source of Truth: LIVE SIMULATION
+    if (simulatedSignal) {
+      return simulatedSignal;
     }
 
-    const signals = ALL_INTERSECTIONS.map(
-      (inter) => allSignalStatuses[inter.id]
-    ).filter((s): s is SignalStatus => s != null);
+    // 2. Fallback: Supabase Decision Engine Database
+    if (selectedIntersection !== "all") {
+      const dbSignal = allSignalStatuses[selectedIntersection];
+      if (dbSignal) return dbSignal;
+    } else {
+      const signals = ALL_INTERSECTIONS.map(
+        (inter) => allSignalStatuses[inter.id]
+      ).filter((s): s is SignalStatus => s != null);
 
-    return getAggregatedSignal(signals.length > 0 ? signals : [simulatedSignal]);
+      if (signals.length > 0) {
+        return getAggregatedSignal(signals);
+      }
+    }
+
+    // 3. Fallback: Offline state
+    return {
+      intersectionId: "simpang4-pingit",
+      timestamp: new Date().toISOString(),
+      currentPhase: "NS",
+      phaseName: "Sistem Offline",
+      remainingSeconds: 0,
+      cycleTimeSeconds: 0,
+      source: "mock",
+    } as SignalStatus;
   }, [selectedIntersection, allSignalStatuses, simulatedSignal]);
 
   const activeRecommendation = useMemo(() => {

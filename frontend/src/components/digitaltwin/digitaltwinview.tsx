@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 
 import Sidebar from "@/components/Sidebar";
+import { fetchSignalStatus } from "@/lib/supabaseData";
 
 type SimulationStatus = "idle" | "running" | "paused";
 
@@ -64,14 +65,46 @@ export default function DigitalTwinView() {
     const [signals, setSignals] = useState<SignalData[]>([]);
 
     useEffect(() => {
-        if (status !== "running") return;
-
         const interval = setInterval(async () => {
             try {
                 const res = await fetch(`${API_BASE_URL}/api/v1/simulation/state`);
                 if (!res.ok) return;
                 const data = await res.json();
                 
+                if (data.running) {
+                    if (data.paused) {
+                        setStatus("paused");
+                    } else {
+                        setStatus("running");
+                    }
+                } else {
+                    setStatus("idle");
+                }
+
+                if (!data.running) {
+                    // SSOT: Use Supabase when simulation is idle
+                    try {
+                        const dbSignal = await fetchSignalStatus("simpang4-pingit");
+                        if (dbSignal) {
+                            const phase = dbSignal.currentPhase.toLowerCase();
+                            const isNS = phase.includes("ns") || phase.includes("north") || phase.includes("south");
+                            const isEW = phase.includes("ew") || phase.includes("east") || phase.includes("west");
+                            const isAmber = phase.includes("amber") || phase.includes("yellow");
+                            const activeColor = isAmber ? "YELLOW" : "GREEN";
+
+                            setSignalStatuses([
+                                { direction: "North", state: isNS ? activeColor : "RED", time: dbSignal.remainingSeconds },
+                                { direction: "East",  state: isEW ? activeColor : "RED", time: dbSignal.remainingSeconds },
+                                { direction: "South", state: isNS ? activeColor : "RED", time: dbSignal.remainingSeconds },
+                                { direction: "West",  state: isEW ? activeColor : "RED", time: dbSignal.remainingSeconds }
+                            ]);
+                        }
+                    } catch (dbErr) {
+                        console.error("Failed to fetch Supabase signal:", dbErr);
+                    }
+                    return;
+                }
+
                 if (data.vehicles) {
                     setVehicles(data.vehicles);
                 }
@@ -124,7 +157,7 @@ export default function DigitalTwinView() {
         }, 500);
 
         return () => clearInterval(interval);
-    }, [status, API_BASE_URL]);
+    }, [API_BASE_URL]);
 
     async function handleStartSimulation() {
         setLoading(true);
@@ -170,6 +203,28 @@ export default function DigitalTwinView() {
             console.error("Failed to stop simulation", error);
         } finally {
             setLoading(false);
+        }
+    }
+
+    async function handlePause() {
+        try {
+            await fetch(`${API_BASE_URL}/api/v1/simulation/pause`, {
+                method: "POST"
+            });
+            setStatus("paused");
+        } catch (error) {
+            console.error("Failed to pause simulation", error);
+        }
+    }
+
+    async function handleResume() {
+        try {
+            await fetch(`${API_BASE_URL}/api/v1/simulation/resume`, {
+                method: "POST"
+            });
+            setStatus("running");
+        } catch (error) {
+            console.error("Failed to resume simulation", error);
         }
     }
 
@@ -582,15 +637,20 @@ export default function DigitalTwinView() {
                             {status === "running" ? (
                                 <button
                                     type="button"
-                                    onClick={() =>
-                                        setStatus(
-                                            "paused"
-                                        )
-                                    }
+                                    onClick={handlePause}
                                     className="flex items-center gap-2 rounded-xl bg-accent px-5 py-2.5 text-xs font-medium text-bg transition hover:opacity-90"
                                 >
                                     <Pause size={15} />
                                     Pause Simulation
+                                </button>
+                            ) : status === "paused" ? (
+                                <button
+                                    type="button"
+                                    onClick={handleResume}
+                                    className="flex items-center gap-2 rounded-xl bg-accent px-5 py-2.5 text-xs font-medium text-bg transition hover:opacity-90"
+                                >
+                                    <Play size={15} />
+                                    Resume Simulation
                                 </button>
                             ) : (
                                 <button
