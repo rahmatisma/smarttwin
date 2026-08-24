@@ -1,70 +1,16 @@
 from __future__ import annotations
 
-from datetime import timedelta
-from pathlib import Path
+from datetime import datetime, timedelta
 
 from app.models.lstm_forecast import LSTMForecaster
+from app.repositories.forecast_repository import (
+    ForecastRepository,
+)
 from app.schemas.forecast import (
     ForecastPrediction,
     ForecastResult,
 )
-from app.schemas.traffic import TrafficState
 
-
-# ============================================================
-# PATH
-# ============================================================
-
-BASE_DIR = Path(__file__).resolve().parents[2]
-
-# Struktur project:
-#
-# smarttwin/
-# ├── backend/
-# │   └── app/
-# │       └── services/
-# │           └── forecast_service.py
-# │
-# └── forecasting/
-#     └── outputs/
-#         └── yolo/
-#             ├── traffic_lstm.pt
-#             ├── scaler.pkl
-#             └── metadata.json
-#
-# parents[0] = services
-# parents[1] = app
-# parents[2] = backend
-# parents[3] = smarttwin
-
-PROJECT_ROOT = BASE_DIR.parent
-
-FORECASTING_OUTPUT_DIR = (
-    PROJECT_ROOT
-    / "forecasting"
-    / "outputs"
-    / "yolo"
-)
-
-MODEL_PATH = (
-    FORECASTING_OUTPUT_DIR
-    / "traffic_lstm.pt"
-)
-
-SCALER_PATH = (
-    FORECASTING_OUTPUT_DIR
-    / "scaler.pkl"
-)
-
-METADATA_PATH = (
-    FORECASTING_OUTPUT_DIR
-    / "metadata.json"
-)
-
-
-# ============================================================
-# LSTM CONTRACT
-# ============================================================
 
 FEATURE_NAMES = [
     "totalDiZona",
@@ -74,399 +20,200 @@ FEATURE_NAMES = [
     "busDiZona",
 ]
 
-SEQUENCE_LENGTH = 12
-
 INTERVAL_SECONDS = 5
 
-
-# ============================================================
-# FORECAST SERVICE
-# ============================================================
 
 class ForecastService:
 
     def __init__(
         self,
         forecaster: LSTMForecaster,
+        repository: ForecastRepository,
     ):
         self.forecaster = forecaster
+        self.repository = repository
 
-        # History disimpan berdasarkan intersectionId.
-        #
-        # Contoh:
-        #
-        # {
-        #     "intersection-001": [
-        #         TrafficState(...),
-        #         TrafficState(...),
-        #         ...
-        #     ]
-        # }
-        #
-        self.history: dict[
-            str,
-            list[TrafficState],
-        ] = {}
+    # =========================================================
+    # FORECAST
+    # =========================================================
 
-    # ========================================================
-    # ADD TRAFFIC STATE
-    # ========================================================
-
-    def add_traffic_state(
+    def forecast(
         self,
-        state: TrafficState,
-    ) -> ForecastResult | None:
-
-        intersection_id = state.intersectionId
-
-        if intersection_id not in self.history:
-            self.history[intersection_id] = []
-
-        self.history[intersection_id].append(state)
-
-        # Simpan sedikit history tambahan.
-        max_history = (
-            self.forecaster.sequence_length
-            + 20
-        )
-
-        self.history[intersection_id] = (
-            self.history[intersection_id][
-                -max_history:
-            ]
-        )
-
-        current_length = len(
-            self.history[intersection_id]
-        )
-
-        required_length = (
-            self.forecaster.sequence_length
-        )
-
-        # ====================================================
-        # WARMING UP
-        # ====================================================
-
-        if current_length < required_length:
-
-            print(
-                "[FORECAST] History belum cukup: "
-                f"{current_length}/{required_length}"
-            )
-
-            return None
-
-        # ====================================================
-        # RUN FORECAST
-        # ====================================================
-
-        return self._run_forecast(
-            intersection_id
-        )
-
-    # ========================================================
-    # CONVERT TRAFFIC STATE -> LSTM FEATURES
-    # ========================================================
-
-    def _state_to_features(
-        self,
-        state: TrafficState,
-    ) -> dict:
-
-        total_di_zona = 0.0
-        motor_di_zona = 0.0
-        mobil_di_zona = 0.0
-        truk_di_zona = 0.0
-        bus_di_zona = 0.0
-
-        # TrafficState mempunyai beberapa approach.
-        #
-        # Setiap approach berasal dari hasil
-        # TrafficStateBuilder.
-        #
-        # Kita agregasikan seluruh approach
-        # menjadi satu timestep tingkat intersection.
-
-        for approach in state.approaches:
-
-            total_di_zona += float(
-                approach.volume or 0
-            )
-
-            motor_di_zona += float(
-                approach.motorcycleCount or 0
-            )
-
-            mobil_di_zona += float(
-                approach.carCount or 0
-            )
-
-            truk_di_zona += float(
-                approach.truckCount or 0
-            )
-
-            bus_di_zona += float(
-                approach.busCount or 0
-            )
-
-        return {
-            "totalDiZona": total_di_zona,
-            "motorDiZona": motor_di_zona,
-            "mobilDiZona": mobil_di_zona,
-            "trukDiZona": truk_di_zona,
-            "busDiZona": bus_di_zona,
-        }
-
-    # ========================================================
-    # RUN LSTM FORECAST
-    # ========================================================
-
-    def _run_forecast(
-        self,
-        intersection_id: str,
+        intersectionId: str,
+        horizonMinutes: int,
     ) -> ForecastResult:
 
-        states = self.history[
-            intersection_id
-        ]
+        if horizonMinutes <= 0:
+            raise ValueError(
+                "horizonMinutes harus lebih besar dari 0."
+            )
 
-        # ====================================================
-        # BUILD HISTORY
-        # ====================================================
+        states = (
+            self.repository.getTrafficHistory(
+                intersectionId=intersectionId,
+                limit=self.forecaster.sequenceLength,
+            )
+        )
 
-        history_features = [
-            self._state_to_features(state)
+        if len(states) < self.forecaster.sequenceLength:
+            raise ValueError(
+                "Data traffic belum cukup untuk forecast. "
+                f"Dibutuhkan "
+                f"{self.forecaster.sequenceLength} timestep, "
+                f"tersedia {len(states)}."
+            )
+
+        historyFeatures = [
+            self._stateToFeatures(state)
             for state in states
         ]
 
-        # ====================================================
-        # LSTM PREDICTION
-        # ====================================================
-
         prediction = (
             self.forecaster.predict(
-                history_features
+                historyFeatures
             )
         )
 
-        latest_state = states[-1]
+        if prediction.ndim == 3:
+            prediction = prediction[0]
 
-        generated_at = (
-            latest_state.windowEnd
-        )
-
-        # ====================================================
-        # NORMALIZE OUTPUT SHAPE
-        # ====================================================
-
-        prediction_values = prediction
-
-        #
-        # Expected:
-        #
-        # [1, horizon, 5]
-        #
-        # menjadi:
-        #
-        # [horizon, 5]
-        #
-
-        if prediction_values.ndim == 3:
-            prediction_values = (
-                prediction_values[0]
+        if prediction.ndim != 2:
+            raise ValueError(
+                "Output LSTM tidak sesuai. "
+                f"Shape: {prediction.shape}"
             )
 
-        #
-        # Kalau:
-        #
-        # [5]
-        #
-        # menjadi:
-        #
-        # [[5]]
-        #
+        latestState = states[-1]
 
-        if prediction_values.ndim == 1:
-            prediction_values = [
-                prediction_values
-            ]
-
-        # ====================================================
-        # BUILD FORECAST PREDICTIONS
-        # ====================================================
+        generatedAt = self._parseDatetime(
+            latestState["windowEnd"]
+        )
 
         predictions = []
 
-        for step_index, values in enumerate(
-            prediction_values
-        ):
+        maxSteps = min(
+            len(prediction),
+            horizonMinutes
+            * 60
+            // INTERVAL_SECONDS,
+        )
 
-            horizon_seconds = (
-                INTERVAL_SECONDS
-                * (step_index + 1)
-            )
+        for index in range(maxSteps):
 
-            prediction_time = (
-                generated_at
+            values = prediction[index]
+
+            predictionTime = (
+                generatedAt
                 + timedelta(
-                    seconds=horizon_seconds
-                )
-            )
-
-            # Pastikan jumlah output sesuai
-            # dengan lima feature LSTM.
-
-            if len(values) < 5:
-                raise ValueError(
-                    "Output LSTM tidak memiliki "
-                    "5 feature yang diperlukan. "
-                    f"Output: {values}"
-                )
-
-            forecast = (
-                ForecastPrediction(
-                    predictionTime=(
-                        prediction_time
-                    ),
-                    horizonSeconds=(
-                        horizon_seconds
-                    ),
-
-                    totalDiZona=max(
-                        0.0,
-                        float(values[0]),
-                    ),
-
-                    motorDiZona=max(
-                        0.0,
-                        float(values[1]),
-                    ),
-
-                    mobilDiZona=max(
-                        0.0,
-                        float(values[2]),
-                    ),
-
-                    trukDiZona=max(
-                        0.0,
-                        float(values[3]),
-                    ),
-
-                    busDiZona=max(
-                        0.0,
-                        float(values[4]),
-                    ),
+                    seconds=(
+                        INTERVAL_SECONDS
+                        * (index + 1)
+                    )
                 )
             )
 
             predictions.append(
-                forecast
+                ForecastPrediction(
+                    timestamp=predictionTime,
+                    predictedVehicleCount=max(
+                        0.0,
+                        float(values[0]),
+                    ),
+                    predictedQueueLengthVeh=0.0,
+                    predictedQueueLengthMEst=0.0,
+                    predictedDensityIndex=0.0,
+                    predictedSpeedKmh=None,
+                )
             )
 
-        # ====================================================
-        # RESULT
-        # ====================================================
-
-        result = ForecastResult(
-            intersectionId=(
-                intersection_id
-            ),
-
-            generatedAt=(
-                generated_at
-            ),
-
-            sourceWindowStart=(
-                latest_state.windowStart
-            ),
-
-            sourceWindowEnd=(
-                latest_state.windowEnd
-            ),
-
-            modelName="LSTM",
-
-            modelVersion="1.0",
-
+        return ForecastResult(
+            intersectionId=intersectionId,
+            horizonMinutes=horizonMinutes,
+            model="LSTM",
             predictions=predictions,
         )
 
-        # ====================================================
-        # LOG
-        # ====================================================
+    # =========================================================
+    # TRAFFIC STATE -> LSTM FEATURES
+    # =========================================================
 
-        print(
-            "\n========== FORECAST =========="
-        )
+    def _stateToFeatures(
+        self,
+        state: dict,
+    ) -> dict:
 
-        print(
-            result.model_dump_json(
-                indent=2
+        total = 0.0
+        motorcycle = 0.0
+        car = 0.0
+        truck = 0.0
+        bus = 0.0
+
+        for approach in state.get(
+            "approaches",
+            [],
+        ):
+
+            total += float(
+                approach.get(
+                    "volume",
+                    0,
+                ) or 0
+            )
+
+            motorcycle += float(
+                approach.get(
+                    "motorcycleCount",
+                    0,
+                ) or 0
+            )
+
+            car += float(
+                approach.get(
+                    "carCount",
+                    0,
+                ) or 0
+            )
+
+            truck += float(
+                approach.get(
+                    "truckCount",
+                    0,
+                ) or 0
+            )
+
+            bus += float(
+                approach.get(
+                    "busCount",
+                    0,
+                ) or 0
+            )
+
+        return {
+            "totalDiZona": total,
+            "motorDiZona": motorcycle,
+            "mobilDiZona": car,
+            "trukDiZona": truck,
+            "busDiZona": bus,
+        }
+
+    # =========================================================
+    # DATETIME
+    # =========================================================
+
+    def _parseDatetime(
+        self,
+        value,
+    ) -> datetime:
+
+        if isinstance(
+            value,
+            datetime,
+        ):
+            return value
+
+        return datetime.fromisoformat(
+            value.replace(
+                "Z",
+                "+00:00",
             )
         )
-
-        print(
-            "==============================\n"
-        )
-
-        return result
-
-
-# ============================================================
-# CREATE LSTM FORECASTER
-# ============================================================
-
-print(
-    "\n=========================================="
-)
-
-print(
-    "[FORECAST] Initializing LSTM..."
-)
-
-print(
-    "=========================================="
-)
-
-print(
-    f"[FORECAST] Model   : {MODEL_PATH}"
-)
-
-print(
-    f"[FORECAST] Scaler  : {SCALER_PATH}"
-)
-
-print(
-    f"[FORECAST] Metadata: {METADATA_PATH}"
-)
-
-print(
-    f"[FORECAST] Features: {FEATURE_NAMES}"
-)
-
-print(
-    f"[FORECAST] Sequence: {SEQUENCE_LENGTH}"
-)
-
-print(
-    "==========================================\n"
-)
-
-
-forecaster = LSTMForecaster(
-    model_path=MODEL_PATH,
-    scaler_path=SCALER_PATH,
-    metadata_path=METADATA_PATH,
-    feature_names=FEATURE_NAMES,
-    sequence_length=SEQUENCE_LENGTH,
-)
-
-
-# ============================================================
-# GLOBAL FORECAST SERVICE
-# ============================================================
-
-forecast_service = ForecastService(
-    forecaster=forecaster
-)

@@ -1,33 +1,80 @@
 from datetime import datetime
-from typing import Dict
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
 
-class RecommendationRequest(BaseModel):
-    intersection_id: str
-    simulation_horizon_minutes: int = Field(
+# ============================================================
+# BASE CONFIG
+# ============================================================
+
+class CamelCaseModel(BaseModel):
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+
+
+# ============================================================
+# REQUEST
+# ============================================================
+
+class RecommendationRequest(
+    CamelCaseModel
+):
+
+    intersectionId: str
+
+    simulationHorizonMinutes: int = Field(
         default=15,
         ge=1,
         le=120,
     )
 
 
-class RecommendationMetrics(BaseModel):
-    queue_length: float = Field(ge=0)
-    vehicle_count: float = Field(ge=0)
-    average_speed_kmh: float = Field(ge=0)
+# ============================================================
+# METRICS
+# ============================================================
+
+class RecommendationMetrics(
+    CamelCaseModel
+):
+
+    queueLength: float = Field(
+        ge=0
+    )
+
+    vehicleCount: float = Field(
+        ge=0
+    )
+
+    averageSpeedKmh: float = Field(
+        ge=0
+    )
 
 
-class SignalRecommendation(BaseModel):
-    intersection_id: str
+# ============================================================
+# SIGNAL RECOMMENDATION
+# ============================================================
+
+class SignalRecommendation(
+    CamelCaseModel
+):
+
+    intersectionId: str
+
     timestamp: datetime
 
-    recommended_phase: str
-    recommended_green_seconds: int = Field(ge=0)
-    current_green_seconds: int = Field(ge=0)
+    recommendedPhase: str
 
-    expected_delay_reduction_percent: float
+    recommendedGreenSeconds: int = Field(
+        ge=0
+    )
+
+    currentGreenSeconds: int = Field(
+        ge=0
+    )
+
+    expectedDelayReductionPercent: float
 
     confidence: float = Field(
         ge=0.0,
@@ -41,7 +88,14 @@ class SignalRecommendation(BaseModel):
     source: str = "pending"
 
 
-class RecommendationResponse(BaseModel):
+# ============================================================
+# RESPONSE
+# ============================================================
+
+class RecommendationResponse(
+    CamelCaseModel
+):
+
     success: bool = True
 
     recommendation: SignalRecommendation

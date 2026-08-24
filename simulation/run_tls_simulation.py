@@ -1,53 +1,96 @@
 from __future__ import annotations
 
 import os
-import sys
-import time
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any
+
+from dotenv import load_dotenv
 
 
 # ============================================================
 # PATH
 # ============================================================
 
-SIMULATION_ROOT = Path(__file__).resolve().parent
+simulationRoot = Path(__file__).resolve().parent
+projectRoot = simulationRoot.parent
+backendRoot = projectRoot / "backend"
+decisionEngineRoot = projectRoot / "decision_engine"
 
-PROJECT_ROOT = SIMULATION_ROOT.parent
-
-BACKEND_ROOT = PROJECT_ROOT / "backend"
-
-ENV_FILE = BACKEND_ROOT / ".env"
+envFile = backendRoot / ".env"
 
 
 # ============================================================
 # PYTHON PATH
 # ============================================================
 
-if str(BACKEND_ROOT) not in sys.path:
-    sys.path.insert(0, str(BACKEND_ROOT))
+# smarttwin/
+# ├── backend/
+# ├── decision_engine/
+# └── simulation/
+#
+# Project root diperlukan agar:
+#
+# from decision_engine.rule_based_engine import RuleBasedEngine
+#
+# bisa ditemukan.
+
+if str(projectRoot) not in sys.path:
+    sys.path.insert(0, str(projectRoot))
+
+
+# Backend root diperlukan agar:
+#
+# from app....
+#
+# bisa ditemukan.
+
+if str(backendRoot) not in sys.path:
+    sys.path.insert(0, str(backendRoot))
+
+
+# ============================================================
+# VALIDATE PROJECT STRUCTURE
+# ============================================================
+
+if not backendRoot.exists():
+    raise RuntimeError(
+        f"Backend tidak ditemukan:\n{backendRoot}"
+    )
+
+
+if not decisionEngineRoot.exists():
+    raise RuntimeError(
+        "Decision engine tidak ditemukan:\n"
+        f"{decisionEngineRoot}"
+    )
+
+
+ruleBasedEngineFile = (
+    decisionEngineRoot / "rule_based_engine.py"
+)
+
+if not ruleBasedEngineFile.exists():
+    raise RuntimeError(
+        "Rule-based engine tidak ditemukan:\n"
+        f"{ruleBasedEngineFile}"
+    )
+
+
+if not envFile.exists():
+    raise RuntimeError(
+        "Backend .env tidak ditemukan:\n"
+        f"{envFile}"
+    )
 
 
 # ============================================================
 # ENVIRONMENT
 # ============================================================
 
-if not ENV_FILE.exists():
-    raise RuntimeError(
-        "\n"
-        "============================================================\n"
-        "BACKEND .env TIDAK DITEMUKAN\n"
-        "============================================================\n"
-        f"Expected:\n{ENV_FILE}\n"
-    )
-
-
-from dotenv import load_dotenv
-
-
 load_dotenv(
-    dotenv_path=ENV_FILE,
+    dotenv_path=envFile,
     override=False,
 )
 
@@ -56,9 +99,9 @@ load_dotenv(
 # SUMO
 # ============================================================
 
-def find_sumo() -> tuple[Path, Path]:
+def findSumo() -> tuple[Path, Path]:
     """
-    Mencari SUMO executable.
+    Mencari executable SUMO.
 
     Prioritas:
 
@@ -67,71 +110,66 @@ def find_sumo() -> tuple[Path, Path]:
     3. PATH
     """
 
-    # --------------------------------------------------------
-    # 1. SUMO dari simulation virtual environment
-    # --------------------------------------------------------
-
     candidates = [
-        SIMULATION_ROOT
+        simulationRoot
         / ".venv"
         / "Scripts"
         / "sumo.exe",
 
-        SIMULATION_ROOT
+        simulationRoot
         / ".venv"
         / "Scripts"
         / "sumo",
     ]
 
+    # --------------------------------------------------------
+    # LOCAL VENV
+    # --------------------------------------------------------
+
     for candidate in candidates:
 
         if candidate.exists():
 
-            sumo_executable = candidate
-
-            tools_dir = (
-                SIMULATION_ROOT
+            toolsDirectory = (
+                simulationRoot
                 / ".venv"
                 / "Lib"
                 / "site-packages"
                 / "sumolib"
             )
 
-            # biasanya TraCI tersedia melalui SUMO_HOME/tools.
-            # Jika tidak ada, cari tools dari package.
-            if not tools_dir.exists():
-                tools_dir = (
-                    SIMULATION_ROOT
+            if not toolsDirectory.exists():
+
+                toolsDirectory = (
+                    simulationRoot
                     / ".venv"
                     / "Lib"
                     / "site-packages"
                 )
 
             return (
-                sumo_executable,
-                tools_dir,
+                candidate,
+                toolsDirectory,
             )
 
     # --------------------------------------------------------
-    # 2. SUMO_HOME
+    # SUMO_HOME
     # --------------------------------------------------------
 
-    sumo_home = os.environ.get(
-        "SUMO_HOME"
-    )
+    sumoHome = os.environ.get("SUMO_HOME")
 
-    if sumo_home:
+    if sumoHome:
 
-        home = Path(sumo_home)
+        homePath = Path(sumoHome)
 
         executable = (
-            home
+            homePath
             / "bin"
             / "sumo.exe"
         )
 
-        tools = (
-            home
+        toolsDirectory = (
+            homePath
             / "tools"
         )
 
@@ -139,71 +177,60 @@ def find_sumo() -> tuple[Path, Path]:
 
             return (
                 executable,
-                tools,
+                toolsDirectory,
             )
 
     # --------------------------------------------------------
-    # 3. PATH
+    # SYSTEM PATH
     # --------------------------------------------------------
 
     try:
 
         result = subprocess.run(
-            [
-                "where",
-                "sumo",
-            ],
+            ["where", "sumo"],
             capture_output=True,
             text=True,
             check=True,
         )
 
-        first_line = (
+        firstLine = (
             result.stdout
             .strip()
             .splitlines()[0]
         )
 
-        executable = Path(
-            first_line
+        executable = Path(firstLine)
+
+        possibleHome = (
+            executable.parent.parent
         )
 
-        # Kalau ditemukan dari PATH,
-        # coba cari SUMO_HOME dari parent.
-        possible_home = executable.parent.parent
-
-        possible_tools = (
-            possible_home
-            / "tools"
+        toolsDirectory = (
+            possibleHome / "tools"
         )
 
         return (
             executable,
-            possible_tools,
+            toolsDirectory,
         )
 
     except Exception:
-
         pass
 
     raise RuntimeError(
-        "\n"
-        "============================================================\n"
-        "SUMO TIDAK DITEMUKAN\n"
-        "============================================================\n"
-        "\n"
+        "SUMO tidak ditemukan.\n\n"
         "Sudah dicoba:\n"
-        f"- {SIMULATION_ROOT / '.venv' / 'Scripts' / 'sumo.exe'}\n"
+        f"- {simulationRoot / '.venv' / 'Scripts' / 'sumo.exe'}\n"
         "- SUMO_HOME\n"
-        "- PATH\n"
+        "- PATH"
     )
 
 
-SUMO_BINARY, SUMO_TOOLS = find_sumo()
+sumoBinary, sumoTools = findSumo()
 
 
 # ============================================================
-# TRAFFIC / BACKEND IMPORT
+# BACKEND IMPORT
 # ============================================================
 
 from app.pipeline.traffic_state_builder import (
@@ -211,8 +238,13 @@ from app.pipeline.traffic_state_builder import (
     TrafficStateBuilderConfig,
 )
 
-from app.services.simulation_result_writer import (
-    SimulationResultWriter,
+
+# ============================================================
+# DECISION ENGINE IMPORT
+# ============================================================
+
+from decision_engine.rule_based_engine import (
+    RuleBasedEngine,
 )
 
 
@@ -220,55 +252,62 @@ from app.services.simulation_result_writer import (
 # TRACI
 # ============================================================
 
-# SUMO_HOME biasanya dibutuhkan oleh traci.
-#
-# Karena SUMO kita berasal dari venv, cari lokasi
-# package traci secara langsung.
-
 try:
 
     import traci
 
 except ModuleNotFoundError:
 
-    # --------------------------------------------------------
-    # fallback: coba tools path
-    # --------------------------------------------------------
+    if sumoTools.exists():
 
-    if SUMO_TOOLS.exists():
-
-        if str(SUMO_TOOLS) not in sys.path:
+        if str(sumoTools) not in sys.path:
 
             sys.path.insert(
                 0,
-                str(SUMO_TOOLS),
+                str(sumoTools),
             )
 
     import traci
 
 
 # ============================================================
-# CONFIG
+# CONFIGURATION
 # ============================================================
 
-INTERSECTION_ID = "simpang4-pingit"
+intersectionId = "simpang4-pingit"
 
-SUMO_CONFIG = (
-    SIMULATION_ROOT
+sumoConfig = (
+    simulationRoot
     / "network"
     / "simpang4_pingit.sumocfg"
 )
 
-TLS_ID = "SIMPANG_CENTER"
+tlsId = "SIMPANG_CENTER"
 
-SIMULATION_STEP_LIMIT = 300
+simulationStepLimit = 300
+
+
+# ============================================================
+# APPROACH → SUMO PHASE
+# ============================================================
+
+approachToPhase = {
+
+    "south": 0,
+
+    "east": 1,
+
+    "north": 2,
+
+    "west": 3,
+}
 
 
 # ============================================================
 # HEADER
 # ============================================================
 
-def print_header(
+def printHeader(
     title: str,
 ) -> None:
 
@@ -285,35 +324,40 @@ def print_header(
 # ENVIRONMENT INFO
 # ============================================================
 
-def print_environment() -> None:
+def printEnvironment() -> None:
 
-    print_header(
+    printHeader(
         "ENVIRONMENT"
     )
 
     print(
         f"Simulation root : "
-        f"{SIMULATION_ROOT}"
+        f"{simulationRoot}"
     )
 
     print(
         f"Backend root    : "
-        f"{BACKEND_ROOT}"
+        f"{backendRoot}"
+    )
+
+    print(
+        f"Decision engine : "
+        f"{decisionEngineRoot}"
     )
 
     print(
         f".env            : "
-        f"{ENV_FILE}"
+        f"{envFile}"
     )
 
     print(
         f"SUMO binary     : "
-        f"{SUMO_BINARY}"
+        f"{sumoBinary}"
     )
 
     print(
         f"SUMO tools      : "
-        f"{SUMO_TOOLS}"
+        f"{sumoTools}"
     )
 
     print(
@@ -324,32 +368,18 @@ def print_environment() -> None:
 
     print(
         "SUPABASE_KEY    : OK"
-        if os.getenv(
-            "SUPABASE_SERVICE_ROLE_KEY"
-        )
+        if os.getenv("SUPABASE_SERVICE_ROLE_KEY")
         else "SUPABASE_KEY    : MISSING"
     )
 
-    print(
-        "HF_TOKEN        : OK"
-        if os.getenv("HF_TOKEN")
-        else "HF_TOKEN        : MISSING"
-    )
-
-    print(
-        "HF_REPO_ID      : OK"
-        if os.getenv("HF_REPO_ID")
-        else "HF_REPO_ID      : MISSING"
-    )
-
 
 # ============================================================
-# TRAFFIC STATE
+# LOAD TRAFFIC STATE
 # ============================================================
 
-def load_traffic_state():
+def loadTrafficState():
 
-    print_header(
+    printHeader(
         "LOADING TRAFFIC STATE"
     )
 
@@ -359,15 +389,14 @@ def load_traffic_state():
         )
     )
 
-    state = (
-        builder
-        .build_latest_state_for_intersection(
-            intersection_id=INTERSECTION_ID,
+    trafficState = (
+        builder.build_latest_state_for_intersection(
+            intersection_id=intersectionId,
             save=False,
         )
     )
 
-    if state is None:
+    if trafficState is None:
 
         raise RuntimeError(
             "TrafficState tidak ditemukan "
@@ -381,123 +410,175 @@ def load_traffic_state():
     )
 
     builder.print_state(
-        state
+        trafficState
     )
 
-    return state
+    return trafficState
 
 
 # ============================================================
-# PHASE PLAN
+# DECISION ENGINE
 # ============================================================
 
-def create_phase_plan(
-    state,
-) -> dict[str, Any]:
+def createDecision(
+    trafficState,
+):
 
-    print_header(
-        "CREATING PHASE PLAN"
+    printHeader(
+        "RUNNING DECISION ENGINE"
     )
 
-    north = next(
-        x for x in state.approaches
-        if x.approach == "north"
-    )
+    engine = RuleBasedEngine()
 
-    south = next(
-        x for x in state.approaches
-        if x.approach == "south"
-    )
-
-    east = next(
-        x for x in state.approaches
-        if x.approach == "east"
-    )
-
-    west = next(
-        x for x in state.approaches
-        if x.approach == "west"
-    )
-
-    queue_north = north.queueLengthVeh
-    queue_south = south.queueLengthVeh
-    queue_east = east.queueLengthVeh
-    queue_west = west.queueLengthVeh
-
-    # --------------------------------------------------------
-    # Adaptive rule-based TLS (4 Phases)
-    # --------------------------------------------------------
-
-    queues = {
-        0: ("South", queue_south),
-        1: ("East", queue_east),
-        2: ("North", queue_north),
-        3: ("West", queue_west),
-    }
-
-    best_phase = max(queues.items(), key=lambda x: x[1][1])[0]
-    best_name, best_queue = queues[best_phase]
-
-    phase = best_phase
-    duration = min(60, max(20, 30 + best_queue))
-    reason = f"{best_name} memiliki queue tertinggi ({best_queue})."
-
-    plan = {
-        "phase": phase,
-        "duration": float(duration),
-        "reason": reason,
-        "queueNorth": queue_north,
-        "queueSouth": queue_south,
-        "queueEast": queue_east,
-        "queueWest": queue_west,
-    }
-
-    print(
-        f"Selected phase : "
-        f"{phase}"
-    )
-
-    print(
-        f"Duration        : "
-        f"{duration:.0f}s"
-    )
-
-    print(
-        f"Reason          : "
-        f"{reason}"
+    recommendation = (
+        engine.recommend(
+            state=trafficState,
+            currentGreenSeconds=15,
+            currentPhase="south",
+        )
     )
 
     print()
 
-    print(f"Queue South     : {queue_south}")
-    print(f"Queue East      : {queue_east}")
-    print(f"Queue North     : {queue_north}")
-    print(f"Queue West      : {queue_west}")
+    print(
+        "Decision Engine berhasil."
+    )
 
-    return plan
+    print()
+
+    print(
+        f"Recommended approach : "
+        f"{recommendation.recommendedPhase}"
+    )
+
+    recommendedApproach = (
+        recommendation.recommendedPhase
+    )
+
+    sumoPhase = approachToPhase.get(
+        recommendedApproach
+    )
+
+    if sumoPhase is None:
+
+        raise ValueError(
+            "Approach tidak memiliki "
+            "mapping SUMO phase: "
+            f"{recommendedApproach}"
+        )
+
+    print(
+        f"SUMO phase            : "
+        f"{sumoPhase}"
+    )
+
+    print(
+        f"Green duration        : "
+        f"{recommendation.recommendedGreenSeconds}s"
+    )
+
+    print(
+        f"Current green         : "
+        f"{recommendation.currentGreenSeconds}s"
+    )
+
+    print(
+        f"Confidence            : "
+        f"{recommendation.confidence}"
+    )
+
+    print(
+        f"Delay reduction       : "
+        f"{recommendation.expectedDelayReductionPercent}"
+    )
+
+    print(
+        f"Source                : "
+        f"{recommendation.source}"
+    )
+
+    print(
+        f"Reason                : "
+        f"{recommendation.reason}"
+    )
+
+    # ========================================================
+    # PHASE PLAN
+    # ========================================================
+
+    phasePlan = {
+
+        "approach":
+            recommendedApproach,
+
+        "sumoPhase":
+            sumoPhase,
+
+        "duration":
+            recommendation.recommendedGreenSeconds,
+
+        "reason":
+            recommendation.reason,
+
+        "confidence":
+            recommendation.confidence,
+
+        "source":
+            recommendation.source,
+    }
+
+    print()
+
+    print(
+        "Phase plan berhasil dibuat."
+    )
+
+    print(
+        f"  Approach   : "
+        f"{phasePlan['approach']}"
+    )
+
+    print(
+        f"  SUMO phase : "
+        f"{phasePlan['sumoPhase']}"
+    )
+
+    print(
+        f"  Duration   : "
+        f"{phasePlan['duration']}s"
+    )
+
+    return (
+        recommendation,
+        phasePlan,
+    )
 
 
 # ============================================================
 # START SUMO
 # ============================================================
 
-def start_sumo():
+def startSumo():
 
-    print_header(
+    printHeader(
         "STARTING SUMO"
     )
 
-    if not SUMO_CONFIG.exists():
+    if not sumoConfig.exists():
 
         raise FileNotFoundError(
-            f"SUMO config tidak ditemukan:\n"
-            f"{SUMO_CONFIG}"
+            "SUMO config tidak ditemukan:\n"
+            f"{sumoConfig}"
         )
 
     command = [
-        str(SUMO_BINARY),
+
+        str(sumoBinary),
+
         "-c",
-        str(SUMO_CONFIG),
+
+        str(sumoConfig),
+
         "--start",
     ]
 
@@ -514,46 +595,78 @@ def start_sumo():
         "SUMO berhasil dimulai."
     )
 
+    trafficLightIds = (
+        traci.trafficlight
+        .getIDList()
+    )
+
+    print(
+        f"Traffic Light ID: "
+        f"{tlsId}"
+    )
+
+    if tlsId not in trafficLightIds:
+
+        raise RuntimeError(
+            f"TLS '{tlsId}' tidak ditemukan. "
+            f"Available: {trafficLightIds}"
+        )
+
 
 # ============================================================
 # APPLY TLS
 # ============================================================
 
-def apply_tls(
-    plan: dict[str, Any],
+def applyTls(
+    phasePlan: dict[str, Any],
 ) -> None:
 
-    print_header(
+    printHeader(
         "TLS PHASE APPLIED"
     )
 
     traci.trafficlight.setPhase(
-        TLS_ID,
-        plan["phase"],
+        tlsId,
+        phasePlan["sumoPhase"],
     )
 
     traci.trafficlight.setPhaseDuration(
-        TLS_ID,
-        plan["duration"],
+        tlsId,
+        phasePlan["duration"],
     )
 
     print(
-        f"TLS      : {TLS_ID}"
+        f"TLS       : {tlsId}"
     )
 
     print(
-        f"Phase    : "
-        f"{plan['phase']}"
+        f"Approach  : "
+        f"{phasePlan['approach']}"
     )
 
     print(
-        f"Duration : "
-        f"{plan['duration']:.0f}s"
+        f"SUMO phase: "
+        f"{phasePlan['sumoPhase']}"
     )
 
     print(
-        f"Reason   : "
-        f"{plan['reason']}"
+        f"Duration  : "
+        f"{phasePlan['duration']}s"
+    )
+
+    print(
+        f"Reason    : "
+        f"{phasePlan['reason']}"
+    )
+
+    print(
+        f"Confidence: "
+        f"{phasePlan['confidence']}"
+    )
+
+    print(
+        f"Source    : "
+        f"{phasePlan['source']}"
     )
 
 
@@ -561,155 +674,294 @@ def apply_tls(
 # RUN SIMULATION
 # ============================================================
 
-def run_simulation():
+def runSimulation():
 
-    print_header(
+    printHeader(
         "SIMULATION RUNNING"
     )
 
     steps = 0
 
-    arrived = 0
+    arrivedVehicles = 0
 
-    departed = 0
+    departedVehicles = 0
 
-    while steps < SIMULATION_STEP_LIMIT:
+    while steps < simulationStepLimit:
 
         try:
 
             traci.simulationStep()
 
-        except Exception as exc:
+        except Exception as exception:
 
             print(
                 "SUMO step error:",
-                exc,
+                exception,
             )
 
             break
 
         steps += 1
 
-        # ----------------------------------------------------
-        # Metrics
-        # ----------------------------------------------------
-
         try:
 
-            arrived = (
+            arrivedVehicles = (
                 traci.simulation
                 .getArrivedNumber()
             )
 
-            departed = (
+            departedVehicles = (
                 traci.simulation
                 .getDepartedNumber()
             )
 
-            active = (
+            activeVehicles = (
                 traci.vehicle
                 .getIDCount()
             )
 
-            expected = (
+            expectedVehicles = (
                 traci.simulation
                 .getMinExpectedNumber()
             )
 
         except Exception:
 
-            active = 0
+            activeVehicles = 0
 
-            expected = 0
+            expectedVehicles = 0
 
-        if (
-            steps % 10 == 0
-            or expected == 0
-        ):
+        if steps % 10 == 0:
 
             print(
                 f"[t={steps:4d}s] "
-                f"active={active:<4} "
-                f"expected={expected:<4}"
+                f"active={activeVehicles:<4} "
+                f"expected={expectedVehicles:<4}"
             )
 
-        if expected == 0:
+        if expectedVehicles == 0:
 
             break
 
-    return {
-        "steps": steps,
-        "active": (
+    # ========================================================
+    # FINAL VALUES
+    # ========================================================
+
+    try:
+
+        activeVehicles = (
             traci.vehicle
             .getIDCount()
-        ),
-        "arrived": arrived,
-        "departed": departed,
+        )
+
+    except Exception:
+
+        activeVehicles = 0
+
+    return {
+
+        "steps":
+            steps,
+
+        "activeVehicles":
+            activeVehicles,
+
+        "arrivedVehicles":
+            arrivedVehicles,
+
+        "departedVehicles":
+            departedVehicles,
     }
 
 
 # ============================================================
-# GET TLS RESULT
+# TLS RESULT
 # ============================================================
 
-def get_tls_result(
-    plan: dict[str, Any],
-) -> dict[str, Any]:
+def getTlsResult(
+    phasePlan: dict[str, Any],
+):
 
-    phase = traci.trafficlight.getPhase(
-        TLS_ID
+    finalPhase = (
+        traci.trafficlight
+        .getPhase(
+            tlsId
+        )
     )
 
-    state = traci.trafficlight.getRedYellowGreenState(
-        TLS_ID
+    tlsState = (
+        traci.trafficlight
+        .getRedYellowGreenState(
+            tlsId
+        )
     )
 
     return {
-        "phase": phase,
-        "duration": plan["duration"],
-        "state": state,
+
+        "approach":
+            phasePlan["approach"],
+
+        "finalPhase":
+            finalPhase,
+
+        "greenDurationSeconds":
+            phasePlan["duration"],
+
+        "tlsState":
+            tlsState,
     }
 
 
 # ============================================================
-# SAVE RESULT
+# BUILD SIMULATION RESULT
 # ============================================================
 
-def save_result(
-    traffic_state,
-    phase_plan,
-    simulation_metrics,
-    tls_result,
+def buildSimulationMetrics(
+    simulationMetrics: dict[str, Any],
+    tlsResult: dict[str, Any],
 ):
 
-    print_header(
-        "WRITING SIMULATION RESULT"
-    )
+    return {
 
-    writer = SimulationResultWriter()
+        "steps":
+            simulationMetrics["steps"],
 
-    result = writer.save_result(
-        traffic_state=traffic_state,
-        phase_plan=phase_plan,
-        simulation_metrics={
-            **simulation_metrics,
-            "tlsPhase": tls_result["phase"],
-            "tlsDuration": tls_result["duration"],
-            "tlsState": tls_result["state"],
-        },
+        "activeVehicles":
+            simulationMetrics["activeVehicles"],
+
+        "arrivedVehicles":
+            simulationMetrics["arrivedVehicles"],
+
+        "departedVehicles":
+            simulationMetrics["departedVehicles"],
+
+        "finalPhase":
+            tlsResult["finalPhase"],
+
+        "tlsState":
+            tlsResult["tlsState"],
+    }
+
+
+# ============================================================
+# PRINT RESULT
+# ============================================================
+
+def printSimulationResult(
+    simulationMetrics,
+    tlsResult,
+):
+
+    printHeader(
+        "SIMULATION METRICS"
     )
 
     print(
-        "Simulation result berhasil "
-        "disimpan ke Supabase."
+        f"Simulation steps : "
+        f"{simulationMetrics['steps']}"
     )
 
     print(
-        f"Simulation ID : "
-        f"{result}"
+        f"Active vehicles  : "
+        f"{simulationMetrics['activeVehicles']}"
     )
 
-    return result
+    print(
+        f"Arrived vehicles : "
+        f"{simulationMetrics['arrivedVehicles']}"
+    )
+
+    print(
+        f"Departed         : "
+        f"{simulationMetrics['departedVehicles']}"
+    )
+
+    print(
+        f"TLS approach     : "
+        f"{tlsResult['approach']}"
+    )
+
+    print(
+        f"TLS phase        : "
+        f"{tlsResult['finalPhase']}"
+    )
+
+    print(
+        f"TLS duration     : "
+        f"{tlsResult['greenDurationSeconds']}s"
+    )
+
+    print(
+        f"TLS state        : "
+        f"{tlsResult['tlsState']}"
+    )
+
+
+# ============================================================
+# SAVE RESULT TO SUPABASE
+# ============================================================
+
+def saveSimulationResult(
+    trafficState,
+    phasePlan,
+    simulationMetrics,
+    tlsResult,
+):
+
+    printHeader(
+        "SAVING SIMULATION RESULT"
+    )
+
+    try:
+
+        from app.services.simulation_result_writer import (
+            SimulationResultWriter,
+        )
+
+    except Exception as exception:
+
+        print(
+            "SimulationResultWriter tidak dapat "
+            "di-import."
+        )
+
+        print(
+            f"Error: {exception}"
+        )
+
+        return None
+
+    resultWriter = (
+        SimulationResultWriter()
+    )
+
+    metricsPayload = (
+        buildSimulationMetrics(
+            simulationMetrics,
+            tlsResult,
+        )
+    )
+
+    simulationRunId = (
+        resultWriter.saveResult(
+            trafficState=trafficState,
+            phasePlan=phasePlan,
+            simulationMetrics=metricsPayload,
+        )
+    )
+
+    print()
+
+    print(
+        "Hasil simulasi berhasil disimpan."
+    )
+
+    print(
+        f"Simulation run ID : "
+        f"{simulationRunId}"
+    )
+
+    return simulationRunId
 
 
 # ============================================================
@@ -728,112 +980,94 @@ def main():
 
     print("=" * 70)
 
-    print_environment()
-
     # --------------------------------------------------------
-    # 1. Traffic State dari Supabase
+    # ENVIRONMENT
     # --------------------------------------------------------
 
-    traffic_state = (
-        load_traffic_state()
+    printEnvironment()
+
+    # --------------------------------------------------------
+    # TRAFFIC STATE
+    # --------------------------------------------------------
+
+    trafficState = (
+        loadTrafficState()
     )
 
     # --------------------------------------------------------
-    # 2. Phase plan
+    # DECISION ENGINE
     # --------------------------------------------------------
 
-    phase_plan = (
-        create_phase_plan(
-            traffic_state
-        )
+    (
+        recommendation,
+        phasePlan,
+    ) = createDecision(
+        trafficState
     )
 
     # --------------------------------------------------------
-    # 3. Start SUMO
+    # START SUMO
     # --------------------------------------------------------
 
-    start_sumo()
+    startSumo()
 
     try:
 
         # ----------------------------------------------------
-        # 4. Apply TLS
+        # APPLY TLS
         # ----------------------------------------------------
 
-        apply_tls(
-            phase_plan
+        applyTls(
+            phasePlan
         )
 
         # ----------------------------------------------------
-        # 5. Run simulation
+        # RUN SIMULATION
         # ----------------------------------------------------
 
-        simulation_metrics = (
-            run_simulation()
+        simulationMetrics = (
+            runSimulation()
         )
 
         # ----------------------------------------------------
-        # 6. TLS result
+        # TLS RESULT
         # ----------------------------------------------------
 
-        tls_result = (
-            get_tls_result(
-                phase_plan
+        tlsResult = (
+            getTlsResult(
+                phasePlan
             )
         )
 
         # ----------------------------------------------------
-        # 7. Print result
+        # PRINT RESULT
         # ----------------------------------------------------
 
-        print_header(
-            "SIMULATION METRICS"
-        )
-
-        print(
-            f"Simulation steps : "
-            f"{simulation_metrics['steps']}"
-        )
-
-        print(
-            f"Active vehicles  : "
-            f"{simulation_metrics['active']}"
-        )
-
-        print(
-            f"Arrived vehicles : "
-            f"{simulation_metrics['arrived']}"
-        )
-
-        print(
-            f"Departed         : "
-            f"{simulation_metrics['departed']}"
-        )
-
-        print(
-            f"TLS phase        : "
-            f"{tls_result['phase']}"
-        )
-
-        print(
-            f"TLS duration     : "
-            f"{tls_result['duration']}"
-        )
-
-        print(
-            f"TLS state        : "
-            f"{tls_result['state']}"
+        printSimulationResult(
+            simulationMetrics,
+            tlsResult,
         )
 
         # ----------------------------------------------------
-        # 8. Save Supabase
+        # BUILD RESULT
         # ----------------------------------------------------
 
-        save_result(
-            traffic_state=traffic_state,
-            phase_plan=phase_plan,
-            simulation_metrics=simulation_metrics,
-            tls_result=tls_result,
+        finalMetrics = (
+            buildSimulationMetrics(
+                simulationMetrics,
+                tlsResult,
+            )
+        )
+
+        # ----------------------------------------------------
+        # SAVE TO SUPABASE
+        # ----------------------------------------------------
+
+        saveSimulationResult(
+            trafficState=trafficState,
+            phasePlan=phasePlan,
+            simulationMetrics=finalMetrics,
+            tlsResult=tlsResult,
         )
 
     finally:
@@ -856,7 +1090,7 @@ def main():
     # FINAL
     # --------------------------------------------------------
 
-    print_header(
+    printHeader(
         "SMARTTWIN TLS SIMULATION SELESAI"
     )
 
@@ -869,7 +1103,15 @@ def main():
     )
 
     print(
-        "Phase Plan"
+        "Rule-Based Decision Engine"
+    )
+
+    print(
+        "     ↓"
+    )
+
+    print(
+        "Phase Mapping"
     )
 
     print(

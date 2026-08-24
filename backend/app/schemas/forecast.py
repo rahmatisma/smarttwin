@@ -6,37 +6,45 @@ from pydantic import BaseModel, Field
 
 
 # ============================================================
+# FORECAST REQUEST
+# ============================================================
+
+class ForecastRequest(BaseModel):
+    intersectionId: str
+
+    horizonMinutes: int = Field(
+        default=15,
+        ge=1,
+        le=60,
+    )
+
+
+# ============================================================
 # FORECAST PREDICTION
 # ============================================================
 
 class ForecastPrediction(BaseModel):
+    timestamp: datetime
 
-    predictionTime: datetime
-
-    horizonSeconds: int
-
-    totalDiZona: float = Field(
-        default=0.0,
+    predictedVehicleCount: float = Field(
         ge=0,
     )
 
-    motorDiZona: float = Field(
-        default=0.0,
+    predictedQueueLengthVeh: float = Field(
         ge=0,
     )
 
-    mobilDiZona: float = Field(
-        default=0.0,
+    predictedQueueLengthMEst: float = Field(
         ge=0,
     )
 
-    trukDiZona: float = Field(
-        default=0.0,
+    predictedDensityIndex: float = Field(
         ge=0,
+        le=1,
     )
 
-    busDiZona: float = Field(
-        default=0.0,
+    predictedSpeedKmh: float | None = Field(
+        default=None,
         ge=0,
     )
 
@@ -46,17 +54,10 @@ class ForecastPrediction(BaseModel):
 # ============================================================
 
 class ForecastResult(BaseModel):
-
     intersectionId: str
 
-    generatedAt: datetime
+    horizonMinutes: int
 
-    sourceWindowStart: datetime
-
-    sourceWindowEnd: datetime
-
-    modelName: str
-
-    modelVersion: str
+    model: str
 
     predictions: list[ForecastPrediction]

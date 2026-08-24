@@ -1,42 +1,58 @@
-from __future__ import annotations
+from fastapi import APIRouter, HTTPException
 
-from fastapi import APIRouter
+from app.schemas.forecast import (
+    ForecastRequest,
+    ForecastResult,
+)
 
-from app.services.forecast_service import forecast_service
-from app.schemas.traffic import TrafficState
+from app.services.realtime_forecast_service import (
+    RealtimeForecastService,
+)
 
 
 router = APIRouter(
-    prefix="/forecast",
+    prefix="/api",
     tags=["Forecast"],
 )
 
 
-@router.post("/predict")
-def predict(
-    state: TrafficState,
+@router.post(
+    "/forecast",
+    response_model=ForecastResult,
+)
+def forecast(
+    request: ForecastRequest,
 ):
-    """
-    Menerima TrafficState terbaru,
-    memasukkannya ke history LSTM,
-    lalu menjalankan forecast jika
-    sequence sudah mencukupi.
-    """
 
-    result = forecast_service.add_traffic_state(state)
+    try:
 
-    if result is None:
-        return {
-            "status": "warming_up",
-            "message": (
-                "History traffic belum cukup "
-                "untuk menjalankan LSTM."
+        service = RealtimeForecastService()
+
+        return service.forecast(
+            intersection_id=request.intersectionId,
+            horizon_minutes=request.horizonMinutes,
+        )
+
+    except ValueError as exc:
+
+        raise HTTPException(
+            status_code=422,
+            detail=str(exc),
+        )
+
+    except FileNotFoundError as exc:
+
+        raise HTTPException(
+            status_code=500,
+            detail=str(exc),
+        )
+
+    except Exception as exc:
+
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                "Gagal menjalankan realtime forecast: "
+                f"{exc}"
             ),
-            "requiredTimesteps": (
-                forecast_service
-                .forecaster
-                .sequence_length
-            ),
-        }
-
-    return result
+        )

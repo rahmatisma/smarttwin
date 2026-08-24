@@ -13,222 +13,227 @@ class ForecastOutput:
 
 
 class LSTMForecaster:
+    """
+    ONNX inference wrapper untuk SmartTwin Traffic LSTM.
+
+    Model contract:
+        input  = [batch, lookback, features]
+        output = [batch, horizon, features]
+
+    Feature model:
+        totalDiZona
+        motorDiZona
+        mobilDiZona
+        trukDiZona
+        busDiZona
+    """
 
     def __init__(
         self,
-        model_path: str | Path,
-        scaler_path: str | Path,
-        metadata_path: str | Path,
-        feature_names: list[str],
-        sequence_length: int,
+        modelPath: str | Path,
+        scalerPath: str | Path,
+        metadataPath: str | Path,
+        featureNames: list[str],
+        sequenceLength: int,
     ):
+        self.modelPath = Path(modelPath)
+        self.scalerPath = Path(scalerPath)
+        self.metadataPath = Path(metadataPath)
 
-        self.model_path = Path(
-            model_path
-        )
-
-        self.scaler_path = Path(
-            scaler_path
-        )
-
-        self.metadata_path = Path(
-            metadata_path
-        )
-
-        self.feature_names = feature_names
-
-        self.sequence_length = sequence_length
-
-        self.model = None
+        self.featureNames = featureNames
+        self.sequenceLength = sequenceLength
 
         self.session = None
+        self.inputName = None
+        self.outputName = None
 
-        self.scaler_min = None
+        self.scalerMin = None
+        self.scalerScale = None
 
-        self.scaler_scale = None
+        self.metadata = {}
 
-        self._load_metadata()
+        self._loadMetadata()
+        self._loadScaler()
+        self._loadModel()
 
-        self._load_scaler()
-
-        self._load_model()
-
-    # ========================================================
+    # =========================================================
     # METADATA
-    # ========================================================
+    # =========================================================
 
-    def _load_metadata(self):
-
-        if not self.metadata_path.exists():
-
+    def _loadMetadata(self) -> None:
+        if not self.metadataPath.exists():
             raise FileNotFoundError(
-                f"Metadata tidak ditemukan: "
-                f"{self.metadata_path}"
+                f"Metadata tidak ditemukan: {self.metadataPath}"
             )
 
         with open(
-            self.metadata_path,
+            self.metadataPath,
             "r",
             encoding="utf-8",
         ) as file:
-
             self.metadata = json.load(file)
 
-        trained_features = (
-            self.metadata.get(
-                "features",
-                []
-            )
+        trainedFeatures = self.metadata.get(
+            "features",
+            [],
         )
 
-        if trained_features != self.feature_names:
-
+        if trainedFeatures != self.featureNames:
             raise ValueError(
                 "\nKontrak feature LSTM tidak cocok.\n\n"
-                f"Model : {trained_features}\n"
-                f"Backend: {self.feature_names}\n"
+                f"Model   : {trainedFeatures}\n"
+                f"Backend : {self.featureNames}\n"
             )
 
-        trained_lookback = (
-            self.metadata.get(
-                "lookback"
-            )
+        trainedLookback = self.metadata.get(
+            "lookback"
         )
 
-        if trained_lookback != self.sequence_length:
-
+        if trainedLookback != self.sequenceLength:
             raise ValueError(
                 "\nSequence length tidak cocok.\n\n"
-                f"Model : {trained_lookback}\n"
-                f"Backend: {self.sequence_length}\n"
+                f"Model   : {trainedLookback}\n"
+                f"Backend : {self.sequenceLength}\n"
             )
 
-    # ========================================================
+    # =========================================================
     # SCALER
-    # ========================================================
+    # =========================================================
 
-    def _load_scaler(self):
-
-        if not self.scaler_path.exists():
-
+    def _loadScaler(self) -> None:
+        if not self.scalerPath.exists():
             raise FileNotFoundError(
-                f"Scaler tidak ditemukan: "
-                f"{self.scaler_path}"
+                f"Scaler tidak ditemukan: {self.scalerPath}"
             )
 
         with open(
-            self.scaler_path,
+            self.scalerPath,
             "r",
             encoding="utf-8",
         ) as file:
+            scalerData = json.load(file)
 
-            scaler_data = json.load(file)
-
-        self.scaler_min = np.asarray(
-            scaler_data["min"],
+        self.scalerMin = np.asarray(
+            scalerData["min"],
             dtype=np.float32,
         )
 
-        self.scaler_scale = np.asarray(
-            scaler_data["scale"],
+        self.scalerScale = np.asarray(
+            scalerData["scale"],
             dtype=np.float32,
         )
 
-    # ========================================================
+        if len(self.scalerMin) != len(self.featureNames):
+            raise ValueError(
+                "Jumlah scaler feature tidak cocok dengan model."
+            )
+
+        if len(self.scalerScale) != len(self.featureNames):
+            raise ValueError(
+                "Jumlah scaler scale tidak cocok dengan model."
+            )
+
+    # =========================================================
     # MODEL
-    # ========================================================
+    # =========================================================
 
-    def _load_model(self):
-
-        if not self.model_path.exists():
-
+    def _loadModel(self) -> None:
+        if not self.modelPath.exists():
             raise FileNotFoundError(
-                f"Model ONNX tidak ditemukan: "
-                f"{self.model_path}"
+                f"Model ONNX tidak ditemukan: {self.modelPath}"
             )
 
         try:
-
             import onnxruntime as ort
-
         except ImportError:
-
             raise RuntimeError(
-                "onnxruntime belum tersedia "
-                "untuk inference backend."
-            )
+                "onnxruntime belum tersedia. "
+                "Install dengan: pip install onnxruntime"
+            ) from None
 
         self.session = ort.InferenceSession(
-            str(self.model_path),
+            str(self.modelPath),
             providers=[
                 "CPUExecutionProvider"
             ],
         )
 
-        self.input_name = (
-            self.session
-            .get_inputs()[0]
-            .name
-        )
+        inputs = self.session.get_inputs()
+        outputs = self.session.get_outputs()
 
-        self.output_name = (
-            self.session
-            .get_outputs()[0]
-            .name
-        )
+        if not inputs:
+            raise RuntimeError(
+                "ONNX model tidak memiliki input."
+            )
+
+        if not outputs:
+            raise RuntimeError(
+                "ONNX model tidak memiliki output."
+            )
+
+        self.inputName = inputs[0].name
+        self.outputName = outputs[0].name
 
         print(
             "[LSTM] ONNX model loaded:",
-            self.model_path,
+            self.modelPath,
         )
 
-    # ========================================================
-    # SCALER TRANSFORM
-    # ========================================================
+        print(
+            "[LSTM] Input:",
+            self.inputName,
+        )
+
+        print(
+            "[LSTM] Output:",
+            self.outputName,
+        )
+
+    # =========================================================
+    # SCALE
+    # =========================================================
 
     def _transform(
         self,
         values: np.ndarray,
-    ):
+    ) -> np.ndarray:
 
         return (
-            values * self.scaler_scale
-            + self.scaler_min
+            values * self.scalerScale
+            + self.scalerMin
         )
 
-    # ========================================================
-    # SCALER INVERSE
-    # ========================================================
+    # =========================================================
+    # INVERSE SCALE
+    # =========================================================
 
-    def _inverse_transform(
+    def _inverseTransform(
         self,
         values: np.ndarray,
-    ):
+    ) -> np.ndarray:
 
         return (
-            values - self.scaler_min
-        ) / self.scaler_scale
+            values - self.scalerMin
+        ) / self.scalerScale
 
-    # ========================================================
+    # =========================================================
     # PREPARE SEQUENCE
-    # ========================================================
+    # =========================================================
 
-    def prepare_sequence(
+    def prepareSequence(
         self,
         history: list[dict],
     ) -> np.ndarray:
 
-        if len(history) < self.sequence_length:
-
+        if len(history) < self.sequenceLength:
             raise ValueError(
-                f"History membutuhkan "
-                f"{self.sequence_length} timestep, "
-                f"tetapi hanya tersedia "
-                f"{len(history)}."
+                "History belum cukup untuk LSTM. "
+                f"Dibutuhkan {self.sequenceLength} timestep, "
+                f"tersedia {len(history)}."
             )
 
         history = history[
-            -self.sequence_length:
+            -self.sequenceLength:
         ]
 
         values = []
@@ -237,7 +242,7 @@ class LSTMForecaster:
 
             timestep = []
 
-            for feature in self.feature_names:
+            for feature in self.featureNames:
 
                 value = row.get(
                     feature,
@@ -260,35 +265,50 @@ class LSTMForecaster:
             dtype=np.float32,
         )
 
-        # [12, 5]
+        if array.shape != (
+            self.sequenceLength,
+            len(self.featureNames),
+        ):
+            raise ValueError(
+                "Shape sequence LSTM tidak sesuai. "
+                f"Shape: {array.shape}"
+            )
+
+        # MinMaxScaler:
+        #
+        # X_scaled = X * scale + min
         array = self._transform(
             array
         )
 
-        # [1, 12, 5]
+        # [lookback, features]
+        #
+        # menjadi
+        #
+        # [1, lookback, features]
+
         return np.expand_dims(
             array,
             axis=0,
         )
 
-    # ========================================================
+    # =========================================================
     # PREDICT
-    # ========================================================
+    # =========================================================
 
     def predict(
         self,
         history: list[dict],
     ) -> np.ndarray:
 
-        sequence = self.prepare_sequence(
+        sequence = self.prepareSequence(
             history
         )
 
         prediction = self.session.run(
-            [self.output_name],
+            [self.outputName],
             {
-                self.input_name:
-                    sequence
+                self.inputName: sequence
             },
         )[0]
 
@@ -297,29 +317,22 @@ class LSTMForecaster:
             dtype=np.float32,
         )
 
-        # Output:
-        #
-        # [1, 3, 5]
-
-        original_shape = (
-            prediction.shape
-        )
+        originalShape = prediction.shape
 
         prediction = prediction.reshape(
             -1,
-            len(self.feature_names),
+            len(self.featureNames),
         )
 
-        prediction = self._inverse_transform(
+        prediction = self._inverseTransform(
             prediction
         )
 
         prediction = prediction.reshape(
-            original_shape
+            originalShape
         )
 
-        # Traffic tidak boleh negatif.
-
+        # Jumlah kendaraan tidak boleh negatif.
         prediction = np.maximum(
             prediction,
             0,

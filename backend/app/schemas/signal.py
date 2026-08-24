@@ -1,46 +1,100 @@
 from datetime import datetime
-from typing import Dict
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
-class SignalPhase(BaseModel):
-    phase_id: str
+# ============================================================
+# BASE MODEL
+# ============================================================
+
+class CamelCaseModel(BaseModel):
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+
+
+# ============================================================
+# SIGNAL PHASE
+# ============================================================
+
+class SignalPhase(
+    CamelCaseModel
+):
+
+    phaseId: str
 
     state: str
 
-    duration_seconds: int = Field(ge=0)
+    durationSeconds: int = Field(
+        ge=0
+    )
 
-    remaining_seconds: int = Field(default=0, ge=0)
+    remainingSeconds: int = Field(
+        default=0,
+        ge=0,
+    )
 
 
-class SignalStatus(BaseModel):
-    intersection_id: str
+# ============================================================
+# SIGNAL STATUS
+# ============================================================
+
+class SignalStatus(
+    CamelCaseModel
+):
+
+    intersectionId: str
 
     timestamp: datetime
 
-    current_phase: str
+    currentPhase: str
 
-    phase_name: str
+    phaseName: str
 
-    remaining_seconds: int = Field(ge=0)
+    remainingSeconds: int = Field(
+        ge=0
+    )
 
-    cycle_time_seconds: int = Field(ge=0)
+    cycleTimeSeconds: int = Field(
+        ge=0
+    )
 
-    phases: Dict[str, SignalPhase] = Field(default_factory=dict)
+    phases: dict[
+        str,
+        SignalPhase
+    ] = Field(
+        default_factory=dict
+    )
 
     source: str = "simulation"
 
 
-class SignalUpdate(BaseModel):
-    intersection_id: str
+# ============================================================
+# SIGNAL UPDATE
+# ============================================================
 
-    current_phase: str
+class SignalUpdate(
+    CamelCaseModel
+):
 
-    phase_name: str
+    intersectionId: str
 
-    remaining_seconds: int = Field(ge=0)
+    currentPhase: str
 
-    cycle_time_seconds: int = Field(ge=0)
+    phaseName: str
 
-    phases: Dict[str, SignalPhase] = Field(default_factory=dict)
+    remainingSeconds: int = Field(
+        ge=0
+    )
+
+    cycleTimeSeconds: int = Field(
+        ge=0
+    )
+
+    phases: dict[
+        str,
+        SignalPhase
+    ] = Field(
+        default_factory=dict
+    )
