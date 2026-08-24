@@ -767,6 +767,16 @@ class SimulationService:
             }
 
     # ============================================================
+    # VEHICLES POSITIONS
+    # ============================================================
+
+    def get_vehicles_position(self) -> list[dict[str, Any]]:
+        with self._lock:
+            if self.controller is None or not self.controller.is_running():
+                return []
+            return self.controller.active_vehicles_data
+
+    # ============================================================
     # STOP
     # ============================================================
 

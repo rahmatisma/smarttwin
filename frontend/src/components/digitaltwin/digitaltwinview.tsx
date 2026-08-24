@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
     Play,
     Pause,
@@ -21,9 +21,87 @@ import Sidebar from "@/components/Sidebar";
 
 type SimulationStatus = "idle" | "running" | "paused";
 
+interface VehicleData {
+    id: string;
+    x: number;
+    y: number;
+    angle: number;
+    type: string;
+}
+
 export default function DigitalTwinView() {
     const [status, setStatus] =
         useState<SimulationStatus>("idle");
+    const [loading, setLoading] = useState(false);
+    const [vehicles, setVehicles] = useState<VehicleData[]>([]);
+    
+    // Auto-calibration bounds
+    const boundsRef = useRef({ minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity });
+
+    const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
+
+    useEffect(() => {
+        if (status !== "running") return;
+
+        const interval = setInterval(async () => {
+            try {
+                const res = await fetch(`${API_BASE_URL}/api/v1/simulation/positions`);
+                if (!res.ok) return;
+                const data: VehicleData[] = await res.json();
+                
+                // Update bounds
+                let { minX, maxX, minY, maxY } = boundsRef.current;
+                let changed = false;
+                data.forEach(v => {
+                    if (v.x < minX) { minX = v.x; changed = true; }
+                    if (v.x > maxX) { maxX = v.x; changed = true; }
+                    if (v.y < minY) { minY = v.y; changed = true; }
+                    if (v.y > maxY) { maxY = v.y; changed = true; }
+                });
+                
+                // Add some padding to bounds so cars don't hit the absolute edge
+                if (changed && minX !== Infinity) {
+                    boundsRef.current = { minX, maxX, minY, maxY };
+                }
+
+                setVehicles(data);
+            } catch (err) {
+                console.error("Failed to fetch positions:", err);
+            }
+        }, 500);
+
+        return () => clearInterval(interval);
+    }, [status, API_BASE_URL]);
+
+    async function handleStartSimulation() {
+        setLoading(true);
+        try {
+            const response = await fetch(`${API_BASE_URL}/api/v1/simulation/run`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    intersectionId: "simpang4-pingit",
+                    durationSeconds: 60,
+                    gui: false,
+                    guiDelayMs: 100,
+                    seed: 42
+                }),
+            });
+
+            if (!response.ok) {
+                const errData = await response.json().catch(() => ({}));
+                throw new Error(errData.detail || "Gagal memulai simulasi");
+            }
+
+            // Simulasi berhasil berjalan
+            setStatus("running");
+        } catch (error) {
+            console.error(error);
+            alert(error instanceof Error ? error.message : "Terjadi kesalahan saat memulai simulasi");
+        } finally {
+            setLoading(false);
+        }
+    }
 
     const [speed, setSpeed] = useState("1x");
 
@@ -192,37 +270,32 @@ export default function DigitalTwinView() {
                                 color="red"
                             />
 
-                            {/* Vehicles */}
+                            {/* Dynamic Vehicles */}
+                            
+                            {vehicles.map((v) => {
+                                const { minX, maxX, minY, maxY } = boundsRef.current;
+                                
+                                // Default to center if bounds not established
+                                let left = 50;
+                                let top = 50;
+                                
+                                if (minX !== Infinity && maxX > minX && maxY > minY) {
+                                    // Calculate percentage with 5% padding so they stay in view
+                                    left = ((v.x - minX) / (maxX - minX)) * 90 + 5;
+                                    // SUMO Y is bottom-to-top, CSS top is top-to-bottom
+                                    top = (1 - (v.y - minY) / (maxY - minY)) * 90 + 5;
+                                }
 
-                            <Vehicle
-                                className="left-[28%] top-[43%]"
-                                direction="right"
-                            />
-
-                            <Vehicle
-                                className="left-[15%] top-[55%]"
-                                direction="right"
-                            />
-
-                            <Vehicle
-                                className="left-[58%] top-[31%]"
-                                direction="down"
-                            />
-
-                            <Vehicle
-                                className="left-[55%] top-[67%]"
-                                direction="up"
-                            />
-
-                            <Vehicle
-                                className="left-[70%] top-[57%]"
-                                direction="left"
-                            />
-
-                            <Vehicle
-                                className="left-[35%] top-[24%]"
-                                direction="down"
-                            />
+                                return (
+                                    <DynamicVehicle
+                                        key={v.id}
+                                        left={left}
+                                        top={top}
+                                        angle={v.angle}
+                                        type={v.type}
+                                    />
+                                );
+                            })}
 
                             {/* Simulation label */}
 
@@ -534,15 +607,12 @@ export default function DigitalTwinView() {
                             ) : (
                                 <button
                                     type="button"
-                                    onClick={() =>
-                                        setStatus(
-                                            "running"
-                                        )
-                                    }
-                                    className="flex items-center gap-2 rounded-xl bg-accent px-5 py-2.5 text-xs font-medium text-bg transition hover:opacity-90"
+                                    onClick={handleStartSimulation}
+                                    disabled={loading}
+                                    className="flex items-center gap-2 rounded-xl bg-accent px-5 py-2.5 text-xs font-medium text-bg transition hover:opacity-90 disabled:opacity-50"
                                 >
                                     <Play size={15} />
-                                    Start Simulation
+                                    {loading ? "Starting..." : "Start Simulation"}
                                 </button>
                             )}
 
@@ -775,28 +845,41 @@ function TrafficLight({
     );
 }
 
-function Vehicle({
-    className,
-    direction,
+function DynamicVehicle({
+    left,
+    top,
+    angle,
+    type,
 }: {
-    className: string;
-    direction: "up" | "down" | "left" | "right";
+    left: number;
+    top: number;
+    angle: number;
+    type: string;
 }) {
-    const rotation = {
-        up: "-rotate-90",
-        down: "rotate-90",
-        left: "rotate-180",
-        right: "rotate-0",
-    }[direction];
+    // SUMO angle is clockwise from North (0 = UP)
+    // CSS rotate is clockwise from element's natural orientation (which we can set as UP)
+    const cssRotation = angle;
+    
+    // Customize color based on type
+    let colorClass = "bg-blue-500";
+    if (type === "motorcycle") colorClass = "bg-purple-500";
+    if (type === "bus" || type === "truck") colorClass = "bg-orange-500";
 
     return (
         <div
-            className={`absolute z-10 ${className} ${rotation} flex h-5 w-9 items-center justify-center rounded-md bg-blue-500 shadow-sm`}
+            className={`absolute z-10 flex h-5 w-9 items-center justify-center rounded-md ${colorClass} shadow-sm transition-all duration-500 ease-linear`}
+            style={{
+                left: `${left}%`,
+                top: `${top}%`,
+                transform: `translate(-50%, -50%) rotate(${cssRotation}deg)`
+            }}
         >
             <Car
                 size={13}
                 className="text-white"
                 fill="currentColor"
+                // Counter-rotate the icon so it faces the direction of travel
+                style={{ transform: "rotate(-90deg)" }}
             />
         </div>
     );

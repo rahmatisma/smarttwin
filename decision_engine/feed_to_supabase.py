@@ -11,22 +11,36 @@ except ImportError:
     print("        Jalankan: pip install supabase")
     sys.exit(1)
 
+try:
+    from dotenv import load_dotenv
+except ImportError:
+    print("[ERROR] python-dotenv belum terinstall.")
+    print("        Jalankan: pip install python-dotenv")
+    sys.exit(1)
+
+# Load environment variables dari file .env (jika ada)
+load_dotenv()
+
 # ─── Konfigurasi Supabase ──────────────────────────────────────────────────
-SUPABASE_URL = "https://cjxsuodiivriifetvrir.supabase.co"
-SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNqeHN1b2RpaXZyaWlmZXR2cmlyIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4NzIyOTYwNSwiZXhwIjoyMTAyODA1NjA1fQ.xYVQm_p7Fg5ZeqBilztNe90zPbzGBy9gR6WXFt0LPhs"
+SUPABASE_URL = os.getenv("SUPABASE_URL", "https://cjxsuodiivriifetvrir.supabase.co")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNqeHN1b2RpaXZyaWlmZXR2cmlyIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4NzIyOTYwNSwiZXhwIjoyMTAyODA1NjA1fQ.xYVQm_p7Fg5ZeqBilztNe90zPbzGBy9gR6WXFt0LPhs")
+
+if not SUPABASE_URL or not SUPABASE_KEY:
+    print("[ERROR] SUPABASE_URL atau SUPABASE_KEY tidak ditemukan!")
+    sys.exit(1)
 
 INTERSECTION_DB_ID = 1
 
 APPROACH_ID_MAP = {
-    "simpang_tengah": 1,
-    "selatan": 2,
-    "timur": 3,
-    "barat": 4,
+    "north": 1, "simpang_tengah": 1,
+    "south": 2, "selatan": 2,
+    "east": 3, "timur": 3,
+    "west": 4, "barat": 4,
 }
 
 LENGAN_TO_APPROACH = {
-    "barat": "west", "selatan": "south",
-    "timur": "east", "simpang_tengah": "north",
+    "barat": "west", "selatan": "south", "timur": "east", "simpang_tengah": "north",
+    "west": "west", "south": "south", "east": "east", "north": "north",
 }
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -97,11 +111,11 @@ def feed_traffic_states(supabase: Client, csv_path: str, is_zona_csv: bool):
         for row in reader:
             ts = row["timestamp"].strip()
             
+            # Ambil lengan (bisa format lama "barat" atau format baru "west")
             if is_zona_csv:
                 lengan = row.get("lengan", "").strip().lower()
             else:
-                raw = row.get("approach", "").strip().lower()
-                lengan = LENGAN_FALLBACK_MAP.get(raw, raw)
+                lengan = row.get("approach", "").strip().lower()
             
             if lengan not in APPROACH_ID_MAP:
                 continue
