@@ -929,21 +929,20 @@ export default function DashboardPage() {
               DIGITAL TWIN + CAMERA
               ================================================= */}
 
-          <div className="grid grid-cols-1 gap-4 xl:grid-cols-[2fr_1fr]">
+          <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
 
             {/* DIGITAL TWIN */}
 
-            <DigitalTwinPanel
-              approaches={lenganFilteredApproaches}
-              signal={activeSignal}
-            />
+            <div className="xl:col-span-2">
+              <DigitalTwinPanel
+                approaches={lenganFilteredApproaches}
+                signal={activeSignal}
+              />
+            </div>
 
-            {/* RIGHT COLUMN */}
+            {/* CAMERA */}
 
-            <div className="flex flex-col gap-4">
-
-              {/* CAMERA */}
-
+            <div className="xl:col-span-1">
               <CameraFeedPanel
                 counts={hasTrafficData ? vehicleClassCounts : []}
                 selectedApproach={selectedApproach}
@@ -952,22 +951,15 @@ export default function DashboardPage() {
                   videoTimeRef.current = time;
                 }}
               />
-
-              {/* SIGNAL STATUS */}
-
-              <SignalStatusPanel
-                signal={activeSignal}
-              />
-
             </div>
 
           </div>
 
           {/* =================================================
-              RECOMMENDATION + FORECAST
+              RECOMMENDATION + SIGNAL STATUS
               ================================================= */}
 
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
 
             {/* RECOMMENDATION */}
 
@@ -975,12 +967,23 @@ export default function DashboardPage() {
               recommendation={activeRecommendation}
             />
 
-            {/* FORECAST */}
+            {/* SIGNAL STATUS */}
 
-            <ForecastChart
-              data={activeForecast}
+            <SignalStatusPanel
+              signal={activeSignal}
             />
 
+          </div>
+
+          {/* =================================================
+              FORECAST
+              ================================================= */}
+
+          <div className="w-full">
+            <ForecastChart
+              data={activeForecast}
+              current={activeTrafficState}
+            />
           </div>
 
         </div>

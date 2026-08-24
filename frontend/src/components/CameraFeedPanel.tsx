@@ -213,7 +213,7 @@ export default function CameraFeedPanel({
   // ===================================================
 
   return (
-    <div className="rounded-lg border border-border bg-surface p-4">
+    <div className="flex h-full flex-col rounded-lg border border-border bg-surface p-4">
 
       {/* =================================================
           HEADER
@@ -255,7 +255,11 @@ export default function CameraFeedPanel({
           CAMERA GRID
       ================================================= */}
 
-      <div className={`grid gap-2 ${cameras.length === 1 ? "grid-cols-1" : "grid-cols-2"}`}>
+      <div className={`grid gap-2 flex-1 min-h-0 ${
+        cameras.length === 1 ? "grid-cols-1 grid-rows-1" :
+        cameras.length === 2 ? "grid-cols-2 grid-rows-1" :
+        "grid-cols-2 grid-rows-2"
+      }`}>
 
         {cameras.length > 0 ? (
 
@@ -270,7 +274,7 @@ export default function CameraFeedPanel({
                   VIDEO
               ========================================= */}
 
-              <div className="aspect-video">
+              <div className="h-full w-full">
 
                 {/* ---------------------------------------
                     RTSP
@@ -317,39 +321,15 @@ export default function CameraFeedPanel({
 
                   <video
                     src={resolvedSrcByCamera.get(camera.id)}
-                    muted
                     controls
+                    muted
                     playsInline
                     preload="metadata"
                     className="h-full w-full object-cover"
-                    autoPlay
-                    onLoadedMetadata={async (e) => {
-                      try {
-                        await e.currentTarget.play();
-                      } catch (error) {
-                        console.warn(`Autoplay blocked for CCTV ${camera.name}:`, error);
-                      }
-                    }}
                     onTimeUpdate={(e) => {
                       if (onTimeUpdate && camera.id === cameras[0].id) {
                         onTimeUpdate(e.currentTarget.currentTime);
                       }
-                      // Development logging as requested
-                      if (camera.id === cameras[0].id) {
-                        console.log("VIDEO:", {
-                          camera: camera.id,
-                          videoTime: e.currentTarget.currentTime,
-                          paused: e.currentTarget.paused,
-                          ended: e.currentTarget.ended
-                        });
-                      }
-                    }}
-                    onError={(event) => {
-                      const err = event.currentTarget.error;
-                      console.error(
-                        `Video CCTV ${camera.name} gagal diputar:`,
-                        err ? `Code ${err.code}: ${err.message}` : "Unknown error"
-                      );
                     }}
                   />
 
