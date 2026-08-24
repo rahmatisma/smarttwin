@@ -58,10 +58,12 @@ class SumoController:
 
     SUMO_SCRIPTS_DIR = SUMO_VENV_DIR / "Scripts"
 
-    SIMULATION_VENV_DIR = SIMULATION_DIR / ".venv"
-
-    SIMULATION_SCRIPTS_DIR = (
-        SIMULATION_VENV_DIR / "Scripts"
+    SUMO_BIN_DIR = (
+        SUMO_VENV_DIR
+        / "Lib"
+        / "site-packages"
+        / "sumo"
+        / "bin"
     )
 
     NETWORK_DIR = (
