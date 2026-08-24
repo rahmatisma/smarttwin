@@ -3,15 +3,15 @@ import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.routes.traffic import router as traffic_router
+from app.api.routes.traffic import (
+    router as traffic_router,
+    legacy_router as traffic_legacy_router,
+)
 from app.api.routes.cctv import close_hf_client, router as cctv_router
 from app.api.routes.signal import router as signal_router
 from app.api.routes.recommendation import router as recommendation_router
 from app.api.routes.simulation import router as simulation_router
 from app.api.routes.health import router as health_router
-<<<<<<< HEAD
-# from app.api.routes.forecast import router as forecast_router
-=======
 
 logger = logging.getLogger("uvicorn.error")
 
@@ -33,7 +33,6 @@ except Exception as exc:  # noqa: BLE001
         "(endpoint lain tetap jalan normal): %s",
         exc,
     )
->>>>>>> f35e8811ea27d7764c1b8160462c4814106ddaf1
 
 app = FastAPI(
     title="SmartTwin Backend",
@@ -62,17 +61,14 @@ app.add_middleware(
 # =========================================================
 
 app.include_router(traffic_router)
+app.include_router(traffic_legacy_router)
 app.include_router(cctv_router)
 app.include_router(signal_router)
 app.include_router(recommendation_router)
 app.include_router(simulation_router)
 app.include_router(health_router)
-<<<<<<< HEAD
-# app.include_router(forecast_router)
-=======
 if forecast_router is not None:
     app.include_router(forecast_router)
->>>>>>> f35e8811ea27d7764c1b8160462c4814106ddaf1
 
 
 # =========================================================

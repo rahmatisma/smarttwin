@@ -30,40 +30,69 @@ class RecommendationService:
     ) -> RecommendationResponse:
 
         latest_traffic_list = self.traffic_service.get_latest_traffic(
-            intersection_id=request.intersection_id,
+            intersection_id=request.intersectionId,
             limit=1
         )
-        
+
         if not latest_traffic_list:
             # Fallback jika tidak ada data
             recommendation = SignalRecommendation(
-                intersection_id=request.intersection_id,
+                intersectionId=request.intersectionId,
                 timestamp=datetime.now(timezone.utc),
-                recommended_phase="north",
-                recommended_green_seconds=30,
-                current_green_seconds=30,
-                green_per_approach={"north": 30, "south": 30, "east": 30, "west": 30},
-                expected_delay_reduction_percent=0.0,
+                recommendedPhase="north",
+                recommendedGreenSeconds=30,
+                currentGreenSeconds=30,
+                expectedDelayReductionPercent=0.0,
                 confidence=0.5,
                 reason="Tidak ada data trafik terbaru.",
-                metrics=RecommendationMetrics(queue_length=0, vehicle_count=0, average_speed_kmh=0),
+                metrics=RecommendationMetrics(queueLength=0, vehicleCount=0, averageSpeedKmh=0),
                 source="fallback"
             )
         else:
             data = latest_traffic_list[0]
             ts_data = data["trafficState"]
             approaches_data = data["approaches"]
-            
+
             traffic_state = TrafficState(
-                intersectionId=request.intersection_id,
+                intersectionId=request.intersectionId,
                 windowStart=ts_data["windowStart"],
                 windowEnd=ts_data["windowEnd"],
                 approaches=[
                     ApproachState(**app) for app in approaches_data
                 ]
             )
-            
-            recommendation = self.engine.decide(traffic_state, current_green_seconds=30)
+
+            engine_result = self.engine.recommend(
+                state=traffic_state,
+                currentGreenSeconds=30,
+                currentPhase="north",
+            )
+
+            selected_approach = next(
+                (
+                    app for app in traffic_state.approaches
+                    if str(getattr(app.approach, "value", app.approach)).lower()
+                    == engine_result.recommendedPhase
+                ),
+                None,
+            )
+
+            recommendation = SignalRecommendation(
+                intersectionId=request.intersectionId,
+                timestamp=datetime.now(timezone.utc),
+                recommendedPhase=engine_result.recommendedPhase,
+                recommendedGreenSeconds=engine_result.recommendedGreenSeconds,
+                currentGreenSeconds=engine_result.currentGreenSeconds,
+                expectedDelayReductionPercent=engine_result.expectedDelayReductionPercent,
+                confidence=engine_result.confidence,
+                reason=engine_result.reason,
+                metrics=RecommendationMetrics(
+                    queueLength=selected_approach.queueLengthVeh if selected_approach else 0,
+                    vehicleCount=selected_approach.volume if selected_approach else 0,
+                    averageSpeedKmh=(selected_approach.avgSpeedKmh or 0) if selected_approach else 0,
+                ),
+                source=engine_result.source,
+            )
 
         return RecommendationResponse(
             success=True,
