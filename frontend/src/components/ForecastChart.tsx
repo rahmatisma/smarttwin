@@ -10,7 +10,7 @@ import {
   CartesianGrid,
 } from "recharts";
 
-import type { ForecastResponse } from "@/types/traffic";
+import type { ForecastResponse, TrafficState } from "@/types/traffic";
 
 function formatForecastData(data: ForecastResponse) {
   return data.predictions.map((prediction) => {
@@ -37,8 +37,10 @@ function formatForecastData(data: ForecastResponse) {
 
 export default function ForecastChart({
   data,
+  current,
 }: {
   data?: ForecastResponse | null;
+  current?: TrafficState | null;
 }) {
   if (!data || !data.predictions || data.predictions.length === 0) {
     return (
@@ -62,7 +64,28 @@ export default function ForecastChart({
     );
   }
 
-  const series = formatForecastData(data);
+  const forecastSeries = formatForecastData(data);
+  
+  let series = forecastSeries;
+  
+  if (current && current.approaches) {
+    const currentVolume = current.approaches.reduce((sum, app) => sum + app.volume, 0);
+    // Prepend the actual point at horizon 0
+    // To make a continuous line, the actual point is also the start of the prediction
+    series = [
+      {
+        horizonMinutes: 0,
+        actualVehicleCount: currentVolume,
+        predictedVehicleCount: currentVolume,
+        predictedQueueLengthMEst: 0,
+        predictedDensityIndex: 0,
+        isActual: true,
+      },
+      ...forecastSeries.map(s => ({ ...s, isActual: false }))
+    ];
+  } else {
+    series = forecastSeries.map(s => ({ ...s, isActual: false }));
+  }
 
   const maxVehicle = Math.max(...series.map((s) => s.predictedVehicleCount));
   const peakTime = series.find((s) => s.predictedVehicleCount === maxVehicle)?.horizonMinutes ?? 0;
@@ -150,19 +173,33 @@ export default function ForecastChart({
                 fontSize: 12,
               }}
               labelFormatter={(m) => `+${m} menit`}
-              formatter={(value) => [
+              formatter={(value, name) => [
                 `${value} kendaraan`,
-                "Prediksi",
+                name,
               ]}
             />
 
-            <Area
-              type="monotone"
-              dataKey="predictedVehicleCount"
-              stroke="#38bdf8"
-              strokeWidth={2}
-              fill="url(#forecastFill)"
-            />
+              <Area
+                type="monotone"
+                dataKey="predictedVehicleCount"
+                stroke="#38bdf8"
+                strokeWidth={2}
+                strokeDasharray="5 5"
+                fill="url(#forecastFill)"
+                name="Prediksi"
+              />
+              {current && (
+                <Area
+                  type="monotone"
+                  dataKey="actualVehicleCount"
+                  stroke="#2ecc71"
+                  strokeWidth={2}
+                  fill="none"
+                  name="Aktual"
+                  dot={{ r: 4, fill: "#2ecc71" }}
+                  activeDot={{ r: 6, fill: "#2ecc71" }}
+                />
+              )}
           </AreaChart>
         </ResponsiveContainer>
       </div>
