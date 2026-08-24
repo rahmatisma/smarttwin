@@ -18,15 +18,24 @@ except ImportError:
     print("        Jalankan: pip install python-dotenv")
     sys.exit(1)
 
-# Load environment variables dari file .env (jika ada)
-load_dotenv()
+# Pakai satu sumber .env yang sama dengan backend/ -- supaya key cuma
+# didefinisikan sekali di satu tempat, tidak diduplikasi/di-hardcode ulang
+# di sini. load_dotenv() tanpa argumen tidak akan menemukan
+# backend/.env karena decision_engine/ bukan ancestor-nya.
+_BACKEND_ENV = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "backend", ".env")
+load_dotenv(_BACKEND_ENV)
 
 # ─── Konfigurasi Supabase ──────────────────────────────────────────────────
-SUPABASE_URL = os.getenv("SUPABASE_URL", "https://cjxsuodiivriifetvrir.supabase.co")
-SUPABASE_KEY = os.getenv("SUPABASE_KEY", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNqeHN1b2RpaXZyaWlmZXR2cmlyIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4NzIyOTYwNSwiZXhwIjoyMTAyODA1NjA1fQ.xYVQm_p7Fg5ZeqBilztNe90zPbzGBy9gR6WXFt0LPhs")
+# WAJIB dari .env / environment -- TIDAK ADA fallback hardcode. Key lama yang
+# sempat ter-commit di sini (service_role, bypass RLS) sudah bocor ke git
+# history dan HARUS di-rotate lewat Supabase Dashboard, terlepas dari
+# perbaikan ini. Nama variabel disamakan dengan backend/.env
+# (SUPABASE_SERVICE_ROLE_KEY) supaya satu key, satu nama, di seluruh repo.
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
 
 if not SUPABASE_URL or not SUPABASE_KEY:
-    print("[ERROR] SUPABASE_URL atau SUPABASE_KEY tidak ditemukan!")
+    print("[ERROR] SUPABASE_URL atau SUPABASE_SERVICE_ROLE_KEY tidak ditemukan di .env!")
     sys.exit(1)
 
 INTERSECTION_DB_ID = 1
@@ -272,26 +281,27 @@ def feed_signal_decisions(supabase: Client):
         recs_to_update = []
         
         for row in batch:
-            skor = safe_int(row["skor"])
-            prioritas = row["prioritas"]
-            confidence = min(skor / 30.0, 1.0)
-            delay_map = {"tinggi": 30.0, "sedang": 15.0, "rendah": 5.0}
-            delay_pct = delay_map.get(prioritas, 5.0)
+            # run_decision.py sekarang menghasilkan confidence/delay/reason
+            # langsung dari RuleBasedEngine (kontrak SignalRecommendation
+            # resmi, lihat rule_based_engine.py) -- tidak perlu dihitung
+            # ulang dari skor/prioritas di sini lagi seperti sebelumnya.
             iso = ts_to_iso(row["timestamp"])
 
             new_row = {
                 "intersectionId": INTERSECTION_DB_ID,
                 "timestamp": iso,
-                "recommendedPhase": row["lengan"],
+                "recommendedPhase": row["recommended_phase"],
                 "recommendedGreenSeconds": safe_int(row["green_time"]),
-                "currentGreenSeconds": 30,
-                "expectedDelayReductionPercent": delay_pct,
-                "confidence": round(confidence, 4),
-                "reason": f"rule_based | prioritas={prioritas} | skor={skor} | total_kend={row['total_kend']}",
+                "currentGreenSeconds": safe_int(row["current_green_seconds"]),
+                "expectedDelayReductionPercent": safe_float(
+                    row["expected_delay_reduction_percent"]
+                ),
+                "confidence": safe_float(row["confidence"]),
+                "reason": row["reason"],
                 "source": "rule_based_engine",
             }
-            
-            key = (iso, row["lengan"])
+
+            key = (iso, row["recommended_phase"])
             if key in existing_recs:
                 old_row = existing_recs[key]
                 if is_changed(old_row, new_row, compare_keys):
