@@ -61,7 +61,7 @@ Ini pembagian **direktori/file**, bukan cuma daftar tugas — biar kalau ada per
 - [x] `rule_based_engine.py` di-refactor total (bukan cuma adapter tipis) — `decide()` sekarang terima `TrafficState` dan hasilkan `SignalRecommendation` asli dari `backend/app/schemas/`, bukan dict Indonesia (`timur`/`total`) lagi. **Catatan:** target-nya kontrak yang HIDUP di backend, BUKAN `docs/data-contract.md` — versi di dokumen itu (`ScenarioResult`, `chosen_scenario`) ternyata tidak pernah diimplementasikan sama sekali, tidak ada konsumennya
 - [x] `run_decision.py` diupdate mengikuti signature baru — sudah dites jalan penuh ke 538 baris data asli (`percobaan_logic_simpang.csv`), hasilnya masuk akal
 - [x] **Efek berantai ke file Melpi:** perubahan skema `signal_decisions.csv` (dari 4-baris-per-timestamp jadi 1 rekomendasi per timestamp) bikin `feed_to_supabase.py::feed_signal_decisions()` ikut rusak (baca kolom lama `lengan`/`skor`/`prioritas`/`total_kend`). Sudah diperbaiki mengikuti skema baru — **ternyata selaras**, fungsi itu sebelumnya sudah menghitung sendiri `confidence`/`delay_pct` secara manual dari `skor`/`prioritas` menuju bentuk yang sama persis dengan `SignalRecommendation`, sekarang tidak perlu dihitung ulang lagi (pass-through langsung)
-- [ ] **Belum dikerjakan di sesi ini:** wiring `run_tls_simulation.py` (Yuli, task 2.1) — `create_phase_plan()` di sana perlu diganti dari logika inline max-queue jadi panggil `RuleBasedEngine.decide()`. Bentuknya sudah cocok (satu `recommended_phase` + durasi per panggilan, sama seperti pola `create_phase_plan()` sekarang) — **kabari Yuli skema barunya sebelum dia mulai wiring**
+- [x] **Update 25 Agustus:** wiring `run_tls_simulation.py` **akhirnya dikerjakan Yuli** (lihat 2.1) — tapi dia menulis ulang total `rule_based_engine.py` jadi versinya sendiri (`.recommend()`, bukan `.decide()` yang Rahmat buat), jadi bukan cuma "dipanggil", tapi "diganti". Sisi kode Rahmat di item ini (kontrak resmi) sudah tidak berlaku lagi — kalau perlu dipakai lagi butuh keputusan tim, bukan tanggung jawab Rahmat lanjut kejar
 
 ### 1.2b [TEMUAN BARU, SUDAH DIPERBAIKI] Service_role key ter-hardcode di `decision_engine/feed_to_supabase.py`
 - [x] Ditemukan saat mengerjakan 1.2: `feed_to_supabase.py` (commit Melpi hari ini) punya Supabase **service_role key** (bypass RLS) ter-hardcode langsung di kode, dan commit "perbaikan" berikutnya cuma menyamarkannya jadi default value `os.getenv(..., "<key yang sama>")` — key-nya tetap hidup di kode
@@ -79,39 +79,43 @@ Ini pembagian **direktori/file**, bukan cuma daftar tugas — biar kalau ada per
 
 ## 2. Yuli
 
-### 2.1 [KRITIS] Sambungkan decision_engine → simulation — temuan audit #1
-- [ ] `run_tls_simulation.py` saat ini pakai logika 2-fase inline sendiri, **bukan** output `RuleBasedEngine` milik Rahmat — ganti supaya rekomendasi yang tampil di simulasi benar-benar hasil decision engine
-- [ ] Konsolidasi `demand_adapter.py` & `tls_controller.py` yang tidak dipakai runner (logika duplikat inline) — kamu paling dalam konteksnya karena sudah pegang `sumo_controller.py` & `traffic_state_adapter.py`
-- [ ] **Koordinasi dengan Melpi** — dia juga commit ke file yang sama hari ini, samakan dulu siapa ngerjain bagian mana
+### 2.1 [SEBAGIAN SELESAI, tapi bikin bug baru] Sambungkan decision_engine → simulation — temuan audit #1
+- [x] **Dicek ulang 25 Agustus siang/malam — akhirnya beneran disambungkan!** `simulation/run_tls_simulation.py` sekarang `from decision_engine.rule_based_engine import RuleBasedEngine` dan manggil `engine.recommend(state=trafficState, ...)` — bukan lagi logika 2-fase inline. Ini progres nyata, item paling kritis di audit akhirnya tersentuh
+- [x] **Tapi:** `rule_based_engine.py` ditulis ulang TOTAL oleh Yuli (693 baris, class `Recommendation` dataclass sendiri, method `.recommend()`) — bukan lagi versi Rahmat (`.decide()`, target `backend/app/schemas/recommendation.py::SignalRecommendation`). Bukan masalah kalau cuma dipakai `run_tls_simulation.py` sendiri (dia sudah disesuaikan ke method baru), TAPI:
+- [ ] **BUG BARU, terverifikasi 25 Agustus, MASIH BELUM DIPERBAIKI setelah commit susulan Yuli** (`673cea7 "bismillah decision enginenya gak error lagi"`): `backend/app/services/recommendation_service.py` **belum ikut disesuaikan** — masih manggil `self.engine.decide(...)` (method yang sudah tidak ada) DAN masih baca `request.intersection_id` (field lama, schema `RecommendationRequest` sudah ditulis ulang ke camelCase `intersectionId`). Dites langsung lewat `TestClient` DUA KALI (sebelum & sesudah commit susulan): `POST /recommendation` → **500 `AttributeError`**, error persis sama, tidak berubah. Commit susulan Yuli cuma benerin `run_tls_simulation.py`/`simulation_result_writer.py` (konteks yang dia tes sendiri), tidak menyentuh `recommendation_service.py` sama sekali
 
-### 2.2 [KRITIS] Test suite backend — temuan audit #2
-- [ ] `pytest -q` sekarang: 24 gagal + 3 error koleksi, cuma 7 lolos dari 15 file — dan yang lolos cuma tes infrastruktur, bukan logika bisnis
-- [ ] Root cause utama: test masih menguji arsitektur CSV lama (`TrafficService(csv_path=...)`, endpoint `/api/v1/traffic/state` versi lama, path legacy `/api/traffic/*`) — update ke arsitektur baru yang sudah kamu bangun
-- [ ] **Risiko demo:** kalau juri minta jalankan test, hasilnya merah semua
+### 2.2 [KRITIS, SEKARANG LEBIH PARAH — bukan cuma gagal, HANG TOTAL] Test suite backend — temuan audit #2
+- [ ] **Dicek ulang 25 Agustus malam (setelah commit `673cea7`):** `pytest` sekarang **macet total di tahap "collecting..."** — bukan lagi "32 gagal", tapi tidak bisa dijalankan SAMA SEKALI (hang tanpa batas waktu, harus di-kill manual). Dites 2 cara: `pytest -q` (hang) dan `pytest --collect-only -q` (collect-only pun tetap hang)
+- [ ] Sudah diisolasi sebagian: tiap file test BARU (`test_rule_based.py`, `test_rule_based_engine.py`, `test_forecast_realtime.py`, `test_lstm_forecaster.py`) **kalau dites SENDIRI-SENDIRI baik-baik saja** (collect dalam <1 detik, atau error cepat kalau memang error) — jadi bukan satu file spesifik yang hang, ini **interaksi antar-modul** yang cuma muncul kalau semua di-import bareng dalam satu proses pytest. Butuh investigasi lebih dalam dari Yuli (kemungkinan resource/lock yang di-share, misal koneksi Supabase atau model LSTM yang di-load ulang-ulang)
+- [ ] **Risiko demo:** jauh lebih parah dari sebelumnya — dulu "test merah semua", sekarang "test tidak bisa dijalankan sama sekali, harus di-force-kill"
 
-### 2.3 Endpoint rusak — temuan audit #4
-- [ ] `GET /api/v1/traffic/live-csv` → HTTP 500. Manggil `builder.buildFromSupabase()` yang sudah tidak ada di `TrafficStateBuilder` versi baru, dan akses `builder.last_matched_video_time` yang tidak pernah di-set
+### 2.3 [SELESAI, diperbaiki Rahmat 24-25 Agustus] Endpoint rusak — temuan audit #4
+- [x] `GET /api/v1/traffic/live-csv` — sudah 200 sejak semalam (perbaikan tidak sengaja lewat refactor `traffic_state_builder.py`), dan datanya sudah disinkronkan ulang ke CSV asli. Tuntas.
 
-### 2.4 Endpoint hardcoded — temuan audit #3
-- [ ] `forecast_service.py` — 8 angka statis, tidak ada model/logika
-- [ ] `recommendation_service.py` — semua konstan (`confidence=0.75`, `source="pending"`), tidak baca request sama sekali
-- [ ] `signal_service.py` — fallback `get_demo_status()` hardcoded; state realtime cuma in-memory, hilang tiap restart (belum persist ke tabel `signalStatuses` yang sudah ada)
-- [ ] **Risiko demo:** kalau juri tanya "rekomendasi ini asalnya dari mana?", jawaban jujurnya sekarang: angka tetap
+### 2.4 [CAMPURAN — sebagian selesai, satu JADI LEBIH BURUK] Endpoint hardcoded — temuan audit #3
+- [x] `forecast_service.py` — sudah bukan hardcode lagi sejak semalam (lihat 2.3), lanjut dikembangkan Yuli jadi `realtime_forecast_service.py` (LSTM PyTorch beneran, masih terus berkembang)
+- [ ] **`recommendation_service.py` — BUKAN LAGI SEKADAR HARDCODE, SEKARANG CRASH (500).** Lihat detail bug di 2.1 — ini regresi dari "angka tetap tapi jalan" jadi "500 error", lebih buruk buat demo. Perlu diperbaiki: sesuaikan `recommendation_service.py` ke schema camelCase (`request.intersectionId`) dan method baru (`engine.recommend(...)`, bukan `.decide(...)`), termasuk bagian fallback yang juga masih pakai field snake_case lama
+- [ ] `signal_service.py` — belum dicek ulang 25 Agustus, kemungkinan masih hardcode seperti audit awal
+- [ ] **Risiko demo:** untuk `/recommendation`, sekarang lebih parah dari sebelumnya — dulu jawabannya "angka tetap", sekarang errornya keliatan literally crash kalau dicoba
 
-### 2.5 Rute mati — temuan audit #5
-- [ ] `app/api/routes/health.py` tidak pernah di-`include_router` → `/api/v1/health` 404
-- [ ] `legacy_router` (`/api/traffic/*`) juga tidak dipasang → penyebab 3 test gagal
-- [ ] Putuskan nasib kode yatim: `traffic_ingestion_service.py`, `repositories/traffic_state_repository.py`, `intersection_repository.py` — tidak dipakai kode aktif, hapus atau sambungkan
+### 2.5 [SEBAGIAN, dicek ulang 25 Agustus] Rute mati — temuan audit #5
+- [x] `app/api/routes/health.py` — sudah di-`include_router` di `main.py`, `/api/v1/health` sudah 200 (perbaikan Rahmat)
+- [ ] `legacy_router` (`/api/traffic/*`) — **dicek ulang, dikonfirmasi masih TIDAK dipasang** di `main.py`. Belum tersentuh
+- [ ] Kode yatim `traffic_ingestion_service.py` — **dicek ulang, dikonfirmasi masih tidak direferensikan** oleh kode aktif mana pun. Belum tersentuh, belum diputuskan hapus atau sambungkan
 
-### 2.6 Dokumentasi — temuan audit #6
-- [ ] `docs/database.md` inkonsisten secara internal: bagian prosa pakai nama tabel baru (`trafficApproachStates`/`trafficLaneMetrics`/`cameraVideos`, sesuai kode), tapi blok `CREATE TABLE` di akhir file masih pakai nama lama (`approachStates`, `videoUploads`) dan tidak ada DDL untuk `trafficLaneMetrics` sama sekali — file ini kamu yang paling sering update, tinggal disatukan
+### 2.6 [BELUM, dicek ulang 25 Agustus] Dokumentasi — temuan audit #6
+- [ ] `docs/database.md` — **dicek ulang, dikonfirmasi masih inkonsisten**: `CREATE TABLE "videoUploads"` (baris 1465) & `CREATE TABLE "approachStates"` (baris 1605) masih pakai nama tabel lama. Belum tersentuh sama sekali sejak audit pagi
+
+### 2.7 [BARU, DIKLARIFIKASI — bukan bug] `forecasting/outputs/` & `forecasting/scripts/` (pems04/tmu/brisbane) terhapus
+- Ditemukan lewat commit `355fabc` (Yuli): seluruh folder `forecasting/outputs/{pems04,tmu,brisbane}/` dan `forecasting/scripts/{pems04,tmu,brisbane}/` — yang `CLAUDE.md` tandai wajib dijaga sebagai bukti laporan — hilang dari repo. Sempat dikira kecelakaan, **diklarifikasi langsung ke Rahmat: ini disengaja**, Yuli lagi melatih ulang LSTM pakai CSV proyek asli (bukan dataset proxy PeMS04/TMU/Brisbane lagi), hasil barunya sudah ada di lokal dia tinggal di-commit
+- **Belum di-commit per saat ini** — sampai itu terjadi, repo sekarang tidak punya bukti LSTM SAMA SEKALI (baik yang lama maupun yang baru). Perlu dipastikan Yuli commit hasil barunya sebelum tenggat, dan idealnya `docs/*` yang menjelaskan hasil PeMS04/TMU/Brisbane lama diupdate juga supaya tidak nyebut angka yang buktinya sudah tidak ada di repo
 
 ---
 
 ## 3. Melpi (Santi Melvira)
 
-### 3.1 Sinkronisasi dulu (lihat Risiko #1)
-- [ ] Klarifikasi dengan Yuli: siapa pegang wiring `tls_controller.py`/`run_tls_simulation.py`/`decision_engine/feed_to_supabase.py` — kalian berdua sama-sama commit ke situ hari ini
+### 3.1 [SELESAI DENGAN SENDIRINYA] Sinkronisasi dulu (lihat Risiko #1)
+- [x] Klarifikasi dengan Yuli: siapa pegang wiring `tls_controller.py`/`run_tls_simulation.py`/`decision_engine/feed_to_supabase.py` — **terselesaikan lewat proses git merge malam ini** (bukan lewat obrolan eksplisit): Yuli akhirnya jadi pemilik utama wiring simulasi (lihat 2.1), Melpi merge perubahannya sendiri di atas itu tanpa konflik berarti. Tidak perlu tindakan lanjutan di poin ini
 
 ### 3.2 Dead code frontend & Optimasi Digital Twin — temuan audit #5
 - [x] `DashboardSkeleton.tsx` — **SUDAH DIHAPUS** (Tidak dipakai, `page.tsx` sudah punya komponen internal).
@@ -123,8 +127,8 @@ Ini pembagian **direktori/file**, bukan cuma daftar tugas — biar kalau ada per
 - [x] Diskusikan dengan tim: halaman login/register/account/settings masuk prioritas demo 31 Agustus atau tidak? — **KEPUTUSAN:** Tidak prioritas untuk demo, namun kode dibiarkan saja (tidak dihapus) untuk pengembangan di masa depan.
 - [x] Kalau **tidak** prioritas: alihkan waktu ke item 3.2 di atas atau kembali pegang CV (lihat 3.4) — *Sudah dialihkan dan diselesaikan.*
 
-### 3.4 Opsional — kembali ke CV (kalau kapasitas ada & tim sepakat)
-- [ ] Track CV (item 1.1 di atas) sudah 1 minggu tidak disentuh oleh pemilik aslinya. Kalau Melpi mau ambil balik, koordinasikan dengan Rahmat supaya tidak dobel kerja di `vehicle_counter_copy.py`
+### 3.4 [TIDAK PERLU LAGI] Opsional — kembali ke CV (kalau kapasitas ada & tim sepakat)
+- [x] Sudah tidak relevan — item 1.1 (validitas data CV) **sudah tuntas dikerjakan Rahmat** 24 Agustus. Melpi tidak perlu balik ke `vehicle_counter_copy.py`, kapasitasnya lebih baik tetap di frontend/digital twin seperti sekarang
 
 ---
 
@@ -142,7 +146,23 @@ Ini pembagian **direktori/file**, bukan cuma daftar tugas — biar kalau ada per
 
 ## 5. Checklist koordinasi (isi saat rapat, bukan solo)
 
-- [ ] Sudah sepakat siapa pegang wiring decision_engine→simulation (Yuli / Melpi / berdua dibagi per fungsi)?
-- [ ] Sudah diputuskan status fitur auth (in-scope / ditunda)?
-- [ ] Sudah diputuskan siapa lanjut kalibrasi CV CCTV_4 & identitas koridor timur (Rahmat / Melpi balik)?
-- [ ] Sudah dicek file network baru (`simpang44_*`) — aset atau regresi?
+- [x] Sudah sepakat siapa pegang wiring decision_engine→simulation? — **Yuli**, dan akhirnya beneran dikerjakan 25 Agustus (lihat 2.1). Tapi menyisakan bug baru di `recommendation_service.py` yang perlu diberesin
+- [x] Sudah diputuskan status fitur auth (in-scope / ditunda)? — **Ditunda**, kode dibiarkan (keputusan Melpi, lihat 3.3)
+- [x] Sudah diputuskan siapa lanjut kalibrasi CV CCTV_4 & identitas koridor timur (Rahmat / Melpi balik)? — **Selesai** oleh Rahmat 24 Agustus, tidak perlu siapa pun lanjut
+- [x] Sudah dicek file network baru (`simpang44_*`) — aset atau regresi? — **Regresi, sudah dihapus** 24 Agustus
+
+## 6. Update malam 25 Agustus — review detail push Yuli & Melpi
+
+**Progres nyata (bukan cuma klaim, sudah diverifikasi langsung):**
+- Item 2.1 (KRITIS) akhirnya tersambung — `run_tls_simulation.py` beneran manggil `RuleBasedEngine` sekarang
+- Item 3.2 (dead code) tuntas — `DashboardSkeleton.tsx`/`DashboardLayout.tsx` sudah terhapus, dikonfirmasi langsung
+- Backend sempat gagal start **3 kali terpisah** malam ini (dependency `joblib` kurang, import salah `app.db.supabase_client`, dan `traci` belum terinstall + path SUMO binary hardcode ke `simulation/.venv` yang tidak pernah ada) — semuanya diperbaiki Rahmat, termasuk pengaman baru di `main.py` (`forecast_router` sekarang gagal dengan aman, tidak lagi bikin backend mati total kalau ada masalah lagi ke depannya)
+- `forecasting/outputs/`+`scripts/` (pems04/tmu/brisbane) yang sempat dikira terhapus tidak sengaja — **dikonfirmasi disengaja** (Yuli lagi latih ulang pakai CSV asli), tapi **hasil barunya belum di-commit**, jadi repo sementara tidak punya bukti LSTM sama sekali sampai itu terjadi
+
+**Regresi baru yang perlu diperbaiki:**
+- `recommendation_service.py` sekarang **500 crash** (bukan cuma hardcode lagi) — `rule_based_engine.py` ditulis ulang total oleh Yuli (`.decide()` → `.recommend()`, schema custom sendiri), tapi `recommendation_service.py` belum ikut disesuaikan. **Masih belum diperbaiki** setelah commit susulan Yuli (`673cea7`) — dites ulang, error persis sama
+- Test suite backend **sekarang hang total** (bukan lagi "32 gagal" — sudah tidak bisa dijalankan sama sekali, macet tanpa batas di "collecting...", harus di-force-kill). Ini lebih parah dari temuan sebelumnya di sesi yang sama
+
+**Update setelah commit susulan Yuli (`673cea7 "bismillah decision enginenya gak error lagi"`, 743 baris `rule_based_engine.py` + 825 baris `run_tls_simulation.py` + 896 baris `simulation_result_writer.py` berubah lagi):** dia benerin error yang dia lihat sendiri pas jalanin simulasi (`run_tls_simulation.py`), TAPI **tidak menyentuh `recommendation_service.py`** — jadi endpoint backend `/recommendation` yang dipakai frontend/dashboard tetap 500. Dua konteks (simulasi vs backend API) dipakai `RuleBasedEngine` yang sama tapi ditest terpisah-pisah, jadi perbaikan di satu sisi tidak otomatis nutup sisi lain.
+
+**Rekomendasi paling mendesak:** perbaiki `recommendation_service.py` dulu (regresi paling parah, endpoint yang tadinya "cuma bohong" sekarang benar-benar mati) DAN cari akar hang di test suite (kemungkinan besar terkait — banyak modul yang saling terkoneksi sekarang: `rule_based_engine`, `realtime_forecast_service`, LSTM, Supabase — kemungkinan ada yang saling rebutan resource pas semua diimport bareng).
