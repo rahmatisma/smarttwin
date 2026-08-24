@@ -258,6 +258,7 @@ def ingest(
     batch_created_at = datetime.now(timezone.utc).isoformat()
 
     windows_written = 0
+    written_states: list[dict[str, Any]] = []
 
     for (window_start, window_end), group in merged.groupby(["windowStart", "windowEnd"]):
 
@@ -300,15 +301,57 @@ def ingest(
         writer.insert_lane_metrics(traffic_state_id, metrics)
         windows_written += 1
 
-    # Agregasi trafficLaneMetrics -> trafficApproachStates, lewat builder
-    # resmi (bukan ditulis ulang di sini) -- limit digenerosir karena
-    # get_latest_traffic_states() ambil N baris ter-windowStart-terbaru
-    # dari SELURUH tabel (bukan cuma punya run ini), dan tabel sudah
-    # punya histori campuran dari beberapa hari.
+        written_states.append(
+            {
+                "id": traffic_state_id,
+                "intersectionId": intersection_row_id,
+                "windowStart": window_start.to_pydatetime().isoformat(),
+                "windowEnd": window_end.to_pydatetime().isoformat(),
+                "source": source,
+            }
+        )
+
+    # Agregasi trafficLaneMetrics -> trafficApproachStates, lewat method
+    # resmi builder (build_state/save_approach_states), TAPI ditarget
+    # persis ke trafficStateId yang baru saja ditulis di sini -- BUKAN
+    # lewat builder.run_once()/build_latest_states(), yang mengambil "N
+    # baris ter-windowStart-terbaru dari SELURUH tabel trafficStates".
+    # Tabel itu sudah punya histori campuran dari banyak hari/sumber
+    # (termasuk baris windowStart di masa jauh lebih "baru" daripada
+    # jam rekaman video kita, mis. baris source=cv_test) -- dicoba
+    # dengan run_once() dan yang ke-build cuma baris cv_test itu,
+    # bukan punya kita, walau limit sudah digenerosir 2x jumlah window.
     builder = TrafficStateBuilder()
-    built_states = builder.run_once(limit=max(windows_written * 2, 200), save=True)
+    traffic_state_ids = [state["id"] for state in written_states]
+    lane_metrics = builder.get_lane_metrics(traffic_state_ids)
+
+    metrics_by_state: dict[int, list[dict[str, Any]]] = {}
+    for metric in lane_metrics:
+        metrics_by_state.setdefault(int(metric["trafficStateId"]), []).append(metric)
+
+    intersection_map, approach_map, lane_map = builder.build_relation_maps()
+
+    states_built = 0
+    for state in written_states:
+        state_metrics = metrics_by_state.get(state["id"], [])
+        if not state_metrics:
+            continue
+        built_state = builder.build_state(
+            traffic_state=state,
+            lane_metrics=state_metrics,
+            intersection_map=intersection_map,
+            approach_map=approach_map,
+            lane_map=lane_map,
+        )
+        if built_state is None:
+            continue
+        builder.save_approach_states(
+            traffic_state_id=state["id"],
+            built_state=built_state,
+        )
+        states_built += 1
 
     return {
         "windowsWritten": windows_written,
-        "statesBuilt": len(built_states),
+        "statesBuilt": states_built,
     }
