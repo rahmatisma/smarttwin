@@ -292,15 +292,22 @@ ZONA_KEPADATAN = {
 # GARIS CROSSING (kalibrasi cv/kalibrasi_crossing.py)
 # ============================================================
 #
-# BELUM DIPAKAI logika apa pun di file ini -- vehicle_counter_copy.py
-# masih murni zona (ZONA_KEPADATAN di atas). Disimpan di sini sebagai
-# hasil kalibrasi mentah untuk fitur counting berbasis crossing-line
-# per lengan yang direncanakan menyusul, supaya tidak perlu kalibrasi
-# ulang nanti.
+# Aktif dipakai lewat hitung_crossing() -- hasilnya ditulis ke
+# CROSSING_CSV_PATH (crossing_simpang.csv), terpisah dari CSV zona
+# (ZONA_KEPADATAN) karena beda metrik: ALIRAN (crossing), bukan
+# KEHADIRAN (zona).
 #
 # CCTV_2 dapat DUA garis (bukan satu) karena framenya memotret dua
 # lengan sekaligus -- Jl. Magelang dan Jl. P. Diponegoro -- persis
 # skenario yang dijelaskan di docstring kalibrasi_crossing.py.
+#
+# CCTV_4 SENGAJA tidak ada di sini (garis_untuk_kamera balikin []
+# untuknya). Sudut kameranya tidak menangkap crossing kendaraan dari
+# arah Jl. P. Diponegoro dengan jelas -- garis "DIPONEGORO" milik
+# CCTV_2 di atas itu sumber crossing sah utk lengan timur. Zona
+# CCTV_4 (ZONA_KEPADATAN) tetap dipakai terpisah untuk density timur,
+# bukan volume/crossing -- lihat CROSS_LABEL_MAP & DENSITY_LENGAN_MAP
+# di backend/app/pipeline/cv_csv_bridge.py untuk pemetaan lengkapnya.
 
 CROSSING_LINES = {
     "CCTV_1": {
