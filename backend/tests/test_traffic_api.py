@@ -12,13 +12,13 @@ INTERSECTION_ID = "simpang4-pingit"
 
 
 def test_health():
-    response = client.get("/health")
+    response = client.get("/api/v1/health")
 
     assert response.status_code == 200
 
     data = response.json()
 
-    assert data["status"] == "healthy"
+    assert data["status"] == "ok"
 
 
 def test_get_latest_traffic():

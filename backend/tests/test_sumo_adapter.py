@@ -1,9 +1,8 @@
 from datetime import datetime
 
-from app.schemas.traffic import (
-    Approach,
-    ApproachState,
-    TrafficState,
+from app.pipeline.traffic_state_builder import (
+    ApproachTrafficState,
+    BuiltTrafficState,
 )
 
 from app.simulation.sumo.traffic_state_adapter import (
@@ -13,7 +12,13 @@ from app.simulation.sumo.traffic_state_adapter import (
 
 def test_traffic_state_to_sumo_demand():
 
-    state = TrafficState(
+    # SumoTrafficStateAdapter.to_demand() menerima
+    # BuiltTrafficState (hasil TrafficStateBuilder),
+    # BUKAN TrafficState (schema API) -- approach di sini
+    # sengaja plain string, bukan enum Approach.
+
+    state = BuiltTrafficState(
+        trafficStateId=1,
         intersectionId="simpang4-pingit",
         windowStart=datetime(
             2026, 8, 15, 16, 30, 12
@@ -22,8 +27,8 @@ def test_traffic_state_to_sumo_demand():
             2026, 8, 15, 16, 30, 17
         ),
         approaches=[
-            ApproachState(
-                approach=Approach.SOUTH,
+            ApproachTrafficState(
+                approach="south",
                 volume=10,
                 queueLengthVeh=5,
                 queueLengthMEst=12.5,
