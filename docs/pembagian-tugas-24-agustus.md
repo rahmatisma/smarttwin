@@ -50,19 +50,30 @@ Ini pembagian **direktori/file**, bukan cuma daftar tugas — biar kalau ada per
 
 ## 1. Rahmat (kamu)
 
-### 1.1 [KRITIS] Validitas data CV — temuan audit #7
-- [ ] Kalibrasi garis crossing **CCTV_4 (timur)** — `CROSSING_LINES` di `cv/vehicle_counter_copy.py` baru berisi CCTV_1, CCTV_2, CCTV_3; output CSV belum punya label `timur` sama sekali
-- [ ] Tutup identitas koridor timur — verifikasi Magelang vs Diponegoro lewat bearing ke network SUMO (rencana roadmap 17 Agustus, belum dieksekusi, masih manual klik)
-- [ ] Rekonsiliasi sumber ganda: zona CCTV_4 (label "timur") vs crossing "DIPONEGORO" dari frame CCTV_2 — dua-duanya belum disatukan jadi satu kebenaran
-- [ ] Pastikan kolom `approach` di Supabase untuk CCTV_3/CCTV_4 sudah tidak terbalik — pernah didokumentasikan sebagai bug di `vehicle_counter_copy.py:874-879`, tinggal verifikasi sudah fixed
-- [ ] Opsional: benerin komentar menyesatkan di `vehicle_counter_copy.py:295` ("BELUM DIPAKAI logika apa pun" — padahal fungsinya aktif dipanggil)
+### 1.1 [SELESAI 24 Agustus] Validitas data CV — temuan audit #7
+- [x] ~~Kalibrasi garis crossing CCTV_4 (timur)~~ — **tidak diperlukan.** Diklarifikasi langsung ke Rahmat: sudut kamera CCTV_4 tidak menangkap crossing dari arah Jl. Diponegoro dengan jelas; garis `DIPONEGORO` milik CCTV_2 sudah jadi sumber sah untuk crossing lengan timur, dan sudah benar diwire di `backend/app/pipeline/cv_csv_bridge.py` (`CROSS_LABEL_MAP`)
+- [x] Rekonsiliasi sumber ganda (zona CCTV_4 vs crossing CCTV_2 DIPONEGORO) — **bukan konflik.** Dua metrik berbeda: zona CCTV_4 = density (`DENSITY_LENGAN_MAP["timur"] = "east"`), crossing CCTV_2 DIPONEGORO = volume (`CROSS_LABEL_MAP["DIPONEGORO"] = "east"`). Sudah konsisten di kode
+- [x] Kolom `approach` Supabase CCTV_3/CCTV_4 — **diverifikasi langsung ke database (read-only query):** `CCTV_3 → west`, `CCTV_4 → east`. Sudah benar, bug lama sudah tidak ada
+- [x] Verifikasi Magelang vs Diponegoro lewat bearing ke network SUMO — **dilakukan** lewat `simulation/verify_corridor_bearing.py` (baca geometri `.net.xml.gz` langsung, tanpa perlu venv/sumolib). Hasil: Jalan Diponegoro bearing 74.5°–93.0° (timur), Jalan Magelang bearing 351.8°–6.3° (utara) — **cocok persis** dengan `CROSS_LABEL_MAP`. Skrip disimpan permanen sebagai bukti audit trail
+- [x] Komentar basi di `vehicle_counter_copy.py:295` — diperbaiki, sekarang menjelaskan kenapa CCTV_4 sengaja tidak punya garis crossing sendiri
 
-### 1.2 Decision Engine — logika inti (kamu yang bikin kerangkanya)
-- [ ] Verifikasi `rule_based_engine.py` & `run_decision.py` (dibuat 23 Agustus) sudah pakai kontrak data resmi (`docs/data-contract.md`), bukan istilah CSV ad-hoc (`selatan/barat/timur/simpang_tengah`) — temuan audit #1
-- [ ] **Koordinasi dengan Yuli & Melpi** sebelum menyambungkan ke `simulation/` — hindari duplikasi kerja di `tls_controller.py`/`run_tls_simulation.py` (lihat Risiko #1 di atas)
+### 1.2 [SELESAI 24 Agustus] Decision Engine — logika inti direfactor ke kontrak resmi
+- [x] `rule_based_engine.py` di-refactor total (bukan cuma adapter tipis) — `decide()` sekarang terima `TrafficState` dan hasilkan `SignalRecommendation` asli dari `backend/app/schemas/`, bukan dict Indonesia (`timur`/`total`) lagi. **Catatan:** target-nya kontrak yang HIDUP di backend, BUKAN `docs/data-contract.md` — versi di dokumen itu (`ScenarioResult`, `chosen_scenario`) ternyata tidak pernah diimplementasikan sama sekali, tidak ada konsumennya
+- [x] `run_decision.py` diupdate mengikuti signature baru — sudah dites jalan penuh ke 538 baris data asli (`percobaan_logic_simpang.csv`), hasilnya masuk akal
+- [x] **Efek berantai ke file Melpi:** perubahan skema `signal_decisions.csv` (dari 4-baris-per-timestamp jadi 1 rekomendasi per timestamp) bikin `feed_to_supabase.py::feed_signal_decisions()` ikut rusak (baca kolom lama `lengan`/`skor`/`prioritas`/`total_kend`). Sudah diperbaiki mengikuti skema baru — **ternyata selaras**, fungsi itu sebelumnya sudah menghitung sendiri `confidence`/`delay_pct` secara manual dari `skor`/`prioritas` menuju bentuk yang sama persis dengan `SignalRecommendation`, sekarang tidak perlu dihitung ulang lagi (pass-through langsung)
+- [ ] **Belum dikerjakan di sesi ini:** wiring `run_tls_simulation.py` (Yuli, task 2.1) — `create_phase_plan()` di sana perlu diganti dari logika inline max-queue jadi panggil `RuleBasedEngine.decide()`. Bentuknya sudah cocok (satu `recommended_phase` + durasi per panggilan, sama seperti pola `create_phase_plan()` sekarang) — **kabari Yuli skema barunya sebelum dia mulai wiring**
 
-### 1.3 Regresi network SUMO
-- [ ] Cek asal-usul file network baru yang masuk lewat `git pull` hari ini: `simpang44_pingit.net.xml.gz`, `simpang44_baru.net.xml`, `simpang4.xml` — CLAUDE.md tegas: cuma boleh ada satu network project (`simpang4_pingit.net.xml.gz`). Pernah kejadian regresi serupa (commit `050324f`, dicatat di `roadmap.md` baris 241) — pastikan ini bukan pengulangan
+### 1.2b [TEMUAN BARU, SUDAH DIPERBAIKI] Service_role key ter-hardcode di `decision_engine/feed_to_supabase.py`
+- [x] Ditemukan saat mengerjakan 1.2: `feed_to_supabase.py` (commit Melpi hari ini) punya Supabase **service_role key** (bypass RLS) ter-hardcode langsung di kode, dan commit "perbaikan" berikutnya cuma menyamarkannya jadi default value `os.getenv(..., "<key yang sama>")` — key-nya tetap hidup di kode
+- [x] Kode sudah diperbaiki: sekarang WAJIB dari environment variable (`SUPABASE_SERVICE_ROLE_KEY`, disamakan namanya dengan `backend/.env`), tidak ada fallback hardcode lagi
+- [ ] **WAJIB kamu lakukan manual, di luar kendali saya:** rotate service_role key di Supabase Dashboard → Settings → API. Key lama sudah bocor permanen ke git history (`69e37bf`, `c6e5a65`) — mengubah kode saja tidak cukup
+
+### 1.3 [SELESAI 24 Agustus] Regresi network SUMO — diperiksa & dibersihkan
+- [x] Diperiksa asal-usul `simpang44_pingit.net.xml.gz`, `simpang44_baru.net.xml`, `simpang4.xml`, `simpang4_pingit.add.xml` yang masuk dari commit Melpi hari ini ("sumocuy"). **Hasil: bukan perbaikan TLS seperti yang diduga awalnya** — diff level baris (`gzip` + `difflib`) menunjukkan `simpang44_pingit.net.xml.gz` **byte-identik** dengan `simpang4_pingit.net.xml.gz` kanonik, cuma beda 3 baris (timestamp generate netconvert & nama file di komentar, keduanya kosmetik). Program TLS `SIMPANG_CENTER` (4 fase, 39/6/39/6 detik, satu grup hijau per fase — pola yang dikira baru) ternyata **sudah ada di network kanonik sejak sebelum hari ini** juga (didokumentasikan di `roadmap.md` sekitar 17-21 Agustus)
+- [x] `simpang4_pingit.sumocfg` dikembalikan ke `net-file="simpang4_pingit.net.xml.gz"` (network kanonik) — sempat menunjuk ke file duplikat bertypo
+- [x] 6 file duplikat/scratch dihapus (`git rm`, fully recoverable dari history): `simpang44_pingit.net.xml.gz`, `simpang44_pingit.net.xml.gz.xml`, `simpang44_baru.net.xml`, `simpang4.xml`, `simpang4_pingit.add.xml`, `simpang4_pingit.sumocfg.bak` — semua terverifikasi tidak dipakai script mana pun dan tidak berisi apa pun yang beda dari network kanonik
+- [x] `simulation/network/` sekarang cuma berisi 2 file: `simpang4_pingit.net.xml.gz` dan `simpang4_pingit.sumocfg` — sesuai kebijakan "satu network project" di CLAUDE.md. XML sumocfg divalidasi well-formed, route file yang dirujuk (`demo_mobil.rou.xml`) dikonfirmasi ada
+- [ ] **Belum tervalidasi dengan simulasi jalan sungguhan** — mesin ini tidak punya `simulation/.venv` (paket `eclipse-sumo` belum terinstall), jadi cuma divalidasi struktur XML-nya, belum smoke-test `sumo -c simpang4_pingit.sumocfg` beneran. **Rekomendasi: siapa pun yang venv `simulation/`-nya sudah siap, jalankan smoke test ini sebelum dipakai demo**
 
 ---
 
