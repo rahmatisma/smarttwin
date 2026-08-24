@@ -1,6 +1,11 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from fastapi import FastAPI
+
+from app.api import traffic
+from app.api import forecast
+
 from app.api.routes.traffic import router as traffic_router
 from app.api.routes.cctv import close_hf_client, router as cctv_router
 from app.api.routes.signal import router as signal_router
@@ -83,3 +88,34 @@ def health():
 @app.on_event("shutdown")
 async def shutdown_hf_client():
     await close_hf_client()
+    
+app = FastAPI(
+    title="SmartTwin Backend",
+    version="1.0.0",
+)
+
+
+app.include_router(
+    traffic.router
+)
+
+app.include_router(
+    forecast.router
+)
+
+
+@app.get("/")
+async def root():
+
+    return {
+        "service": "SmartTwin Backend",
+        "status": "running",
+    }
+
+
+@app.get("/health")
+async def health():
+
+    return {
+        "status": "healthy",
+    }

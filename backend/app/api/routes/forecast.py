@@ -1,18 +1,41 @@
-from fastapi import APIRouter
+from __future__ import annotations
 
-from app.schemas.forecast import ForecastPoint
-from app.services.forecast_service import get_forecast
+from fastapi import APIRouter, HTTPException
+
+from app.schemas.forecast import ForecastResult
+from app.services.forecast_service import (
+    forecast_service,
+)
 
 
 router = APIRouter(
-    prefix="/api/v1/forecast",
+    prefix="/api/forecast",
     tags=["Forecast"],
 )
 
 
 @router.get(
-    "",
-    response_model=list[ForecastPoint],
+    "/latest/{intersection_id}",
+    response_model=ForecastResult,
 )
-def get_forecast_endpoint() -> list[ForecastPoint]:
-    return get_forecast()
+async def get_latest_forecast(
+    intersection_id: str,
+):
+
+    result = (
+        forecast_service
+        .get_latest(
+            intersection_id
+        )
+    )
+
+    if result is None:
+
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                "Forecast belum tersedia."
+            ),
+        )
+
+    return result
