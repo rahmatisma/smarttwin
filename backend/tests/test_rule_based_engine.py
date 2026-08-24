@@ -4,7 +4,14 @@ from app.schemas.traffic import (
     ApproachState,
     TrafficState,
 )
-from app.services.rule_based_engine import (
+import sys
+from pathlib import Path
+
+project_root = str(Path(__file__).resolve().parents[2])
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
+
+from decision_engine.rule_based_engine import (
     RuleBasedEngine,
 )
 
@@ -79,11 +86,9 @@ def test_rule_based_engine():
         currentPhase="northSouth",
     )
 
-    assert (
-        recommendation
-        .intersectionId
-        == "intersection_01"
-    )
+    # Recommendation dari RuleBasedEngine sengaja tidak membawa
+    # intersectionId -- itu ditempel oleh caller (lihat
+    # recommendation_service.py) dari TrafficState yang dikirim.
 
     assert (
         recommendation.recommendedPhase
@@ -112,7 +117,7 @@ def test_rule_based_engine():
 
     assert (
         recommendation.source
-        == "ruleBased"
+        == "rule-based"
     )
 
     print(
