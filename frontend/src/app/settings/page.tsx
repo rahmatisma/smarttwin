@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { Suspense, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import {
     User,
@@ -43,6 +43,14 @@ const menuItems = [
 ];
 
 export default function SettingsPage() {
+    return (
+        <Suspense fallback={null}>
+            <SettingsContent />
+        </Suspense>
+    );
+}
+
+function SettingsContent() {
     const searchParams = useSearchParams();
     const requestedSection = searchParams.get("section");
     const initialSection = menuItems.some(
