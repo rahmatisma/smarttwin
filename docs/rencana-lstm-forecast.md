@@ -27,6 +27,15 @@ Kalau desainnya tidak mengarah ke pertanyaan itu, dia tidak berguna buat sistem 
 
 **Implikasi peringatan di atas:** karena 2 dari 4 fitur selalu 0 di seluruh data training, model akan "belajar" bahwa antrean selalu 0 — bukan salah modelnya, itu jujur cerminan data yang ada. Prediksi `queueLengthVeh`/`queueLengthMEst` dari model ini **tidak boleh dipercaya** sampai CV benar-benar menghitung antrean asli (lihat catatan RunPod di `docs/realtime-dashboard.md`). Kalau mau, latih dulu cuma pakai 2 fitur yang datanya asli (`vehicleCount`, `densityIndex`) — lebih jujur daripada pura-pura prediksi antrean dari data yang isinya nol semua.
 
+### 2.1 Rencana bertahap (disepakati 25 Agustus)
+
+Supaya Yuli tidak nunggu (waktu tersisa cuma H-6 ke 31 Agustus), disepakati jalan **2 fase paralel**, bukan satu jalur berurutan:
+
+- **Fase 1 — jalan SEKARANG (Yuli).** Latih LSTM cuma pakai 2 fitur yang datanya sudah asli: `vehicleCount` + `densityIndex`. Sekalian benerin granularitas (bagian 4) dan cari `SEQUENCE_LENGTH` yang pas (bagian 6) — kerjaan infrastruktur/pipeline ini tetap kepakai di Fase 2, tidak kebuang.
+- **Fase 2 — nanti setelah CSV antrean baru siap (Rahmat).** Rahmat yang jalanin logika perhitungan antrean (definisi ulang buat pendekatan zona + tracking kendaraan berhenti, lihat `docs/realtime-dashboard.md`) dan hasilnya jadi CSV baru dengan `queueLengthVeh`/`queueLengthMEst` yang isinya bukan nol lagi. Begitu CSV itu ada, Yuli **retrain ulang** pipeline yang sama dari Fase 1, sekarang pakai 4 fitur penuh.
+
+Jadi bukan "Yuli pegang kerjaan lain dulu sambil nunggu" — dia tetap di LSTM dari sekarang, cuma scope datanya yang bertahap.
+
 ---
 
 ## 3. Sumber data — gabungan, bukan satu CSV
@@ -107,12 +116,21 @@ Ditemukan lewat audit langsung ke kode, dicatat di sini biar tidak diulang kebin
 
 ---
 
-## 10. Checklist buat Yuli
+## 10. Checklist
+
+### Fase 1 — Yuli, mulai sekarang
 
 - [ ] Putuskan: latih dari histori Supabase (`ForecastRepository`) atau gabungan CSV manual (lihat bagian 3) — Supabase lebih disarankan
 - [ ] Ganti agregasi dari per-menit (`.dt.floor("min")`) ke per-5-detik (window native `WINDOW_SECONDS`)
 - [ ] Eksperimen ulang `SEQUENCE_LENGTH` di skala 5 detik (bagian 6) — jangan asumsikan `30` masih benar
-- [ ] Pertimbangkan: latih cuma dari `vehicleCount` + `densityIndex` (data asli) dulu, pisahkan dari `queueLengthVeh`/`queueLengthMEst` (selalu 0) — atau minimal beri catatan jelas di output bahwa 2 fitur itu tidak bisa dipercaya
-- [ ] Retrain model (`lstm_model.keras` + `scaler.pkl`) dengan setup baru, commit hasilnya (jangan lupa — `forecasting/outputs/` sekarang kosong, lihat `pembagian-tugas-24-agustus.md` item 2.7)
+- [ ] Latih cuma dari `vehicleCount` + `densityIndex` (2 fitur, data asli) — jangan sertakan `queueLengthVeh`/`queueLengthMEst` dulu (lihat bagian 2.1, masih selalu 0)
+- [ ] Simpan model (`lstm_model.keras` + `scaler.pkl`) + commit hasilnya (jangan lupa — `forecasting/outputs/` sekarang kosong, lihat `pembagian-tugas-24-agustus.md` item 2.7)
 - [ ] Putuskan nasib `forecast_service.py` (versi lama) — hapus atau biarkan
 - [ ] Kalau ada waktu: mulai sambungkan hasil forecast ke `RuleBasedEngine.recommend()` (bagian 8) — kalau tidak sempat sebelum 31 Agustus, dokumentasikan sebagai keterbatasan, jangan diklaim sudah terintegrasi kalau belum
+
+### Fase 2 — Rahmat, jalankan logika antrean → Yuli retrain 4 fitur
+
+- [ ] Rahmat: desain ulang definisi "antrean" buat pendekatan zona (bukan crossing lama) + logika deteksi kendaraan berhenti
+- [ ] Rahmat: jalankan logika itu ke rekaman yang ada, hasilnya CSV baru berisi `queueLengthVeh`/`queueLengthMEst` yang bukan nol
+- [ ] Yuli: retrain ulang pipeline dari Fase 1, sekarang 4 fitur penuh (`vehicleCount`, `densityIndex`, `queueLengthVeh`, `queueLengthMEst`)
+- [ ] Update tabel di bagian 2 dokumen ini — ganti status `queueLengthVeh`/`queueLengthMEst` dari "SELALU 0" jadi "Data asli" begitu Fase 2 selesai
