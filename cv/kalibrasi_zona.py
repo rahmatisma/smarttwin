@@ -1,6 +1,6 @@
 """
 Tool kalibrasi interaktif untuk menentukan koordinat polygon zona
-kepadatan (ZONA_KEPADATAN di vehicle_counter_copy.py) dengan cara
+kepadatan (ZONA_KEPADATAN di vehicle_counter_pingit.py) dengan cara
 klik langsung di frame video, bukan tebak-tebakan angka rasio.
 
 Alur:

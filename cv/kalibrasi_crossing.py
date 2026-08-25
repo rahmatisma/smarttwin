@@ -7,7 +7,7 @@ Dipakai antara lain untuk kamera yang framenya memotret DUA lengan
 sekaligus (mis. CCTV_2 yang melihat Jl. Magelang dan Jl. Diponegoro
 dalam satu frame): satu sesi kalibrasi bisa menyimpan BEBERAPA garis
 crossing berbeda, masing-masing dengan label sendiri, supaya counting
-di vehicle_counter_copy.py bisa dibedakan per lengan.
+di vehicle_counter_pingit.py bisa dibedakan per lengan.
 
 Alur per garis (bisa diulang beberapa kali dalam satu run):
     1. Klik 2 titik di frame -- titik 1 lalu titik 2, garis hijau

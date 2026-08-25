@@ -358,6 +358,58 @@ KELAS_KE_KOLOM = {
 
 
 # ============================================================
+# PARAMETER ANTREAN
+# ============================================================
+#
+# Diadaptasi dari vehicle_counter.py (yang punya logika antrean asli,
+# dipakai jalur upload video manual) -- BUKAN disalin mentah, karena
+# file itu kerja di piksel mentah + titik tengah bbox, sedangkan file
+# ini kerja di rasio 0.0-1.0 + titik acuan roda (y2). Lihat diskusi
+# 25 Agustus di docs/pembagian-tugas-tahap-akhir.md.
+#
+# Kendaraan dianggap "sedang antre" kalau SEMUA syarat ini benar:
+#   1. Titik acuannya ada di dalam zona lengan ini (sudah dicek oleh
+#      hitung_kendaraan_di_zona, dipakai ulang di hitung_antrean)
+#   2. Pergeseran posisi antar-frame di bawah ANTREAN_GERAK_RASIO_MAKS
+#   3. Sudah "hampir diam" minimal ANTREAN_MIN_FRAME_DIAM frame
+#      berturut-turut
+
+# Ambang gerak antar-frame dalam RASIO (bukan piksel). Konversi kasar
+# dari 3.0 piksel (nilai asli vehicle_counter.py) di frame lebar
+# ~1280px -> ~0.0023, dibulatkan naik ke 0.004 supaya lebih toleran
+# terhadap jitter kotak deteksi YOLO (yang di rasio lebih terasa
+# dibanding di piksel mentah). BUTUH DIKALIBRASI ULANG setelah lihat
+# hasil run percobaan -- angka ini titik awal, bukan final.
+ANTREAN_GERAK_RASIO_MAKS = 0.004
+
+# Sama seperti vehicle_counter.py: minimal 5 frame berturut-turut
+# gerak kecil sebelum dianggap benar-benar antre (bukan cuma
+# melambat sesaat).
+ANTREAN_MIN_FRAME_DIAM = 5
+
+# Jumlah lajur per lengan -- diambil dari tabel `lanes` di Supabase
+# (dicek 25 Agustus 2026). BUKAN ditebak: barat memang cuma 1 lajur,
+# tiga lengan lain 2 lajur. Kalau kalibrasi lajur berubah di database,
+# perbarui juga angka di sini.
+LAJUR_PER_LENGAN = {
+    "utara": 2,
+    "selatan": 2,
+    "timur": 2,
+    "barat": 1,
+}
+
+# Sama seperti vehicle_counter.py -- ESTIMASI KESEPAKATAN TIM, BUKAN
+# kutipan dari tabel resmi PKJI 2023. Jangan dipresentasikan sebagai
+# angka standar kalau ditanya juri.
+QUEUE_SPACE_M = {
+    "motor": 2,
+    "mobil": 5,
+    "bus": 10,
+    "truk": 10,
+}
+
+
+# ============================================================
 # GEOMETRI
 # ============================================================
 
@@ -484,6 +536,133 @@ def hitung_kendaraan_di_zona(
             hasil["kotak_luar"].append(kotak)
 
     return hasil
+
+
+def hitung_antrean(
+    state,
+    detections,
+    zona_polygon,
+    frame_width,
+    frame_height,
+    lengan,
+):
+    """
+    Hitung kendaraan yang sedang ANTRE (berhenti) di dalam zona, dan
+    estimasi panjang antrean dalam meter.
+
+    Beda dengan hitung_kendaraan_di_zona(): itu KEHADIRAN (semua
+    kendaraan di zona, bergerak atau diam). Ini subset yang lebih
+    ketat -- cuma yang sudah "hampir diam" beberapa frame berturut-
+    turut (lihat ANTREAN_MIN_FRAME_DIAM). detections perlu track_id
+    (dari ByteTrack) supaya bisa dibandingkan posisinya dengan frame
+    sebelumnya lewat state.antrean_last_pos/antrean_stopped_frames.
+
+    queue_length_veh: total kendaraan yang lolos 3 syarat, TIDAK
+    peduli posisi kiri-kanannya -- ini murni "ada berapa yang antre".
+
+    queue_length_m_est: BUKAN sekadar jumlah semua kendaraan x jatah
+    meter per kelas (itu keliru kalau kendaraan sejajar di lajur
+    beda -- lihat diskusi 25 Agustus). Kendaraan yang lolos
+    dikelompokkan dulu jadi "lajur empirik" berdasarkan posisi x
+    (kiri-kanan) memakai lebar per lajur = lebar zona / jumlah lajur
+    lengan ini (dari LAJUR_PER_LENGAN), lalu diambil KEDALAMAN LAJUR
+    TERPANJANG -- bukan dijumlah semua lajur. Ini juga sesuai definisi
+    umum panjang antrean di teknik lalu lintas: diukur dari lajur
+    yang paling penuh, bukan total kendaraan gabungan semua lajur.
+
+    Catatan jujur: pengelompokan lajur ini pendekatan kasar (lebar
+    zona dibagi rata jumlah lajur), bukan deteksi batas lajur asli --
+    zona sendiri tidak dikalibrasi per lajur (lihat catatan "YANG
+    SENGAJA TIDAK ADA DI SINI" di kepala file).
+    """
+
+    kandidat = []
+
+    for det in detections:
+        x1, y1, x2, y2, class_id, track_id = det
+
+        if track_id is None:
+            # ByteTrack belum sempat kasih id -- tidak ada riwayat
+            # posisi buat dibandingkan, tidak bisa dinilai "diam"
+            # atau tidak.
+            continue
+
+        nama_kelas = mapping_class(class_id)
+
+        if nama_kelas is None:
+            continue
+
+        # Titik acuan SAMA PERSIS dengan hitung_kendaraan_di_zona --
+        # tepi bawah bbox (roda), rasio 0.0-1.0. Kalau titik acuannya
+        # beda, kendaraan yang "di zona" versi satu bisa "di luar
+        # zona" versi lain, dan dua metrik jadi tidak sepadan.
+        cx = ((x1 + x2) / 2) / frame_width
+        cy = y2 / frame_height
+
+        if not point_in_polygon(cx, cy, zona_polygon):
+            # Tidak di zona -- reset riwayat diamnya, biar kalau
+            # kendaraan ini balik masuk zona nanti dihitung dari nol,
+            # bukan mewarisi status diam dari sebelum dia keluar.
+            state.antrean_stopped_frames.pop(track_id, None)
+            state.antrean_last_pos.pop(track_id, None)
+            continue
+
+        pos_lama = state.antrean_last_pos.get(track_id)
+        state.antrean_last_pos[track_id] = (cx, cy)
+
+        if pos_lama is None:
+            # Frame pertama track_id ini terlihat -- belum ada
+            # riwayat buat dibandingkan, mulai dari 0.
+            state.antrean_stopped_frames[track_id] = 0
+            continue
+
+        dx = cx - pos_lama[0]
+        dy = cy - pos_lama[1]
+        gerak = (dx * dx + dy * dy) ** 0.5
+
+        if gerak <= ANTREAN_GERAK_RASIO_MAKS:
+            state.antrean_stopped_frames[track_id] = (
+                state.antrean_stopped_frames.get(track_id, 0) + 1
+            )
+        else:
+            state.antrean_stopped_frames[track_id] = 0
+
+        if state.antrean_stopped_frames[track_id] >= ANTREAN_MIN_FRAME_DIAM:
+            kandidat.append((cx, nama_kelas))
+
+    hasil_antrean = {
+        "queue_length_veh": len(kandidat),
+        "queue_length_m_est": 0.0,
+    }
+
+    if not kandidat:
+        return hasil_antrean
+
+    # ------------------------------------------------------------
+    # Kelompokkan jadi "lajur empirik" berdasarkan posisi x, lalu
+    # ambil kedalaman lajur TERPANJANG.
+    # ------------------------------------------------------------
+
+    jumlah_lajur = max(1, LAJUR_PER_LENGAN.get(lengan, 1))
+
+    xs_poligon = [titik[0] for titik in zona_polygon]
+    x_min = min(xs_poligon)
+    x_max = max(xs_poligon)
+    lebar_zona = max(x_max - x_min, 1e-6)
+    lebar_lajur = lebar_zona / jumlah_lajur
+
+    kedalaman_per_lajur = [0.0 for _ in range(jumlah_lajur)]
+
+    for cx, nama_kelas in kandidat:
+        idx_lajur = int((cx - x_min) / lebar_lajur)
+        idx_lajur = max(0, min(jumlah_lajur - 1, idx_lajur))
+        kedalaman_per_lajur[idx_lajur] += QUEUE_SPACE_M[nama_kelas]
+
+    hasil_antrean["queue_length_m_est"] = round(
+        max(kedalaman_per_lajur), 2
+    )
+
+    return hasil_antrean
 
 
 def garis_untuk_kamera(nama_kamera, lengan_default):
@@ -1086,6 +1265,14 @@ class KameraState:
         # crossing gracefully no-op dalam kasus itu.
         self.garis_list = garis_untuk_kamera(nama_kamera, self.lengan)
         self.prev_pos = {}
+
+        # State antrean -- terpisah dari prev_pos di atas (yang buat
+        # crossing) supaya semantiknya tidak bercampur. track_id ->
+        # posisi (cx, cy) rasio frame lalu, dan track_id -> berapa
+        # frame berturut-turut sudah "hampir diam". Lihat
+        # hitung_antrean().
+        self.antrean_last_pos = {}
+        self.antrean_stopped_frames = {}
         self.sudah_dihitung = {g["label"]: set() for g in self.garis_list}
         self.crossing_akumulasi = {
             g["label"]: {
@@ -1144,7 +1331,10 @@ def tulis_baris_csv(state, penulis_csv):
 
     rata = {
         k: sum(a[k] for a in state.akumulasi) / n
-        for k in ("total", "motor", "mobil", "truk", "bus")
+        for k in (
+            "total", "motor", "mobil", "truk", "bus",
+            "queue_length_veh", "queue_length_m_est",
+        )
     }
 
     penulis_csv.writerow({
@@ -1158,6 +1348,8 @@ def tulis_baris_csv(state, penulis_csv):
         "mobil_di_zona": round(rata["mobil"], 2),
         "truk_di_zona": round(rata["truk"], 2),
         "bus_di_zona": round(rata["bus"], 2),
+        "queue_length_veh": round(rata["queue_length_veh"], 2),
+        "queue_length_m_est": round(rata["queue_length_m_est"], 2),
         "frame_number": state.frame_terakhir,
     })
 
@@ -1192,6 +1384,8 @@ def tulis_baris_csv_snapshot(state, penulis_csv_snapshot):
         "mobil_di_zona": hasil["mobil"],
         "truk_di_zona": hasil["truk"],
         "bus_di_zona": hasil["bus"],
+        "queue_length_veh": hasil["queue_length_veh"],
+        "queue_length_m_est": hasil["queue_length_m_est"],
         "frame_number": state.snapshot_frame_aktif,
     })
 
@@ -1330,6 +1524,22 @@ def proses_tick(
     # HARUS dipanggil di sini, tiap frame yang diproses -- bukan cuma
     # saat jendela tutup seperti tulis_baris_csv_crossing.
     hitung_crossing(state, deteksi)
+
+    # Sama alasannya -- butuh riwayat posisi tiap track_id per frame
+    # (state.antrean_last_pos/antrean_stopped_frames), jadi harus
+    # dipanggil tiap frame juga. Hasilnya digabung ke dict `hasil`
+    # yang sama dengan zona, supaya ikut mengalir otomatis ke CSV
+    # snapshot & CSV jendela 5 detik lewat state.akumulasi.
+    hasil.update(
+        hitung_antrean(
+            state,
+            deteksi,
+            state.poligon,
+            state.width,
+            state.height,
+            state.lengan,
+        )
+    )
 
     # Snapshot per detik: bucket 1 detik TERPISAH dari jendela 5
     # detik di atas. Begitu detiknya berganti, flush bacaan TERAKHIR
@@ -1574,6 +1784,8 @@ KOLOM = [
     "mobil_di_zona",
     "truk_di_zona",
     "bus_di_zona",
+    "queue_length_veh",
+    "queue_length_m_est",
     "frame_number",
 ]
 
@@ -1604,6 +1816,8 @@ KOLOM_SNAPSHOT = [
     "mobil_di_zona",
     "truk_di_zona",
     "bus_di_zona",
+    "queue_length_veh",
+    "queue_length_m_est",
     "frame_number",
 ]
 

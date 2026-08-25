@@ -1,12 +1,12 @@
 """
-Jembatan CSV vehicle_counter_copy.py -> trafficLaneMetrics (Supabase).
+Jembatan CSV vehicle_counter_pingit.py -> trafficLaneMetrics (Supabase).
 
 Kenapa file ini ada, bukan langsung pakai TrafficStateBuilder:
     TrafficStateBuilder (lihat traffic_state_builder.py) sekarang murni
     Supabase-native -- dia baca trafficLaneMetrics dan mengagregasi ke
     trafficApproachStates, tidak tahu apa-apa soal CSV. Yang menulis
     trafficLaneMetrics itu tanggung jawab modul terpisah -- ini dia,
-    khusus untuk output vehicle_counter_copy.py (crossing_simpang.csv +
+    khusus untuk output vehicle_counter_pingit.py (crossing_simpang.csv +
     percobaan_logic_simpang.csv).
 
 Kenapa BUKAN pakai TrafficMetricsWriter.write_cv_window() langsung:
@@ -81,7 +81,7 @@ def get_default_cross_path() -> Path:
 
 def get_default_density_path() -> Path:
     # snapshot_zona.csv, BUKAN percobaan_logic_simpang.csv -- keduanya
-    # skema kolomnya identik (ditulis oleh vehicle_counter_copy.py yang
+    # skema kolomnya identik (ditulis oleh vehicle_counter_pingit.py yang
     # sama), tapi beda tujuan. percobaan_logic_simpang.csv sudah
     # dirata-rata per window 5 detik OLEH SCRIPT CV ITU SENDIRI --
     # cukup halus tapi bisa meleset lumayan dari apa yang kelihatan di
