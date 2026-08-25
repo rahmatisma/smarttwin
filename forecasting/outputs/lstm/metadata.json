@@ -1,0 +1,36 @@
+{
+  "project": "SmartTwin",
+  "model": "TrafficLSTM",
+  "features": [
+    "vehicleCount",
+    "queueLengthVeh",
+    "queueLengthMEst",
+    "densityIndex"
+  ],
+  "inputSteps": 12,
+  "outputSteps": 12,
+  "historySeconds": 60,
+  "forecastSeconds": 60,
+  "intervalSeconds": 5,
+  "trainRows": 376,
+  "validationRows": 80,
+  "testRows": 82,
+  "modelConfig": {
+    "inputSize": 4,
+    "hiddenSize": 64,
+    "numLayers": 2,
+    "dropout": 0.2
+  },
+  "metrics": {
+    "mae": 3.2416763305664062,
+    "mse": 22.864830017089844,
+    "rmse": 4.781718312185468,
+    "feature_mae": {
+      "vehicleCount": 2.869720220565796,
+      "queueLengthVeh": 3.4384944438934326,
+      "queueLengthMEst": 6.628787517547607,
+      "densityIndex": 0.02969709224998951
+    }
+  },
+  "queueNote": "queueLengthVeh dan queueLengthMEst berisi estimasi dari cv/vehicle_counter_pingit.py::hitung_antrean(), bukan lagi hardcode 0."
+}

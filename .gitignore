@@ -63,7 +63,6 @@ data/*.parquet
 # Forecasting datasets, model, hasil training
 forecasting/data/*
 forecasting/models/*
-forecasting/outputs/*
 !forecasting/data/.gitkeep
 !forecasting/models/.gitkeep
 !forecasting/outputs/.gitkeep
