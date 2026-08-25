@@ -19,6 +19,11 @@ pip-cache/
 # bawah tidak menutup ini karena file-nya ada di root, bukan di data/.
 *.zip
 
+cv/output/anotasi_CCTV_1.mp4
+cv/output/anotasi_CCTV_2.mp4
+cv/output/anotasi_CCTV_3.mp4
+cv/output/anotasi_CCTV_4.mp4
+
 # CCTV videos
 cv/videos/
 cv/models/

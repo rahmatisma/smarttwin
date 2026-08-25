@@ -16,20 +16,29 @@ Disusun dari audit progres per modul malam 25 Agustus (lihat rekap commit di `pe
 
 ## 1. Rahmat — Backend, CV, Integrasi Simulasi
 
-### 1.1 [P0 — hari ini] Commit fix regresi `sumo_controller.py`
-- [ ] Commit fix `SUMO_BIN_DIR` yang sempat terhapus tanpa sengaja di commit LSTM Yuli (sudah diperbaiki, belum di-commit)
-- [ ] Jalankan `run_tls_simulation.py` sekali penuh buat mastiin simulasi beneran jalan lagi, bukan cuma lolos import
+### 1.1 [SELESAI 25 Agustus] Commit fix regresi `sumo_controller.py`
+- [x] Commit fix `SUMO_BIN_DIR` yang sempat terhapus tanpa sengaja di commit LSTM Yuli — commit `26e4d48` (25 Agustus 06:35 WIB)
+- [x] Jalankan `run_tls_simulation.py` sekali penuh buat mastiin simulasi beneran jalan lagi, bukan cuma lolos import — **`STATUS: SUCCESS`, exit 0, `simulations` id 7** (25 Agustus 11:28 UTC). Rantai penuh terlewati: TrafficState → Rule-Based Engine (green 60s) → Phase Mapping → TLS Controller → SUMO (300 step, 65 kendaraan) → Metrics → Supabase
+- [x] **Blocker yang ketemu saat mengerjakan ini:** `backend/.venv` tidak punya `traci` sama sekali, jadi `sumo_controller.py` gagal dengan "TraCI belum tersedia di environment backend". Akar yang lebih dalam: `backend/requirements.txt` cuma mencantumkan `traci`, padahal `SUMO_BIN_DIR` mencari binary di `sys.prefix/Lib/site-packages/sumo/bin` — itu paket **`eclipse-sumo`** yang tidak terdaftar, jadi impor lolos tapi `sumo.exe` tidak ada. Dipasang `eclipse-sumo`/`traci`/`sumolib` 1.27.1 (disamakan dengan `simulation/.venv`) dan requirements sudah dilengkapi
 
-### 1.2 [P1 — besar, mulai secepatnya] Logika antrean CV (Fase 2 LSTM)
-- [ ] Desain ulang definisi "antrean" buat pendekatan zona (bukan crossing lama) — lihat catatan teknis lama di `docs/realtime-dashboard.md` (`QUEUE_SPACE_M`, `STOPPED_PIXEL_THRESHOLD`, dst dari `vehicle_counter.py` versi lama)
-- [ ] Implementasi logika deteksi kendaraan berhenti, jalankan ke rekaman yang ada
-- [ ] Hasilkan CSV baru dengan `queueLengthVeh`/`queueLengthMEst` yang bukan nol lagi
-- [ ] Estimasi waktu proses ulang video sudah pernah dihitung ~5 jam (lihat `docs/realtime-dashboard.md`) — alokasikan waktu mesin, bukan cuma waktu kerja
-- [ ] Serahkan ke Yuli begitu CSV siap, biar dia retrain 4 fitur penuh
+> Catatan verifikasi: run simulasi ini sengaja dipastikan terjadi **setelah** commit `26e4d48`, karena inti butir keduanya adalah membuktikan simulasi jalan lagi PASCA-perbaikan. Run terakhir sebelumnya (`simulations` id 6, 25 Agustus 02:47 WIB) jatuh ~4 jam sebelum fix, jadi tidak sah dipakai sebagai bukti.
 
-### 1.3 [P1] Satukan metrik simulasi
-- [ ] `run_simulation.py` sudah punya `averageWaitingTimeSeconds`, throughput per-approach — tapi terpisah dari `run_tls_simulation.py` yang dipakai live
-- [ ] Pindahkan/sambungkan logika metrik itu ke `run_tls_simulation.py`, atau minimal ke `SimulationResultWriter`, biar hasil simulasi live juga punya delay/queue/throughput, bukan cuma step count & posisi kendaraan
+### 1.2 [SELESAI 25 Agustus] Logika antrean CV (Fase 2 LSTM)
+- [x] Desain ulang definisi "antrean" buat pendekatan zona (bukan crossing lama) — `hitung_antrean()` di `cv/vehicle_counter_pingit.py`: 3 syarat (di dalam zona + geser < `ANTREAN_GERAK_RASIO_MAKS` + diam ≥ `ANTREAN_MIN_FRAME_DIAM` frame berturut-turut), titik acuan roda (y2) konsisten dengan `hitung_kendaraan_di_zona`
+- [x] Implementasi logika deteksi kendaraan berhenti, jalankan ke rekaman yang ada — run penuh 43,4 menit × 4 kamera, **538 jendela per kamera, nol error**
+- [x] Hasilkan CSV baru dengan `queueLengthVeh`/`queueLengthMEst` yang bukan nol lagi — `snapshot_zona.csv` 10.452 baris, **71% baris punya queue > 0**. Rata-rata per lengan: selatan 6,56 / barat 2,80 / timur 0,92 / simpang_tengah 0,70 kendaraan
+- [x] Estimasi waktu proses ulang video ~5 jam — **aktualnya 2,4 jam** dengan CUDA + `--tanpa-tampilan` (run pertama dengan tampilan 3,7 jam; GPU cuma terpakai ~25%, hambatannya CPU untuk encode 4 video anotasi)
+- [x] Serahkan ke Yuli begitu CSV siap — CSV sudah disalin ke `forecasting/data/` sebagai snapshot beku, dan `data_gabungan.csv` (538 baris, 4 fitur berisi semua) sudah dihasilkan
+
+> **Bukti logikanya benar secara fisik, bukan sekadar mengeluarkan angka:** rasio antre (queue ÷ kehadiran zona) = badan simpang **34%** (kendaraan melintas), lengan pendekat **43–77%** (kendaraan menunggu merah). Kalau logikanya asal, keempatnya akan mirip. Detail lengkap + keterbatasan yang diketahui ada di `docs/hasil-run-antrean-25-agustus.md`.
+>
+> **Belum selesai dari rantai ini (bukan bagian 1.2, tapi jangan hilang):** Yuli masih perlu instal `scikit-learn` dan retrain 4 fitur. Dan ada temuan yang memengaruhi kualitas model — **24% deret latih tercemar lompatan waktu palsu** karena rekaman punya 15 lubang dan `create_sequences()` tidak sadar timestamp. Lihat bagian 5.1 di `docs/hasil-run-antrean-25-agustus.md`.
+
+### 1.3 [SELESAI 25 Agustus] Satukan metrik simulasi
+- [x] `run_simulation.py` sudah punya `averageWaitingTimeSeconds`, throughput per-approach — tapi terpisah dari `run_tls_simulation.py` yang dipakai live
+- [x] Pindahkan/sambungkan logika metrik itu ke `run_tls_simulation.py`, atau minimal ke `SimulationResultWriter`, biar hasil simulasi live juga punya delay/queue/throughput, bukan cuma step count & posisi kendaraan — `runSimulation()` sekarang menghitung `throughputVeh`, `queueLengthVeh` (puncak kendaraan berhenti, definisi "halting" bawaan SUMO), dan `averageWaitingTimeSeconds` (pola sama dengan `run_simulation.py`), lalu `SimulationResultWriter.saveMetrics()` (method baru) menulisnya ke tabel `simulationMetrics`. **Diverifikasi lewat run sungguhan** (`simulations` id 8), dicek langsung ke database: 3 baris tersimpan (`throughputVeh=54 vehicles`, `queueLengthVeh=9 vehicles`, `averageWaitingTimeSeconds=24.6 seconds`)
+- [x] **Bonus temuan sambil mengerjakan ini:** skema `simulationMetrics` di `docs/database.md` (tabel lebar dengan kolom `delaySeconds`/`queueLengthVeh`/dst + `simulationRunId`) **tidak cocok dengan skema live** (diverifikasi lewat PostgREST OpenAPI: skema aslinya pola key-value generik — `simulationId`, `metricName`, `metricValue`, `unit`). `saveMetrics()` ditulis mengikuti skema live, bukan dokumen — dicatat di docstring method itu supaya tidak ada yang menulis ulang berdasar dokumen yang keliru
+- [x] **Bug tambahan yang ditemukan & diperbaiki di fungsi yang sama:** `arrivedVehicles`/`departedVehicles` di `runSimulation()` sebelumnya DITIMPA tiap step (`=`), bukan diakumulasi (`+=`) — `getArrivedNumber()`/`getDepartedNumber()` TraCI itu hitungan per-step, jadi nilai akhirnya cuma dari step terakhir, bukan total sepanjang simulasi. Kalau tidak diperbaiki, `throughputVeh` yang baru disambungkan ini hampir selalu bernilai 0
 
 ### 1.4 [P2 — kalau sempat] Bersihkan sisa kode basi
 - [ ] `decision_engine/run_decision.py` masih manggil `.decide()` yang sudah tidak ada — perbaiki atau hapus kalau memang sudah tidak dipakai
@@ -107,5 +116,5 @@ Rekomendasi: **Opsi A** — script training PyTorch Yuli sudah jalan & teruji (5
 - [x] Format model LSTM: **PyTorch** disepakati (item 2.1)
 - [x] Scenario Generator: **versi ringan dibangun (1.5), PPO paralel non-blocking (1.6)** disepakati
 - [ ] Sudah sepakat siapa yang dokumentasikan keputusan Recommendation Panel (item 3.2) ke laporan teknis?
-- [ ] Rahmat sudah commit fix `sumo_controller.py` (item 1.1)?
+- [x] Rahmat sudah commit fix `sumo_controller.py` (item 1.1)? — **sudah** (`26e4d48`), dan simulasinya sudah diverifikasi jalan pasca-fix (`simulations` id 7)
 - [ ] Rahmat sudah time-box PPO (item 1.6) — jangan biarkan tanpa batas waktu jelas
