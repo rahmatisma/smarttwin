@@ -376,24 +376,45 @@ KELAS_KE_KOLOM = {
 
 # Ambang gerak antar-frame dalam RASIO (bukan piksel). Konversi kasar
 # dari 3.0 piksel (nilai asli vehicle_counter.py) di frame lebar
-# ~1280px -> ~0.0023, dibulatkan naik ke 0.004 supaya lebih toleran
-# terhadap jitter kotak deteksi YOLO (yang di rasio lebih terasa
-# dibanding di piksel mentah). BUTUH DIKALIBRASI ULANG setelah lihat
-# hasil run percobaan -- angka ini titik awal, bukan final.
+# ~1280px -> ~0.0023, dibulatkan naik ke 0.004.
+#
+# KOREKSI 25 Agustus (review kode) -- komentar sebelumnya bilang
+# "lebih toleran", itu TIDAK akurat: hitung_antrean() cuma dipanggil
+# tiap frame yang LOLOS --langkah (default 5, lihat proses_tick()),
+# jadi dua posisi yang dibandingkan sebenarnya berjarak 5 frame video
+# ASLI (~0.2 detik di 25fps), bukan 1 frame seperti asumsi konversi
+# di atas. Dalam satuan kecepatan (gerak per frame asli), ambang
+# efektifnya jadi ~3x LEBIH KETAT dari 3px/frame yang asli, bukan
+# lebih toleran. BUTUH DIKALIBRASI ULANG setelah lihat hasil run
+# sungguhan -- angka ini titik awal, bukan final.
 ANTREAN_GERAK_RASIO_MAKS = 0.004
 
-# Sama seperti vehicle_counter.py: minimal 5 frame berturut-turut
-# gerak kecil sebelum dianggap benar-benar antre (bukan cuma
-# melambat sesaat).
+# Minimal 5 KALI proses_tick() (bukan 5 frame video asli, lihat
+# koreksi di atas) berturut-turut gerak kecil sebelum dianggap benar-
+# benar antre. Dengan --langkah default 5 di ~25fps, ini setara ~1
+# detik nyata -- BEDA dari vehicle_counter.py aslinya (~0.2 detik,
+# karena skrip itu tidak melompati frame yang sama). Kebetulan 1
+# detik lebih masuk akal buat "antre" (bukan cuma jeda sesaat), tapi
+# ini kebetulan, bukan hasil kalibrasi sengaja -- perlu dicek ulang
+# saat lihat hasil run sungguhan.
 ANTREAN_MIN_FRAME_DIAM = 5
 
 # Jumlah lajur per lengan -- diambil dari tabel `lanes` di Supabase
 # (dicek 25 Agustus 2026). BUKAN ditebak: barat memang cuma 1 lajur,
 # tiga lengan lain 2 lajur. Kalau kalibrasi lajur berubah di database,
 # perbarui juga angka di sini.
+#
+# KEY-nya harus persis nama_lengan yang dihasilkan ZONA_KEPADATAN di
+# file INI (selatan/simpang_tengah/barat/timur) -- BUKAN nama approach
+# konseptual di backend (utara/selatan/timur/barat). CCTV_2 nama_lengan-
+# nya "simpang_tengah" (bukan "utara"), sengaja dipetakan ke "utara"
+# di cv_csv_bridge.py::DENSITY_LENGAN_MAP sebagai proxy -- lihat
+# catatan di sana. Ditemukan 25 Agustus (review kode): sebelum
+# diperbaiki, key "utara" di sini tidak pernah cocok, jadi
+# simpang_tengah diam-diam jatuh ke default 1 lajur.
 LAJUR_PER_LENGAN = {
-    "utara": 2,
     "selatan": 2,
+    "simpang_tengah": 2,  # proxy utara, sama seperti DENSITY_LENGAN_MAP
     "timur": 2,
     "barat": 1,
 }
@@ -538,6 +559,41 @@ def hitung_kendaraan_di_zona(
     return hasil
 
 
+def _sumbu_lateral_zona(zona_polygon):
+    """
+    Cari sumbu LEBAR jalan (lintas-lajur) dari titik-titik poligon
+    zona, lewat PCA -- BUKAN diasumsikan sumbu-x gambar.
+
+    Ditambahkan 25 Agustus 2026 (temuan review kode): zona seperti
+    CCTV_1/CCTV_4 diagonal mengikuti perspektif jalan, jadi sumbu-x
+    mentah bisa lebih dekat ke arah KEDALAMAN jalan daripada LEBAR
+    jalan -- pengelompokan lajur yang pakai cx apa adanya jadi keliru
+    di zona semacam itu.
+
+    Poligon zona lebih PANJANG mengikuti arah jalan (kedalaman, dari
+    jauh sampai garis stop) daripada LEBAR jalan (lintas-lajur, cuma
+    beberapa meter). Jadi sumbu dengan sebaran titik TERKECIL
+    diasumsikan sumbu lebar jalan -- itu yang dipakai mengelompokkan
+    kendaraan per lajur di hitung_antrean(). Sumbu dengan sebaran
+    TERBESAR (kedalaman) sengaja TIDAK dipakai buat pengelompokan.
+
+    Return (pusat, sumbu_lebar) -- sumbu_lebar vektor satuan.
+    """
+
+    titik = np.array(zona_polygon, dtype=float)
+    pusat = titik.mean(axis=0)
+    tersentral = titik - pusat
+
+    kovarian = np.cov(tersentral.T)
+    nilai_eigen, vektor_eigen = np.linalg.eigh(kovarian)
+
+    # eigh mengurutkan nilai eigen NAIK -- kolom indeks 0 adalah
+    # sumbu dengan sebaran TERKECIL di antara titik poligon.
+    sumbu_lebar = vektor_eigen[:, 0]
+
+    return tuple(pusat), tuple(sumbu_lebar)
+
+
 def hitung_antrean(
     state,
     detections,
@@ -563,17 +619,52 @@ def hitung_antrean(
     queue_length_m_est: BUKAN sekadar jumlah semua kendaraan x jatah
     meter per kelas (itu keliru kalau kendaraan sejajar di lajur
     beda -- lihat diskusi 25 Agustus). Kendaraan yang lolos
-    dikelompokkan dulu jadi "lajur empirik" berdasarkan posisi x
-    (kiri-kanan) memakai lebar per lajur = lebar zona / jumlah lajur
-    lengan ini (dari LAJUR_PER_LENGAN), lalu diambil KEDALAMAN LAJUR
-    TERPANJANG -- bukan dijumlah semua lajur. Ini juga sesuai definisi
-    umum panjang antrean di teknik lalu lintas: diukur dari lajur
-    yang paling penuh, bukan total kendaraan gabungan semua lajur.
+    dikelompokkan dulu jadi "lajur empirik", lalu diambil KEDALAMAN
+    LAJUR TERPANJANG -- bukan dijumlah semua lajur. Ini juga sesuai
+    definisi umum panjang antrean di teknik lalu lintas: diukur dari
+    lajur yang paling penuh, bukan total kendaraan gabungan semua
+    lajur.
 
-    Catatan jujur: pengelompokan lajur ini pendekatan kasar (lebar
-    zona dibagi rata jumlah lajur), bukan deteksi batas lajur asli --
-    zona sendiri tidak dikalibrasi per lajur (lihat catatan "YANG
-    SENGAJA TIDAK ADA DI SINI" di kepala file).
+    PENTING soal sumbu pengelompokan (diperbaiki 25 Agustus, temuan
+    review kode): zona TIDAK selalu sejajar sumbu gambar -- CCTV_1
+    dan CCTV_4 poligonnya diagonal mengikuti perspektif jalan menuju
+    titik hilang (lihat riwayat kalibrasi di ZONA_KEPADATAN). Kalau
+    dikelompokkan pakai koordinat x MENTAH, sumbu itu malah lebih
+    dekat ke arah KEDALAMAN jalan daripada LEBAR jalan -- kendaraan
+    di lajur fisik yang sama tapi beda jarak dari garis stop bisa
+    masuk bucket berbeda, dan sebaliknya. Makanya di sini poligon
+    di-dekomposisi dulu lewat PCA (lihat _sumbu_lateral_zona): sumbu
+    dengan sebaran TERKECIL di antara titik poligon diasumsikan sumbu
+    LEBAR jalan (lintas-lajur, karena zona lebih panjang mengikuti
+    jalan daripada lebar jalan), lalu tiap kendaraan diproyeksikan ke
+    sumbu itu sebelum dikelompokkan -- bukan pakai cx apa adanya.
+
+    Catatan jujur: pengelompokan lajur ini tetap pendekatan kasar
+    (lebar zona dibagi rata jumlah lajur, bukan deteksi batas lajur
+    asli) -- zona sendiri tidak dikalibrasi per lajur (lihat catatan
+    "YANG SENGAJA TIDAK ADA DI SINI" di kepala file). PCA memperbaiki
+    SUMBU pengelompokannya, bukan menghilangkan asumsi "kendaraan
+    tersebar rata sepanjang lebar jalan".
+
+    KETERBATASAN YANG DIKETAHUI, SENGAJA TIDAK DIPERBAIKI (di luar
+    scope waktu, dicatat 25 Agustus lewat review kode):
+
+    1. ID-switch ByteTrack di antrean padat. Kendaraan yang saling
+       menutupi (kondisi paling sering justru pas benar-benar macet
+       -- yang paling ingin diukur) bikin ByteTrack ganti track_id.
+       Tiap ganti id, riwayat "sudah diam berapa lama" mulai dari 0
+       lagi -- kendaraan itu butuh ~1 detik lagi sebelum terhitung
+       antre. Efeknya SISTEMATIS menurunkan queue_length_veh, paling
+       parah justru saat kondisi paling padat. Tidak fatal (tetap
+       jauh lebih berguna dari konstanta 0 yang lama), tapi jangan
+       dipresentasikan sebagai angka akurat/presisi.
+    2. state.antrean_last_pos/antrean_stopped_frames cuma dibersihkan
+       kalau kendaraan TERDETEKSI di luar zona (lihat pop() di bawah).
+       Kalau track_id hilang begitu saja (keluar frame, oklusi total),
+       entrinya tinggal selamanya di dict. Untuk 49 menit x 4 kamera
+       paling beberapa ribu entri -- tidak masalah praktis, tapi kalau
+       skrip ini dipakai buat rekaman berjam-jam/hari, perlu ada
+       pembersihan berkala.
     """
 
     kandidat = []
@@ -628,7 +719,7 @@ def hitung_antrean(
             state.antrean_stopped_frames[track_id] = 0
 
         if state.antrean_stopped_frames[track_id] >= ANTREAN_MIN_FRAME_DIAM:
-            kandidat.append((cx, nama_kelas))
+            kandidat.append((cx, cy, nama_kelas))
 
     hasil_antrean = {
         "queue_length_veh": len(kandidat),
@@ -639,22 +730,34 @@ def hitung_antrean(
         return hasil_antrean
 
     # ------------------------------------------------------------
-    # Kelompokkan jadi "lajur empirik" berdasarkan posisi x, lalu
+    # Kelompokkan jadi "lajur empirik" berdasarkan proyeksi ke sumbu
+    # LEBAR jalan (lihat _sumbu_lateral_zona -- BUKAN sumbu-x mentah,
+    # itu keliru buat zona diagonal seperti CCTV_1/CCTV_4), lalu
     # ambil kedalaman lajur TERPANJANG.
     # ------------------------------------------------------------
 
     jumlah_lajur = max(1, LAJUR_PER_LENGAN.get(lengan, 1))
 
-    xs_poligon = [titik[0] for titik in zona_polygon]
-    x_min = min(xs_poligon)
-    x_max = max(xs_poligon)
-    lebar_zona = max(x_max - x_min, 1e-6)
+    pusat, sumbu_lebar = _sumbu_lateral_zona(zona_polygon)
+
+    proyeksi_poligon = [
+        (titik[0] - pusat[0]) * sumbu_lebar[0]
+        + (titik[1] - pusat[1]) * sumbu_lebar[1]
+        for titik in zona_polygon
+    ]
+    proyeksi_min = min(proyeksi_poligon)
+    proyeksi_max = max(proyeksi_poligon)
+    lebar_zona = max(proyeksi_max - proyeksi_min, 1e-6)
     lebar_lajur = lebar_zona / jumlah_lajur
 
     kedalaman_per_lajur = [0.0 for _ in range(jumlah_lajur)]
 
-    for cx, nama_kelas in kandidat:
-        idx_lajur = int((cx - x_min) / lebar_lajur)
+    for cx, cy, nama_kelas in kandidat:
+        proyeksi = (
+            (cx - pusat[0]) * sumbu_lebar[0]
+            + (cy - pusat[1]) * sumbu_lebar[1]
+        )
+        idx_lajur = int((proyeksi - proyeksi_min) / lebar_lajur)
         idx_lajur = max(0, min(jumlah_lajur - 1, idx_lajur))
         kedalaman_per_lajur[idx_lajur] += QUEUE_SPACE_M[nama_kelas]
 
