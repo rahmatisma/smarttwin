@@ -49,6 +49,7 @@ class SimulationResultWriter:
 
     TABLE_NAME = "simulations"
     INTERSECTIONS_TABLE = "intersections"
+    METRICS_TABLE_NAME = "simulationMetrics"
 
     # ========================================================
     # CONSTRUCTOR
@@ -654,3 +655,86 @@ class SimulationResultWriter:
         )
 
         return simulation
+
+    # ========================================================
+    # SAVE METRICS
+    # ========================================================
+
+    def saveMetrics(
+        self,
+        simulationId: int,
+        metrics: Dict[str, tuple[float, str]],
+    ) -> list[Dict[str, Any]]:
+        """
+        Simpan metrik evaluasi (delay/queue/throughput/dst) ke:
+
+            public.simulationMetrics
+
+        SATU BARIS PER METRIK -- bukan satu baris lebar per
+        simulasi. Ini bukan pilihan desain di sini, ini mengikuti
+        skema yang SUDAH ADA di database, diverifikasi langsung
+        lewat PostgREST OpenAPI (25 Agustus 2026):
+
+            id             int8
+            simulationId   int8
+            metricName     varchar
+            metricValue    float8
+            unit           varchar
+            createdAt      timestamptz
+
+        PENTING: `docs/database.md` mendokumentasikan tabel ini
+        sebagai tabel LEBAR (kolom delaySeconds/queueLengthVeh/
+        throughputVeh/waitingTimeSeconds/emission/approachId/
+        simulationRunId tersendiri) -- kolom-kolom itu TIDAK ADA
+        di database sungguhan. Kalau dokumen itu diperbarui dan
+        skemanya benar-benar diubah jadi tabel lebar, method ini
+        perlu ditulis ulang, bukan cuma nama kolomnya diganti.
+
+        metrics: {"namaMetrik": (nilai, satuan), ...}
+        contoh:  {"queueLengthVeh": (12.0, "vehicles")}
+
+        Dipanggil TERPISAH dari saveResult() dan sengaja tidak
+        fatal kalau gagal (lihat pemanggil di run_tls_simulation.py)
+        -- baris `simulations` sudah tersimpan duluan, jadi gagal
+        simpan metrik tidak boleh membuat seolah simulasinya sendiri
+        gagal.
+        """
+
+        if not metrics:
+            return []
+
+        rows = [
+            {
+                "simulationId": simulationId,
+                "metricName": name,
+                "metricValue": float(value),
+                "unit": unit,
+            }
+            for name, (value, unit) in metrics.items()
+        ]
+
+        try:
+
+            response = (
+                self.supabase
+                .table(
+                    self.METRICS_TABLE_NAME
+                )
+                .insert(
+                    rows
+                )
+                .execute()
+            )
+
+        except Exception as exc:
+
+            raise RuntimeError(
+                "Gagal insert ke tabel "
+                f"{self.METRICS_TABLE_NAME}: "
+                f"{exc}"
+            ) from exc
+
+        return (
+            response.data
+            or []
+        )

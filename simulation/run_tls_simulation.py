@@ -1041,6 +1041,17 @@ def runSimulation():
 
     departedVehicles = 0
 
+    # Puncak jumlah kendaraan berhenti (speed < 0.1 m/s, definisi
+    # "halting" bawaan SUMO) yang teramati sepanjang simulasi --
+    # dipakai sebagai queueLengthVeh, konsisten dengan nama field
+    # queueLengthVeh di data-contract.md.
+    peakQueueLength = 0
+
+    # Sampel accumulated-waiting-time tiap kendaraan aktif, diambil
+    # tiap step -- pola sama dengan run_simulation.py, supaya
+    # averageWaitingTimeSeconds di sini sepadan artinya.
+    waitingTimeSamples: list[float] = []
+
     while (
         steps
         < simulationStepLimit
@@ -1063,28 +1074,67 @@ def runSimulation():
 
         try:
 
-            arrivedVehicles = (
+            # getArrivedNumber()/getDepartedNumber() itu hitungan
+            # PER STEP INI SAJA (bukan kumulatif) -- sebelumnya
+            # ditimpa (=) tiap step, bukan ditambah (+=), jadi nilai
+            # akhirnya cuma dari step TERAKHIR, bukan total sepanjang
+            # simulasi. Ditemukan 25 Agustus 2026 pas menyambungkan
+            # throughputVeh -- kalau tidak diperbaiki, throughput
+            # yang disimpan ke simulationMetrics nanti hampir selalu
+            # 0 (step terakhir jarang ada yang datang/pergi persis).
+            arrivedVehicles += (
                 traci
                 .simulation
                 .getArrivedNumber()
             )
 
-            departedVehicles = (
+            departedVehicles += (
                 traci
                 .simulation
                 .getDepartedNumber()
             )
 
-            activeVehicles = (
+            vehicleIds = (
                 traci
                 .vehicle
-                .getIDCount()
+                .getIDList()
+            )
+
+            activeVehicles = len(
+                vehicleIds
             )
 
             expectedVehicles = (
                 traci
                 .simulation
                 .getMinExpectedNumber()
+            )
+
+            # Antrean & waktu tunggu dalam SATU pass yang sama atas
+            # vehicleIds -- bukan loop terpisah, supaya tidak dobel
+            # menelusuri seluruh kendaraan aktif tiap step.
+            haltingCount = 0
+
+            for vehicleId in vehicleIds:
+
+                waitingTimeSamples.append(
+                    traci.vehicle
+                    .getAccumulatedWaitingTime(
+                        vehicleId
+                    )
+                )
+
+                if (
+                    traci.vehicle
+                    .getSpeed(vehicleId)
+                    < 0.1
+                ):
+
+                    haltingCount += 1
+
+            peakQueueLength = max(
+                peakQueueLength,
+                haltingCount,
             )
 
         except Exception:
@@ -1121,6 +1171,13 @@ def runSimulation():
 
         activeVehicles = 0
 
+    averageWaitingTimeSeconds = (
+        sum(waitingTimeSamples)
+        / len(waitingTimeSamples)
+        if waitingTimeSamples
+        else 0.0
+    )
+
     return {
 
         "steps":
@@ -1134,6 +1191,22 @@ def runSimulation():
 
         "departedVehicles":
             departedVehicles,
+
+        # throughputVeh = total kendaraan yang selesai perjalanan
+        # (arrived) sepanjang simulasi -- baru bermakna setelah
+        # arrivedVehicles diperbaiki jadi akumulasi, bukan step
+        # terakhir saja (lihat catatan di loop di atas).
+        "throughputVeh":
+            arrivedVehicles,
+
+        "queueLengthVeh":
+            peakQueueLength,
+
+        "averageWaitingTimeSeconds":
+            round(
+                averageWaitingTimeSeconds,
+                2,
+            ),
     }
 
 
@@ -1208,6 +1281,21 @@ def buildSimulationMetrics(
                 "departedVehicles"
             ],
 
+        "throughputVeh":
+            simulationMetrics[
+                "throughputVeh"
+            ],
+
+        "queueLengthVeh":
+            simulationMetrics[
+                "queueLengthVeh"
+            ],
+
+        "averageWaitingTimeSeconds":
+            simulationMetrics[
+                "averageWaitingTimeSeconds"
+            ],
+
         "finalPhase":
             tlsResult[
                 "finalPhase"
@@ -1251,6 +1339,21 @@ def printSimulationResult(
     print(
         f"Departed         : "
         f"{simulationMetrics['departedVehicles']}"
+    )
+
+    print(
+        f"Throughput       : "
+        f"{simulationMetrics['throughputVeh']} veh"
+    )
+
+    print(
+        f"Queue (peak)     : "
+        f"{simulationMetrics['queueLengthVeh']} veh"
+    )
+
+    print(
+        f"Avg waiting time : "
+        f"{simulationMetrics['averageWaitingTimeSeconds']}s"
     )
 
     print(
@@ -1427,6 +1530,53 @@ def saveSimulationResult(
         f"{simulationId}"
     )
 
+    # ========================================================
+    # SAVE METRICS (delay/queue/throughput) -- item 1.3
+    #
+    # TERPISAH dari insert simulations di atas, dan sengaja
+    # TIDAK FATAL kalau gagal: baris `simulations` sudah tersimpan
+    # duluan, jadi kegagalan simpan metrik tidak boleh membuat
+    # seolah simulasinya sendiri gagal (exception di sini di-catch,
+    # bukan di-raise ulang).
+    # ========================================================
+
+    try:
+
+        resultWriter.saveMetrics(
+            simulationId,
+            {
+                "averageWaitingTimeSeconds": (
+                    simulationMetrics[
+                        "averageWaitingTimeSeconds"
+                    ],
+                    "seconds",
+                ),
+                "queueLengthVeh": (
+                    simulationMetrics[
+                        "queueLengthVeh"
+                    ],
+                    "vehicles",
+                ),
+                "throughputVeh": (
+                    simulationMetrics[
+                        "throughputVeh"
+                    ],
+                    "vehicles",
+                ),
+            },
+        )
+
+        print(
+            "Metrics (delay/queue/throughput) berhasil disimpan."
+        )
+
+    except Exception as exc:
+
+        print(
+            "Gagal menyimpan simulationMetrics "
+            f"(non-fatal, simulasi tetap tersimpan): {exc}"
+        )
+
     return simulation
 
 
@@ -1549,9 +1699,14 @@ def main():
         # ----------------------------------------------------
         # BUILD FINAL METRICS
         #
-        # Metrics TIDAK dimasukkan ke simulations.
-        #
-        # Hanya untuk output terminal saat ini.
+        # Sampai 25 Agustus 2026 metrics di sini CUMA buat output
+        # terminal, tidak pernah disimpan -- saveSimulationResult()
+        # di bawah cuma mengirim field administratif (intersectionId
+        # dkk) ke tabel `simulations`. Sekarang throughputVeh/
+        # queueLengthVeh/averageWaitingTimeSeconds ikut disimpan ke
+        # tabel terpisah `simulationMetrics` lewat
+        # SimulationResultWriter.saveMetrics() -- lihat pemanggilannya
+        # di akhir saveSimulationResult().
         # ----------------------------------------------------
 
         finalMetrics = (
