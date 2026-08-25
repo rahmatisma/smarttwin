@@ -264,12 +264,47 @@ def load_snapshot_dataset(path: Path) -> pd.DataFrame:
     #
     # Snapshot memiliki beberapa kamera/lengan.
     # Kita gunakan MEAN antar kamera/lengan.
+    #
+    # ANTREAN (ditambahkan 25 Agustus 2026): sejak
+    # cv/vehicle_counter_pingit.py punya hitung_antrean(),
+    # snapshot_zona.csv membawa queue_length_veh dan
+    # queue_length_m_est yang benar-benar berisi -- sebelumnya
+    # kedua kolom di-hardcode 0.0 di merge_datasets() di bawah.
+    #
+    # SUM untuk queue_length_veh (bukan mean seperti
+    # total_di_zona): alasan "jangan hitung kendaraan yang sama
+    # dua kali" tidak berlaku -- kendaraan yang antre di lengan
+    # selatan bukan kendaraan yang sama dengan yang antre di
+    # lengan barat. MAX untuk queue_length_m_est: menjumlahkan
+    # METER antar-lengan tidak bermakna (empat antrean terpisah,
+    # bukan satu antrean panjang), jadi dipakai lengan terparah.
+    #
+    # Perubahan yang sama persis ada di prepare_data.py --
+    # dua file ini memang punya logika merge yang terduplikasi.
+    # Kalau salah satu diubah, ubah keduanya.
     # ========================================================
+
+    for kolom_antrean in (
+        "queue_length_veh",
+        "queue_length_m_est",
+    ):
+        if kolom_antrean in df.columns:
+            df[kolom_antrean] = pd.to_numeric(
+                df[kolom_antrean],
+                errors="coerce",
+            ).fillna(0)
+
+    agregasi = {"total_di_zona": "mean"}
+
+    if "queue_length_veh" in df.columns:
+        agregasi["queue_length_veh"] = "sum"
+
+    if "queue_length_m_est" in df.columns:
+        agregasi["queue_length_m_est"] = "max"
 
     result = (
         df.groupby("timestamp", as_index=False)
-        ["total_di_zona"]
-        .mean()
+        .agg(agregasi)
     )
 
     # ========================================================
@@ -300,12 +335,16 @@ def load_snapshot_dataset(path: Path) -> pd.DataFrame:
         result.head(10).to_string(index=False)
     )
 
-    return result[
-        [
-            "timestamp",
-            "densityIndex",
-        ]
-    ]
+    kolom_keluar = ["timestamp", "densityIndex"]
+
+    for kolom_antrean in (
+        "queue_length_veh",
+        "queue_length_m_est",
+    ):
+        if kolom_antrean in result.columns:
+            kolom_keluar.append(kolom_antrean)
+
+    return result[kolom_keluar]
 
 
 # ============================================================
@@ -347,9 +386,24 @@ def resample_snapshot(
         df["timestamp"]
     )
 
+    # Kolom antrean ikut MEAN, dan di sini itu memang benar --
+    # beda dari agregasi LINTAS-LENGAN di load_snapshot_dataset()
+    # yang pakai sum/max. Yang ini agregasi LINTAS-WAKTU (beberapa
+    # detik di dalam satu jendela 5 detik), dan antrean itu besaran
+    # KEHADIRAN: menjumlahkannya antar-detik akan menghitung
+    # kendaraan diam yang sama berkali-kali.
+    kolom_dipakai = ["densityIndex"]
+
+    for kolom_antrean in (
+        "queue_length_veh",
+        "queue_length_m_est",
+    ):
+        if kolom_antrean in df.columns:
+            kolom_dipakai.append(kolom_antrean)
+
     df = (
         df.set_index("timestamp")
-        [["densityIndex"]]
+        [kolom_dipakai]
         .resample("5s")
         .mean()
         .reset_index()
@@ -407,11 +461,33 @@ def merge_datasets(
     ).reset_index(drop=True)
 
     # ========================================================
-    # QUEUE SEMENTARA
+    # QUEUE
+    #
+    # Sampai 25 Agustus 2026 kedua kolom ini di-hardcode 0.0
+    # karena CV memang belum menghitung antrean. Sekarang
+    # snapshot_zona.csv sudah membawanya (lihat
+    # load_snapshot_dataset di atas), jadi dipakai apa adanya.
+    #
+    # Fallback 0.0 DIPERTAHANKAN untuk CSV lama yang belum punya
+    # kolom itu, supaya skrip ini tidak gagal keras kalau
+    # dijalankan ke rekaman hasil run sebelum perubahan CV.
+    # Kalau hasilnya nol semua, cek dulu apakah CSV sumbernya
+    # memang CSV lama, sebelum menyalahkan modelnya.
     # ========================================================
 
-    merged["queueLengthVeh"] = 0.0
-    merged["queueLengthMEst"] = 0.0
+    if "queue_length_veh" in merged.columns:
+        merged["queueLengthVeh"] = (
+            merged["queue_length_veh"].fillna(0.0)
+        )
+    else:
+        merged["queueLengthVeh"] = 0.0
+
+    if "queue_length_m_est" in merged.columns:
+        merged["queueLengthMEst"] = (
+            merged["queue_length_m_est"].fillna(0.0)
+        )
+    else:
+        merged["queueLengthMEst"] = 0.0
 
     # ========================================================
     # URUTKAN SESUAI MODEL CONTRACT

@@ -211,13 +211,40 @@ def load_snapshot(path: Path) -> pd.DataFrame:
     #
     # Kita menggunakan rata-rata antar kamera/lengan supaya
     # tidak menghitung kendaraan yang sama berkali-kali.
+    #
+    # ANTREAN (ditambahkan 25 Agustus 2026, begitu CV mulai
+    # benar-benar menghitung antrean -- sebelumnya kedua kolom
+    # ini di-hardcode 0.0 di merge_datasets()):
+    #
+    # queue_length_veh pakai SUM, bukan mean seperti
+    # total_di_zona. Alasan "jangan hitung kendaraan yang sama
+    # dua kali" TIDAK berlaku di sini -- kendaraan yang antre di
+    # lengan selatan bukan kendaraan yang sama dengan yang antre
+    # di lengan barat, jadi menjumlahkannya benar secara fisik:
+    # "berapa total kendaraan sedang mengantre di simpang ini".
+    #
+    # queue_length_m_est pakai MAX, bukan sum: menjumlahkan
+    # METER antar-lengan tidak bermakna (itu bukan satu antrean
+    # panjang, tapi empat antrean terpisah). MAX = "lengan
+    # terparah", satuannya tetap meter dan tetap bisa dibaca.
+    #
+    # Pola sum/max ini mengikuti preseden yang sudah ada di
+    # backend/app/services/realtime_forecast_service.py saat ia
+    # meruntuhkan seluruh approach jadi satu deret.
     # ========================================================
+
+    agregasi = {"total_di_zona": "mean"}
+
+    if "queue_length_veh" in dataframe.columns:
+        agregasi["queue_length_veh"] = "sum"
+
+    if "queue_length_m_est" in dataframe.columns:
+        agregasi["queue_length_m_est"] = "max"
 
     dataframe = (
         dataframe
         .groupby("timestamp", as_index=False)
-        ["total_di_zona"]
-        .mean()
+        .agg(agregasi)
     )
 
     # ========================================================
@@ -319,9 +346,24 @@ def resample_snapshot(
     #
     # Untuk snapshot:
     # gunakan MEAN dalam interval 5 detik.
+    #
+    # Kolom antrean ikut MEAN juga, dan di sini itu memang yang
+    # benar -- beda dari agregasi LINTAS-LENGAN di load_snapshot()
+    # yang pakai sum/max. Yang ini agregasi LINTAS-WAKTU (beberapa
+    # detik di dalam satu jendela 5 detik), dan antrean itu
+    # besaran KEHADIRAN: menjumlahkannya antar-detik akan
+    # menghitung kendaraan diam yang sama berkali-kali -- persis
+    # kesalahan yang dicatat di cv/vehicle_counter_pingit.py soal
+    # jendela 5 detik.
+    kolom_dipakai = ["densityIndex"]
+
+    for kolom in ("queue_length_veh", "queue_length_m_est"):
+        if kolom in dataframe.columns:
+            kolom_dipakai.append(kolom)
+
     dataframe = (
         dataframe[
-            ["densityIndex"]
+            kolom_dipakai
         ]
         .resample(f"{RESAMPLE_SECONDS}s")
         .mean()
@@ -378,14 +420,35 @@ def merge_datasets(
     )
 
     # ========================================================
-    # Queue sementara
+    # Queue
     #
-    # CV saat ini belum menghitung antrean.
+    # Sampai 25 Agustus 2026 dua kolom ini di-hardcode 0.0 di
+    # sini karena CV memang belum menghitung antrean. Sejak
+    # cv/vehicle_counter_pingit.py punya hitung_antrean(),
+    # snapshot_zona.csv sudah membawa queue_length_veh dan
+    # queue_length_m_est yang benar-benar berisi, jadi keduanya
+    # dipakai apa adanya lewat load_snapshot()/resample_snapshot().
+    #
+    # Fallback 0.0 DIPERTAHANKAN untuk CSV lama yang belum punya
+    # kolom itu -- supaya skrip ini tidak mendadak gagal keras
+    # kalau dijalankan ke rekaman hasil run sebelum perubahan CV.
+    # Kalau angkanya nol semua, cek dulu apakah CSV sumbernya
+    # memang CSV lama, sebelum menyalahkan modelnya.
     # ========================================================
 
-    merged["queueLengthVeh"] = 0.0
+    if "queue_length_veh" in merged.columns:
+        merged["queueLengthVeh"] = (
+            merged["queue_length_veh"].fillna(0.0)
+        )
+    else:
+        merged["queueLengthVeh"] = 0.0
 
-    merged["queueLengthMEst"] = 0.0
+    if "queue_length_m_est" in merged.columns:
+        merged["queueLengthMEst"] = (
+            merged["queue_length_m_est"].fillna(0.0)
+        )
+    else:
+        merged["queueLengthMEst"] = 0.0
 
     # ========================================================
     # Susun kolom sesuai MODEL CONTRACT
