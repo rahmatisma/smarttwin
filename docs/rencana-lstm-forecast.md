@@ -104,15 +104,17 @@ Kalau dikerjakan, pola yang masuk akal: `RuleBasedEngine.recommend()` menerima p
 
 ---
 
-## 9. Status implementasi malam ini (25 Agustus) — ada 3 versi berbeda, membingungkan
+## 9. Status implementasi (diperbarui 25 Agustus malam — audit sebelumnya di bagian ini TERBALIK dari kenyataan kode)
 
-Ditemukan lewat audit langsung ke kode, dicatat di sini biar tidak diulang kebingungannya:
+Audit awal dokumen ini (ditulis siang 25 Agustus) menyimpulkan `realtime_forecast_service.py` yang aktif dan `forecast_service.py` yang mati. **Itu salah** — waktu itu belum dicek langsung apa yang benar-benar di-import `forecast.py`. Audit ulang malam ini (lewat `grep` ke seluruh repo, bukan menduga dari nama file) membalik kesimpulannya:
 
-1. **`backend/app/services/forecast_service.py`** (`ForecastService`) — versi PERTAMA. TensorFlow, cuma pakai `values[0]` buat `predictedVehicleCount`, sisanya hardcode 0/None. Sepertinya sudah tidak dipakai (`forecast.py` routes tidak import ini lagi), tapi filenya masih ada — perlu diputuskan hapus atau tidak, biar tidak ada 2 sumber kebenaran yang beda soal "bagaimana forecast dihitung".
-2. **`backend/app/services/realtime_forecast_service.py`** (`RealtimeForecastService`) — versi yang **aktif dipakai sekarang** (di-import `app/api/routes/forecast.py`). TensorFlow juga, 4 fitur, agregasi per-MENIT (masalah yang dibahas di bagian 4).
-3. **`decision_engine/rule_based_engine.py`** — ini BUKAN LSTM (ini rule-based, dibahas di dokumen `pembagian-tugas-24-agustus.md`), disebut di sini cuma buat menegaskan: **LSTM dan RuleBasedEngine masih dua sistem terpisah yang belum saling bicara** (lihat bagian 8).
+1. **`backend/app/services/forecast_service.py`** (`ForecastService`) — **inilah yang aktif dipakai sekarang.** Di-import langsung oleh `app/api/routes/forecast.py`. Sudah PyTorch (bukan TensorFlow), 4 fitur, `INPUT_TIMESTEPS=12` / `OUTPUT_TIMESTEPS=3` di skala 5 detik — cocok dengan rencana granularitas di bagian 4-5 dokumen ini, dan cocok dengan output `forecasting/scripts/lstm/train.py` (`traffic_lstm.pt` + `scaler.json`).
+2. **`backend/app/services/realtime_forecast_service.py`** (`RealtimeForecastService`) — **DIHAPUS 25 Agustus malam.** Tidak di-import siapa pun (dikonfirmasi lewat grep, nol hasil di luar dirinya sendiri dan satu baris komentar di `prepare_data.py`), dan tidak bisa jalan sama sekali kalau diinstansiasi (`load_model(...)` dipanggil tanpa pernah di-import — `NameError` instan). Menunjuk ke `.keras`/`backend/models/` yang direktorinya tidak ada. File ini adalah sisa desain lama (agregasi per-menit, masalah yang dibahas di bagian 4) yang tidak pernah disambungkan ke apa pun.
+3. **`backend/app/repositories/forecast_repository.py`** (`ForecastRepository`) — **DIHAPUS bersamaan**, karena satu-satunya pemakainya adalah `RealtimeForecastService` di atas. Sebagai catatan audit trail: query-nya sendiri sebenarnya tidak pernah bisa jalan — memfilter kolom `intersectionId`/`windowStart` yang tidak ada di tabel `trafficApproachStates` (kolom itu ada di `trafficStates`), jadi akan melempar `APIError 42703` kalau sempat dipanggil.
+4. **`backend/tests/test_forecast_realtime.py`** — **DIHAPUS bersamaan.** Bukan test pytest asli (`def main()`, nol `def test_*`), sama persis polanya dengan 4 file basi yang sudah dihapus di item 2.5 `pembagian-tugas-24-agustus.md`. Sebelum dihapus, file ini aktif MEMBUAT `pytest -q` gagal collection total (bukan cuma 1 test gagal) karena mengimpor dua kelas yang sudah dihapus. Regresi ini tidak tercatat di mana pun sebelum ditemukan malam ini.
+5. **`decision_engine/rule_based_engine.py`** — ini BUKAN LSTM (rule-based, dibahas di `pembagian-tugas-24-agustus.md`), disebut di sini cuma buat menegaskan: **LSTM dan RuleBasedEngine masih dua sistem terpisah yang belum saling bicara** (lihat bagian 8).
 
-**Rekomendasi kebersihan kode:** setelah desain di dokumen ini disepakati, `forecast_service.py` (versi 1) sebaiknya dihapus supaya tidak ada dua implementasi forecast yang membingungkan orang berikutnya yang buka kode ini.
+**Verifikasi setelah penghapusan:** `python -c "import app.main"` sukses, `pytest -q` kembali ke `1 failed, 18 passed` (satu-satunya gagal adalah `test_lstm_forecaster.py`, menunggu model dari Yuli — sudah diharapkan, bukan regresi).
 
 ---
 
