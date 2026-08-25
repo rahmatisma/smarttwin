@@ -310,37 +310,68 @@ class TrafficStateBuilder:
         if not traffic_state_ids:
             return []
 
-        result = (
-            self.supabase
-            .table("trafficLaneMetrics")
-            .select(
-                """
-                id,
-                trafficStateId,
-                laneId,
-                timestamp,
-                vehicleCount,
-                carCount,
-                motorcycleCount,
-                busCount,
-                truckCount,
-                queueLengthVeh,
-                queueLengthMEst,
-                densityIndex
-                """
-            )
-            .in_(
-                "trafficStateId",
-                traffic_state_ids,
-            )
-            .order(
-                "timestamp",
-                desc=False,
-            )
-            .execute()
-        )
+        # PostgREST memotong hasil di 1000 baris secara DIAM-DIAM kalau
+        # tidak diberi .range() -- tidak ada error, tidak ada peringatan,
+        # datanya saja yang tinggal separuh. Ditemukan 25 Agustus 2026:
+        # rekaman 49 menit menghasilkan 2152 trafficLaneMetrics, tapi
+        # yang kebaca cuma 1000, jadi trafficApproachStates cuma
+        # terbentuk untuk 250 dari 538 window (1000 / 4 lajur = 250) dan
+        # sisanya hilang tanpa jejak di log.
+        #
+        # Ambang ini kena di rekaman apa pun yang lebih panjang dari
+        # ~21 menit (250 window x 5 detik), jadi bukan kasus pinggiran.
+        # Karena itu di sini di-paginasi eksplisit sampai habis.
+        UKURAN_HALAMAN = 1000
 
-        return result.data or []
+        semua_baris: list[dict[str, Any]] = []
+        offset = 0
+
+        while True:
+
+            halaman = (
+                self.supabase
+                .table("trafficLaneMetrics")
+                .select(
+                    """
+                    id,
+                    trafficStateId,
+                    laneId,
+                    timestamp,
+                    vehicleCount,
+                    carCount,
+                    motorcycleCount,
+                    busCount,
+                    truckCount,
+                    queueLengthVeh,
+                    queueLengthMEst,
+                    densityIndex
+                    """
+                )
+                .in_(
+                    "trafficStateId",
+                    traffic_state_ids,
+                )
+                .order(
+                    "timestamp",
+                    desc=False,
+                )
+                .range(
+                    offset,
+                    offset + UKURAN_HALAMAN - 1,
+                )
+                .execute()
+            ).data or []
+
+            semua_baris.extend(halaman)
+
+            # Halaman tidak penuh = sudah baris terakhir. Ini juga yang
+            # menghentikan loop kalau tabelnya kosong.
+            if len(halaman) < UKURAN_HALAMAN:
+                break
+
+            offset += UKURAN_HALAMAN
+
+        return semua_baris
 
     # ========================================================
     # BUILD RELATION MAP

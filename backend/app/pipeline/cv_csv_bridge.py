@@ -277,9 +277,43 @@ def _insert_traffic_state(
             writer.supabase.table("trafficApproachStates").delete().eq(
                 "trafficStateId", existing_id
             ).execute()
-            writer.supabase.table("trafficStates").delete().eq(
-                "id", existing_id
-            ).execute()
+
+            try:
+                writer.supabase.table("trafficStates").delete().eq(
+                    "id", existing_id
+                ).execute()
+            except APIError as delete_exc:
+                if delete_exc.code != "23503":
+                    raise
+
+                # Baris ini masih dirujuk tabel lain lewat foreign key
+                # (nyatanya: simulations.trafficStateId, ditemukan 25
+                # Agustus). Sebelum ini exception-nya lolos naik dan
+                # MEMBATALKAN SELURUH ingest -- termasuk tahap agregasi
+                # trafficApproachStates yang jalan di paling akhir. Jadi
+                # satu baris yang tidak bisa dihapus bikin 500+ window
+                # lain kehilangan approach-nya, dan dashboard kosong
+                # total walau trafficStates & trafficLaneMetrics terisi.
+                #
+                # Sekarang barisnya DIPAKAI ULANG, bukan dilewati:
+                # id-nya dipertahankan (FK dari tabel lain tetap sah),
+                # tapi createdAt/source di-update supaya window ini ikut
+                # batch yang sedang ditulis. createdAt itu penting --
+                # frontend (supabaseData.ts::fetchTrafficState) memilih
+                # "batch yang sedang ditonton" justru dengan
+                # mengelompokkan createdAt, jadi baris yang createdAt-nya
+                # tertinggal akan jadi yatim dan tidak pernah terbaca.
+                writer.supabase.table("trafficStates").update(
+                    {
+                        "createdAt": created_at,
+                        "source": source,
+                    }
+                ).eq("id", existing_id).execute()
+
+                # UNIQUE(intersectionId, windowStart, windowEnd) menjamin
+                # `existing` maksimal satu baris, jadi aman langsung
+                # keluar tanpa memproses sisa loop.
+                return existing_id
 
         result = writer.supabase.table("trafficStates").insert(payload).execute()
 

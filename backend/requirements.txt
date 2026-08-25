@@ -9,5 +9,13 @@ pandas==2.3.3
 python-multipart==0.0.20
 huggingface-hub==0.27.1
 supabase==2.11.0
-traci
+# SUMO dipasang sebagai paket pip DI DALAM venv ini, bukan install
+# sistem -- sumo_controller.py mencari binarynya di
+# sys.prefix/Lib/site-packages/sumo/bin (lihat SUMO_BIN_DIR di sana).
+# Jadi `traci` saja tidak cukup: tanpa eclipse-sumo, importnya lolos
+# tapi binary sumo.exe tidak ada. Versi disamakan dengan
+# simulation/.venv (1.27.1) supaya dua environment tidak beda perilaku.
+eclipse-sumo==1.27.1
+traci==1.27.1
+sumolib==1.27.1
 # library YOLO, LSTM dan PPO belum ditambahkan
