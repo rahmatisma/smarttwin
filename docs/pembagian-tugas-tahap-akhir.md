@@ -20,12 +20,12 @@ Disusun dari audit progres per modul malam 25 Agustus (lihat rekap commit di `pe
 - [ ] Commit fix `SUMO_BIN_DIR` yang sempat terhapus tanpa sengaja di commit LSTM Yuli (sudah diperbaiki, belum di-commit)
 - [ ] Jalankan `run_tls_simulation.py` sekali penuh buat mastiin simulasi beneran jalan lagi, bukan cuma lolos import
 
-### 1.2 [P1 — besar, mulai secepatnya] Logika antrean CV (Fase 2 LSTM)
-- [ ] Desain ulang definisi "antrean" buat pendekatan zona (bukan crossing lama) — lihat catatan teknis lama di `docs/realtime-dashboard.md` (`QUEUE_SPACE_M`, `STOPPED_PIXEL_THRESHOLD`, dst dari `vehicle_counter.py` versi lama)
-- [ ] Implementasi logika deteksi kendaraan berhenti, jalankan ke rekaman yang ada
-- [ ] Hasilkan CSV baru dengan `queueLengthVeh`/`queueLengthMEst` yang bukan nol lagi
-- [ ] Estimasi waktu proses ulang video sudah pernah dihitung ~5 jam (lihat `docs/realtime-dashboard.md`) — alokasikan waktu mesin, bukan cuma waktu kerja
-- [ ] Serahkan ke Yuli begitu CSV siap, biar dia retrain 4 fitur penuh
+### 1.2 [SELESAI 25 Agustus, Rahmat] Logika antrean CV (Fase 2 LSTM)
+- [x] Desain ulang definisi "antrean" buat pendekatan zona — `hitung_antrean()` di `vehicle_counter_pingit.py` (3 syarat: di zona + gerak minim + diam berturut-turut), diadaptasi dari logika lama `vehicle_counter.py`
+- [x] Implementasi logika deteksi kendaraan berhenti + kelompokkan lajur pakai PCA (bukan sumbu-x mentah, zona diagonal CCTV_1/CCTV_4 butuh itu) — sempat ada 2 bug nyata ketauan lewat review kode manual sebelum full run (pembagian lajur salah axis, key lengan `simpang_tengah` tidak cocok), sudah diperbaiki + tervalidasi
+- [x] Full run 4 kamera × 49 menit dijalankan Rahmat di PC ber-GPU
+- [x] `ingest()` dijalankan, **terverifikasi langsung ke Supabase**: 538 window ter-ingest, rentang `16:30:10`–`17:19:15` (rentang penuh rekaman), `queueLengthVeh`/`queueLengthMEst` bervariasi dan masuk akal, bukan konstanta
+- [ ] **BELUM:** kasih tau Yuli data antrean asli sudah ada di Supabase, biar dia retrain LSTM 4 fitur penuh (Fase 2 di `rencana-lstm-forecast.md`)
 
 ### 1.3 [P1] Satukan metrik simulasi
 - [ ] `run_simulation.py` sudah punya `averageWaitingTimeSeconds`, throughput per-approach — tapi terpisah dari `run_tls_simulation.py` yang dipakai live
