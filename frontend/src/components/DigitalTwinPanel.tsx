@@ -266,12 +266,28 @@ export default function DigitalTwinPanel({
    * Mapping approach berdasarkan arah.
    */
 
+  /*
+   * Partial, BUKAN Record penuh. Sebelumnya di-cast paksa jadi
+   * Record<Approach, ApproachState> -- itu janji palsu ke
+   * TypeScript: isinya bergantung data, jadi arah yang tidak ada
+   * bernilai undefined saat runtime sementara compiler diam.
+   * Akibatnya `byApproach.north.queueLengthVeh` crash begitu
+   * salah satu arah absen (render awal sebelum data masuk, atau
+   * dulu waktu panel ini masih diberi daftar hasil filter lengan).
+   */
   const byApproach = Object.fromEntries(
     approaches.map((approach) => [
       approach.approach,
       approach,
     ])
-  ) as Record<Approach, ApproachState>;
+  ) as Partial<Record<Approach, ApproachState>>;
+
+  /*
+   * Arah yang belum ada datanya dianggap antrean kosong, bukan
+   * bikin komponen mati -- denah simpang tetap tergambar utuh.
+   */
+  const queueOf = (arah: Approach) =>
+    byApproach[arah]?.queueLengthVeh ?? 0;
 
   /*
    * Warna signal dihitung dari currentPhase.
@@ -520,7 +536,7 @@ export default function DigitalTwinPanel({
                 ================================================= */}
 
             <QueueDots
-              count={queueDotCount(byApproach.north.queueLengthVeh)}
+              count={queueDotCount(queueOf("north"))}
               axis="y"
               fixed={180}
               from={150}
@@ -528,7 +544,7 @@ export default function DigitalTwinPanel({
             />
 
             <QueueDots
-              count={queueDotCount(byApproach.south.queueLengthVeh)}
+              count={queueDotCount(queueOf("south"))}
               axis="y"
               fixed={220}
               from={250}
@@ -536,7 +552,7 @@ export default function DigitalTwinPanel({
             />
 
             <QueueDots
-              count={queueDotCount(byApproach.east.queueLengthVeh)}
+              count={queueDotCount(queueOf("east"))}
               axis="x"
               fixed={180}
               from={250}
@@ -544,7 +560,7 @@ export default function DigitalTwinPanel({
             />
 
             <QueueDots
-              count={queueDotCount(byApproach.west.queueLengthVeh)}
+              count={queueDotCount(queueOf("west"))}
               axis="x"
               fixed={220}
               from={150}

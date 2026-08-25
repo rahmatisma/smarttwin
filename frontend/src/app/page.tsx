@@ -754,6 +754,23 @@ export default function DashboardPage() {
   }, [selectedApproach, allTrafficStates]);
 
   /*
+   * Versi TIDAK difilter, khusus DigitalTwinPanel.
+   *
+   * Panel itu menggambar DENAH FISIK simpang -- keempat lengan
+   * selalu ada di dunia nyata, tidak peduli lengan mana yang
+   * sedang dipilih di dropdown Header. Filter lengan itu maunya
+   * StatsRow (statistik memang mengikuti pilihan), bukan denah.
+   *
+   * Sebelumnya panel ikut diberi daftar terfilter, jadi memilih
+   * satu lengan menghapus tiga lengan lain dari denah dan bikin
+   * komponennya crash.
+   */
+  const semuaApproaches = useMemo(
+    () => allTrafficStates["intersection4"]?.approaches ?? [],
+    [allTrafficStates]
+  );
+
+  /*
    * =========================================================
    * LOADING
    * =========================================================
@@ -935,7 +952,7 @@ export default function DashboardPage() {
 
             <div className="xl:col-span-2">
               <DigitalTwinPanel
-                approaches={lenganFilteredApproaches}
+                approaches={semuaApproaches}
                 signal={activeSignal}
               />
             </div>

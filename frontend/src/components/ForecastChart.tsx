@@ -35,6 +35,24 @@ function formatForecastData(data: ForecastResponse) {
   });
 }
 
+/*
+ * Titik pada grafik = hasil formatForecastData DITAMBAH dua field
+ * yang cuma ada di sisi grafik, bukan di kontrak ForecastPrediction:
+ *
+ *   actualVehicleCount -> dataKey garis "aktual" (lihat <Line> di
+ *                         bawah). Hanya terisi di titik horizon 0.
+ *   isActual           -> penanda titik aktual vs prediksi.
+ *
+ * Sebelumnya tipe ini tidak pernah dideklarasikan, jadi TypeScript
+ * menyimpulkan bentuk deret dari formatForecastData saja dan
+ * menolak kedua field itu sebagai properti asing -- `npm run build`
+ * gagal total di sini.
+ */
+type TitikDeret = ReturnType<typeof formatForecastData>[number] & {
+  isActual: boolean;
+  actualVehicleCount?: number;
+};
+
 export default function ForecastChart({
   data,
   current,
@@ -65,9 +83,12 @@ export default function ForecastChart({
   }
 
   const forecastSeries = formatForecastData(data);
-  
-  let series = forecastSeries;
-  
+
+  let series: TitikDeret[] = forecastSeries.map((s) => ({
+    ...s,
+    isActual: false,
+  }));
+
   if (current && current.approaches) {
     const currentVolume = current.approaches.reduce((sum, app) => sum + app.volume, 0);
     // Prepend the actual point at horizon 0
@@ -77,14 +98,14 @@ export default function ForecastChart({
         horizonMinutes: 0,
         actualVehicleCount: currentVolume,
         predictedVehicleCount: currentVolume,
+        predictedQueueLengthVeh: 0,
         predictedQueueLengthMEst: 0,
         predictedDensityIndex: 0,
+        predictedSpeedKmh: null,
         isActual: true,
       },
-      ...forecastSeries.map(s => ({ ...s, isActual: false }))
+      ...forecastSeries.map((s) => ({ ...s, isActual: false })),
     ];
-  } else {
-    series = forecastSeries.map(s => ({ ...s, isActual: false }));
   }
 
   const maxVehicle = Math.max(...series.map((s) => s.predictedVehicleCount));
