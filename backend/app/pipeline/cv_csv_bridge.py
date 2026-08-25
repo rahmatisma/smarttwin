@@ -141,12 +141,33 @@ def _load_merged(cross_path: Path, density_path: Path) -> pd.DataFrame:
     # mean dari 5 bacaan per-detik dalam window itu -- masih rata-rata,
     # tapi rata-rata dari sample MENTAH per detik (bukan pra-rata-rata
     # internal CV), dan tiap sample individualnya presisi ke video.
+    #
+    # queue_length_veh/queue_length_m_est BARU ada di snapshot_zona.csv
+    # sejak vehicle_counter_pingit.py ditambah hitung_antrean() (25
+    # Agustus 2026) -- CSV lama (hasil run sebelum itu) belum punya
+    # kolom ini. Dicek eksplisit (bukan diasumsikan selalu ada) supaya
+    # bridge ini tidak crash kalau dijalankan ke CSV lama, dan tetap
+    # jujur queueLengthVeh/queueLengthMEst = 0 (bukan error) kalau
+    # datanya memang belum pernah diproses ulang dengan kode baru.
+    ada_kolom_antrean = (
+        "queue_length_veh" in df_density.columns
+        and "queue_length_m_est" in df_density.columns
+    )
+
+    agregasi = {
+        "densityIndex": ("total_di_zona", "mean"),
+        "carCount": ("mobil_di_zona", "mean"),
+        "motorcycleCount": ("motor_di_zona", "mean"),
+        "busCount": ("bus_di_zona", "mean"),
+        "truckCount": ("truk_di_zona", "mean"),
+    }
+
+    if ada_kolom_antrean:
+        agregasi["queueLengthVeh"] = ("queue_length_veh", "mean")
+        agregasi["queueLengthMEst"] = ("queue_length_m_est", "mean")
+
     density_agg = df_density.groupby(["timestamp", "approach"], as_index=False).agg(
-        densityIndex=("total_di_zona", "mean"),
-        carCount=("mobil_di_zona", "mean"),
-        motorcycleCount=("motor_di_zona", "mean"),
-        busCount=("bus_di_zona", "mean"),
-        truckCount=("truk_di_zona", "mean"),
+        **agregasi
     )
 
     merged = pd.merge(cross_agg, density_agg, on=["timestamp", "approach"], how="outer")
@@ -155,6 +176,13 @@ def _load_merged(cross_path: Path, density_path: Path) -> pd.DataFrame:
     for col in ("carCount", "motorcycleCount", "busCount", "truckCount"):
         merged[col] = merged[col].fillna(0).round().astype(int)
     merged["densityIndex"] = merged["densityIndex"].fillna(0.0).astype(float)
+
+    if ada_kolom_antrean:
+        merged["queueLengthVeh"] = merged["queueLengthVeh"].fillna(0).round().astype(int)
+        merged["queueLengthMEst"] = merged["queueLengthMEst"].fillna(0.0).astype(float)
+    else:
+        merged["queueLengthVeh"] = 0
+        merged["queueLengthMEst"] = 0.0
 
     merged["windowStart"] = merged["timestamp"]
     merged["windowEnd"] = merged["timestamp"] + pd.Timedelta(seconds=WINDOW_SECONDS)
@@ -312,8 +340,8 @@ def ingest(
                     "motorcycleCount": int(row["motorcycleCount"]),
                     "busCount": int(row["busCount"]),
                     "truckCount": int(row["truckCount"]),
-                    "queueLengthVeh": 0,
-                    "queueLengthMEst": 0.0,
+                    "queueLengthVeh": int(row["queueLengthVeh"]),
+                    "queueLengthMEst": float(row["queueLengthMEst"]),
                     "densityIndex": float(row["densityIndex"]),
                 }
             )
