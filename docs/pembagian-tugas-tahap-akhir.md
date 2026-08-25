@@ -23,12 +23,14 @@ Disusun dari audit progres per modul malam 25 Agustus (lihat rekap commit di `pe
 
 > Catatan verifikasi: run simulasi ini sengaja dipastikan terjadi **setelah** commit `26e4d48`, karena inti butir keduanya adalah membuktikan simulasi jalan lagi PASCA-perbaikan. Run terakhir sebelumnya (`simulations` id 6, 25 Agustus 02:47 WIB) jatuh ~4 jam sebelum fix, jadi tidak sah dipakai sebagai bukti.
 
-### 1.2 [SELESAI 25 Agustus] Logika antrean CV (Fase 2 LSTM)
+### 1.2 [SELESAI 25 Agustus, Rahmat] Logika antrean CV (Fase 2 LSTM)
 - [x] Desain ulang definisi "antrean" buat pendekatan zona (bukan crossing lama) — `hitung_antrean()` di `cv/vehicle_counter_pingit.py`: 3 syarat (di dalam zona + geser < `ANTREAN_GERAK_RASIO_MAKS` + diam ≥ `ANTREAN_MIN_FRAME_DIAM` frame berturut-turut), titik acuan roda (y2) konsisten dengan `hitung_kendaraan_di_zona`
-- [x] Implementasi logika deteksi kendaraan berhenti, jalankan ke rekaman yang ada — run penuh 43,4 menit × 4 kamera, **538 jendela per kamera, nol error**
+- [x] Implementasi logika deteksi kendaraan berhenti + kelompokkan lajur pakai PCA (bukan sumbu-x mentah, zona diagonal CCTV_1/CCTV_4 butuh itu) — sempat ada 2 bug nyata ketauan lewat review kode manual sebelum full run (pembagian lajur salah axis, key lengan `simpang_tengah` tidak cocok), sudah diperbaiki + tervalidasi
+- [x] Full run 4 kamera × 49 menit (43,4 menit rekaman) dijalankan Rahmat di PC ber-GPU dengan CUDA + `--tanpa-tampilan` — **538 jendela per kamera, nol error**. Estimasi awal ~5 jam, aktualnya **2,4 jam** (run pertama dengan tampilan 3,7 jam; GPU cuma terpakai ~25%, hambatannya CPU untuk encode 4 video anotasi)
 - [x] Hasilkan CSV baru dengan `queueLengthVeh`/`queueLengthMEst` yang bukan nol lagi — `snapshot_zona.csv` 10.452 baris, **71% baris punya queue > 0**. Rata-rata per lengan: selatan 6,56 / barat 2,80 / timur 0,92 / simpang_tengah 0,70 kendaraan
-- [x] Estimasi waktu proses ulang video ~5 jam — **aktualnya 2,4 jam** dengan CUDA + `--tanpa-tampilan` (run pertama dengan tampilan 3,7 jam; GPU cuma terpakai ~25%, hambatannya CPU untuk encode 4 video anotasi)
-- [x] Serahkan ke Yuli begitu CSV siap — CSV sudah disalin ke `forecasting/data/` sebagai snapshot beku, dan `data_gabungan.csv` (538 baris, 4 fitur berisi semua) sudah dihasilkan
+- [x] `ingest()` dijalankan, **terverifikasi langsung ke Supabase**: 538 window ter-ingest, rentang `16:30:10`–`17:19:15` (rentang penuh rekaman), `queueLengthVeh`/`queueLengthMEst` bervariasi dan masuk akal, bukan konstanta
+- [x] CSV siap buat Yuli — sudah disalin ke `forecasting/data/` sebagai snapshot beku, dan `data_gabungan.csv` (538 baris, 4 fitur berisi semua) sudah dihasilkan
+- [ ] **BELUM:** kasih tau Yuli langsung (chat/rapat) data antrean asli sudah ada di Supabase, biar dia retrain LSTM 4 fitur penuh (Fase 2 di `rencana-lstm-forecast.md`) — datanya sudah siap secara teknis, tapi belum tentu Yuli tahu
 
 > **Bukti logikanya benar secara fisik, bukan sekadar mengeluarkan angka:** rasio antre (queue ÷ kehadiran zona) = badan simpang **34%** (kendaraan melintas), lengan pendekat **43–77%** (kendaraan menunggu merah). Kalau logikanya asal, keempatnya akan mirip. Detail lengkap + keterbatasan yang diketahui ada di `docs/hasil-run-antrean-25-agustus.md`.
 >
