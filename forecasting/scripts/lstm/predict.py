@@ -24,7 +24,7 @@ FEATURES = [
 ]
 
 INPUT_TIMESTEPS = 12
-OUTPUT_TIMESTEPS = 3
+OUTPUT_TIMESTEPS = 12
 
 HIDDEN_SIZE = 64
 NUM_LAYERS = 2
@@ -67,7 +67,7 @@ class TrafficLSTM(nn.Module):
         [batch, 12, 4]
 
     Output:
-        [batch, 3, 4]
+        [batch, 12, 4]
     """
 
     def __init__(
@@ -75,7 +75,7 @@ class TrafficLSTM(nn.Module):
         input_size: int = 4,
         hidden_size: int = 64,
         num_layers: int = 2,
-        output_timesteps: int = 3,
+        output_timesteps: int = 12,
         dropout: float = 0.2,
     ):
         super().__init__()
@@ -670,7 +670,7 @@ def run_prediction(
         .numpy()
     )
 
-    # [3, 4]
+    # [12, 4]
 
     prediction = scaler.inverse_transform(
         prediction_scaled
@@ -751,7 +751,7 @@ def print_forecast(
     )
 
     print(
-        "FORECAST 15 DETIK KE DEPAN"
+        "FORECAST 60 DETIK KE DEPAN"
     )
 
     print(
@@ -850,7 +850,7 @@ def save_json_result(
         "model": "traffic_lstm",
         "input_timesteps": INPUT_TIMESTEPS,
         "output_timesteps": OUTPUT_TIMESTEPS,
-        "forecast_seconds": 15,
+        "forecast_seconds": 60,
         "features": FEATURES,
         "predictions": [],
     }

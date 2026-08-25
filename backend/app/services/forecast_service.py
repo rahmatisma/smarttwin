@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timedelta
+from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
@@ -41,19 +41,16 @@ DEFAULT_DROPOUT = 0.2
 #   0 = services
 #   1 = app
 #   2 = backend
-#
-# Jadi:
-#   backend_root = Path(__file__).resolve().parents[2]
 
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
 
-# Project root:
 # smarttwin/
 PROJECT_ROOT = BACKEND_ROOT.parent
 
 # forecasting/
 FORECASTING_ROOT = PROJECT_ROOT / "forecasting"
 
+# forecasting/outputs/lstm/
 MODEL_DIR = FORECASTING_ROOT / "outputs" / "lstm"
 
 MODEL_PATH = MODEL_DIR / "traffic_lstm.pt"
@@ -68,7 +65,7 @@ METADATA_PATH = MODEL_DIR / "metadata.json"
 
 class TrafficLSTM(nn.Module):
     """
-    LSTM model yang harus sama dengan model saat training.
+    LSTM model SmartTwin.
 
     Input:
         [batch, 12, 4]
@@ -110,16 +107,16 @@ class TrafficLSTM(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
-        x:
+        Input:
             [batch, input_timesteps, features]
 
-        return:
+        Output:
             [batch, output_timesteps, features]
         """
 
         output, _ = self.lstm(x)
 
-        # Ambil hidden state timestep terakhir
+        # Hidden state timestep terakhir
         last_hidden = output[:, -1, :]
 
         prediction = self.fc(last_hidden)
@@ -140,18 +137,25 @@ class TrafficLSTM(nn.Module):
 
 class ForecastService:
     """
-    Service untuk menjalankan inference LSTM SmartTwin.
+    Service inference LSTM SmartTwin.
 
-    Tugas utama:
+    Pipeline:
 
-    1. Load model .pt
-    2. Load scaler
-    3. Load metadata
-    4. Validasi input
-    5. Normalisasi input
-    6. Jalankan LSTM
-    7. Inverse transform
-    8. Menghasilkan forecast 15 detik
+        input dataframe
+              ↓
+        validation
+              ↓
+        ambil 12 timestep
+              ↓
+        MinMax scaling
+              ↓
+        PyTorch LSTM
+              ↓
+        inverse MinMax scaling
+              ↓
+        forecast 3 timestep
+              ↓
+        JSON response
     """
 
     def __init__(
@@ -165,7 +169,9 @@ class ForecastService:
         self.scaler_path = Path(scaler_path)
         self.metadata_path = Path(metadata_path)
 
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.device = torch.device(
+            "cuda" if torch.cuda.is_available() else "cpu"
+        )
 
         self.model: TrafficLSTM | None = None
 
@@ -181,9 +187,7 @@ class ForecastService:
 
     def load(self) -> None:
         """
-        Load model, scaler dan metadata.
-
-        Dipanggil sekali saat service pertama kali digunakan.
+        Load model, scaler, dan metadata.
         """
 
         if self.loaded:
@@ -207,7 +211,10 @@ class ForecastService:
         if missing_files:
             raise FileNotFoundError(
                 "File forecasting tidak ditemukan:\n"
-                + "\n".join(f"- {path}" for path in missing_files)
+                + "\n".join(
+                    f"- {path}"
+                    for path in missing_files
+                )
             )
 
         # ----------------------------------------------------
@@ -220,6 +227,11 @@ class ForecastService:
         ) as file:
             metadata = json.load(file)
 
+        if not isinstance(metadata, dict):
+            raise ValueError(
+                "Format metadata.json tidak valid."
+            )
+
         self.metadata = metadata
 
         # ----------------------------------------------------
@@ -228,28 +240,36 @@ class ForecastService:
 
         model_config = metadata.get("model", {})
 
-        # Be defensive kalau struktur metadata berbeda
         if not isinstance(model_config, dict):
             model_config = {}
 
         hidden_size = int(
             model_config.get(
                 "hidden_size",
-                metadata.get("hidden_size", DEFAULT_HIDDEN_SIZE),
+                metadata.get(
+                    "hidden_size",
+                    DEFAULT_HIDDEN_SIZE,
+                ),
             )
         )
 
         num_layers = int(
             model_config.get(
                 "num_layers",
-                metadata.get("num_layers", DEFAULT_NUM_LAYERS),
+                metadata.get(
+                    "num_layers",
+                    DEFAULT_NUM_LAYERS,
+                ),
             )
         )
 
         dropout = float(
             model_config.get(
                 "dropout",
-                metadata.get("dropout", DEFAULT_DROPOUT),
+                metadata.get(
+                    "dropout",
+                    DEFAULT_DROPOUT,
+                ),
             )
         )
 
@@ -265,11 +285,16 @@ class ForecastService:
 
         if not isinstance(scaler, dict):
             raise ValueError(
-                "Format scaler.json tidak valid. "
-                "Root JSON harus berupa object."
+                "Format scaler.json tidak valid."
             )
 
         self.scaler = scaler
+
+        # ----------------------------------------------------
+        # Validate scaler
+        # ----------------------------------------------------
+
+        self._validate_scaler()
 
         # ----------------------------------------------------
         # Build model
@@ -294,19 +319,22 @@ class ForecastService:
         )
 
         # ----------------------------------------------------
-        # Support several checkpoint formats
+        # Support checkpoint formats
         # ----------------------------------------------------
 
         if isinstance(checkpoint, dict):
 
             if "state_dict" in checkpoint:
+
                 state_dict = checkpoint["state_dict"]
 
             elif "model_state_dict" in checkpoint:
+
                 state_dict = checkpoint["model_state_dict"]
 
             else:
-                # Bisa jadi langsung state_dict
+
+                # kemungkinan langsung state_dict
                 state_dict = checkpoint
 
         else:
@@ -315,22 +343,40 @@ class ForecastService:
             )
 
         # ----------------------------------------------------
-        # Remove DataParallel prefix jika ada
+        # Remove DataParallel prefix
         # ----------------------------------------------------
 
-        cleaned_state_dict = {}
+        cleaned_state_dict: dict[str, Any] = {}
 
         for key, value in state_dict.items():
 
             if key.startswith("module."):
-                key = key[len("module.") :]
+                key = key[len("module."):]
 
             cleaned_state_dict[key] = value
 
-        self.model.load_state_dict(
-            cleaned_state_dict,
-            strict=True,
-        )
+        # ----------------------------------------------------
+        # Load weights
+        # ----------------------------------------------------
+
+        try:
+
+            self.model.load_state_dict(
+                cleaned_state_dict,
+                strict=True,
+            )
+
+        except RuntimeError as exc:
+
+            raise RuntimeError(
+                "Struktur model traffic_lstm.pt tidak cocok "
+                "dengan TrafficLSTM pada backend.\n\n"
+                f"Detail PyTorch:\n{exc}"
+            ) from exc
+
+        # ----------------------------------------------------
+        # Device
+        # ----------------------------------------------------
 
         self.model.to(self.device)
 
@@ -338,38 +384,55 @@ class ForecastService:
 
         self.loaded = True
 
+        # ----------------------------------------------------
+        # Startup information
+        # ----------------------------------------------------
+
         print("=" * 70)
         print("SMARTTWIN FORECAST SERVICE")
         print("=" * 70)
-        print(f"Device      : {self.device}")
-        print(f"Model       : {self.model_path}")
-        print(f"Scaler      : {self.scaler_path}")
-        print(f"Metadata    : {self.metadata_path}")
-        print(f"Hidden size : {hidden_size}")
-        print(f"Layers      : {num_layers}")
-        print(f"Dropout     : {dropout}")
-        print(f"Input       : {INPUT_TIMESTEPS} × {len(FEATURES)}")
-        print(f"Output      : {OUTPUT_TIMESTEPS} × {len(FEATURES)}")
+
+        print(f"Device       : {self.device}")
+        print(f"Model        : {self.model_path}")
+        print(f"Scaler       : {self.scaler_path}")
+        print(f"Metadata     : {self.metadata_path}")
+
+        print(f"Hidden size  : {hidden_size}")
+        print(f"Layers       : {num_layers}")
+        print(f"Dropout      : {dropout}")
+
+        print(
+            f"Input        : "
+            f"{INPUT_TIMESTEPS} × {len(FEATURES)}"
+        )
+
+        print(
+            f"Output       : "
+            f"{OUTPUT_TIMESTEPS} × {len(FEATURES)}"
+        )
+
+        print("Scaler       : MinMaxScaler")
+
         print("=" * 70)
 
     # ========================================================
-    # SCALER
+    # VALIDATE SCALER
     # ========================================================
 
-    def _get_scaler_parameters(
-        self,
-    ) -> tuple[np.ndarray, np.ndarray]:
+    def _validate_scaler(self) -> None:
         """
-        Mengambil center/scale dari scaler.json.
+        Validasi scaler.json.
 
-        Mendukung format:
-            mean / scale
+        Format scaler yang digunakan training:
 
-        maupun:
-            mean_ / scale_
-
-        maupun:
-            center / scale
+        {
+            "features": [...],
+            "min": [...],
+            "scale": [...],
+            "data_min": [...],
+            "data_max": [...],
+            "data_range": [...]
+        }
         """
 
         if self.scaler is None:
@@ -379,76 +442,92 @@ class ForecastService:
 
         scaler = self.scaler
 
-        # ----------------------------------------------------
-        # Case 1:
-        # {
-        #   "mean": [...],
-        #   "scale": [...]
-        # }
-        # ----------------------------------------------------
+        required = [
+            "min",
+            "scale",
+        ]
 
-        if "mean" in scaler and "scale" in scaler:
+        missing = [
+            key
+            for key in required
+            if key not in scaler
+        ]
 
-            mean = np.asarray(
-                scaler["mean"],
-                dtype=np.float32,
+        if missing:
+            raise ValueError(
+                "scaler.json tidak memiliki field: "
+                + ", ".join(missing)
             )
 
-            scale = np.asarray(
-                scaler["scale"],
-                dtype=np.float32,
-            )
-
-            return mean, scale
-
-        # ----------------------------------------------------
-        # Case 2:
-        # {
-        #   "mean_": [...],
-        #   "scale_": [...]
-        # }
-        # ----------------------------------------------------
-
-        if "mean_" in scaler and "scale_" in scaler:
-
-            mean = np.asarray(
-                scaler["mean_"],
-                dtype=np.float32,
-            )
-
-            scale = np.asarray(
-                scaler["scale_"],
-                dtype=np.float32,
-            )
-
-            return mean, scale
-
-        # ----------------------------------------------------
-        # Case 3:
-        # {
-        #   "center": [...],
-        #   "scale": [...]
-        # }
-        # ----------------------------------------------------
-
-        if "center" in scaler and "scale" in scaler:
-
-            mean = np.asarray(
-                scaler["center"],
-                dtype=np.float32,
-            )
-
-            scale = np.asarray(
-                scaler["scale"],
-                dtype=np.float32,
-            )
-
-            return mean, scale
-
-        raise ValueError(
-            "Format scaler.json tidak dikenali. "
-            "Dibutuhkan pasangan mean/scale."
+        scaler_features = scaler.get(
+            "features"
         )
+
+        if scaler_features is not None:
+
+            if scaler_features != FEATURES:
+
+                raise ValueError(
+                    "Urutan fitur pada scaler.json berbeda "
+                    "dengan model backend.\n"
+                    f"Scaler : {scaler_features}\n"
+                    f"Model  : {FEATURES}"
+                )
+
+        min_values = np.asarray(
+            scaler["min"],
+            dtype=np.float32,
+        )
+
+        scale_values = np.asarray(
+            scaler["scale"],
+            dtype=np.float32,
+        )
+
+        if len(min_values) != len(FEATURES):
+
+            raise ValueError(
+                "Jumlah nilai min scaler tidak sesuai "
+                f"dengan fitur. "
+                f"Diharapkan {len(FEATURES)}, "
+                f"ditemukan {len(min_values)}."
+            )
+
+        if len(scale_values) != len(FEATURES):
+
+            raise ValueError(
+                "Jumlah nilai scale scaler tidak sesuai "
+                f"dengan fitur. "
+                f"Diharapkan {len(FEATURES)}, "
+                f"ditemukan {len(scale_values)}."
+            )
+
+    # ========================================================
+    # GET MINMAX PARAMETERS
+    # ========================================================
+
+    def _get_scaler_parameters(
+        self,
+    ) -> tuple[np.ndarray, np.ndarray]:
+
+        if self.scaler is None:
+            raise RuntimeError(
+                "Scaler belum dimuat."
+            )
+
+        scaler = self.scaler
+
+        min_values = np.asarray(
+            scaler["min"],
+            dtype=np.float32,
+        )
+
+        scale_values = np.asarray(
+            scaler["scale"],
+            dtype=np.float32,
+        )
+
+        return min_values, scale_values
 
     # ========================================================
     # NORMALIZE
@@ -459,35 +538,26 @@ class ForecastService:
         values: np.ndarray,
     ) -> np.ndarray:
         """
-        Standardisasi:
+        MinMax scaling.
 
-            z = (x - mean) / scale
+        Sesuai dengan sklearn MinMaxScaler:
+
+            X_scaled = X * scale + min
         """
 
-        mean, scale = self._get_scaler_parameters()
+        min_values, scale_values = (
+            self._get_scaler_parameters()
+        )
 
-        if mean.shape[0] != len(FEATURES):
-            raise ValueError(
-                f"Jumlah mean scaler ({mean.shape[0]}) "
-                f"tidak sama dengan jumlah fitur ({len(FEATURES)})."
-            )
-
-        if scale.shape[0] != len(FEATURES):
-            raise ValueError(
-                f"Jumlah scale scaler ({scale.shape[0]}) "
-                f"tidak sama dengan jumlah fitur ({len(FEATURES)})."
-            )
-
-        # Hindari division by zero
-        scale = np.where(
-            scale == 0,
-            1.0,
-            scale,
+        values = np.asarray(
+            values,
+            dtype=np.float32,
         )
 
         return (
-            values - mean
-        ) / scale
+            values * scale_values
+            + min_values
+        )
 
     # ========================================================
     # INVERSE NORMALIZE
@@ -498,20 +568,30 @@ class ForecastService:
         values: np.ndarray,
     ) -> np.ndarray:
         """
-        Mengembalikan data ke skala asli.
+        Inverse MinMax scaling.
+
+            X = (X_scaled - min) / scale
         """
 
-        mean, scale = self._get_scaler_parameters()
+        min_values, scale_values = (
+            self._get_scaler_parameters()
+        )
 
-        scale = np.where(
-            scale == 0,
+        values = np.asarray(
+            values,
+            dtype=np.float32,
+        )
+
+        # Hindari division by zero
+        safe_scale = np.where(
+            scale_values == 0,
             1.0,
-            scale,
+            scale_values,
         )
 
         return (
-            values * scale
-        ) + mean
+            values - min_values
+        ) / safe_scale
 
     # ========================================================
     # VALIDATE DATAFRAME
@@ -525,8 +605,12 @@ class ForecastService:
         Validasi dataframe input.
 
         Wajib memiliki:
+
             timestamp
-            4 feature
+            vehicleCount
+            queueLengthVeh
+            queueLengthMEst
+            densityIndex
         """
 
         if dataframe is None:
@@ -552,6 +636,7 @@ class ForecastService:
         ]
 
         if missing:
+
             raise ValueError(
                 "Kolom input kurang:\n"
                 + "\n".join(
@@ -564,15 +649,101 @@ class ForecastService:
         # Timestamp
         # ----------------------------------------------------
 
-        dataframe["timestamp"] = pd.to_datetime(
-            dataframe["timestamp"],
-            errors="coerce",
-        )
+        # IMPORTANT:
+        #
+        # Jangan langsung pd.to_datetime(errors="coerce")
+        # tanpa mengetahui format input.
+        #
+        # Kita support:
+        #
+        # 2026-08-15 17:19:15
+        # 2026-08-15T17:19:15
+        # 2026-08-15T17:19:15+07:00
+        # ISO timestamp.
+        #
+        # Tetapi placeholder seperti:
+        #
+        # "string"
+        #
+        # tetap akan ditolak.
 
-        if dataframe["timestamp"].isna().any():
+        raw_timestamps = dataframe[
+            "timestamp"
+        ].copy()
+
+        parsed_timestamps = []
+
+        invalid_values = []
+
+        for value in raw_timestamps:
+
+            if value is None:
+                invalid_values.append(value)
+                parsed_timestamps.append(pd.NaT)
+                continue
+
+            if isinstance(
+                value,
+                float,
+            ) and np.isnan(value):
+
+                invalid_values.append(value)
+                parsed_timestamps.append(pd.NaT)
+                continue
+
+            text = str(value).strip()
+
+            if not text:
+
+                invalid_values.append(value)
+                parsed_timestamps.append(pd.NaT)
+                continue
+
+            # Explicitly reject common placeholder
+            # values from Swagger/OpenAPI.
+
+            if text.lower() in {
+                "string",
+                "null",
+                "none",
+                "nan",
+                "nat",
+            }:
+
+                invalid_values.append(value)
+                parsed_timestamps.append(pd.NaT)
+                continue
+
+            try:
+
+                parsed = pd.to_datetime(
+                    text,
+                    errors="raise",
+                )
+
+                parsed_timestamps.append(parsed)
+
+            except Exception:
+
+                invalid_values.append(value)
+                parsed_timestamps.append(pd.NaT)
+
+        if invalid_values:
+
+            examples = [
+                repr(value)
+                for value in invalid_values[:5]
+            ]
+
             raise ValueError(
-                "Terdapat timestamp yang tidak valid."
+                "Terdapat timestamp yang tidak valid. "
+                "Nilai bermasalah: "
+                + ", ".join(examples)
             )
+
+        dataframe["timestamp"] = pd.to_datetime(
+            parsed_timestamps
+        )
 
         # ----------------------------------------------------
         # Numeric features
@@ -589,7 +760,9 @@ class ForecastService:
         # NaN
         # ----------------------------------------------------
 
-        if dataframe[FEATURES].isna().any().any():
+        if dataframe[
+            FEATURES
+        ].isna().any().any():
 
             nan_columns = (
                 dataframe[FEATURES]
@@ -607,12 +780,32 @@ class ForecastService:
             )
 
         # ----------------------------------------------------
-        # Sort timestamp
+        # Infinite
+        # ----------------------------------------------------
+
+        feature_values = dataframe[
+            FEATURES
+        ].to_numpy(
+            dtype=np.float32
+        )
+
+        if not np.isfinite(
+            feature_values
+        ).all():
+
+            raise ValueError(
+                "Terdapat nilai infinite pada fitur."
+            )
+
+        # ----------------------------------------------------
+        # Sort
         # ----------------------------------------------------
 
         dataframe = dataframe.sort_values(
             "timestamp"
-        ).reset_index(drop=True)
+        ).reset_index(
+            drop=True
+        )
 
         return dataframe
 
@@ -623,14 +816,10 @@ class ForecastService:
     def prepare_input(
         self,
         dataframe: pd.DataFrame,
-    ) -> tuple[np.ndarray, pd.Timestamp]:
-        """
-        Ambil 12 timestep terakhir.
-
-        Return:
-            array [12, 4]
-            last timestamp
-        """
+    ) -> tuple[
+        np.ndarray,
+        pd.Timestamp,
+    ]:
 
         dataframe = self.validate_dataframe(
             dataframe
@@ -639,9 +828,11 @@ class ForecastService:
         if len(dataframe) < INPUT_TIMESTEPS:
 
             raise ValueError(
-                f"Data tidak cukup untuk forecast. "
-                f"Dibutuhkan minimal {INPUT_TIMESTEPS} timestep, "
-                f"tetapi hanya tersedia {len(dataframe)}."
+                "Data tidak cukup untuk forecast. "
+                f"Dibutuhkan minimal "
+                f"{INPUT_TIMESTEPS} timestep, "
+                f"tetapi hanya tersedia "
+                f"{len(dataframe)}."
             )
 
         latest = dataframe.tail(
@@ -658,7 +849,60 @@ class ForecastService:
             "timestamp"
         ].iloc[-1]
 
-        return values, last_timestamp
+        return (
+            values,
+            last_timestamp,
+        )
+
+    # ========================================================
+    # CHECK TIMESTEP
+    # ========================================================
+
+    def _validate_timestep_interval(
+        self,
+        dataframe: pd.DataFrame,
+    ) -> None:
+        """
+        Validasi apakah data memiliki interval 5 detik.
+
+        Tidak dibuat terlalu ketat supaya API tetap bisa
+        menerima data realtime dari backend.
+
+        Jika ada interval berbeda, hanya diberi warning.
+        """
+
+        if len(dataframe) < 2:
+            return
+
+        timestamps = dataframe[
+            "timestamp"
+        ].sort_values()
+
+        differences = (
+            timestamps
+            .diff()
+            .dropna()
+            .dt.total_seconds()
+        )
+
+        if differences.empty:
+            return
+
+        invalid = differences[
+            differences != STEP_SECONDS
+        ]
+
+        if not invalid.empty:
+
+            print(
+                "WARNING: Dataset memiliki interval "
+                "timestamp selain 5 detik."
+            )
+
+            print(
+                f"Interval unik: "
+                f"{sorted(differences.unique())}"
+            )
 
     # ========================================================
     # PREDICT
@@ -669,15 +913,23 @@ class ForecastService:
         self,
         dataframe: pd.DataFrame,
     ) -> dict[str, Any]:
+
         """
-        Jalankan forecasting dari dataframe.
+        Forecast dari dataframe.
 
         Input:
             minimal 12 timestep.
 
         Output:
-            forecast 3 timestep / 15 detik.
+            3 timestep:
+                +5
+                +10
+                +15 detik
         """
+
+        # ----------------------------------------------------
+        # Load model
+        # ----------------------------------------------------
 
         self.load()
 
@@ -686,8 +938,14 @@ class ForecastService:
                 "Model belum tersedia."
             )
 
-        values, last_timestamp = self.prepare_input(
-            dataframe
+        # ----------------------------------------------------
+        # Prepare input
+        # ----------------------------------------------------
+
+        values, last_timestamp = (
+            self.prepare_input(
+                dataframe
+            )
         )
 
         # ----------------------------------------------------
@@ -708,10 +966,9 @@ class ForecastService:
             device=self.device,
         )
 
-        tensor = tensor.unsqueeze(0)
+        # [12, 4] → [1, 12, 4]
 
-        # Shape:
-        # [1, 12, 4]
+        tensor = tensor.unsqueeze(0)
 
         # ----------------------------------------------------
         # Model inference
@@ -730,10 +987,12 @@ class ForecastService:
             .numpy()
         )
 
+        # [3, 4]
+
         prediction = prediction[0]
 
         # ----------------------------------------------------
-        # Inverse transform
+        # Inverse scaling
         # ----------------------------------------------------
 
         prediction_original = (
@@ -746,25 +1005,29 @@ class ForecastService:
         # Business safety
         # ----------------------------------------------------
 
-        # vehicle count tidak boleh negatif
+        # vehicle count >= 0
+
         prediction_original[:, 0] = np.maximum(
             prediction_original[:, 0],
             0.0,
         )
 
-        # queue kendaraan tidak boleh negatif
+        # queue vehicles >= 0
+
         prediction_original[:, 1] = np.maximum(
             prediction_original[:, 1],
             0.0,
         )
 
-        # queue meter tidak boleh negatif
+        # queue meters >= 0
+
         prediction_original[:, 2] = np.maximum(
             prediction_original[:, 2],
             0.0,
         )
 
         # density 0..1
+
         prediction_original[:, 3] = np.clip(
             prediction_original[:, 3],
             0.0,
@@ -772,10 +1035,12 @@ class ForecastService:
         )
 
         # ----------------------------------------------------
-        # Build forecast records
+        # Build forecast
         # ----------------------------------------------------
 
-        forecasts: list[dict[str, Any]] = []
+        forecasts: list[
+            dict[str, Any]
+        ] = []
 
         for index in range(
             OUTPUT_TIMESTEPS
@@ -784,37 +1049,60 @@ class ForecastService:
             timestamp = (
                 last_timestamp
                 + timedelta(
-                    seconds=STEP_SECONDS * (index + 1)
+                    seconds=(
+                        STEP_SECONDS
+                        * (index + 1)
+                    )
                 )
             )
 
             row = {
                 "timestamp": timestamp.isoformat(),
+
                 "vehicleCount": round(
                     float(
-                        prediction_original[index, 0]
+                        prediction_original[
+                            index,
+                            0,
+                        ]
                     ),
                     4,
                 ),
+
                 "queueLengthVeh": round(
                     float(
-                        prediction_original[index, 1]
+                        prediction_original[
+                            index,
+                            1,
+                        ]
                     ),
                     4,
                 ),
+
                 "queueLengthMEst": round(
                     float(
-                        prediction_original[index, 2]
+                        prediction_original[
+                            index,
+                            2,
+                        ]
                     ),
                     4,
                 ),
+
                 "densityIndex": round(
                     float(
-                        prediction_original[index, 3]
+                        prediction_original[
+                            index,
+                            3,
+                        ]
                     ),
                     4,
                 ),
-                "secondsAhead": STEP_SECONDS * (index + 1),
+
+                "secondsAhead": (
+                    STEP_SECONDS
+                    * (index + 1)
+                ),
             }
 
             forecasts.append(row)
@@ -826,27 +1114,47 @@ class ForecastService:
         return {
             "model": {
                 "type": "LSTM",
-                "inputTimesteps": INPUT_TIMESTEPS,
-                "outputTimesteps": OUTPUT_TIMESTEPS,
+
+                "inputTimesteps": (
+                    INPUT_TIMESTEPS
+                ),
+
+                "outputTimesteps": (
+                    OUTPUT_TIMESTEPS
+                ),
+
                 "stepSeconds": STEP_SECONDS,
+
                 "forecastSeconds": (
                     OUTPUT_TIMESTEPS
                     * STEP_SECONDS
                 ),
+
                 "features": FEATURES,
             },
+
             "input": {
-                "timestepsUsed": INPUT_TIMESTEPS,
-                "lastTimestamp": last_timestamp.isoformat(),
+                "timestepsUsed": (
+                    INPUT_TIMESTEPS
+                ),
+
+                "lastTimestamp": (
+                    last_timestamp.isoformat()
+                ),
+
                 "latestValues": {
                     FEATURES[index]: float(
-                        values[-1, index]
+                        values[
+                            -1,
+                            index,
+                        ]
                     )
                     for index in range(
                         len(FEATURES)
                     )
                 },
             },
+
             "forecast": forecasts,
         }
 
@@ -856,15 +1164,17 @@ class ForecastService:
 
     def predict_records(
         self,
-        records: list[dict[str, Any]],
+        records: list[
+            dict[str, Any]
+        ],
     ) -> dict[str, Any]:
+
         """
         Forecast dari list JSON records.
-
-        Cocok untuk request dari frontend/backend.
         """
 
         if not records:
+
             raise ValueError(
                 "records tidak boleh kosong."
             )
@@ -878,7 +1188,7 @@ class ForecastService:
         )
 
     # ========================================================
-    # PREDICT FROM LATEST VALUES
+    # PREDICT FROM VALUES
     # ========================================================
 
     def predict_from_values(
@@ -889,20 +1199,24 @@ class ForecastService:
         queue_length_m_est: list[float],
         density_index: list[float],
     ) -> dict[str, Any]:
-        """
-        Helper kalau nanti backend ingin langsung
-        mengirim data hasil TrafficStateBuilder.
 
-        Semua list harus memiliki minimal 12 item.
+        """
+        Helper untuk TrafficStateBuilder.
+
+        Semua array harus memiliki jumlah elemen
+        yang sama dan minimal 12 timestep.
         """
 
-        if not (
-            len(timestamps)
-            == len(vehicle_count)
-            == len(queue_length_veh)
-            == len(queue_length_m_est)
-            == len(density_index)
-        ):
+        lengths = {
+            len(timestamps),
+            len(vehicle_count),
+            len(queue_length_veh),
+            len(queue_length_m_est),
+            len(density_index),
+        }
+
+        if len(lengths) != 1:
+
             raise ValueError(
                 "Semua array input harus memiliki "
                 "jumlah elemen yang sama."
@@ -926,42 +1240,97 @@ class ForecastService:
     # HEALTH
     # ========================================================
 
-    def health(self) -> dict[str, Any]:
+    def health(
+        self,
+    ) -> dict[str, Any]:
+
         """
-        Status model forecasting.
+        Status forecasting service.
+
+        Health endpoint TIDAK memaksa model loading.
         """
 
-        model_exists = self.model_path.exists()
-        scaler_exists = self.scaler_path.exists()
-        metadata_exists = self.metadata_path.exists()
+        model_exists = (
+            self.model_path.exists()
+        )
+
+        scaler_exists = (
+            self.scaler_path.exists()
+        )
+
+        metadata_exists = (
+            self.metadata_path.exists()
+        )
 
         return {
             "loaded": self.loaded,
-            "device": str(self.device),
+
+            "device": str(
+                self.device
+            ),
+
             "modelExists": model_exists,
+
             "scalerExists": scaler_exists,
+
             "metadataExists": metadata_exists,
+
             "modelPath": str(
                 self.model_path
             ),
+
             "scalerPath": str(
                 self.scaler_path
             ),
+
             "metadataPath": str(
                 self.metadata_path
             ),
+
             "features": FEATURES,
-            "inputTimesteps": INPUT_TIMESTEPS,
-            "outputTimesteps": OUTPUT_TIMESTEPS,
+
+            "inputTimesteps": (
+                INPUT_TIMESTEPS
+            ),
+
+            "outputTimesteps": (
+                OUTPUT_TIMESTEPS
+            ),
+
+            "stepSeconds": (
+                STEP_SECONDS
+            ),
+
             "forecastSeconds": (
                 OUTPUT_TIMESTEPS
                 * STEP_SECONDS
             ),
+
+            "scalerType": "MinMaxScaler",
         }
+
+    # ========================================================
+    # LOAD TEST
+    # ========================================================
+
+    def test_load(
+        self,
+    ) -> dict[str, Any]:
+
+        """
+        Memaksa load model.
+
+        Berguna untuk endpoint:
+            /api/forecast/health/load
+        """
+
+        self.load()
+
+        return self.health()
 
 
 # ============================================================
-# SINGLETON SERVICE
+# SINGLETON
 # ============================================================
 
 forecast_service = ForecastService()

@@ -20,7 +20,7 @@ from torch.utils.data import DataLoader, TensorDataset
 SEED = 42
 
 INPUT_STEPS = 12          # 12 x 5 detik = 60 detik history
-OUTPUT_STEPS = 3          # 3 x 5 detik = 15 detik forecast
+OUTPUT_STEPS = 12         # 12 x 5 detik = 60 detik forecast (= MAX_GREEN_SECONDS)
 NUM_FEATURES = 4
 
 FEATURES = [
@@ -463,9 +463,9 @@ def merge_datasets(
     # ========================================================
     # QUEUE
     #
-    # Sampai 25 Agustus 2026 kedua kolom ini di-hardcode 0.0
-    # karena CV memang belum menghitung antrean. Sekarang
-    # snapshot_zona.csv sudah membawanya (lihat
+    # Sejak cv/vehicle_counter_pingit.py punya hitung_antrean(),
+    # snapshot_zona.csv sudah membawa queue_length_veh dan
+    # queue_length_m_est yang benar-benar berisi (lihat
     # load_snapshot_dataset di atas), jadi dipakai apa adanya.
     #
     # Fallback 0.0 DIPERTAHANKAN untuk CSV lama yang belum punya
@@ -1111,10 +1111,9 @@ def save_metadata(
         "metrics": metrics,
 
         "queueNote": (
-            "queueLengthVeh dan "
-            "queueLengthMEst sementara "
-            "bernilai 0 karena mekanisme "
-            "estimasi antrean CV belum tersedia."
+            "queueLengthVeh dan queueLengthMEst berisi estimasi "
+            "dari cv/vehicle_counter_pingit.py::hitung_antrean(), "
+            "bukan lagi hardcode 0."
         ),
 
     }
@@ -1418,11 +1417,11 @@ def main():
     print("\nQueue:")
 
     print(
-        "  queueLengthVeh  → 0 sementara"
+        "  queueLengthVeh  → dari hitung_antrean() (data asli)"
     )
 
     print(
-        "  queueLengthMEst → 0 sementara"
+        "  queueLengthMEst → dari hitung_antrean() (data asli)"
     )
 
     # ========================================================
