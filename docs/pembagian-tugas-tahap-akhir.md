@@ -6,6 +6,8 @@ Disusun dari audit progres per modul malam 25 Agustus (lihat rekap commit di `pe
 
 **Prinsip pembagian:** tetap di jalur masing-masing yang sudah terbukti malam ini (Rahmat = backend/CV/simulasi, Yuli = LSTM, Melpi = frontend) — bukan dirombak, biar tidak ada waktu terbuang re-onboarding ke area baru.
 
+**Update 27 Agustus:** satu pengecualian — item 1.5 (Scenario Generator + Traffic Simulator + Performance Analysis) pindah dari solo Rahmat ke tim, karena Rahmat tidak bisa lanjut pegang bagian itu. Lihat catatan di 1.5 dan dokumen serah terima `docs/rencana-scenario-generator.md`.
+
 ---
 
 ## 0. Keputusan tim — SUDAH DISEPAKATI 25 Agustus malam
@@ -49,8 +51,10 @@ Disusun dari audit progres per modul malam 25 Agustus (lihat rekap commit di `pe
   > **Update 26 Agustus — diputuskan, bukan ditambal di sini:** hasil run sempat menunjukkan `queue=0` di semua baris preview karena `baca_zona_csv()` tidak membaca kolom `queue_length_veh`/`queue_length_m_est` dari `percobaan_logic_simpang.csv`. Daripada tempel kolom + ganti sumber CSV, diputuskan `run_decision.py`/`feed_to_supabase.py`/tabel `recommendations` ditinggalkan sebagai jalur legacy — Recommendation Panel dipindah baca `POST /recommendation` yang sudah baca antrean asli live dari Supabase. Detail di 3.2. `run_decision.py` tetap dibiarkan tidak-crash (fix `.decide()` di atas) buat jaga-jaga kalau masih dipakai buat sesuatu yang lain, tapi bukan lagi jalur kritis demo.
 - [x] `backend/tests/test_simulation_service.py` diisi 6 smoke test (instansiasi, `status()`, `get_simulation_state()`, `stop()` tanpa SUMO jalan, `_create_adapter()` cakup 4 approach, `_get_config_file()` nunjuk ke `simpang4_pingit.sumocfg`) — semua PASS, tidak butuh SUMO/TraCI beneran jalan
 
-### 1.5 [SELESAI 26 Agustus] Scenario Generator ringan + LOS
+### 1.5 [SELESAI 26 Agustus, KEPEMILIKAN PINDAH 27 Agustus] Scenario Generator ringan + LOS
 Mengisi gap yang ketauan pas cocokkan kode ke diagram arsitektur asli (`data-contract.md` / proposal). Bukan Scenario Generator penuh — versi yang realistis buat 6 hari:
+
+> **Update 27 Agustus:** versi dasar item ini SUDAH selesai & terverifikasi (checklist di bawah tetap berlaku apa adanya). Tapi Rahmat sekarang tidak bisa lanjut pegang bagian ini, jadi kepemilikan **dipindah ke tim** (bukan solo Rahmat lagi) untuk kerjaan lanjutannya (lihat 4.1-4.3). Dokumen serah terima lengkap — arsitektur, cara kerja, batasan yang sengaja ada, dan 3 opsi desain buat sambungkan ke dashboard live — ada di **`docs/rencana-scenario-generator.md`** (pola sama seperti `rencana-lstm-forecast.md` punya Yuli). Baca dokumen itu dulu sebelum mulai kerja di bagian ini, supaya tidak reverse-engineer dari kode dari nol.
 - [x] **Generator kandidat (kotak 7):** `simulation/scenario_generator.py::generate_candidate_plans()` — 3 varian durasi hijau per keputusan, approach sama dari `RuleBasedEngine` — (a) apa adanya, (b) +20% ke lengan tersibuk (dijepit ke `MAX_GREEN_SECONDS`), (c) ditarik ke arah minimum (lebih merata)
 - [x] **Loop simulasi pendek (kotak 8):** `simulate_candidate()` — tiap kandidat jalan lewat `runSimulation()` yang sudah ada di `run_tls_simulation.py` (di-refactor supaya `step_limit` jadi parameter, bukan konstanta modul) — TIDAK diduplikasi. `SHORT_SIM_STEPS=90` (di tengah rentang 60-120 detik yang diminta)
 - [x] **Satukan Performance Analysis (kotak 9):** delay/queue/throughput dihitung ULANG per kandidat lewat `simulate_candidate()`, bukan cuma 1x jalan
