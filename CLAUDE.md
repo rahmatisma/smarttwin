@@ -8,7 +8,7 @@ SmartTwin — a digital twin for traffic-signal optimization at a 4-way intersec
 
 `backend/` was empty until 17 August 2026 and now holds **22 Python files** — `app/main.py`, `app/api/routes/` (health, traffic, signal, forecast, recommendation), `app/schemas/`, `app/services/`, `app/core/config.py`, plus `tests/test_api.py`, `requirements.txt`, and `.env.example`. **Not yet verified** whether those endpoints serve real `TrafficState` data or are still stubs, and whether the PostgreSQL schema exists — check before relying on them.
 
-`docs/roadmap.md` is the current plan of record — a 16-day compressed schedule (15–31 August 2026). Read it before assuming what is in or out of scope.
+`docs/pembagian-tugas-tahap-akhir.md` is the current plan of record and status tracker — read it before assuming what is in or out of scope, or who owns what. `docs/roadmap.md` was the original 16-day compressed schedule (15–31 August 2026) but stopped being synced on 17 August; it now only carries historical scope/timeline context and should not be trusted for current status (see the superseded-notice banner at its top). `docs/README.md` indexes all docs and gives a reading order for newcomers.
 
 ## Pipeline architecture
 

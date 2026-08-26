@@ -1,5 +1,8 @@
 # SmartTwin — Roadmap Pengembangan (REVISI DARURAT: 16 Hari)
 
+> ⚠️ **SUPERSEDED sejak 17 Agustus 2026 — jangan dijadikan acuan status terkini.**
+> Dokumen ini berhenti disinkronkan tanggal 17 Agustus. Banyak risiko/checklist di sini sudah tertutup tapi tidak pernah dicentang balik (contoh: identitas koridor `east`, kalibrasi `north` — dua-duanya sudah selesai per audit 26-27 Agustus, tapi masih tertulis "berisiko" di bawah). **Acuan status terkini: `docs/pembagian-tugas-tahap-akhir.md`.** Dokumen ini dipertahankan cuma sebagai catatan sejarah scope/timeline awal, bukan sumber kebenaran kerja yang sudah/belum selesai.
+
 **Tim:** AkU dan DuA ORang PLEnGer — Politeknik Negeri Lhokseumawe
 **Kompetisi:** KMIPN VIII 2026, final di Makassar
 **Timeline:** 15–31 Agustus 2026 (~16 hari)
