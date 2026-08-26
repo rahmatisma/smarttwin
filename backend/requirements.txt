@@ -18,4 +18,12 @@ supabase==2.11.0
 eclipse-sumo==1.27.1
 traci==1.27.1
 sumolib==1.27.1
-# library YOLO, LSTM dan PPO belum ditambahkan
+# LSTM (forecast_service.py) -- CPU cukup, backend cuma load model
+# yang sudah dilatih (forecasting/), tidak training di sini. Paket
+# PyPI polos `torch` bisa menarik build CUDA yang besar; kalau mau
+# CPU-only murni (lebih kecil, lebih cepat diinstal), jalankan:
+#   pip install torch --index-url https://download.pytorch.org/whl/cpu
+# lalu install requirements ini seperti biasa (pip tidak akan
+# menimpa yang sudah cocok versinya).
+torch==2.13.0
+# library YOLO dan PPO belum ditambahkan

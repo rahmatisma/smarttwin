@@ -23,7 +23,12 @@ FEATURES = [
 ]
 
 INPUT_TIMESTEPS = 12
-OUTPUT_TIMESTEPS = 3
+# 12, bukan 3 -- model traffic_lstm.pt hasil retrain 26 Agustus
+# (commit 5d2e594) memprediksi 12 langkah (60 detik), sesuai
+# metadata.json::outputSteps. Nilai lama (3) cocok buat model
+# SEBELUM retrain 4-fitur, sekarang bikin size mismatch saat
+# load_state_dict (fc.weight [48,64] vs [12,64]).
+OUTPUT_TIMESTEPS = 12
 STEP_SECONDS = 5
 
 DEFAULT_HIDDEN_SIZE = 64
