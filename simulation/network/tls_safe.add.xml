@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<additional>
+    <!-- Empat fase hijau dengan transisi kuning 4 detik. Index hijau:
+         south=0, east=2, north=4, west=6. -->
+    <tlLogic id="SIMPANG_CENTER" type="static" programID="safe-yellow" offset="0">
+        <phase duration="39" state="GGGggrrrrrrrrrrrrrrr"/>
+        <phase duration="4"  state="yyyyyrrrrrrrrrrrrrrr"/>
+        <phase duration="39" state="rrrrrGGGggrrrrrrrrrr"/>
+        <phase duration="4"  state="rrrrryyyyyrrrrrrrrrr"/>
+        <phase duration="39" state="rrrrrrrrrrGGGggrrrrr"/>
+        <phase duration="4"  state="rrrrrrrrrryyyyyrrrrr"/>
+        <phase duration="39" state="rrrrrrrrrrrrrrrGGGgg"/>
+        <phase duration="4"  state="rrrrrrrrrrrrrrryyyyy"/>
+    </tlLogic>
+</additional>

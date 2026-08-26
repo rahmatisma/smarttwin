@@ -12,6 +12,10 @@ from app.schemas.signal import (
 )
 from app.schemas.traffic import ApproachState, TrafficState
 from app.services.traffic_service import TrafficService, TrafficServiceError
+from app.services.per_approach_forecast_service import (
+    PerApproachForecastService,
+    per_approach_forecast_service,
+)
 
 project_root = str(Path(__file__).resolve().parents[3])
 if project_root not in sys.path:
@@ -27,6 +31,8 @@ from decision_engine.rule_based_engine import (
 logger = logging.getLogger("uvicorn.error")
 
 INTERSECTION_ID = "simpang4-pingit"
+FORECAST_HISTORY_LIMIT = 24
+FORECAST_WEIGHT = 0.3
 
 # Baseline dunia nyata Simpang Pingit (dicari manual, bukan dari
 # formula MIN/MAX_GREEN_SECONDS RuleBasedEngine) -- CUMA dipakai
@@ -64,6 +70,7 @@ class SignalService:
     def __init__(
         self,
         traffic_service: Optional[TrafficService] = None,
+        forecast_service: Optional[PerApproachForecastService] = None,
     ) -> None:
 
         self.traffic_service = (
@@ -73,6 +80,7 @@ class SignalService:
         )
 
         self.engine = RuleBasedEngine()
+        self.forecast_service = forecast_service or per_approach_forecast_service
 
         self._lock = threading.Lock()
 
@@ -160,27 +168,30 @@ class SignalService:
     # LIVE TICK
     # ========================================================
 
-    def _fetch_traffic_state(self) -> Optional[TrafficState]:
+    def _fetch_traffic_history(self) -> list[dict]:
 
         try:
             latest = self.traffic_service.get_latest_traffic(
                 intersection_id=INTERSECTION_ID,
-                limit=1,
+                limit=FORECAST_HISTORY_LIMIT,
             )
         except TrafficServiceError:
-            return None
+            return []
         except Exception:
             logger.warning(
                 "get_latest_traffic gagal saat tick SignalService, "
                 "pakai DEFAULT_GREEN_SECONDS",
                 exc_info=True,
             )
-            return None
+            return []
 
         if not latest:
-            return None
+            return []
 
-        data = latest[0]
+        return latest
+
+    def _traffic_state_from_record(self, data: dict) -> TrafficState:
+
         ts_data = data["trafficState"]
         approaches_data = data["approaches"]
 
@@ -211,13 +222,22 @@ class SignalService:
         di RecommendationService.
         """
 
-        state = self._fetch_traffic_state()
+        history = self._fetch_traffic_history()
+        state = self._traffic_state_from_record(history[0]) if history else None
+        forecast = None
+        if history:
+            try:
+                forecast = self.forecast_service.predict_records(history)
+            except Exception as exc:
+                logger.warning("Forecast live tidak tersedia, pakai TrafficState saat ini: %s", exc)
 
         if state is not None:
 
             plan = self.engine.recommend_cycle(
                 state=state,
                 currentPhase=active_approach,
+                forecast=forecast,
+                forecastWeight=FORECAST_WEIGHT,
             )
 
         else:

@@ -20,6 +20,25 @@ from decision_engine.rule_based_engine import (  # noqa: E402
 )
 
 
+class _TrafficHistoryStub:
+    def __init__(self, records):
+        self.records = records
+
+    def get_latest_traffic(self, **_kwargs):
+        return self.records
+
+
+class _ForecastStub:
+    def __init__(self, result=None, error=None):
+        self.result = result
+        self.error = error
+
+    def predict_records(self, _records):
+        if self.error:
+            raise self.error
+        return self.result
+
+
 def _service_with_fixed_green(seconds: int) -> SignalService:
     """
     SignalService dengan _recompute_cycle_plan() DIPATCH supaya semua
@@ -183,3 +202,55 @@ def test_get_cycle_plan_matches_phases_shown_in_live_status():
             continue
 
         assert phase.durationSeconds == plan_by_approach[approach_name]
+
+
+def test_recompute_cycle_plan_passes_forecast_to_decision_engine():
+    now = datetime(2026, 8, 26, 8, 0, 0, tzinfo=timezone.utc)
+    record = {
+        "trafficState": {"windowStart": now, "windowEnd": now},
+        "approaches": [
+            {"approach": approach, "volume": 1, "queueLengthVeh": 0, "densityIndex": 0}
+            for approach in FIXED_CYCLE_ORDER
+        ],
+    }
+    forecast = {"approachForecasts": [{"approaches": []}]}
+    service = SignalService(
+        traffic_service=_TrafficHistoryStub([record]),
+        forecast_service=_ForecastStub(result=forecast),
+    )
+    captured = {}
+
+    def recommend_cycle(**kwargs):
+        captured.update(kwargs)
+        return CyclePlan(
+            phases=[ApproachPhase(approach=a, greenSeconds=20) for a in FIXED_CYCLE_ORDER],
+            cycleLengthSeconds=80,
+            currentPhase=kwargs["currentPhase"],
+            source="rule-based+forecast",
+        )
+
+    service.engine.recommend_cycle = recommend_cycle
+    plan = service._recompute_cycle_plan("west")
+
+    assert captured["forecast"] is forecast
+    assert captured["forecastWeight"] == 0.3
+    assert plan.source == "rule-based+forecast"
+
+
+def test_recompute_cycle_plan_falls_back_when_forecast_fails():
+    now = datetime(2026, 8, 26, 8, 0, 0, tzinfo=timezone.utc)
+    record = {
+        "trafficState": {"windowStart": now, "windowEnd": now},
+        "approaches": [
+            {"approach": approach, "volume": 1, "queueLengthVeh": 0, "densityIndex": 0}
+            for approach in FIXED_CYCLE_ORDER
+        ],
+    }
+    service = SignalService(
+        traffic_service=_TrafficHistoryStub([record]),
+        forecast_service=_ForecastStub(error=ValueError("history belum cukup")),
+    )
+
+    plan = service._recompute_cycle_plan("west")
+
+    assert plan.source == "rule-based"

@@ -2,10 +2,14 @@
     <input>
         <net-file value="simpang4_pingit.net.xml.gz"/>
         <route-files value="../outputs/demo_mobil.rou.xml"/>
+        <additional-files value="tls_safe.add.xml"/>
     </input>
 
     <time>
         <begin value="0"/>
         <end value="3600"/>
     </time>
+    <report>
+        <no-warnings value="true"/>
+    </report>
 </configuration>

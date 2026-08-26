@@ -272,6 +272,10 @@ from scenario_generator import (
     ScenarioEngine,
 )
 
+from forecast_client import (
+    ForecastClient,
+)
+
 
 # ============================================================
 # SUPABASE
@@ -334,11 +338,11 @@ approachToPhase = {
 
     "south": 0,
 
-    "east": 1,
+    "east": 2,
 
-    "north": 2,
+    "north": 4,
 
-    "west": 3,
+    "west": 6,
 }
 
 
@@ -742,6 +746,8 @@ def getRecommendationId(
 
 def createDecision(
     trafficState,
+    forecast=None,
+    forecastWeight: float = 0.3,
 ):
 
     printHeader(
@@ -763,6 +769,8 @@ def createDecision(
             state=trafficState,
             currentGreenSeconds=15,
             currentPhase="south",
+            forecast=forecast,
+            forecastWeight=forecastWeight,
         )
     )
 
@@ -828,6 +836,11 @@ def createDecision(
     )
 
     print(
+        f"Forecast weight       : "
+        f"{forecastWeight if forecast is not None else 0.0}"
+    )
+
+    print(
         f"Reason                : "
         f"{recommendation.reason}"
     )
@@ -884,6 +897,24 @@ def createDecision(
 
         "recommendationId":
             recommendationId,
+
+        "forecastApplied":
+            forecast is not None,
+
+        "forecastWeight":
+            forecastWeight if forecast is not None else 0.0,
+
+        "forecastFallbackUsed": (
+            bool(forecast.get("fallbackUsed", False))
+            if forecast is not None
+            else False
+        ),
+
+        "forecastSource": (
+            forecast.get("forecastSource", "none")
+            if forecast is not None
+            else "none"
+        ),
     }
 
     print()
@@ -911,6 +942,87 @@ def createDecision(
         recommendation,
         phasePlan,
     )
+
+
+# ============================================================
+# TRAFFIC FORECAST
+# ============================================================
+
+def loadForecast():
+    """Ambil forecast dari histori TrafficState dengan fallback aman."""
+
+    printHeader(
+        "LOADING TRAFFIC FORECAST"
+    )
+
+    enabled = os.getenv(
+        "FORECAST_ENABLED",
+        "true",
+    ).strip().lower() not in {
+        "0",
+        "false",
+        "no",
+        "off",
+    }
+
+    try:
+        forecastWeight = float(
+            os.getenv(
+                "FORECAST_WEIGHT",
+                "0.3",
+            )
+        )
+    except ValueError:
+        print(
+            "FORECAST_WEIGHT tidak valid; "
+            "pakai nilai konservatif 0.3."
+        )
+        forecastWeight = 0.3
+
+    forecastWeight = max(
+        0.0,
+        min(1.0, forecastWeight),
+    )
+
+    if not enabled or forecastWeight == 0.0:
+        print(
+            "Forecast dinonaktifkan. ScenarioEngine akan memakai "
+            "TrafficState aktual saja."
+        )
+        return None, 0.0
+
+    client = ForecastClient()
+    forecast = client.get_live_forecast()
+
+    if forecast is None:
+        print(
+            "Forecast tidak tersedia; fallback ke TrafficState aktual."
+        )
+        print(
+            f"Alasan                 : {client.last_error}"
+        )
+        return None, forecastWeight
+
+    print(
+        "Forecast berhasil dimuat."
+    )
+    print(
+        f"Source                 : "
+        f"{forecast.get('forecastSource', 'unknown')}"
+    )
+    print(
+        f"Fallback model         : "
+        f"{forecast.get('fallbackUsed', False)}"
+    )
+    print(
+        f"Horizon                : "
+        f"{len(forecast.get('approachForecasts', []))} timestep / 60 detik"
+    )
+    print(
+        f"Decision weight        : {forecastWeight}"
+    )
+
+    return forecast, forecastWeight
 
 
 # ============================================================
@@ -971,6 +1083,11 @@ def startSumo():
             f"TLS '{tlsId}' tidak ditemukan. "
             f"Available: {trafficLightIds}"
         )
+
+    traci.trafficlight.setProgram(
+        tlsId,
+        "safe-yellow",
+    )
 
 
 # ============================================================
@@ -1571,6 +1688,22 @@ def saveSimulationResult(
                     ],
                     "vehicles",
                 ),
+                "forecastApplied": (
+                    1.0 if phasePlan.get("forecastApplied") else 0.0,
+                    "boolean",
+                ),
+                "forecastWeight": (
+                    float(phasePlan.get("forecastWeight", 0.0)),
+                    "ratio",
+                ),
+                "forecastFallbackUsed": (
+                    1.0 if phasePlan.get("forecastFallbackUsed") else 0.0,
+                    "boolean",
+                ),
+                "recommendedGreenSeconds": (
+                    float(phasePlan.get("duration", 0.0)),
+                    "seconds",
+                ),
             },
         )
 
@@ -1639,6 +1772,15 @@ def main():
     )
 
     # ========================================================
+    # FORECAST DARI HISTORI TRAFFIC STATE BUILDER
+    # ========================================================
+
+    (
+        forecast,
+        forecastWeight,
+    ) = loadForecast()
+
+    # ========================================================
     # DECISION ENGINE
     # ========================================================
 
@@ -1646,7 +1788,9 @@ def main():
         recommendation,
         phasePlan,
     ) = createDecision(
-        trafficState
+        trafficState,
+        forecast=forecast,
+        forecastWeight=forecastWeight,
     )
 
     # ========================================================
@@ -1773,15 +1917,23 @@ def main():
     )
 
     print(
-        "     ↓"
+        "     |"
     )
 
     print(
-        "Rule-Based Decision Engine"
+        "LSTM Forecast (optional, fallback TrafficState)"
     )
 
     print(
-        "     ↓"
+        "     |"
+    )
+
+    print(
+        "Scenario Generator + Rule-Based Decision Engine"
+    )
+
+    print(
+        "     |"
     )
 
     print(
@@ -1789,7 +1941,7 @@ def main():
     )
 
     print(
-        "     ↓"
+        "     |"
     )
 
     print(
@@ -1797,7 +1949,7 @@ def main():
     )
 
     print(
-        "     ↓"
+        "     |"
     )
 
     print(
@@ -1805,7 +1957,7 @@ def main():
     )
 
     print(
-        "     ↓"
+        "     |"
     )
 
     print(
@@ -1813,7 +1965,7 @@ def main():
     )
 
     print(
-        "     ↓"
+        "     |"
     )
 
     print(

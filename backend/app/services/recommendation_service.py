@@ -11,6 +11,7 @@ from app.schemas.recommendation import (
 )
 from app.schemas.traffic import TrafficState, ApproachState
 from app.services.traffic_service import TrafficService, TrafficServiceError
+from app.services.per_approach_forecast_service import per_approach_forecast_service
 
 import sys
 from pathlib import Path
@@ -39,7 +40,7 @@ class RecommendationService:
         try:
             latest_traffic_list = self.traffic_service.get_latest_traffic(
                 intersection_id=request.intersectionId,
-                limit=1
+                limit=24
             )
         except TrafficServiceError:
             # intersectionId tidak dikenal di database (mis. intersection
@@ -94,10 +95,21 @@ class RecommendationService:
                 ]
             )
 
+            forecast = None
+            try:
+                forecast = per_approach_forecast_service.predict_records(latest_traffic_list)
+            except Exception as exc:
+                logger.warning(
+                    "Forecast rekomendasi tidak tersedia, pakai TrafficState saat ini: %s",
+                    exc,
+                )
+
             engine_result = self.engine.recommend(
                 state=traffic_state,
                 currentGreenSeconds=30,
                 currentPhase="north",
+                forecast=forecast,
+                forecastWeight=0.3,
             )
 
             selected_approach = next(

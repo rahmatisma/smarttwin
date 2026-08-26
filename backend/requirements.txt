@@ -6,6 +6,7 @@ python-dotenv==1.1.1
 httpx==0.28.1
 pytest==8.4.2
 pandas==2.3.3
+numpy==2.2.6
 python-multipart==0.0.20
 huggingface-hub==0.27.1
 supabase==2.11.0
@@ -18,7 +19,7 @@ supabase==2.11.0
 eclipse-sumo==1.27.1
 traci==1.27.1
 sumolib==1.27.1
-# LSTM (forecast_service.py) -- CPU cukup, backend cuma load model
+# LSTM agregat dan per-approach -- CPU cukup, backend cuma load model
 # yang sudah dilatih (forecasting/), tidak training di sini. Paket
 # PyPI polos `torch` bisa menarik build CUDA yang besar; kalau mau
 # CPU-only murni (lebih kecil, lebih cepat diinstal), jalankan:

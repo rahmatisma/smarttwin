@@ -31,12 +31,12 @@ Kalau desainnya tidak mengarah ke pertanyaan itu, dia tidak berguna buat sistem 
 |---|---|---|---|
 | `vehicleCount` | jumlah kendaraan | `volume` di `TrafficState` (dari `crossing_simpang.csv` — ALIRAN, kendaraan lewat garis) | ✅ Data asli, bervariasi |
 | `densityIndex` | indeks kepadatan zona | `densityIndex` di `TrafficState` (dari `snapshot_zona.csv` sejak 25 Agustus — KEHADIRAN, kendaraan di zona) | ✅ Data asli, bervariasi |
-| `queueLengthVeh` | jumlah kendaraan antre | `queueLengthVeh` di `TrafficState` | ⚠️ **SELALU 0** — CV belum pernah menghitung ini (lihat `docs/realtime-dashboard.md`) |
-| `queueLengthMEst` | estimasi antrean (meter) | `queueLengthMEst` di `TrafficState` | ⚠️ **SELALU 0** — sama, belum ada logikanya di CV |
+| `queueLengthVeh` | jumlah kendaraan antre | `queueLengthVeh` di `TrafficState` | ✅ Data estimasi CV asli, bervariasi, sudah dipakai training |
+| `queueLengthMEst` | estimasi antrean (meter) | `queueLengthMEst` di `TrafficState` | ✅ Data estimasi CV asli, bervariasi, sudah dipakai training |
 
 **`avgSpeedKmh` TIDAK diprediksi sama sekali** — tidak ada di 4 fitur ini, dan memang belum ada sumber data kecepatan.
 
-**Implikasi peringatan di atas:** karena 2 dari 4 fitur selalu 0 di seluruh data training, model akan "belajar" bahwa antrean selalu 0 — bukan salah modelnya, itu jujur cerminan data yang ada. Prediksi `queueLengthVeh`/`queueLengthMEst` dari model ini **tidak boleh dipercaya** sampai CV benar-benar menghitung antrean asli (lihat catatan RunPod di `docs/realtime-dashboard.md`). Kalau mau, latih dulu cuma pakai 2 fitur yang datanya asli (`vehicleCount`, `densityIndex`) — lebih jujur daripada pura-pura prediksi antrean dari data yang isinya nol semua.
+**Status terbaru:** dua fitur antrean sudah berasal dari `hitung_antrean()` pada pipeline CV dan tidak lagi konstan nol. Model agregat dan shared LSTM per-approach sudah dilatih dengan empat fitur penuh. Nilainya tetap merupakan estimasi berbasis zona/tracking, bukan pengukuran fisik manual; khusus north, density dan antrean memakai zona `simpang_tengah` sebagai proxy.
 
 ### 2.1 Rencana bertahap (disepakati 25 Agustus)
 
@@ -103,7 +103,7 @@ Sekarang `SEQUENCE_LENGTH = 30`, didesain buat skala menit (artinya "lihat 30 me
 
 - **Cuma 49 menit rekaman, dari SATU sesi (15 Agustus, siang hari).** Tidak ada variasi kondisi (tidak ada data malam hari, tidak ada data hari kerja vs weekend, tidak ada data hujan). Model ini **tidak akan bisa generalisasi** ke kondisi yang tidak pernah direkam — itu bukan bug, itu keterbatasan data mentah yang ada.
 - **~589 titik data (skala 5 detik)** itu jauh lebih baik dari ~43 (skala menit), tapi tetap kecil untuk LSTM standar. Realistis: model ini pantas diperlakukan sebagai **bukti-konsep** ("LSTM bisa dipasang dan menghasilkan angka yang masuk akal"), bukan model produksi yang diklaim akurat — sama seperti status PeMS04/TMU/Brisbane yang sudah didokumentasikan di `CLAUDE.md` (dilatih & dievaluasi, tapi masalahnya transferabilitas/skala data, bukan modelnya "gagal").
-- **2 dari 4 fitur (antrean) selalu 0** — lihat bagian 2. Kalau mau laporan yang jujur, sebutkan ini eksplisit: LSTM memprediksi `vehicleCount` dan `densityIndex` dengan data asli, TIDAK memprediksi antrean secara bermakna (datanya tidak pernah ada nilai selain 0).
+- **Antrean adalah estimasi CV, bukan ground truth manual.** Nilainya sudah bervariasi dan dapat dipakai sebagai proof of concept, tetapi kualitasnya tetap mengikuti akurasi zona, tracking kendaraan berhenti, dan proxy north.
 
 ---
 
@@ -125,7 +125,7 @@ Audit awal dokumen ini (ditulis siang 25 Agustus) menyimpulkan `realtime_forecas
 4. **`backend/tests/test_forecast_realtime.py`** — **DIHAPUS bersamaan.** Bukan test pytest asli (`def main()`, nol `def test_*`), sama persis polanya dengan 4 file basi yang sudah dihapus di item 2.5 `pembagian-tugas-24-agustus.md`. Sebelum dihapus, file ini aktif MEMBUAT `pytest -q` gagal collection total (bukan cuma 1 test gagal) karena mengimpor dua kelas yang sudah dihapus. Regresi ini tidak tercatat di mana pun sebelum ditemukan malam ini.
 5. **`decision_engine/rule_based_engine.py`** — ini BUKAN LSTM (rule-based, dibahas di `pembagian-tugas-24-agustus.md`), disebut di sini cuma buat menegaskan: **LSTM dan RuleBasedEngine masih dua sistem terpisah yang belum saling bicara** (lihat bagian 8).
 
-**Verifikasi setelah penghapusan:** `python -c "import app.main"` sukses, `pytest -q` kembali ke `1 failed, 18 passed` (satu-satunya gagal adalah `test_lstm_forecaster.py`, menunggu model dari Yuli — sudah diharapkan, bukan regresi).
+**Pembaruan 26 Agustus:** modul ONNX legacy `backend/app/models/lstm_forecast.py` dan test pasangannya sudah dihapus setelah dipastikan tidak dipakai kode produksi. Serving aktif memakai `backend/app/services/forecast_service.py`; shared LSTM per-approach memiliki pipeline dan artefak terpisah di `forecasting/outputs/lstm/per_approach/`.
 
 ---
 
@@ -145,5 +145,5 @@ Audit awal dokumen ini (ditulis siang 25 Agustus) menyimpulkan `realtime_forecas
 
 - [ ] Rahmat: desain ulang definisi "antrean" buat pendekatan zona (bukan crossing lama) + logika deteksi kendaraan berhenti
 - [ ] Rahmat: jalankan logika itu ke rekaman yang ada, hasilnya CSV baru berisi `queueLengthVeh`/`queueLengthMEst` yang bukan nol
-- [ ] Yuli: retrain ulang pipeline dari Fase 1, sekarang 4 fitur penuh (`vehicleCount`, `densityIndex`, `queueLengthVeh`, `queueLengthMEst`)
-- [ ] Update tabel di bagian 2 dokumen ini — ganti status `queueLengthVeh`/`queueLengthMEst` dari "SELALU 0" jadi "Data asli" begitu Fase 2 selesai
+- [x] Yuli: retrain ulang pipeline dari Fase 1, sekarang 4 fitur penuh (`vehicleCount`, `densityIndex`, `queueLengthVeh`, `queueLengthMEst`)
+- [x] Update tabel di bagian 2 dokumen ini — status `queueLengthVeh`/`queueLengthMEst` sudah diperbarui menjadi data estimasi CV asli

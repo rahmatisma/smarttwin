@@ -3,21 +3,37 @@
 Modul ini memprediksi kondisi lalu lintas 60 detik ke depan menggunakan LSTM
 PyTorch dan data CV Simpang Pingit berinterval 5 detik. Tersedia dua model:
 
-- model agregat sebagai serving/fallback backend saat ini;
-- shared LSTM per-approach yang sudah dilatih untuk west, south, east, north.
+- model agregat untuk endpoint agregat dan fallback;
+- shared LSTM per-approach sebagai model utama endpoint per-approach serta
+  input prediktif Decision Engine live.
 
 ## Pipeline aktif
 
+Training dan runtime adalah dua alur berbeda. CSV dipakai untuk melatih model;
+serving tidak membaca CSV atau keluaran YOLO secara langsung.
+
 ```text
+TRAINING
 crossing_simpang.csv + snapshot_zona.csv
-                 ↓ resample 5 detik
-vehicleCount, queueLengthVeh, queueLengthMEst, densityIndex
-                 ↓ histori 12 timestep / 60 detik
-traffic_lstm.pt
-                 ↓ prediksi 12 timestep / 60 detik
-/api/forecast atau /api/forecast/approaches
-                 ↓ opsional
-RuleBasedEngine → ScenarioEngine
+    → preprocessing per 5 detik
+    → sequence 12 input / 12 output
+    → traffic_lstm.pt + traffic_lstm_per_approach.pt
+
+RUNTIME BACKEND
+CV/YOLO + ByteTrack
+    → metrik traffic per window 5 detik
+    → TrafficState contract di Supabase
+    → TrafficService mengambil 12 state lengkap terakhir
+    → shared LSTM per-approach memprediksi 60 detik
+    → RuleBasedEngine (70% state aktual + 30% forecast)
+    → SignalService dan RecommendationService
+
+RUNTIME SIMULATION
+TrafficState API
+    → simulation/forecast_client.py
+    → Forecast API
+    → ScenarioEngine
+    → run_tls_simulation.py / SUMO
 ```
 
 File utama:
@@ -28,6 +44,89 @@ File utama:
 - `outputs/lstm/scaler.json`: parameter normalisasi;
 - `outputs/lstm/metadata.json`: konfigurasi dan metrik;
 - `backend/app/services/forecast_service.py`: serving model.
+- `backend/app/services/per_approach_forecast_service.py`: serving shared LSTM
+  per-approach;
+- `backend/app/services/signal_service.py`: integrasi forecast ke siklus lampu
+  live dengan fallback ke TrafficState saat ini.
+- `simulation/forecast_client.py`: client yang menyiapkan forecast dari histori
+  TrafficState untuk jalur batch SUMO;
+- `simulation/run_tls_simulation.py`: meneruskan forecast ke ScenarioEngine dan
+  tetap memakai TrafficState aktual jika forecast tidak tersedia.
+
+## Sumber TrafficState saat runtime
+
+LSTM tidak menerima bounding box, track YOLO, maupun CSV mentah. Batas input
+serving adalah kontrak `TrafficState` yang sudah berisi empat approach dan empat
+fitur traffic. Karena itu, LSTM secara arsitektural berada **setelah** Traffic
+State Builder, bukan menggantikannya.
+
+Saat ini terdapat dua jalur produsen data:
+
+1. Pipeline empat kamera terkalibrasi menghasilkan CSV CV, lalu
+   `backend/app/pipeline/cv_csv_bridge.py` memasukkan lane metrics dan
+   `TrafficStateBuilder` membentuk approach state di Supabase.
+2. Pemrosesan satu video yang diunggah melalui halaman CCTV memakai
+   `cv/process_uploaded_video.py`. Jalur ini menghitung window lima detik dan
+   langsung melakukan upsert ke `trafficStates` serta
+   `trafficApproachStates`. Implementasinya adalah builder sederhana khusus
+   satu approach, bukan pemanggilan class `TrafficStateBuilder` utama.
+
+Kedua jalur berakhir pada kontrak database yang sama. Forecast live membaca
+kontrak tersebut melalui `TrafficService.get_latest_traffic()`. Client simulasi
+membacanya melalui `GET /api/v1/traffic/{intersectionId}`. Dengan demikian tidak
+ada jalur langsung `YOLO → LSTM` dan tidak ada duplikasi preprocessing di SUMO.
+
+## Arti realtime pada implementasi sekarang
+
+Sistem sudah event-driven pada level hasil deteksi: setiap window lima detik
+yang selesai diproses disimpan ke Supabase, lalu
+`cv/process_uploaded_video.py` memanggil `POST /api/v1/traffic/notify` dan
+backend meneruskannya ke dashboard melalui WebSocket. Forecast dan rekomendasi
+selalu mengambil histori terbaru yang sudah tersimpan.
+
+Namun sumber gambarnya masih file video yang diunggah atau rekaman lokal, bukan
+stream kamera RTSP yang terus-menerus. Jadi istilah yang tepat untuk kondisi
+sekarang adalah **near-real-time processing dari rekaman/video upload**, bukan
+live CCTV end-to-end. Supabase berperan sebagai penyimpanan state; push dashboard
+menggunakan WebSocket backend karena Supabase Realtime tidak dipakai pada jalur
+aktif ini.
+
+Untuk menjadi realtime end-to-end, pekerjaan berikutnya berada di sisi producer
+CV: menerima RTSP/live capture, memproses frame kontinu, menutup window setiap
+lima detik, menyimpan TrafficState lengkap, dan mengirim notify. LSTM tidak perlu
+dilatih ulang hanya karena sumber berubah, selama kontrak fitur dan intervalnya
+tetap sama.
+
+## Posisi Decision Engine dan PPO
+
+Forecast saat ini dibaca oleh `RuleBasedEngine`, bukan PPO. `ScenarioEngine`
+dan runner SUMO sudah menerima forecast melalui `simulation/forecast_client.py`.
+Implementasi PPO belum tersedia. Alur target masa depan adalah:
+
+```text
+TrafficState → LSTM forecast → state/observation PPO → timing signal → SUMO
+```
+
+Jangan menyatakan PPO sudah membaca keluaran LSTM sebelum environment, model,
+loader, dan evaluasi PPO benar-benar ditambahkan serta diuji.
+
+## Instalasi
+
+Jalankan dari root repository:
+
+```powershell
+# Environment training/evaluasi forecasting
+py -3.10 -m venv forecasting\.venv
+.\forecasting\.venv\Scripts\python.exe -m pip install -r forecasting\requirements.txt
+
+# Environment API dan serving model
+py -3.10 -m venv backend\.venv
+.\backend\.venv\Scripts\python.exe -m pip install -r backend\requirements.txt
+```
+
+Backend hanya melakukan inferensi. `scikit-learn` dan `matplotlib` berada di
+requirement forecasting karena hanya diperlukan saat preprocessing, training,
+dan evaluasi.
 
 ## Data dan preprocessing
 
@@ -194,17 +293,150 @@ empat pendekat:
 
 Tambahkan 11 record berikutnya dengan interval lima detik. Respons berisi:
 
-- `forecast`: hasil agregat LSTM;
 - `approachForecasts`: 12 horizon untuk setiap pendekat;
-- `allocationMethod`: `recent-approach-share`;
-- `allocationNote`: penjelasan metode dan batasannya.
+- `forecastSource`: `lstm-per-approach`;
+- `fallbackUsed`: `false` ketika shared model berhasil digunakan;
+- `model` dan `input`: identitas model serta rentang histori yang dipakai.
 
-Endpoint backend saat ini masih memakai model agregat. Nilai per pendekat dialokasikan
-dari proporsi 12 timestep input terakhir. Forecast ini sudah dapat dipakai
-secara opsional oleh `RuleBasedEngine` dan `ScenarioEngine`, tetapi predicted
-demand belum diinjeksi sebagai kendaraan baru ke SUMO. Shared LSTM per-approach
-yang baru sudah tersedia sebagai artefak, tetapi belum menggantikan loader model
-di endpoint ini.
+Endpoint memakai shared LSTM per-approach sebagai model utama. Jika artefak atau
+input per-approach tidak dapat dipakai, endpoint jatuh ke model agregat dengan
+`forecastSource=aggregate-recent-share-fallback` dan `fallbackUsed=true`.
+
+Pada jalur live, `SignalService` mengambil histori TrafficState dari Supabase,
+menjalankan shared LSTM, lalu mengirim hasilnya ke
+`RuleBasedEngine.recommend_cycle()`. `RecommendationService` melakukan hal yang
+sama untuk `RuleBasedEngine.recommend()`. Jika 12 TrafficState lengkap
+berinterval lima detik belum tersedia atau inferensi gagal, Decision Engine
+tetap berjalan menggunakan kondisi live tanpa forecast.
+
+## Menjalankan dan menguji
+
+Semua command berikut dijalankan dari root repository.
+
+### Jalankan backend
+
+```powershell
+$env:DEBUG='false'
+.\backend\.venv\Scripts\python.exe -m uvicorn app.main:app --app-dir backend --reload
+```
+
+Buka dokumentasi API di `http://127.0.0.1:8000/docs`.
+
+### Health check model agregat
+
+```powershell
+Invoke-RestMethod -Method Get -Uri http://127.0.0.1:8000/api/forecast/health |
+    ConvertTo-Json -Depth 10
+```
+
+### Tes forecasting dan Decision Engine tanpa Supabase
+
+```powershell
+$env:DEBUG='false'
+.\backend\.venv\Scripts\python.exe -m pytest `
+    backend/tests/test_forecast_decision_integration.py `
+    backend/tests/test_signal_service.py `
+    backend/tests/test_rule_based_engine_cycle.py `
+    simulation/tests/test_forecast_client.py -q
+```
+
+Tes ini memeriksa model per-approach sungguhan, output 60 detik untuk empat
+lengan, penerusan forecast ke Decision Engine, rotasi sinyal, dan fallback.
+
+### Tes seluruh backend
+
+```powershell
+$env:DEBUG='false'
+.\backend\.venv\Scripts\python.exe -m pytest backend/tests -q
+```
+
+Sebagian tes penuh membutuhkan koneksi Supabase dan data ingest. Kegagalan
+koneksi pada tes database/traffic tidak berarti inferensi LSTM gagal.
+
+### Prediksi offline dan evaluasi ulang
+
+```powershell
+$env:PYTHONUTF8='1'
+.\forecasting\.venv\Scripts\python.exe forecasting/scripts/lstm/predict.py
+.\forecasting\.venv\Scripts\python.exe forecasting/scripts/lstm/per_approach/predict.py
+.\forecasting\.venv\Scripts\python.exe forecasting/scripts/lstm/per_approach/evaluate.py
+```
+
+### Jalankan SUMO dengan forecast
+
+Backend harus hidup karena simulation forecast client memakai Traffic API dan
+Forecast API. Jalankan runner pada terminal lain:
+
+```powershell
+$env:SMARTTWIN_BACKEND_URL='http://127.0.0.1:8000'
+$env:FORECAST_ENABLED='true'
+$env:FORECAST_WEIGHT='0.3'
+.\simulation\.venv\Scripts\python.exe simulation\run_tls_simulation.py
+```
+
+Log yang membuktikan forecast diteruskan ke Decision Engine:
+
+```text
+Forecast berhasil dimuat.
+Source                 : lstm-per-approach
+Horizon                : 12 timestep / 60 detik
+Decision weight        : 0.3
+Source                 : rule-based+forecast
+```
+
+Jika histori/model/backend tidak tersedia, runner menampilkan fallback dan SUMO
+tetap berjalan dari TrafficState aktual.
+
+Setiap hasil juga menyimpan provenance numerik pada `simulationMetrics`:
+`forecastApplied`, `forecastWeight`, `forecastFallbackUsed`, dan
+`recommendedGreenSeconds`. Nama sumber forecast tetap dicetak di log karena
+skema `simulationMetrics.metricValue` hanya menerima angka.
+
+### A/B test SUMO
+
+Tanpa forecast:
+
+```powershell
+$env:FORECAST_ENABLED='false'
+$env:FORECAST_WEIGHT='0.0'
+.\simulation\.venv\Scripts\python.exe simulation\run_tls_simulation.py
+```
+
+Dengan forecast:
+
+```powershell
+$env:FORECAST_ENABLED='true'
+$env:FORECAST_WEIGHT='0.3'
+.\simulation\.venv\Scripts\python.exe simulation\run_tls_simulation.py
+```
+
+Bandingkan `averageWaitingTimeSeconds`, `queueLengthVeh`, `throughputVeh`, dan
+LOS dari dua hasil tersebut. Jangan menyimpulkan forecast memperbaiki sinyal
+sebelum hasil A/B menunjukkan perbaikan pada data holdout/skenario yang sama.
+
+Hasil A/B aktual 26 Agustus 2026 setelah normalisasi density dan fase kuning,
+menggunakan TrafficState ID `13784` serta route file yang sama:
+
+| Metrik | Tanpa forecast (simulation 12) | Forecast 30% (simulation 13) | Hasil |
+|---|---:|---:|---|
+| Green south | 38 detik | 22 detik | Berubah |
+| Average waiting time | 31,56 detik | 32,83 detik | Forecast lebih buruk 1,27 detik |
+| Peak queue | 13 kendaraan | 16 kendaraan | Forecast lebih buruk 3 kendaraan |
+| Throughput | 59 kendaraan | 57 kendaraan | Forecast lebih buruk 2 kendaraan |
+
+Kesimpulan yang sah dari satu pasangan run ini: integrasi LSTM memengaruhi
+keputusan timing, tetapi belum terbukti meningkatkan performa. Perlu beberapa
+TrafficState holdout dan pengulangan terkontrol sebelum menarik kesimpulan umum.
+
+### Predicted demand
+
+Forecast saat ini memengaruhi pemilihan approach dan timing, tetapi tidak
+menambah kendaraan ke route SUMO. Injeksi otomatis sengaja belum diaktifkan:
+route file belum memiliki mapping resmi `approach → origin edge/route`, sehingga
+membagi kendaraan prediksi secara acak akan membuat evaluasi menyesatkan.
+Prasyarat sebelum injeksi adalah mapping empat approach ke route masuk, mode
+replace/scale demand statis (bukan menumpuk kendaraan ganda), dan seed yang sama
+untuk A/B. Ini keputusan validasi, bukan kegagalan loader LSTM.
 
 ## Riwayat eksperimen dataset
 
@@ -217,8 +449,8 @@ fitur, lokasi, dan definisinya berbeda. Dataset tidak digabung langsung.
 | PEMS04 | Eksperimen multi-sensor | 20 sensor × flow, occupancy, speed | Training dan evaluasi selesai; R² sekitar 0,8786 |
 | Brisbane | Eksplorasi persimpangan | controller/API, lane count, flow, cycle | Belum training karena histori tidak cukup |
 | YOLO SmartTwin | Forecast dari deteksi lokal | 12 lane sensor × 8 fitur | Training dan evaluasi eksperimen selesai |
-| LSTM Pingit aktif | Serving MVP | agregat empat fitur CV asli | Training, API, dan integrasi opsional selesai |
-| Shared LSTM per-approach | Forecast empat lengan | 4 fitur traffic + one-hot approach | Training, evaluasi, dan prediksi offline selesai |
+| LSTM Pingit agregat | Serving dan fallback | agregat empat fitur CV asli | Training dan API agregat selesai |
+| Shared LSTM per-approach | Forecast empat lengan | 4 fitur traffic + one-hot approach | Training, evaluasi, serving API, dan Decision Engine live selesai |
 
 ### TMU
 
@@ -257,8 +489,13 @@ dipengaruhi banyak target nol seperti bus, truk, dan queue.
 - [x] forecast opsional pada RuleBasedEngine dan ScenarioEngine;
 - [x] shared LSTM per-approach sudah dilatih dan mengalahkan baseline;
 - [x] prediksi offline 12 langkah untuk empat approach;
+- [x] backend memuat shared LSTM per-approach sebagai model utama endpoint;
+- [x] forecast per-approach terhubung ke RecommendationService dan SignalService;
+- [x] fallback ke kondisi live tersedia ketika forecast gagal;
+- [x] client forecast untuk jalur batch simulation tersedia dan diuji;
+- [x] `run_tls_simulation.py` meneruskan forecast ke ScenarioEngine;
 - [ ] histori lintas hari/jam/cuaca belum tersedia;
-- [ ] backend belum memuat shared LSTM per-approach sebagai model utama;
+- [ ] PPO belum diimplementasikan dan belum membaca forecast;
 - [ ] predicted demand belum diinjeksi ke SUMO;
 - [ ] export ONNX membutuhkan dependency `onnxscript`.
 

@@ -187,6 +187,11 @@ def simulate_candidate(
 
     try:
 
+        traci.trafficlight.setProgram(
+            tls_id,
+            "safe-yellow",
+        )
+
         traci.trafficlight.setPhase(
             tls_id,
             sumo_phase,

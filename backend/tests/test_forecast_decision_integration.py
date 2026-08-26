@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta, timezone
 import sys
 from pathlib import Path
+import pytest
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -9,6 +10,9 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from app.schemas.traffic import ApproachState, TrafficState  # noqa: E402
 from app.services.forecast_service import ForecastService  # noqa: E402
+from app.services.per_approach_forecast_service import (  # noqa: E402
+    PerApproachForecastService,
+)
 from decision_engine.rule_based_engine import RuleBasedEngine  # noqa: E402
 
 
@@ -76,3 +80,74 @@ def test_forecast_can_change_rule_based_priority():
 
     assert result.recommendedPhase == "east"
     assert result.source == "rule-based+forecast"
+
+
+def test_trained_per_approach_model_returns_four_approaches_for_60_seconds():
+    start = datetime(2026, 8, 15, tzinfo=timezone.utc)
+    records = []
+    for index in range(12):
+        records.append({
+            "timestamp": (start + timedelta(seconds=5 * index)).isoformat(),
+            "approaches": [
+                {
+                    "approach": approach,
+                    "vehicleCount": index + approach_index,
+                    "queueLengthVeh": max(0, index - 2),
+                    "queueLengthMEst": max(0, index - 2) * 2.5,
+                    "densityIndex": min(1, index / 20),
+                }
+                for approach_index, approach in enumerate(
+                    ("west", "south", "east", "north")
+                )
+            ],
+        })
+
+    result = PerApproachForecastService().predict_records(records)
+
+    assert result["forecastSource"] == "lstm-per-approach"
+    assert result["fallbackUsed"] is False
+    assert len(result["approachForecasts"]) == 12
+    assert result["approachForecasts"][-1]["secondsAhead"] == 60
+    assert {
+        item["approach"]
+        for item in result["approachForecasts"][0]["approaches"]
+    } == {"west", "south", "east", "north"}
+
+
+def test_runtime_density_is_normalized_like_training_data(monkeypatch):
+    service = PerApproachForecastService()
+    start = datetime(2026, 8, 15, tzinfo=timezone.utc)
+    records = [
+        {
+            "trafficState": {
+                "windowEnd": (start + timedelta(seconds=index * 5)).isoformat()
+            },
+            "approaches": [
+                {
+                    "approach": approach,
+                    "volume": 1,
+                    "queueLengthVeh": 0,
+                    "queueLengthMEst": 0,
+                    "densityIndex": 10.5,
+                }
+                for approach in ("west", "south", "east", "north")
+            ],
+        }
+        for index in range(12)
+    ]
+    captured = {}
+
+    class ModelStub:
+        def __call__(self, tensor):
+            captured["tensor"] = tensor.numpy()
+            return __import__("torch").zeros((4, 12, 4))
+
+    service._model = ModelStub()
+    service._checkpoint = {}
+    service._scaler = {"min": [0, 0, 0, 0], "scale": [1, 1, 1, 1]}
+    service._metadata = {"model": "stub"}
+    monkeypatch.setattr(service, "_load", lambda: None)
+
+    service.predict_records(records)
+
+    assert captured["tensor"][0, 0, 3] == pytest.approx(10.5 / 33.0)

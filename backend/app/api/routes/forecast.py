@@ -7,6 +7,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from app.services.forecast_service import forecast_service
+from app.services.per_approach_forecast_service import per_approach_forecast_service
 
 
 router = APIRouter(
@@ -153,8 +154,9 @@ def forecast_health() -> dict[str, Any]:
     "/approaches",
     summary="Traffic Forecast 60 Detik Per Pendekat",
     description=(
-        "Menjalankan LSTM agregat lalu mengalokasikan prediksi ke setiap "
-        "pendekat berdasarkan proporsi traffic 12 timestep terakhir."
+        "Menjalankan LSTM per-approach menggunakan 12 TrafficState lengkap "
+        "berinterval 5 detik. Jika model per-approach tidak tersedia, layanan "
+        "jatuh ke alokasi model agregat."
     ),
 )
 def predict_approach_forecast(
@@ -162,7 +164,14 @@ def predict_approach_forecast(
 ) -> dict[str, Any]:
     try:
         records = [record.model_dump(mode="json") for record in request.records]
-        return forecast_service.predict_approach_records(records)
+        try:
+            return per_approach_forecast_service.predict_records(records)
+        except Exception as primary_exc:
+            result = forecast_service.predict_approach_records(records)
+            result["forecastSource"] = "aggregate-recent-share-fallback"
+            result["fallbackUsed"] = True
+            result["fallbackReason"] = str(primary_exc)
+            return result
     except FileNotFoundError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     except ValueError as exc:

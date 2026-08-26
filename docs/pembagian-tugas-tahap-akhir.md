@@ -95,8 +95,8 @@ Rekomendasi: **Opsi A** — script training PyTorch Yuli sudah jalan & teruji (5
 ### 2.3 [SELESAI 26 Agustus siang, dengan 1 bug ketauan+diperbaiki] Retrain 4 fitur
 - [x] Model sudah beneran jalan — diverifikasi lewat prediksi sungguhan (`POST /api/forecast` pakai 12 baris asli dari `data_gabungan.csv`), hasilnya prediksi 12 langkah ke depan (60 detik) yang masuk akal, bukan cuma health check kosong
 - [x] **Bug ditemukan & diperbaiki saat verifikasi:** `backend/app/services/forecast_service.py:26` masih hardcode `OUTPUT_TIMESTEPS = 3` (model versi lama, horizon 15 detik) — model hasil retrain terbaru (`metadata.json::outputSteps`) sebenarnya 12 (horizon 60 detik). Mismatch ini bikin `load_state_dict()` gagal total dengan `size mismatch for fc.weight: [48,64] vs [12,64]`, jadi `POST /api/forecast` selalu 500 walau file model-nya sudah ada. Diubah jadi `OUTPUT_TIMESTEPS = 12`, semua tempat lain (docstring, `forecastHorizonSeconds`, dst) otomatis ikut karena semua turunan dari konstanta ini, tidak ada hardcode ganda
-- [x] **Temuan tambahan (bukan blocker, tapi catat):** `torch` sekarang ternyata SUDAH terinstal di `backend/.venv` (`torch-2.13.0+cpu`) — tapi **tidak tercantum** di `backend/requirements.txt`. Kemungkinan diinstal manual di suatu titik. Perlu ditambahkan ke `requirements.txt` supaya environment baru manapun (termasuk demo di laptop lain) bisa `pip install -r requirements.txt` dan langsung dapat forecast jalan, bukan gagal diam-diam
-- [x] **Kode mati ketauan sekalian:** `backend/app/models/lstm_forecast.py` (`LSTMForecaster`) + `backend/tests/test_lstm_forecaster.py` itu modul LAIN dari desain lama (nunjuk ke `forecasting/outputs/yolo/metadata.json` yang tidak pernah ada dan tidak akan pernah ada — arsitektur YOLO-per-dataset sudah ditinggalkan). Test ini SELALU gagal di `pytest -q` (FileNotFoundError) dan kelihatan seperti "LSTM masih rusak" padahal LSTM yang aktif (`forecast_service.py`) sudah jalan. Aman dihapus, tapi belum dihapus — tanya dulu ke tim sebelum dihapus permanen
+- [x] `torch==2.13.0` sudah tercantum di `backend/requirements.txt`, sehingga environment backend baru dapat memasang dependency serving LSTM secara reproducible
+- [x] Kode mati `backend/app/models/lstm_forecast.py` + `backend/tests/test_lstm_forecaster.py` sudah dihapus 26 Agustus setelah dipastikan tidak diimpor kode produksi; loader aktif tetap `forecast_service.py`
 - [ ] Update tabel status fitur di `rencana-lstm-forecast.md` bagian 2 — **masih belum dikerjakan**, tabel di bagian 2 dokumen itu masih menulis `queueLengthVeh`/`queueLengthMEst` sebagai "⚠️ SELALU 0", padahal data asli sudah ada sejak 25 Agustus DAN model sudah dilatih dengan data itu
 
 ### 2.4 [DINAIKKAN KE P0 — fokus utama 26 Agustus sore/malam] Sambungkan forecast ke Decision Engine
@@ -149,7 +149,7 @@ Rekomendasi: **Opsi A** — script training PyTorch Yuli sudah jalan & teruji (5
 - [ ] Rahmat sudah time-box PPO (item 1.6) — jangan biarkan tanpa batas waktu jelas
 - [x] **Baru:** model LSTM Yuli sudah di-commit (`5d2e594`) dan sudah diverifikasi jalan (2.2/2.3) — sudah sepakat forecast → decision engine (2.4/bagian 6) jadi fokus 26 Agustus sore, menggantikan prioritas P2 lama
 - [ ] **Baru:** siapa yang jalankan `run_ingest.py` (CV → Supabase) secara rutin sebelum demo — sekarang manual, tidak ada scheduler (lihat bagian 7.2). Perlu SOP jelas siapa & kapan, supaya data di dashboard demo tidak basi
-- [ ] **Baru:** `backend/app/models/lstm_forecast.py` + `backend/tests/test_lstm_forecaster.py` (kode mati, lihat 2.3) — sudah sepakat boleh dihapus?
+- [x] `backend/app/models/lstm_forecast.py` + `backend/tests/test_lstm_forecaster.py` (kode mati, lihat 2.3) sudah dihapus
 
 ---
 
