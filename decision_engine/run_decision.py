@@ -22,13 +22,15 @@ import os
 from collections import defaultdict
 from datetime import datetime, timezone
 
-# Pastikan bisa import rule_based_engine dari direktori yang sama
+# Pastikan bisa import rule_based_engine dari direktori yang sama, dan
+# app.schemas dari backend/ -- backend HARUS masuk path duluan karena
+# rule_based_engine.py sendiri mengimpor app.schemas.traffic saat di-import.
 sys.path.insert(0, os.path.dirname(__file__))
-from rule_based_engine import RuleBasedEngine
-
 sys.path.insert(
     0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "backend")
 )
+
+from rule_based_engine import RuleBasedEngine
 from app.schemas.traffic import ApproachState, TrafficState  # noqa: E402
 
 # ─── Konfigurasi Path ─────────────────────────────────────────────────────────
@@ -154,15 +156,15 @@ def run(engine, data: dict):
             approaches=approach_states,
         )
 
-        rekomendasi = engine.decide(traffic_state)
+        rekomendasi = engine.recommend(traffic_state)
 
         results.append({
             "timestamp": ts,
-            "recommended_phase": rekomendasi.recommended_phase,
-            "green_time": rekomendasi.recommended_green_seconds,
-            "current_green_seconds": rekomendasi.current_green_seconds,
+            "recommended_phase": rekomendasi.recommendedPhase,
+            "green_time": rekomendasi.recommendedGreenSeconds,
+            "current_green_seconds": rekomendasi.currentGreenSeconds,
             "confidence": rekomendasi.confidence,
-            "expected_delay_reduction_percent": rekomendasi.expected_delay_reduction_percent,
+            "expected_delay_reduction_percent": rekomendasi.expectedDelayReductionPercent,
             "reason": rekomendasi.reason,
         })
 
