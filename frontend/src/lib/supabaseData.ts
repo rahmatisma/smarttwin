@@ -18,6 +18,9 @@ import type {
 
 export const DEFAULT_INTERSECTION_ID = "simpang4-pingit";
 
+const API_BASE_URL =
+  process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
+
 /* =========================================================
  * INTERSECTION LOOKUP
  * ========================================================= */
@@ -193,76 +196,67 @@ export async function fetchTrafficState(
 
 /* =========================================================
  * SIGNAL STATUS
+ *
+ * Sengaja BUKAN baca tabel `signalStatuses` Supabase langsung --
+ * tabel itu cuma diisi tabel beku dari batch lama, tidak pernah
+ * diperbarui (pola sama seperti masalah lama fetchRecommendation()).
+ * GET /signal/status baca SignalService yang "hidup" -- lengan aktif
+ * & sisa waktunya benar-benar berputar/berjalan di server. Endpoint
+ * ini cuma untuk simpang4-pingit (satu-satunya intersection nyata),
+ * jadi intersectionId di sini tidak dikirim ke backend, cuma buat
+ * konsistensi signature dengan fetch* lain.
  * ========================================================= */
 
 export async function fetchSignalStatus(
   intersectionId: string = DEFAULT_INTERSECTION_ID
 ): Promise<SignalStatus | null> {
-  const rowId = await getIntersectionRowId(intersectionId);
+  void intersectionId;
 
-  if (rowId === null) {
-    return null;
+  const response = await fetch(`${API_BASE_URL}/signal/status`);
+
+  if (!response.ok) {
+    throw new Error(`Gagal mengambil signal status: ${response.status}`);
   }
 
-  const { data, error } = await supabase
-    .from("signalStatuses")
-    .select(
-      "timestamp, currentPhase, phaseName, remainingSeconds, cycleTimeSeconds, source"
-    )
-    .eq("intersectionId", rowId)
-    .order("timestamp", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-
-  if (error) {
-    throw new Error(`Gagal mengambil signal status: ${error.message}`);
-  }
-
-  if (!data) {
-    return null;
-  }
-
-  return {
-    intersectionId,
-    ...data,
-  };
+  return (await response.json()) as SignalStatus;
 }
 
 /* =========================================================
  * RECOMMENDATION
+ *
+ * Sengaja BUKAN baca tabel `recommendations` Supabase langsung.
+ * Tabel itu diisi lewat decision_engine/run_decision.py + feed_to_supabase.py,
+ * skrip batch offline yang harus dijalankan manual dan gampang basi.
+ *
+ * POST /recommendation baca TrafficState Supabase yang sama (live,
+ * diisi terus oleh ingest CV) lalu jalankan RuleBasedEngine saat itu
+ * juga -- jadi selalu segar, termasuk queueLengthVeh/queueLengthMEst
+ * asli, tanpa perlu proses batch terpisah. Lihat RecommendationService
+ * di backend/app/services/recommendation_service.py.
  * ========================================================= */
 
 export async function fetchRecommendation(
   intersectionId: string = DEFAULT_INTERSECTION_ID
 ): Promise<Recommendation | null> {
-  const rowId = await getIntersectionRowId(intersectionId);
+  const response = await fetch(`${API_BASE_URL}/recommendation`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ intersectionId }),
+  });
 
-  if (rowId === null) {
+  if (!response.ok) {
+    throw new Error(
+      `Gagal mengambil recommendation: ${response.status}`
+    );
+  }
+
+  const body = await response.json();
+
+  if (!body.success || !body.recommendation) {
     return null;
   }
 
-  const { data, error } = await supabase
-    .from("recommendations")
-    .select(
-      "timestamp, recommendedPhase, recommendedGreenSeconds, currentGreenSeconds, expectedDelayReductionPercent, confidence, reason, source"
-    )
-    .eq("intersectionId", rowId)
-    .order("timestamp", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-
-  if (error) {
-    throw new Error(`Gagal mengambil recommendation: ${error.message}`);
-  }
-
-  if (!data) {
-    return null;
-  }
-
-  return {
-    intersectionId,
-    ...data,
-  };
+  return body.recommendation as Recommendation;
 }
 
 /* =========================================================

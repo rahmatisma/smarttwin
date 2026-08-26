@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import type { SignalStatus } from "@/types/traffic";
 
 export default function SignalStatusPanel({
@@ -5,6 +6,33 @@ export default function SignalStatusPanel({
 }: {
   signal: SignalStatus;
 }) {
+  /*
+   * =========================================================
+   * COUNTDOWN LOKAL
+   * =========================================================
+   *
+   * signal.remainingSeconds itu snapshot dari backend, cuma
+   * ter-update tiap poll (5 detik, lihat page.tsx). Supaya terasa
+   * benar-benar berjalan, turunkan angkanya sendiri tiap 1 detik di
+   * sini, lalu di-resync ke nilai backend tiap kali prop `signal`
+   * berubah (poll baru) -- jadi tidak ngaco kalau backend pindah
+   * fase di antara dua poll.
+   */
+  const [displayRemainingSeconds, setDisplayRemainingSeconds] =
+    useState(signal.remainingSeconds);
+
+  useEffect(() => {
+    setDisplayRemainingSeconds(signal.remainingSeconds);
+  }, [signal.remainingSeconds, signal.currentPhase]);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setDisplayRemainingSeconds((current) => Math.max(0, current - 1));
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, []);
+
   return (
     <div className="rounded-lg border border-border bg-surface p-4">
       {/* =====================================================
@@ -59,7 +87,7 @@ export default function SignalStatusPanel({
             </div>
 
             <div className="mt-1 font-mono text-3xl font-bold tabular-nums text-text">
-              {signal.remainingSeconds}
+              {displayRemainingSeconds}
 
               <span className="ml-1 text-sm font-normal text-text-muted">
                 detik
@@ -85,6 +113,35 @@ export default function SignalStatusPanel({
             </div>
           </div>
         </div>
+
+        {/* =================================================
+            SIKLUS SELANJUTNYA
+
+            Durasinya diambil dari signal.phases[nextPhase] --
+            SUMBER YANG SAMA dengan angka statis di kotak lengan itu
+            di panel Rekomendasi Sinyal (lihat
+            RecommendationService::get_cycle_plan()), jadi dua panel
+            tidak pernah beda angka.
+            ================================================= */}
+
+        {signal.nextPhase && (
+          <div className="rounded-md border border-border bg-surface-2 p-3">
+            <div className="text-xs text-text-muted">
+              Siklus Selanjutnya
+            </div>
+
+            <div className="mt-1 font-display text-sm font-semibold text-text">
+              {signal.nextPhaseName || signal.nextPhase}
+            </div>
+
+            {signal.phases?.[signal.nextPhase] && (
+              <div className="mt-1 font-mono text-xs text-text-secondary">
+                {signal.phases[signal.nextPhase].durationSeconds} detik
+                (menunggu giliran)
+              </div>
+            )}
+          </div>
+        )}
 
         {/* =================================================
             INTERSECTION

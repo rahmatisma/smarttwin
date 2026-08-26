@@ -42,70 +42,6 @@ import type {
  * =========================================================
  */
 
-function getAggregatedSignal(signals: SignalStatus[]): SignalStatus {
-  const activeSignals = signals.filter(Boolean);
-  if (activeSignals.length === 0) {
-    return {
-      intersectionId: "Semua Simpang",
-      timestamp: new Date().toISOString(),
-      currentPhase: "ALL",
-      phaseName: "Semua Fase",
-      remainingSeconds: 0,
-      cycleTimeSeconds: 0,
-      source: "mock",
-    };
-  }
-  const latestTimestamp = new Date(
-    Math.max(...activeSignals.map((s) => new Date(s.timestamp).getTime()))
-  ).toISOString();
-  const avgRemaining = Math.round(
-    activeSignals.reduce((sum, s) => sum + s.remainingSeconds, 0) /
-      activeSignals.length
-  );
-  const avgCycle = Math.round(
-    activeSignals.reduce((sum, s) => sum + s.cycleTimeSeconds, 0) /
-      activeSignals.length
-  );
-  const anySynced = activeSignals.some((s) => s.source !== "mock");
-
-  return {
-    intersectionId: "Semua Simpang",
-    timestamp: latestTimestamp,
-    currentPhase: "ALL",
-    phaseName: "Semua Fase",
-    remainingSeconds: avgRemaining,
-    cycleTimeSeconds: avgCycle,
-    source: anySynced ? "synced" : "mock",
-  };
-}
-
-function getAggregatedRecommendation(
-  recs: Recommendation[]
-): Recommendation | null {
-  const activeRecs = recs.filter(Boolean);
-  if (activeRecs.length === 0) return null;
-  const avgImprovement =
-    activeRecs.reduce(
-      (sum, r) => sum + r.expectedDelayReductionPercent,
-      0
-    ) / activeRecs.length;
-  const avgConfidence =
-    activeRecs.reduce((sum, r) => sum + r.confidence, 0) / activeRecs.length;
-
-  return {
-    intersectionId: "Semua Simpang",
-    timestamp: new Date().toISOString(),
-    recommendedPhase: "N/A",
-    recommendedGreenSeconds: 0,
-    currentGreenSeconds: 0,
-    expectedDelayReductionPercent: avgImprovement,
-    confidence: avgConfidence,
-    reason:
-      "Pilih salah satu persimpangan spesifik pada menu di atas untuk melihat detail rekomendasi optimasi fase lampu lalu lintas.",
-    source: "SmartTwin AI",
-  };
-}
-
 function getAggregatedForecast(
   forecasts: ForecastResponse[]
 ): ForecastResponse | null {
@@ -599,7 +535,21 @@ export default function DashboardPage() {
         setAllRecommendations((prev) => {
           const next = { ...prev };
           results.forEach((res) => {
-            if (res) next[res.id] = res.recommendation;
+            if (!res) return;
+
+            // Kalau poll ini kebetulan jatuh ke fallback (mis.
+            // koneksi Supabase sesaat putus di backend, sudah
+            // ditangani gracefully di sana tapi cyclePlan jadi null
+            // utk request INI SAJA) DAN sebelumnya sudah ada data
+            // bagus, pertahankan yang lama -- jangan biarkan panel
+            // "Durasi Hijau per Lengan" berkedip kosong tiap kali ada
+            // hiccup sesaat. Pulih sendiri begitu poll berikutnya
+            // (5 detik lagi) berhasil normal.
+            if (!res.recommendation?.cyclePlan && prev[res.id]?.cyclePlan) {
+              return;
+            }
+
+            next[res.id] = res.recommendation;
           });
           return next;
         });
@@ -635,7 +585,7 @@ export default function DashboardPage() {
 
     const pollInterval = setInterval(() => {
       if (!cancelled) refetchAllData();
-    }, 1000);
+    }, 5000);
 
     return () => {
       cancelled = true;
@@ -686,24 +636,19 @@ export default function DashboardPage() {
   }, [selectedIntersection, allTrafficStates]);
 
   const activeSignal = useMemo(() => {
-    // 1. Single Source of Truth: LIVE SIMULATION
+    // 1. Single Source of Truth: LIVE SIMULATION (kalau ada sesi SUMO
+    //    interaktif berjalan dari Digital Twin panel)
     if (simulatedSignal) {
       return simulatedSignal;
     }
 
-    // 2. Fallback: Supabase Decision Engine Database
-    if (selectedIntersection !== "all") {
-      const dbSignal = allSignalStatuses[selectedIntersection];
-      if (dbSignal) return dbSignal;
-    } else {
-      const signals = ALL_INTERSECTIONS.map(
-        (inter) => allSignalStatuses[inter.id]
-      ).filter((s): s is SignalStatus => s != null);
-
-      if (signals.length > 0) {
-        return getAggregatedSignal(signals);
-      }
-    }
+    // 2. simpang4-pingit adalah satu-satunya intersection nyata -- sama
+    //    seperti activeRecommendation/lenganFilteredApproaches, langsung
+    //    ambil dari situ, tidak lewat selectedIntersection (konsep lama)
+    //    atau agregasi lintas-simpang (getAggregatedSignal dulu selalu
+    //    menampilkan "Semua Fase"/"ALL" walau datanya sendiri live).
+    const dbSignal = allSignalStatuses["intersection4"];
+    if (dbSignal) return dbSignal;
 
     // 3. Fallback: Offline state
     return {
@@ -715,19 +660,16 @@ export default function DashboardPage() {
       cycleTimeSeconds: 0,
       source: "mock",
     } as SignalStatus;
-  }, [selectedIntersection, allSignalStatuses, simulatedSignal]);
+  }, [allSignalStatuses, simulatedSignal]);
 
+  // simpang4-pingit adalah satu-satunya intersection nyata (lihat
+  // catatan di lib/intersections.ts) -- sama seperti
+  // lenganFilteredApproaches di bawah, langsung ambil dari situ,
+  // tidak lewat selectedIntersection (konsep lama yang sudah
+  // digantikan selectedApproach/dropdown CCTV).
   const activeRecommendation = useMemo(() => {
-    if (selectedIntersection !== "all") {
-      return allRecommendations[selectedIntersection] ?? null;
-    }
-
-    const recs = ALL_INTERSECTIONS.map(
-      (inter) => allRecommendations[inter.id]
-    ).filter((r): r is Recommendation => r != null);
-
-    return getAggregatedRecommendation(recs);
-  }, [selectedIntersection, allRecommendations]);
+    return allRecommendations["intersection4"] ?? null;
+  }, [allRecommendations]);
 
   const activeForecast = useMemo(() => {
     if (selectedIntersection !== "all") {
@@ -982,6 +924,10 @@ export default function DashboardPage() {
 
             <RecommendationPanel
               recommendation={activeRecommendation}
+              selectedApproach={selectedApproach}
+              activePhase={activeSignal.currentPhase}
+              activeRemainingSeconds={activeSignal.remainingSeconds}
+              activeCycleSeconds={activeSignal.cycleTimeSeconds}
             />
 
             {/* SIGNAL STATUS */}

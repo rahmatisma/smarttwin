@@ -323,6 +323,8 @@ export default function CameraFeedPanel({
                     src={resolvedSrcByCamera.get(camera.id)}
                     controls
                     muted
+                    autoPlay
+                    loop
                     playsInline
                     preload="metadata"
                     className="h-full w-full object-cover"

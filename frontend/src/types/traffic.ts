@@ -105,6 +105,16 @@ export interface ForecastResponse {
  * SIGNAL STATUS
  * ========================================================= */
 
+export interface SignalPhaseStatus {
+  phaseId: string;
+
+  state: string;
+
+  durationSeconds: number;
+
+  remainingSeconds: number;
+}
+
 export interface SignalStatus {
   intersectionId: string;
 
@@ -118,6 +128,12 @@ export interface SignalStatus {
 
   cycleTimeSeconds: number;
 
+  phases?: Record<string, SignalPhaseStatus>;
+
+  nextPhase?: string;
+
+  nextPhaseName?: string;
+
   source: string;
 }
 
@@ -125,6 +141,27 @@ export interface SignalStatus {
 /* =========================================================
  * RECOMMENDATION
  * ========================================================= */
+
+// Rekomendasi durasi hijau utk SATU lengan (rotasi tetap
+// barat-selatan-timur-utara). Lihat RuleBasedEngine.recommend_cycle()
+// di decision_engine/rule_based_engine.py.
+export interface ApproachPhase {
+  approach: string;
+
+  greenSeconds: number;
+
+  demandScore: number;
+}
+
+export interface CyclePlan {
+  phases: ApproachPhase[];
+
+  cycleLengthSeconds: number;
+
+  currentPhase: string;
+
+  source: string;
+}
 
 export interface Recommendation {
   intersectionId: string;
@@ -144,4 +181,8 @@ export interface Recommendation {
   reason: string;
 
   source: string;
+
+  // null kalau belum ada TrafficState (fallback) -- lihat
+  // recommendation_service.py.
+  cyclePlan?: CyclePlan | null;
 }
