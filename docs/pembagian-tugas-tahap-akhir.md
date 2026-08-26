@@ -249,9 +249,14 @@ Penting buat jujur ke juri: CV **TIDAK** memproses siaran langsung (RTSP/live fe
 
 `docs/roadmap.md` (per 17 Agustus) mencatat ini sebagai risiko besar yang menggantung ("kalau ternyata Magelang, east dan north menghitung lengan yang sama dua kali"). **Sudah diverifikasi dan ditutup** lewat commit `700140c` (24 Agustus) — `simulation/verify_corridor_bearing.py` mengroskek bearing OSM vs klasifikasi CV secara independen: **Jl. Diponegoro = timur, Jl. Magelang = utara**, cocok dengan kode. `docs/roadmap.md` sendiri belum diupdate untuk menghapus tanda risiko ini — perlu dirapikan supaya tidak membingungkan pembaca dokumen nanti (roadmap.md itu sendiri sudah basi sejak 17 Agustus, banyak checklist di situ yang sudah selesai tapi belum dicentang).
 
-### 7.4 Belum jelas: kalibrasi `north`
+### 7.4 [TERJAWAB 27 Agustus] Kalibrasi `north` — ternyata sudah dikalibrasi, bukan default
 
-`roadmap.md` (17 Agustus) mencatat counting line `north` masih pakai nilai default, belum dikalibrasi, padahal menyumbang volume tertinggi. Tidak ditemukan commit lanjutan yang secara eksplisit menyebut kalibrasi ulang `north`. **Tapi** pendekatan CV sendiri sudah berubah sejak saat itu (dari counting-line murni ke pendekatan zona + PCA lane-grouping di `vehicle_counter_pingit.py`, item 1.2) — jadi belum tentu keterangan lama ini masih relevan apa adanya. **Perlu dicek ulang oleh yang pegang CV**, jangan diasumsikan salah satu (masih bermasalah / sudah otomatis terselesaikan oleh pendekatan baru).
+`roadmap.md` (17 Agustus) mencatat counting line `north` masih pakai nilai default, belum dikalibrasi, padahal menyumbang volume tertinggi. Tidak ditemukan commit lanjutan yang secara eksplisit menyebut kalibrasi ulang `north`. Dicek langsung ke `cv/vehicle_counter_pingit.py` (bukan cuma cari commit message) — dua temuan menutup kekhawatiran ini:
+
+1. **Zona `simpang_tengah` (proxy `north`, CCTV_2) sudah dikalibrasi manual lewat klik interaktif** (`cv/kalibrasi_zona.py --kamera CCTV_2`), BUKAN nilai default — kode menyimpan riwayat revisi eksplisit (v1 kotak kasar → v2 → v3 baji mengikuti coretan biru di frame asli → v4 SEKARANG, hasil klik interaktif). Garis crossing `MAGELANG`/`DIPONEGORO` di CCTV_2 juga dari alat kalibrasi terpisah (`cv/kalibrasi_crossing.py`), bukan angka default. Ke-4 kamera (bukan cuma north) punya pola riwayat yang sama.
+2. **Bug key-matching yang SEBELUMNYA bikin `north` diam-diam jatuh ke default 1 lajur sudah ditemukan & diperbaiki 25 Agustus** — komentar eksplisit di `LAJUR_PER_LENGAN` (baris ~402-420): key harus `simpang_tengah` (bukan `utara`), sebelum diperbaiki key `utara` tidak pernah cocok. Sekarang sudah benar (`simpang_tengah: 2`).
+
+Dua-duanya ada di commit `5b2c18e` (25 Agustus, "feat(cv): tambah deteksi antrean ke vehicle_counter_pingit.py"). **Kesimpulan: klaim "north pakai nilai default" di `roadmap.md` sudah tidak berlaku** — sudah dikalibrasi sama seriusnya dengan 3 lengan lain. Yang TIDAK tertutup oleh temuan ini (beda concern): seberapa AKURAT kalibrasinya secara formal — itu masuk keterbatasan yang lebih luas dan sudah jujur didokumentasikan di 7.5 (nol validasi mAP/precision/recall untuk SEMUA kamera, bukan cuma north), bukan hal baru.
 
 ### 7.5 Tidak ada validasi akurasi deteksi
 
@@ -279,12 +284,13 @@ Dipicu temuan audit 27 Agustus: dashboard live dan jalur simulasi (kotak 4/7/8/9
 | **Melpi** | Tampilkan indikator `source` (`"scenario-generator"` vs `"rule-based"`) di `RecommendationPanel`/`SignalStatusPanel` setelah backend Yuli siap; opsional: badge LOS/delay kalau ada waktu | `rencana-scenario-generator.md` 4.1, "Melpi — frontend" |
 | **Melpi** | Verifikasi manual lewat browser hidup untuk perbaikan regresi `SharedSignalPanels` (item 3.4) — baru lolos `npm run build`, belum dites manual | item 3.4 |
 | **Melpi** | 2 item P2 lama yang masih belum: Digital Twin hardcode 32s/18s, indikator loading sebelum poll pertama | item 3.3 |
+| **Melpi** | Siklus 4-lengan penuh ke SUMO live (`traci.trafficlight.setProgramLogic()`) — **beda domain dari kerjaan frontend di atas** (Python/TraCI di `simulation/`), lihat catatan risiko di 8.2 | item 1.7, `rencana-scenario-generator.md` 4.2, 8.2 |
 | **Rahmat** | PPO (1.6, bonus non-blocking, tidak berubah), kalibrasi kandidat "agresif" +20% kalau ada waktu (P2), SOP/scheduler ingest CV (7.2) | item 1.6, `rencana-scenario-generator.md` 4.3, temuan 7.2 |
 
-### 8.2 Item yang SENGAJA belum dapat pemilik — flag, bukan lupa
+### 8.2 Item yang sempat belum dapat pemilik — sudah dijawab 27 Agustus
 
-- **Siklus 4-lengan penuh ke SUMO live** (`traci.trafficlight.setProgramLogic()`, item 1.7 & `rencana-scenario-generator.md` 4.2) — berbeda dari kerjaan 8.1 di atas (itu soal WHO memutuskan, ini soal SUMO menjalankan rotasi 4 lengan penuh, bukan cuma 1 fase menang per run). Belum ditugaskan ke siapa pun — kalau mau diprioritaskan sebelum 31 Agustus, perlu didiskusikan dulu siapa yang pegang, jangan diasumsikan otomatis masuk kerjaan Yuli di 8.1
-- **Kalibrasi ulang `north`** (temuan 7.4) — masih belum jelas siapa yang cek ulang, domain CV yang selama ini Rahmat pegang tapi belum eksplisit di-assign ulang setelah perubahan kapasitas Rahmat
+- **Siklus 4-lengan penuh ke SUMO live** (`traci.trafficlight.setProgramLogic()`, item 1.7 & `rencana-scenario-generator.md` 4.2) — **ditugaskan ke Melpi.** Catatan penting: ini kerjaan Python/TraCI di `simulation/` (bukan frontend/React seperti kerjaan Melpi selama ini) — beda domain dari jalur yang sudah terbukti buat dia. Kalau ternyata butuh ramp-up signifikan buat masuk ke kode SUMO/TraCI, jangan dipaksakan sampai mengorbankan 3.3/3.4 (item frontend yang sudah pasti jadi tanggung jawabnya) — komunikasikan cepat kalau ini ternyata terlalu berat digabung dengan kerjaan frontend-nya.
+- ~~Kalibrasi ulang `north`~~ — **selesai, ternyata sudah dikalibrasi** (bukan kerjaan baru). Lihat temuan lengkap di 7.4: sudah dicek langsung ke kode, north (proxy `simpang_tengah`) sudah dikalibrasi lewat alat klik interaktif sejak 25 Agustus (`5b2c18e`), bukan nilai default seperti dikira `roadmap.md` lama. Tidak perlu dikerjakan ulang.
 
 ### 8.3 Realita waktu
 
