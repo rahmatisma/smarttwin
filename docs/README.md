@@ -1,13 +1,15 @@
 # Indeks Dokumen — mulai dari sini
 
-Ditulis 27 Agustus 2026 setelah bersih-bersih dokumen (2 file dihapus karena basi/duplikat-membingungkan, 2 file diberi banner peringatan karena sebagian isinya sudah terbukti salah/usang — lihat bagian "Sudah dibersihkan" di bawah). Kalau bingung mulai baca dari mana, ikuti urutan di bagian 1.
+Ditulis 27 Agustus 2026 setelah bersih-bersih dokumen (1 file dihapus karena basi & orphan, 3 file diberi banner peringatan/disegarkan karena sebagian isinya sudah terbukti salah/usang — lihat bagian "Sudah dibersihkan" di bawah). Kalau bingung mulai baca dari mana, ikuti urutan di bagian 1.
+
+> **Koreksi:** `backend/docs/data-contract.md` sempat salah dihapus di versi awal pembersihan ini (dikira duplikat `docs/data-contract.md`), lalu dikembalikan — ternyata dua dokumen itu beda fungsi (lihat bagian 2 poin 2 dan catatan di file itu sendiri), bukan duplikat. Sudah disegarkan juga (path endpoint & field yang ketinggalan dari item 1.7).
 
 ---
 
 ## 1. WAJIB dibaca semua orang, urutannya begini
 
 1. **`../CLAUDE.md`** (root repo) — konteks proyek, konvensi, ringkasan arsitektur pipa data. Paling singkat, paling penting buat orientasi awal.
-2. **`data-contract.md`** — kontrak schema resmi antar-modul (CV → Traffic State → Forecast → Simulasi → Decision Engine). Kalau ubah field apa pun yang menyeberang modul, ini yang harus disepakati dulu.
+2. **`data-contract.md`** — kontrak SEMANTIK schema resmi antar-modul (field apa yang ada, artinya apa). Kalau ubah field apa pun yang menyeberang modul, ini yang harus disepakati dulu. (Kalau kerja di backend dan butuh bentuk request/response endpoint yang literal + konvensi penamaan camelCase, ada satu lagi khusus itu — lihat poin 2 di bagian "Baca sesuai bagianmu" di bawah.)
 3. **`pembagian-tugas-tahap-akhir.md`** — **dokumen paling penting di seluruh repo.** Status kerjaan terkini, siapa pegang apa, checklist per item, dan section 6-8 berisi peta status arsitektur + rencana integrasi yang sedang berjalan. Kalau cuma boleh baca SATU dokumen, baca ini.
 4. **`status-integrasi-diagram-arsitektur.md`** — jawaban jujur "apakah sistem ini sudah jalan selaras seperti diagram arsitektur". Penting buat semua orang karena temuannya (jalur live dan jalur simulasi itu 2 pipeline terpisah) memengaruhi kerjaan semua orang sekarang.
 
@@ -43,10 +45,11 @@ Bukan basi karena isinya salah, tapi karena statusnya sudah digantikan dokumen y
 
 **Dihapus** (basi total, nol referensi valid dari dokumen lain, tidak ada info yang hilang — semua sudah tercakup dokumen lebih baru):
 - `PROGRESS_REPORT.md` (root) — snapshot status 22 Agustus, seluruh rekomendasinya sudah dikerjakan/digantikan (Scenario Generator, kalibrasi north, keputusan PPO, dst.), nol dokumen lain yang merujuknya
-- `backend/docs/data-contract.md` — **nama sama** dengan `docs/data-contract.md` di atas tapi ISINYA BEDA dan SALING KONTRADIKSI (yang di backend maksa camelCase mutlak, padahal kontrak resmi pakai snake_case di level Python dengan alias camelCase di JSON) — draft lama dari 19 Agustus sebelum kontrak resmi ditetapkan, nol referensi valid selain dari `PROGRESS_REPORT.md` yang juga dihapus
 
 **Diberi banner peringatan, TIDAK dihapus** (masih dirujuk dokumen lain / masih ada nilai historis, tapi isinya sebagian sudah usang/salah — lihat bagian 3 dan 4 di atas):
 - `roadmap.md`, `database.md`
+
+**Disegarkan (bukan dihapus)** — `backend/docs/data-contract.md` sempat DIHAPUS KELIRU di iterasi awal pembersihan ini (dikira duplikat `docs/data-contract.md` yang saling kontradiktif). Setelah dicek langsung ke `backend/app/schemas/traffic.py`, ternyata dokumen ini benar mendokumentasikan konvensi camelCase yang SUNGGUHAN dipakai kode (atribut Python-nya literally `queueLengthVeh`, bukan snake_case+alias) — bukan draft basi. Dikembalikan, dan sekalian disegarkan bagian yang memang ketinggalan (path `/api/signal/status`→`/signal/status`, `/api/recommendation`→`/recommendation`, field `cyclePlan`/`phases`/`nextPhase`/`nextPhaseName` dari item 1.7 yang belum tercatat).
 
 **`CLAUDE.md`** juga diperbarui — sebelumnya menyebut `roadmap.md` sebagai "plan of record" (sudah tidak akurat), sekarang menunjuk ke `pembagian-tugas-tahap-akhir.md`.
 
@@ -55,6 +58,7 @@ Bukan basi karena isinya salah, tapi karena statusnya sudah digantikan dokumen y
 ## Dokumen di luar `docs/` (referensi per-modul, baca kalau kerja di modul itu)
 
 - `backend/README.md`, `backend/docs/traffic-state-builder.md` — detail internal backend
+- **`backend/docs/data-contract.md`** — beda dari `docs/data-contract.md` (root): ini bentuk request/response endpoint yang LITERAL (`GET /signal/status`, `POST /recommendation`, dst.) + aturan penamaan camelCase yang benar-benar dipakai kode. Wajib dibaca kalau kerja di endpoint backend atau integrasi frontend↔backend (relevan buat kerjaan cache Yuli & indikator `source` Melpi, section 8 di `pembagian-tugas-tahap-akhir.md`)
 - `frontend/README.md` — setup & struktur frontend
 - `simulation/README.md` — setup simulasi SUMO
 - `forecasting/README.md` — pipeline training LSTM (agregat + per-approach)
