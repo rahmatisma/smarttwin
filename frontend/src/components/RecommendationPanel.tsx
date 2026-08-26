@@ -1,6 +1,9 @@
 import type { ApproachPhase, Recommendation, SignalStatus } from "@/types/traffic";
 import { APPROACH_OPTIONS, type ApproachSelection } from "@/lib/intersections";
 
+// Harus sama dengan YELLOW_SECONDS di backend/app/services/signal_service.py
+const YELLOW_SECONDS = 4;
+
 function approachLabel(approach: string): string {
   const option = APPROACH_OPTIONS.find((opt) => opt.id === approach);
   return option ? option.name : approach;
@@ -40,7 +43,7 @@ function ApproachBox({
   const barPercent = status === "RED"
     ? Math.round(Math.min(1, Math.max(0, phase.demandScore)) * 100)
     : Math.round(
-        Math.min(1, Math.max(0, displaySeconds / (status === "YELLOW" ? 5 : (liveTotalSeconds || phase.greenSeconds || 1)))) * 100
+        Math.min(1, Math.max(0, displaySeconds / (status === "YELLOW" ? YELLOW_SECONDS : (liveTotalSeconds || phase.greenSeconds || 1)))) * 100
       );
 
   let ringClass = "border-border bg-surface-2";
@@ -116,12 +119,12 @@ export default function RecommendationPanel({
 
     let waitTime = sharedVisualRemaining;
     if (sharedVisualPhaseState === "GREEN") {
-      waitTime += 5; // Upcoming yellow phase for current active approach
+      waitTime += YELLOW_SECONDS; // Upcoming yellow phase for current active approach
     }
 
     let i = (currentIndex + 1) % phases.length;
     while (i !== targetIndex) {
-      waitTime += phases[i].greenSeconds + 5; // Green + Yellow
+      waitTime += phases[i].greenSeconds + YELLOW_SECONDS; // Green + Yellow
       i = (i + 1) % phases.length;
     }
     return waitTime;

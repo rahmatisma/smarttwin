@@ -1,9 +1,28 @@
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState } from "react";
 import RecommendationPanel from "@/components/RecommendationPanel";
 import SignalStatusPanel from "@/components/SignalStatusPanel";
 import type { SignalStatus, Recommendation } from "@/types/traffic";
 import type { ApproachSelection } from "@/lib/intersections";
 
+// Harus sama dengan YELLOW_SECONDS di backend/app/services/signal_service.py
+const YELLOW_SECONDS = 4;
+
+/*
+ * =========================================================
+ * SUMBER KEBENARAN: SERVER, BUKAN SIMULASI DI BROWSER
+ * =========================================================
+ *
+ * activeSignal.currentPhase/remainingSeconds itu hasil hitungan
+ * "lazy tick" SignalService di backend (lihat CLAUDE.md/item 1.7) --
+ * kapan fase pindah, berapa lama tiap lengan, itu semua diputuskan
+ * SERVER, dipoll tiap 5 detik dari page.tsx.
+ *
+ * Di sini CUMA diturunkan jadi countdown per-detik yang halus di
+ * antara dua poll (resync ke angka server tiap poll baru), TIDAK
+ * boleh menyimulasikan sendiri kapan fase pindah -- kalau tidak,
+ * dua browser bisa menampilkan fase yang berbeda dari kenyataan di
+ * server, dan drift makin lama makin lebar.
+ */
 export default function SharedSignalPanels({
   activeRecommendation,
   activeSignal,
@@ -13,64 +32,26 @@ export default function SharedSignalPanels({
   activeSignal: SignalStatus;
   selectedApproach?: ApproachSelection;
 }) {
-  const activePhase = activeSignal.currentPhase;
-  const activeRemainingSeconds = activeSignal.remainingSeconds;
-  
-  const [visualPhase, setVisualPhase] = useState<string | null>(null);
-  const [visualPhaseState, setVisualPhaseState] = useState<"GREEN" | "YELLOW">("GREEN");
-  const [visualRemaining, setVisualRemaining] = useState<number>(0);
-
-  const syncedPhaseRef = useRef<string | null>(null);
-  const phases = activeRecommendation?.cyclePlan?.phases ?? [];
+  const [displayRemaining, setDisplayRemaining] = useState(
+    activeSignal.remainingSeconds
+  );
 
   useEffect(() => {
-    if (!phases.length) return;
-    
-    if (activePhase && activePhase !== syncedPhaseRef.current) {
-      const match = phases.find(p => p.approach === activePhase);
-      if (match) {
-        syncedPhaseRef.current = activePhase;
-        setVisualPhase(match.approach);
-        setVisualPhaseState("GREEN");
-        setVisualRemaining(activeRemainingSeconds ?? match.greenSeconds);
-        return;
-      }
-    }
-
-    if (!visualPhase) {
-      setVisualPhase(phases[0].approach);
-      setVisualPhaseState("GREEN");
-      setVisualRemaining(phases[0].greenSeconds);
-    }
-  }, [activePhase, activeRemainingSeconds, phases, visualPhase]);
+    setDisplayRemaining(activeSignal.remainingSeconds);
+  }, [activeSignal.remainingSeconds, activeSignal.currentPhase]);
 
   useEffect(() => {
-    if (!phases.length || !visualPhase) return;
-
     const interval = setInterval(() => {
-      setVisualRemaining((current) => Math.max(0, current - 1));
+      setDisplayRemaining((current) => Math.max(0, current - 1));
     }, 1000);
 
     return () => clearInterval(interval);
-  }, [phases, visualPhase]);
+  }, []);
 
-  useEffect(() => {
-    if (visualRemaining === 0 && phases.length > 0 && visualPhase) {
-      const currentIndex = phases.findIndex(p => p.approach === visualPhase);
-      if (currentIndex !== -1) {
-        if (visualPhaseState === "GREEN") {
-          setVisualPhaseState("YELLOW");
-          setVisualRemaining(5);
-        } else {
-          const nextIndex = (currentIndex + 1) % phases.length;
-          const nextPhase = phases[nextIndex];
-          setVisualPhase(nextPhase.approach);
-          setVisualPhaseState("GREEN");
-          setVisualRemaining(nextPhase.greenSeconds);
-        }
-      }
-    }
-  }, [visualRemaining, phases, visualPhase, visualPhaseState]);
+  const visualPhase = activeSignal.currentPhase || null;
+  const visualPhaseState: "GREEN" | "YELLOW" =
+    displayRemaining <= YELLOW_SECONDS ? "YELLOW" : "GREEN";
+  const visualRemaining = displayRemaining;
 
   return (
     <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">

@@ -1,6 +1,9 @@
 import type { SignalStatus, Recommendation } from "@/types/traffic";
 import { APPROACH_OPTIONS } from "@/lib/intersections";
 
+// Harus sama dengan YELLOW_SECONDS di backend/app/services/signal_service.py
+const YELLOW_SECONDS = 4;
+
 function approachLabel(approach: string): string {
   const option = APPROACH_OPTIONS.find((opt) => opt.id === approach);
   return option ? option.name : approach;
@@ -55,16 +58,16 @@ export default function SignalStatusPanel({
     const currentIndex = phases.findIndex(p => p.approach === sharedVisualPhase);
     
     phases.forEach((p, index) => {
-      totalCycleDuration += p.greenSeconds + 5;
-      
+      totalCycleDuration += p.greenSeconds + YELLOW_SECONDS;
+
       if (currentIndex !== -1) {
         if (index < currentIndex) {
-          elapsedTime += p.greenSeconds + 5;
+          elapsedTime += p.greenSeconds + YELLOW_SECONDS;
         } else if (index === currentIndex) {
           if (sharedVisualPhaseState === "GREEN") {
             elapsedTime += p.greenSeconds - sharedVisualRemaining;
           } else {
-            elapsedTime += p.greenSeconds + (5 - sharedVisualRemaining);
+            elapsedTime += p.greenSeconds + (YELLOW_SECONDS - sharedVisualRemaining);
           }
         }
       }
@@ -73,10 +76,10 @@ export default function SignalStatusPanel({
     if (currentIndex !== -1) {
       const nextIndex = (currentIndex + 1) % phases.length;
       nextPhaseApproach = phases[nextIndex].approach;
-      
+
       nextPhaseWaitTime = sharedVisualRemaining;
       if (sharedVisualPhaseState === "GREEN") {
-        nextPhaseWaitTime += 5;
+        nextPhaseWaitTime += YELLOW_SECONDS;
       }
     }
   }
