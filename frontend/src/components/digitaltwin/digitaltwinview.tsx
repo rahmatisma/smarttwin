@@ -47,6 +47,8 @@ export default function DigitalTwinView() {
         { direction: "South", state: "GREEN", time: 32 },
         { direction: "West", state: "RED", time: 18 },
     ]);
+    const [isInitialLoading, setIsInitialLoading] = useState(true);
+    const [isSimStateLoaded, setIsSimStateLoaded] = useState(false);
     
     // Auto-calibration bounds
     const boundsRef = useRef({ minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity });
@@ -71,6 +73,8 @@ export default function DigitalTwinView() {
                 if (!res.ok) return;
                 const data = await res.json();
                 
+                setIsSimStateLoaded(true);
+
                 if (data.running) {
                     if (data.paused) {
                         setStatus("paused");
@@ -98,6 +102,7 @@ export default function DigitalTwinView() {
                                 { direction: "South", state: isNS ? activeColor : "RED", time: dbSignal.remainingSeconds },
                                 { direction: "West",  state: isEW ? activeColor : "RED", time: dbSignal.remainingSeconds }
                             ]);
+                            setIsInitialLoading(false);
                         }
                     } catch (dbErr) {
                         console.error("Failed to fetch Supabase signal:", dbErr);
@@ -130,6 +135,7 @@ export default function DigitalTwinView() {
                             { direction: "South", state: getState(rawState.slice(0, 5)),   time: remaining },
                             { direction: "West",  state: getState(rawState.slice(15, 20)), time: remaining }
                         ]);
+                        setIsInitialLoading(false);
                     }
                 }
                 if (data.simulationTimeSeconds !== undefined) {
@@ -414,33 +420,35 @@ export default function DigitalTwinView() {
 
                             </div>
 
-                            <div className="space-y-4">
-
-                                <MetricRow
-                                    label="Simulation Time"
-                                    value={`${Math.floor(simulationTime / 60).toString().padStart(2, '0')}:${(Math.floor(simulationTime) % 60).toString().padStart(2, '0')}`}
-                                    icon={<Clock3 size={15} />}
-                                />
-
-                                <MetricRow
-                                    label="Vehicles"
-                                    value={vehicles.length.toString()}
-                                    icon={<Car size={15} />}
-                                />
-
-                                <MetricRow
-                                    label="Average Speed"
-                                    value="32 km/h"
-                                    icon={<Gauge size={15} />}
-                                />
-
-                                <MetricRow
-                                    label="Queue Length"
-                                    value="14"
-                                    icon={<List size={15} />}
-                                />
-
-                            </div>
+                            {!isSimStateLoaded ? (
+                                <div className="py-6 text-center">
+                                    <div className="mx-auto h-5 w-5 animate-spin rounded-full border-2 border-text-muted border-t-transparent"></div>
+                                    <p className="mt-3 text-xs text-text-muted">Memuat status simulasi...</p>
+                                </div>
+                            ) : status === "idle" ? (
+                                <div className="py-6 text-center">
+                                    <p className="text-xs font-medium text-text">Stopped / Ready</p>
+                                    <p className="mt-1 text-[10px] text-text-muted">Mulai simulasi untuk melihat metrik.</p>
+                                </div>
+                            ) : (
+                                <div className="space-y-4">
+                                    <MetricRow
+                                        label="Current State"
+                                        value={status === "paused" ? "Paused" : "Running"}
+                                        icon={<Activity size={15} />}
+                                    />
+                                    <MetricRow
+                                        label="Simulation Time"
+                                        value={`${Math.floor(simulationTime / 60).toString().padStart(2, '0')}:${(Math.floor(simulationTime) % 60).toString().padStart(2, '0')}`}
+                                        icon={<Clock3 size={15} />}
+                                    />
+                                    <MetricRow
+                                        label="Current Vehicles"
+                                        value={vehicles.length.toString()}
+                                        icon={<Car size={15} />}
+                                    />
+                                </div>
+                            )}
 
                         </div>
 
@@ -480,38 +488,47 @@ export default function DigitalTwinView() {
                 </div>
 
                 {/* ================================================= */}
-                {/* METRICS */}
+                {/* VEHICLE INFORMATION / METRICS */}
                 {/* ================================================= */}
 
                 <div className="mt-5 grid grid-cols-2 gap-4 lg:grid-cols-4">
 
-                    <StatCard
-                        label="Vehicles"
-                        value="128"
-                        change="+12%"
-                        icon={<Car size={18} />}
-                    />
+                    {!isSimStateLoaded ? (
+                        <div className="col-span-full rounded-2xl border border-border bg-surface p-8 text-center shadow-sm">
+                            <div className="mx-auto h-6 w-6 animate-spin rounded-full border-2 border-text-muted border-t-transparent"></div>
+                            <p className="mt-3 text-xs text-text-muted">Memuat informasi kendaraan...</p>
+                        </div>
+                    ) : (
+                        <>
+                            <StatCard
+                                label="Current Vehicles"
+                                value={status === "idle" ? "0" : vehicles.length.toString()}
+                                change={status === "idle" ? "" : "Live snapshot"}
+                                icon={<Car size={18} />}
+                            />
 
-                    <StatCard
-                        label="Average Speed"
-                        value="32 km/h"
-                        change="+8.4%"
-                        icon={<Gauge size={18} />}
-                    />
+                            <StatCard
+                                label="Average Speed"
+                                value="-"
+                                change="Data belum tersedia"
+                                icon={<Gauge size={18} />}
+                            />
 
-                    <StatCard
-                        label="Queue Length"
-                        value="14"
-                        change="-18%"
-                        icon={<List size={18} />}
-                    />
+                            <StatCard
+                                label="Queue Length"
+                                value="-"
+                                change="Data belum tersedia"
+                                icon={<List size={18} />}
+                            />
 
-                    <StatCard
-                        label="Traffic Flow"
-                        value="1,284 veh/h"
-                        change="+6.2%"
-                        icon={<Zap size={18} />}
-                    />
+                            <StatCard
+                                label="Traffic Flow"
+                                value="-"
+                                change="Data belum tersedia"
+                                icon={<Zap size={18} />}
+                            />
+                        </>
+                    )}
 
                 </div>
 
@@ -704,12 +721,27 @@ export default function DigitalTwinView() {
 
                         <div className="space-y-2">
                             {signalStatuses.map((s, i) => (
-                                <SignalRow
-                                    key={i}
-                                    direction={s.direction}
-                                    state={s.state}
-                                    time={status === "running" ? `${s.time}s` : "--"}
-                                />
+                                isInitialLoading ? (
+                                    <div key={i} className="flex items-center justify-between rounded-xl border border-border p-3">
+                                        <div className="flex items-center gap-3">
+                                            <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-surface-2" />
+                                            <span className="text-xs font-medium text-text-muted">
+                                                {s.direction}
+                                            </span>
+                                        </div>
+                                        <div className="flex items-center gap-3">
+                                            <span className="h-2.5 w-6 animate-pulse rounded bg-surface-2" />
+                                            <span className="h-2.5 w-10 animate-pulse rounded bg-surface-2" />
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <SignalRow
+                                        key={i}
+                                        direction={s.direction}
+                                        state={s.state}
+                                        time={status === "running" ? `${s.time}s` : "--"}
+                                    />
+                                )
                             ))}
                         </div>
 
@@ -789,9 +821,11 @@ function StatCard({
 
             </div>
 
-            <p className="mt-3 text-[10px] text-signal-green">
-                {change} from previous
-            </p>
+            {change && (
+                <p className={`mt-3 text-[10px] ${change.includes("Data belum tersedia") ? "text-text-muted" : "text-signal-green"}`}>
+                    {change}
+                </p>
+            )}
 
         </div>
     );
