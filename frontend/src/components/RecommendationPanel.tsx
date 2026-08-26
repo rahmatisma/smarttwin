@@ -1,5 +1,4 @@
-import { useEffect, useState } from "react";
-import type { ApproachPhase, Recommendation } from "@/types/traffic";
+import type { ApproachPhase, Recommendation, SignalStatus } from "@/types/traffic";
 import { APPROACH_OPTIONS, type ApproachSelection } from "@/lib/intersections";
 
 function approachLabel(approach: string): string {
@@ -29,58 +28,52 @@ function approachShortLabel(approach: string): string {
  */
 function ApproachBox({
   phase,
-  isSelected,
-  liveRemainingSeconds,
+  status,
+  displaySeconds,
   liveTotalSeconds,
 }: {
   phase: ApproachPhase;
-  isSelected: boolean;
-  // Kalau isSelected true DAN dua nilai ini ada, kotak ini
-  // menampilkan hitung mundur LIVE (sama sumbernya dengan panel
-  // Status Sinyal) -- bukan angka rekomendasi statis lagi, supaya
-  // tidak ada dua angka berbeda untuk lengan yang sama.
-  liveRemainingSeconds?: number;
+  status: "GREEN" | "YELLOW" | "RED";
+  displaySeconds: number;
   liveTotalSeconds?: number;
 }) {
-  const isLive =
-    isSelected &&
-    liveRemainingSeconds !== undefined &&
-    liveTotalSeconds !== undefined &&
-    liveTotalSeconds > 0;
+  const barPercent = status === "RED"
+    ? Math.round(Math.min(1, Math.max(0, phase.demandScore)) * 100)
+    : Math.round(
+        Math.min(1, Math.max(0, displaySeconds / (status === "YELLOW" ? 5 : (liveTotalSeconds || phase.greenSeconds || 1)))) * 100
+      );
 
-  const displaySeconds = isLive
-    ? liveRemainingSeconds
-    : phase.greenSeconds;
+  let ringClass = "border-border bg-surface-2";
+  let dotClass = "bg-signal-red";
+  let textClass = "text-signal-red";
+  let progressClass = "bg-text-muted";
 
-  const barPercent = isLive
-    ? Math.round(
-        Math.min(1, Math.max(0, liveRemainingSeconds! / liveTotalSeconds!)) *
-          100
-      )
-    : Math.round(Math.min(1, Math.max(0, phase.demandScore)) * 100);
+  if (status === "GREEN") {
+    ringClass = "border-signal-green bg-surface-2 ring-1 ring-signal-green";
+    dotClass = "bg-signal-green";
+    textClass = "text-text";
+    progressClass = "bg-signal-green";
+  } else if (status === "YELLOW") {
+    ringClass = "border-signal-amber bg-surface-2 ring-1 ring-signal-amber";
+    dotClass = "bg-signal-amber";
+    textClass = "text-text";
+    progressClass = "bg-signal-amber";
+  }
 
   return (
-    <div
-      className={`rounded-md border p-2 text-center transition-colors ${
-        isSelected
-          ? "border-signal-green bg-surface-2 ring-1 ring-signal-green"
-          : "border-border bg-surface-2"
-      }`}
-    >
+    <div className={`rounded-md border p-2 text-center transition-colors ${ringClass}`}>
       <div className="text-[10px] text-text-muted">
         {approachShortLabel(phase.approach)}
-        {isLive && (
-          <span className="ml-1 inline-block h-1.5 w-1.5 rounded-full bg-signal-green align-middle" />
-        )}
+        <span className={`ml-1 inline-block h-1.5 w-1.5 rounded-full align-middle ${dotClass}`} />
       </div>
 
-      <div className="mt-0.5 font-mono text-base font-semibold text-text">
+      <div className={`mt-0.5 font-mono text-base font-semibold ${textClass}`}>
         {displaySeconds}s
       </div>
 
       <div className="mt-1 h-1 w-full overflow-hidden rounded-full bg-border">
         <div
-          className="h-full rounded-full bg-signal-green transition-all"
+          className={`h-full rounded-full transition-all ${progressClass}`}
           style={{ width: `${barPercent}%` }}
         />
       </div>
@@ -90,49 +83,49 @@ function ApproachBox({
 
 export default function RecommendationPanel({
   recommendation,
+  signal,
   selectedApproach,
-  activePhase,
-  activeRemainingSeconds,
   activeCycleSeconds,
+  sharedVisualPhase,
+  sharedVisualPhaseState,
+  sharedVisualRemaining,
 }: {
   recommendation?: Recommendation | null;
+  signal?: SignalStatus;
   selectedApproach?: ApproachSelection;
-  // Lengan yang BENAR-BENAR hijau sekarang (live, dari
-  // activeSignal.currentPhase di page.tsx -- sinkron dengan panel
-  // Status Sinyal). Ini yang menentukan kotak mana disorot, BUKAN
-  // selectedApproach (itu cuma menentukan label di kotak tengah).
-  activePhase?: string;
-  // activeSignal.remainingSeconds/cycleTimeSeconds -- dipakai supaya
-  // kotak yang aktif menampilkan hitung mundur LIVE yang SAMA dengan
-  // panel Status Sinyal, bukan angka rekomendasi statis.
-  activeRemainingSeconds?: number;
   activeCycleSeconds?: number;
+  sharedVisualPhase: string | null;
+  sharedVisualPhaseState: "GREEN" | "YELLOW";
+  sharedVisualRemaining: number;
 }) {
-  /*
-   * =========================================================
-   * COUNTDOWN LOKAL utk kotak yang sedang aktif
-   * =========================================================
-   *
-   * Pola sama seperti SignalStatusPanel -- turunkan sendiri tiap 1
-   * detik, resync ke nilai backend tiap kali activeRemainingSeconds
-   * berubah (poll 5 detik). Hook ini HARUS dipanggil sebelum early
-   * return di bawah (aturan React: hooks tidak boleh kondisional).
-   */
-  const [displayActiveRemaining, setDisplayActiveRemaining] = useState(
-    activeRemainingSeconds ?? 0
-  );
+  const phases = recommendation?.cyclePlan?.phases ?? [];
 
-  useEffect(() => {
-    setDisplayActiveRemaining(activeRemainingSeconds ?? 0);
-  }, [activeRemainingSeconds, activePhase]);
+  const getStatus = (approach: string): "GREEN" | "YELLOW" | "RED" => {
+    if (sharedVisualPhase === approach) return sharedVisualPhaseState;
+    return "RED";
+  };
 
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setDisplayActiveRemaining((current) => Math.max(0, current - 1));
-    }, 1000);
+  const getDisplaySeconds = (approach: string) => {
+    if (!phases.length || !sharedVisualPhase) return phaseByApproach[approach]?.greenSeconds ?? 0;
+    
+    const currentIndex = phases.findIndex(p => p.approach === sharedVisualPhase);
+    const targetIndex = phases.findIndex(p => p.approach === approach);
+    
+    if (currentIndex === -1 || targetIndex === -1) return phaseByApproach[approach]?.greenSeconds ?? 0;
+    if (currentIndex === targetIndex) return sharedVisualRemaining;
 
-    return () => clearInterval(interval);
-  }, []);
+    let waitTime = sharedVisualRemaining;
+    if (sharedVisualPhaseState === "GREEN") {
+      waitTime += 5; // Upcoming yellow phase for current active approach
+    }
+
+    let i = (currentIndex + 1) % phases.length;
+    while (i !== targetIndex) {
+      waitTime += phases[i].greenSeconds + 5; // Green + Yellow
+      i = (i + 1) % phases.length;
+    }
+    return waitTime;
+  };
 
   /*
    * =========================================================
@@ -152,15 +145,17 @@ export default function RecommendationPanel({
           </h2>
 
           <span className="text-xs text-text-muted">
-            Belum tersedia
+            Memuat...
           </span>
         </div>
 
-        <div className="flex min-h-32 items-center justify-center rounded-md border border-border bg-surface-2 px-4 text-center">
-          <p className="text-xs text-text-muted">
-            Rekomendasi pengaturan lampu lalu lintas
-            belum tersedia dari backend.
-          </p>
+        <div className="flex min-h-[320px] items-center justify-center rounded-md border border-border bg-surface-2 px-4 text-center">
+          <div className="flex flex-col items-center justify-center space-y-3">
+            <div className="h-5 w-5 animate-spin rounded-full border-2 border-text-muted border-t-transparent"></div>
+            <p className="text-xs text-text-muted">
+              Mengambil data rekomendasi...
+            </p>
+          </div>
         </div>
       </div>
     );
@@ -218,8 +213,8 @@ export default function RecommendationPanel({
               {phaseByApproach.north && (
                 <ApproachBox
                   phase={phaseByApproach.north}
-                  isSelected={activePhase === "north"}
-                  liveRemainingSeconds={displayActiveRemaining}
+                  status={getStatus("north")}
+                  displaySeconds={getDisplaySeconds("north")}
                   liveTotalSeconds={activeCycleSeconds}
                 />
               )}
@@ -228,8 +223,8 @@ export default function RecommendationPanel({
               {phaseByApproach.west && (
                 <ApproachBox
                   phase={phaseByApproach.west}
-                  isSelected={activePhase === "west"}
-                  liveRemainingSeconds={displayActiveRemaining}
+                  status={getStatus("west")}
+                  displaySeconds={getDisplaySeconds("west")}
                   liveTotalSeconds={activeCycleSeconds}
                 />
               )}
@@ -243,8 +238,8 @@ export default function RecommendationPanel({
               {phaseByApproach.east && (
                 <ApproachBox
                   phase={phaseByApproach.east}
-                  isSelected={activePhase === "east"}
-                  liveRemainingSeconds={displayActiveRemaining}
+                  status={getStatus("east")}
+                  displaySeconds={getDisplaySeconds("east")}
                   liveTotalSeconds={activeCycleSeconds}
                 />
               )}
@@ -253,8 +248,8 @@ export default function RecommendationPanel({
               {phaseByApproach.south && (
                 <ApproachBox
                   phase={phaseByApproach.south}
-                  isSelected={activePhase === "south"}
-                  liveRemainingSeconds={displayActiveRemaining}
+                  status={getStatus("south")}
+                  displaySeconds={getDisplaySeconds("south")}
                   liveTotalSeconds={activeCycleSeconds}
                 />
               )}
@@ -263,36 +258,30 @@ export default function RecommendationPanel({
           </div>
         )}
 
-        {/* Recommended Phase */}
-        <div className="rounded-md border border-border bg-surface-2 p-3">
-          <div className="text-xs text-text-muted">
-            Recommended Phase
-          </div>
-
-          <div className="mt-1 font-display text-sm font-semibold text-text">
-            {recommendation.recommendedPhase}
-          </div>
-        </div>
 
         {/* Green Time */}
         <div className="grid grid-cols-2 gap-3">
           <div className="rounded-md border border-border bg-surface-2 p-3">
             <div className="text-xs text-text-muted">
-              Recommended Green
+              Recommendation Green
             </div>
 
             <div className="mt-1 font-mono text-sm font-semibold text-text">
-              {recommendation.recommendedGreenSeconds}s
+              {sharedVisualPhase 
+                ? `${phases.find(p => p.approach === sharedVisualPhase)?.greenSeconds ?? "-"}s` 
+                : "Memuat..."}
             </div>
           </div>
 
           <div className="rounded-md border border-border bg-surface-2 p-3">
             <div className="text-xs text-text-muted">
-              Current Green
+              Current Green Phase
             </div>
 
             <div className="mt-1 font-mono text-sm font-semibold text-text">
-              {recommendation.currentGreenSeconds}s
+              {sharedVisualPhase && signal?.phases?.[sharedVisualPhase]
+                ? `${signal.phases[sharedVisualPhase].durationSeconds}s`
+                : "Memuat..."}
             </div>
           </div>
         </div>

@@ -327,7 +327,7 @@ export default function CameraFeedPanel({
                     loop
                     playsInline
                     preload="metadata"
-                    className="h-full w-full object-cover"
+                    className="h-full w-full object-contain"
                     onTimeUpdate={(e) => {
                       if (onTimeUpdate && camera.id === cameras[0].id) {
                         onTimeUpdate(e.currentTarget.currentTime);
@@ -428,52 +428,51 @@ export default function CameraFeedPanel({
           VEHICLE COUNTS
       ================================================= */}
 
-      <div className="mt-3 border-t border-border pt-3">
+      <div className="mt-4 border-t border-border pt-4">
 
-        <div className="mb-2 text-[10px] uppercase tracking-wide text-text-muted">
+        <div className="mb-3 text-[10px] uppercase tracking-wider font-semibold text-text-muted">
           Vehicle Detection
         </div>
 
-        <div className="grid grid-cols-2 gap-x-4 gap-y-1">
-
-          {counts.length > 0 ? (
-
-            counts.map((c) => (
-
-              <div
-                key={c.vehicleClass}
-                className="flex items-center gap-1.5 text-xs"
-              >
-
-                <span className="text-text-secondary">
-                  {ICONS[c.vehicleClass]}
-                </span>
-
-                <span className="text-text-secondary">
-                  {LABELS[c.vehicleClass]}
-                </span>
-
-                <span className="ml-auto font-mono tabular-nums text-text">
-
-                  {c.count.toLocaleString(
-                    "id-ID"
-                  )}
-
-                </span>
-
-              </div>
-
-            ))
-
-          ) : (
-
-            <div className="col-span-2 text-xs text-text-muted">
-              Data kendaraan belum tersedia.
+        {counts.length > 0 ? (
+          <div className="flex flex-col gap-3">
+            {/* TOTAL */}
+            <div className="flex items-center justify-between rounded-md border border-border bg-surface-2 p-3">
+              <span className="text-xs font-semibold uppercase tracking-wide text-text-muted">
+                Total Vehicles
+              </span>
+              <span className="font-mono text-3xl font-extrabold tracking-tight text-text">
+                {counts.reduce((acc, c) => acc + c.count, 0).toLocaleString("id-ID")}
+              </span>
             </div>
 
-          )}
-
-        </div>
+            {/* BREAKDOWN */}
+            <div className="grid grid-cols-2 gap-3">
+              {counts.map((c) => (
+                <div
+                  key={c.vehicleClass}
+                  className="flex flex-col justify-center rounded-md border border-border bg-surface-2 p-3"
+                >
+                  <div className="mb-1 flex items-center gap-2">
+                    <span className="text-text-muted">
+                      {ICONS[c.vehicleClass]}
+                    </span>
+                    <span className="text-[10px] font-medium uppercase text-text-muted">
+                      {LABELS[c.vehicleClass]}
+                    </span>
+                  </div>
+                  <span className="font-mono text-xl font-bold text-text">
+                    {c.count.toLocaleString("id-ID")}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : (
+          <div className="rounded-md border border-dashed border-border bg-surface-2 p-4 text-center text-xs text-text-muted">
+            Data kendaraan belum tersedia.
+          </div>
+        )}
 
       </div>
 

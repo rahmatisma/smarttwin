@@ -7,8 +7,7 @@ import Header from "@/components/Header";
 import StatsRow from "@/components/StatsRow";
 import DigitalTwinPanel from "@/components/DigitalTwinPanel";
 import CameraFeedPanel from "@/components/CameraFeedPanel";
-import SignalStatusPanel from "@/components/SignalStatusPanel";
-import RecommendationPanel from "@/components/RecommendationPanel";
+import SharedSignalPanels from "@/components/SharedSignalPanels";
 import ForecastChart from "@/components/ForecastChart";
 
 import { useTrafficSimulation } from "@/hooks/useTrafficSimulaton";
@@ -918,24 +917,12 @@ export default function DashboardPage() {
               RECOMMENDATION + SIGNAL STATUS
               ================================================= */}
 
-          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-
-            {/* RECOMMENDATION */}
-
-            <RecommendationPanel
-              recommendation={activeRecommendation}
+          <div className="w-full">
+            <SharedSignalPanels
+              activeRecommendation={activeRecommendation}
+              activeSignal={activeSignal}
               selectedApproach={selectedApproach}
-              activePhase={activeSignal.currentPhase}
-              activeRemainingSeconds={activeSignal.remainingSeconds}
-              activeCycleSeconds={activeSignal.cycleTimeSeconds}
             />
-
-            {/* SIGNAL STATUS */}
-
-            <SignalStatusPanel
-              signal={activeSignal}
-            />
-
           </div>
 
           {/* =================================================
