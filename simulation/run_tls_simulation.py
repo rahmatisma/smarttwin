@@ -265,11 +265,11 @@ from app.services.simulation_result_writer import (
 
 
 # ============================================================
-# DECISION ENGINE IMPORT
+# SCENARIO GENERATOR (kotak 7-8-9-10, bungkus RuleBasedEngine)
 # ============================================================
 
-from decision_engine.rule_based_engine import (
-    RuleBasedEngine,
+from scenario_generator import (
+    ScenarioEngine,
 )
 
 
@@ -749,7 +749,13 @@ def createDecision(
     )
 
     engine = (
-        RuleBasedEngine()
+        ScenarioEngine(
+            sumo_binary=sumoBinary,
+            sumo_config=sumoConfig,
+            tls_id=tlsId,
+            approach_to_phase=approachToPhase,
+            run_simulation_fn=runSimulation,
+        )
     )
 
     recommendation = (
@@ -1029,7 +1035,9 @@ def applyTls(
 # RUN SIMULATION
 # ============================================================
 
-def runSimulation():
+def runSimulation(
+    step_limit: int = simulationStepLimit,
+):
 
     printHeader(
         "SIMULATION RUNNING"
@@ -1054,7 +1062,7 @@ def runSimulation():
 
     while (
         steps
-        < simulationStepLimit
+        < step_limit
     ):
 
         try:
