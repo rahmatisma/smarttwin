@@ -6,7 +6,25 @@ Menjawab pertanyaan langsung: **apakah kode SmartTwin sudah mengintegrasikan ke-
 
 ---
 
-## Ringkasan per kotak
+## KOREKSI PENTING (ditambahkan 27 Agustus, setelah laporan awal) — dua jalur yang TIDAK PERNAH ketemu
+
+Persentase per kotak di bagian bawah menilai **apakah komponennya sendiri berfungsi benar** — itu valid, tapi bisa menyesatkan kalau dibaca seolah artinya "pipeline di diagram ini 70-90% mengalir seperti gambarnya". **Kenyataannya tidak.** Dicek langsung ke kode (`grep ScenarioEngine` di seluruh `backend/app/` — nol hasil; `RecommendationService`/`SignalService` dua-duanya instansiasi `RuleBasedEngine()` langsung, bukan `ScenarioEngine`):
+
+- **Jalur LIVE — yang dashboard-mu benar-benar tampilkan:**
+  `TrafficState (Supabase) → LSTM forecast → RuleBasedEngine (matematika langsung, TANPA simulasi) → Recommendation/SignalStatus → Dashboard`
+  Jalur ini **melompati kotak 4 (SUMO dipakai untuk keputusan), 7 (Scenario Generator), 8 (Traffic Simulation), 9 (Performance Analysis) SELURUHNYA.** Rekomendasi yang muncul di dashboard tidak pernah diuji lewat simulasi SUMO atau dianalisis LOS-nya — murni rumus demand-score.
+
+- **Jalur BATCH — terpisah total, dipicu manual dari terminal (`python run_tls_simulation.py`):**
+  `TrafficState → forecast → RuleBasedEngine (baseline) → Scenario Generator (3 kandidat) → Traffic Simulation (SUMO beneran per kandidat) → Performance Analysis (LOS dst.) → pemenang → disimpan ke tabel simulations/simulationMetrics`
+  Tabel `simulations`/`simulationMetrics` ini **tidak pernah dibaca balik oleh endpoint manapun yang dashboard pakai** (`/recommendation`, `/signal/status`) — diverifikasi lewat `grep` di seluruh `backend/app/api`+`backend/app/services`, nol referensi balik.
+
+**Artinya:** bukan "kotak 7-9 baru 70-75% nyambung ke live" — yang benar **0% keputusan yang tampil di dashboard pernah melalui simulasi/analisis performa sama sekali.** Dua alur ini berjalan sendiri-sendiri, hasilnya tidak pernah bertemu. Ini bukan salah tim — sudah didokumentasikan sebagai keputusan sadar sejak item 1.5 (3 simulasi SUMO penuh per HTTP request terlalu berat untuk endpoint yang dipoll tiap 5 detik) — tapi kalau ditanya "apakah sudah selaras seperti diagram", jawaban jujurnya **belum, ada 2 pipeline paralel yang tidak saling bicara**, bukan 1 pipeline utuh seperti yang digambar.
+
+Rencana untuk menyatukan dua jalur ini (dengan 3 opsi desain trade-off) sudah ditulis di `docs/rencana-scenario-generator.md` bagian 4.1 — itu **satu-satunya pekerjaan** yang, kalau selesai, benar-benar membuat sistem berjalan SATU alur utuh persis seperti diagram, bukan dua alur terpisah.
+
+---
+
+## Ringkasan per kotak (skor komponen — baca dengan koreksi di atas)
 
 | # | Kotak (diagram) | % | Status singkat |
 |---|---|---|---|
@@ -96,9 +114,17 @@ Jangan dibaca sebagai satu angka tunggal — baca bagian "Dua cara baca angka ke
 
 ## Ringkasan yang bisa langsung dipakai
 
-- **Kalau ditanya "berapa persen proyek ini jadi": jawab ≈ 90%**, dengan catatan PPO (bukan "Decision Engine" secara umum) sengaja di luar scope dan digantikan rule-based yang teruji.
-- **Kalau ditanya spesifik "apakah PPO sudah ada": jawab jujur, belum, dan itu keputusan sadar** (time-boxed, non-blocking, item 1.6) — bukan kegagalan atau kelupaan.
-- **Kotak yang paling butuh kerja lanjutan** (bukan blocker, tapi paling jauh dari 100%): kotak 7-9 (Scenario Generator/Simulation/Performance Analysis) yang masih batch-only — sudah ada dokumen rencana khusus di `docs/rencana-scenario-generator.md`.
+**Kalau ditanya "apakah sudah berjalan selaras/nyambung seperti diagram ini": jawaban jujurnya BELUM.** Bukan cuma "beberapa modul belum nyambung" — lebih tepatnya ada **2 pipeline paralel yang tidak pernah bertemu** (lihat bagian "KOREKSI PENTING" di atas). Yang dashboard tampilkan ke user itu jalur pintas (skip kotak 4/7/8/9), bukan alur penuh yang digambar.
+
+Dua angka yang perlu dipisah, jangan dicampur jadi satu:
+
+| Yang diukur | Angka | Artinya |
+|---|---|---|
+| **Kelengkapan tiap komponen sendiri-sendiri** (12 kotak dinilai satu-satu) | ≈ 78-90% | Hampir semua kotak, kalau dites TERPISAH, sudah berfungsi dan terverifikasi |
+| **Apakah 12 kotak itu benar-benar SATU alur mengalir seperti panah di diagram** | **TIDAK** | Ada percabangan: jalur live (dashboard) skip kotak 4/7/8/9 total; jalur batch (kotak 4/7/8/9) hasilnya tidak pernah sampai ke dashboard |
+
+- **Kotak yang paling butuh kerja lanjutan, dan ini yang PALING PENTING dari semua temuan hari ini:** menyatukan jalur live dan jalur batch supaya keputusan yang tampil di dashboard benar-benar sudah melalui simulasi SUMO + analisis performa (kotak 7-8-9), bukan cuma rumus rule-based langsung. 3 opsi desain buat ini sudah ditulis di `docs/rencana-scenario-generator.md` bagian 4.1.
+- **Kalau ditanya spesifik "apakah PPO sudah ada": jawab jujur, belum, dan itu keputusan sadar** (time-boxed, non-blocking, item 1.6) — beda urusan dari poin di atas.
 - **Yang paling perlu diverifikasi ulang SEGERA** (bukan karena belum dikerjakan, tapi karena baru saja diperbaiki dan belum dites manual): dashboard live pasca perbaikan regresi jam simulasi (kotak 12).
 
 ---
