@@ -2,6 +2,8 @@
 
 Disusun dari audit progres per modul malam 25 Agustus (lihat rekap commit di `pembagian-tugas-24-agustus.md` dan desain LSTM di `rencana-lstm-forecast.md`), **diperbarui menyeluruh 26 Agustus siang** setelah scan ulang seluruh modul (CV, forecasting, backend, decision_engine, simulation, frontend) — lihat bagian 6 & 7 untuk temuan baru. Skor kesiapan MVP keseluruhan sekarang **jauh lebih tinggi dari 72%** — hampir semua blocker besar (model LSTM tidak ada, Recommendation Panel putus, rotasi lampu tidak hidup) sudah tertutup hari ini. Sisa kerjaan intinya cuma satu: **sambungkan pipa yang sudah ada satu sama lain** (lihat bagian 6), bukan bangun dari nol lagi.
 
+**Update 26 Agustus malam:** Yuli menutup item 2.4 sendiri (commit `d5ec395` "train per approach" + `3c6ee4c` "integrasikan forecast LSTM per-approach ke decision engine dan SUMO") — satu-satunya kotak yang masih "berdiri sendiri" di bagian 6.1 (LSTM → Decision Engine) sekarang tersambung, di jalur live MAUPUN batch sekaligus (lihat 2.4 & 6.1 versi baru). Diverifikasi ulang oleh Rahmat 26 Agustus malam: `pytest -q` di `backend/` 52 passed (naik dari 46), test forecast client di `simulation/` 8 passed (pakai `backend/.venv`, lihat catatan lingkungan di 2.4).
+
 **Prinsip pembagian:** tetap di jalur masing-masing yang sudah terbukti malam ini (Rahmat = backend/CV/simulasi, Yuli = LSTM, Melpi = frontend) — bukan dirombak, biar tidak ada waktu terbuang re-onboarding ke area baru.
 
 ---
@@ -74,7 +76,8 @@ Muncul dari koreksi arah setelah 1.5: yang dimaksud user itu **bukan** "pilih 1 
 - [x] **3 bug tersembunyi ketauan & diperbaiki sekaligus** (root cause sama semua: dua tempat hitung sendiri-sendiri, harusnya satu sumber): `activeRecommendation`/`activeSignal` di `page.tsx` masih bergantung ke `selectedIntersection` yang di-hardcode `"all"` (peninggalan desain lama "4 simpang", sudah digantikan `selectedApproach`) — dua fungsi `getAggregatedRecommendation()`/`getAggregatedSignal()` yang isinya teks hardcode "N/A"/"Semua Fase" dihapus total
 - [x] Video CCTV (`CameraFeedPanel.tsx`) ditambah `autoPlay`/`loop` sesuai permintaan — sebelumnya harus diklik manual dan tidak mengulang begitu habis
 - [x] Diverifikasi lewat browser sungguhan berkali-kali (bukan cuma TestClient) sampai semua panel sinkron — 14 test baru (`test_rule_based_engine_cycle.py`, `test_signal_service.py`)
-- [ ] **Belum:** menerapkan siklus 4-lengan ini ke SUMO live (`run_tls_simulation.py`/`sumo_controller.py`) — itu butuh `traci.trafficlight.setProgramLogic()` (program TLS custom 4 fase), beda API dari `setPhase()`/`setPhaseDuration()` yang dipakai sekarang. Dashboard sudah menunjukkan rotasi yang benar, tapi simulasi SUMO belum benar-benar menjalankan rotasi yang sama
+- [ ] **Masih belum:** menerapkan siklus 4-lengan PENUH (`CyclePlan`/`recommend_cycle()`) ke SUMO live — `run_tls_simulation.py`/`ScenarioEngine` masih memanggil `RuleBasedEngine.recommend()` (satu lengan pemenang per run), bukan `recommend_cycle()`. Dashboard sudah menunjukkan rotasi 4-lengan yang benar, simulasi SUMO belum
+- [x] **Update 26 Agustus malam (Yuli, commit `3c6ee4c`):** sub-masalah yang berdekatan sudah dibereskan sekalian — sebelumnya `run_tls_simulation.py` mengandalkan program TLS *actuated* bawaan net file dengan `approachToPhase` yang index-nya (0/1/2/3) tidak cocok index fase hijau program itu (yang diselingi fase kuning). Sekarang ada program eksplisit `simulation/network/tls_safe.add.xml` (`programID="safe-yellow"`, 8 fase: 4 hijau 39s + 4 kuning 4s, index hijau south=0/east=2/north=4/west=6), diaktifkan via `traci.trafficlight.setProgram(tlsId, "safe-yellow")` di `startSumo()`, dan `approachToPhase` diperbaiki cocok index barunya. Ini memperbaiki dasar sebelum "siklus penuh" di atas bisa dibangun — bukan pengganti item itu
 
 ---
 
@@ -90,20 +93,31 @@ Rekomendasi: **Opsi A** — script training PyTorch Yuli sudah jalan & teruji (5
 ### 2.2 [SELESAI 26 Agustus pagi] Selesaikan training & commit hasil
 - [x] ~~Latih pakai 2 fitur asli dulu~~ — **dilewati**, Yuli langsung latih 4 fitur (lihat 2.3). Tidak masalah, cuma dicatat biar tidak dikira lupa
 - [x] **Blocker lama sudah tertutup** — commit `5d2e594` "commit model" (26 Agustus 06:51 WIB, ~1 jam setelah audit sebelumnya) memakai `git add -f` (`.gitignore` diubah 1 baris) dan benar-benar membawa `traffic_lstm.pt` (221.653 bytes), `scaler.json`, `metadata.json`, plus `predictions.csv`/`training_history.json`/plot loss. **Diverifikasi ulang siang ini**, filenya ada di disk & ke-track git, `modelExists`/`scalerExists`/`metadataExists` semua `true` di `/api/forecast/health`
-- [ ] Update `forecasting/README.md` bagian status — **masih belum dikerjakan**. README saat ini masih mendeskripsikan desain lama 4 dataset terpisah (`scripts/tmu/`, `scripts/pems04/`, `scripts/brisbane/`, `scripts/yolo/`), tidak cocok dengan struktur asli sekarang (`forecasting/scripts/lstm/` satu pipeline gabungan). P2 — dokumentasi saja, tidak blocking
+- [x] Update `forecasting/README.md` bagian status — **sudah dikerjakan Yuli 26 Agustus malam** (bagian dari `d5ec395` + `3c6ee4c`, total >1500 baris diagram-ulang) — sekarang mendeskripsikan pipeline aktual yang berjalan (training vs runtime terpisah, model agregat + model per-approach, alur live DAN batch lengkap dengan nama file), bukan lagi desain lama 4 dataset terpisah
 
 ### 2.3 [SELESAI 26 Agustus siang, dengan 1 bug ketauan+diperbaiki] Retrain 4 fitur
 - [x] Model sudah beneran jalan — diverifikasi lewat prediksi sungguhan (`POST /api/forecast` pakai 12 baris asli dari `data_gabungan.csv`), hasilnya prediksi 12 langkah ke depan (60 detik) yang masuk akal, bukan cuma health check kosong
 - [x] **Bug ditemukan & diperbaiki saat verifikasi:** `backend/app/services/forecast_service.py:26` masih hardcode `OUTPUT_TIMESTEPS = 3` (model versi lama, horizon 15 detik) — model hasil retrain terbaru (`metadata.json::outputSteps`) sebenarnya 12 (horizon 60 detik). Mismatch ini bikin `load_state_dict()` gagal total dengan `size mismatch for fc.weight: [48,64] vs [12,64]`, jadi `POST /api/forecast` selalu 500 walau file model-nya sudah ada. Diubah jadi `OUTPUT_TIMESTEPS = 12`, semua tempat lain (docstring, `forecastHorizonSeconds`, dst) otomatis ikut karena semua turunan dari konstanta ini, tidak ada hardcode ganda
 - [x] `torch==2.13.0` sudah tercantum di `backend/requirements.txt`, sehingga environment backend baru dapat memasang dependency serving LSTM secara reproducible
 - [x] Kode mati `backend/app/models/lstm_forecast.py` + `backend/tests/test_lstm_forecaster.py` sudah dihapus 26 Agustus setelah dipastikan tidak diimpor kode produksi; loader aktif tetap `forecast_service.py`
-- [ ] Update tabel status fitur di `rencana-lstm-forecast.md` bagian 2 — **masih belum dikerjakan**, tabel di bagian 2 dokumen itu masih menulis `queueLengthVeh`/`queueLengthMEst` sebagai "⚠️ SELALU 0", padahal data asli sudah ada sejak 25 Agustus DAN model sudah dilatih dengan data itu
+- [x] Update tabel status fitur di `rencana-lstm-forecast.md` bagian 2 — **sudah dikerjakan Yuli 26 Agustus malam** (bagian dari commit `d5ec395`), status `queueLengthVeh`/`queueLengthMEst` diganti dari "⚠️ SELALU 0" jadi "✅ Data estimasi CV asli, bervariasi, sudah dipakai training"
 
-### 2.4 [DINAIKKAN KE P0 — fokus utama 26 Agustus sore/malam] Sambungkan forecast ke Decision Engine
-**Perubahan prioritas 26 Agustus:** item ini sebelumnya P2 "kalau sempat" — sekarang jadi fokus utama, karena dua prasyaratnya (model LSTM jalan di 2.2/2.3, siklus lampu live di 1.7) baru saja selesai hari ini, dan tim ingin pipa penuhnya benar-benar tersambung, bukan cuma tiap potongan jalan sendiri-sendiri. Detail desain & pembagian kerja lengkap ada di **bagian 6** di bawah — ringkasannya di sini:
-- [ ] Belum ada kode yang menyambungkan hasil forecast ke `RuleBasedEngine.recommend()`/`recommend_cycle()` — desain pola opsional (`forecast: ForecastResult | None`) sudah dibahas di `rencana-lstm-forecast.md` bagian 8, tinggal diimplementasikan
-- [ ] Keputusan desain yang perlu diambil dulu (lihat bagian 6.2): forecast dipakai di jalur SIKLUS LAMPU LIVE (`SignalService`, tiap transisi fase) atau di jalur BATCH SIMULASI (`ScenarioEngine`), atau dua-duanya — trade-off kecepatan vs risiko forecast yang belum tervalidasi akurasinya
-- [ ] Kalau tidak sempat sebelum 31 Agustus: dokumentasikan sebagai keterbatasan yang jujur, jangan diklaim terintegrasi kalau belum — **lihat catatan validitas di bagian 6.3**, forecast belum tentu memperbaiki hasil kalau akurasinya belum terbukti buat simpang ini spesifik
+### 2.4 [SELESAI 26 Agustus malam, dikerjakan Yuli] Sambungkan forecast ke Decision Engine
+**Perubahan prioritas 26 Agustus:** item ini sebelumnya P2 "kalau sempat", dinaikkan ke P0 siang ini, dan **ditutup malam ini juga** — lebih cepat dari perkiraan. Dikerjakan Yuli sendiri lewat 2 commit (`d5ec395` "train per approach", `3c6ee4c` "integrasikan forecast LSTM per-approach ke decision engine dan SUMO"), bukan Rahmat seperti rencana pembagian kerja awal di bagian 6.4 (lihat catatan di situ) — masuk akal karena forecast tetap di domain LSTM Yuli. Diverifikasi ulang Rahmat malam ini: `pytest -q` di `backend/` 52 passed (naik dari 46 sebelum commit ini), tidak ada regresi.
+
+- [x] **Model baru: shared LSTM per-approach** (`forecasting/scripts/lstm/per_approach/`) — beda dari model agregat lama (`forecast_service.py`), model ini satu jaringan dengan encoding one-hot approach (4 fitur traffic + 4 one-hot = 8 input), dilatih atas gabungan data ke-4 lengan sekaligus. Artefak: `forecasting/outputs/lstm/per_approach/traffic_lstm_per_approach.pt` (226KB) + `scaler.json` + `metadata.json`, di-commit dengan `git add -f` (pola sama seperti model agregat, lihat `CLAUDE.md`)
+- [x] **Serving baru:** `backend/app/services/per_approach_forecast_service.py` (`PerApproachForecastService`) — ambil 12 `TrafficState` berurutan tepat berinterval 5 detik dari histori, prediksi 12 langkah (60 detik) ke depan untuk ke-4 lengan sekaligus dalam satu forward pass
+- [x] **Endpoint `POST /api/forecast/approaches` diperbarui** — sekarang coba model per-approach dulu, kalau gagal (artefak belum ada / histori kurang dari 12 baris lengkap) baru fallback ke alokasi model agregat lama (`forecastSource: "aggregate-recent-share-fallback"`), field `fallbackUsed`/`fallbackReason` melaporkan jujur yang mana yang benar-benar dipakai
+- [x] **Tersambung ke decision engine, dua-duanya (Opsi 1 DAN Opsi 2 di 6.2 lama, bukan cuma salah satu):**
+  - `RuleBasedEngine.recommend()`/`recommend_cycle()` (`decision_engine/rule_based_engine.py`) dapat parameter opsional baru `forecast: dict | None`, `forecastWeight: float = 0.5` + method baru `apply_forecast()` — blend `TrafficState` sekarang dengan horizon forecast TERAKHIR (langkah ke-12, +60 detik) pakai bobot linear per fitur (`volume`, `queueLengthVeh`, `queueLengthMEst`, `densityIndex`, plus skala proporsional untuk breakdown per-kelas kendaraan). Tanpa forecast, perilaku identik dengan sebelumnya (parameter opsional, `source` tetap `"rule-based"`); dengan forecast, `source` jadi `"rule-based+forecast"` — gampang dibedakan di data
+  - **Jalur live (Opsi 1):** `SignalService._recompute_cycle_plan()` sekarang ambil 24 `TrafficState` terakhir, panggil `PerApproachForecastService.predict_records()`, teruskan hasilnya ke `recommend_cycle(forecast=..., forecastWeight=0.3)` tiap kali fase pindah. Forecast gagal (histori kurang, model belum ada, dll) → tangkap exception, jatuh ke `forecast=None` (pola fallback yang sama dipakai di semua service lain di proyek ini) — dites eksplisit (`test_recompute_cycle_plan_falls_back_when_forecast_fails`)
+  - `RecommendationService.get_recommendation()` juga dapat perlakuan sama (`limit=1` → `limit=24` biar cukup histori, forecast diteruskan ke `engine.recommend(forecast=..., forecastWeight=0.3)`)
+  - **Jalur batch (Opsi 2):** `simulation/forecast_client.py` (baru) — `ForecastClient` narik histori dari `GET /api/v1/traffic/{id}` lewat backend, susun 12 record, panggil `POST /api/forecast/approaches`, validasi bentuknya (12 horizon, 4 approach tiap horizon), balikin `None` kalau gagal di titik mana pun (bukan exception mentah — biar SUMO tetap bisa jalan tanpa forecast). `run_tls_simulation.py::loadForecast()` panggil ini sebelum `createDecision()`, dikontrol lewat env var `FORECAST_ENABLED`/`FORECAST_WEIGHT` (default aktif, bobot 0.3). `ScenarioEngine.recommend()` (`simulation/scenario_generator.py`) juga dapat parameter `forecast`/`forecastWeight`, diteruskan ke `RuleBasedEngine` internalnya sebelum generate 3 kandidat — jadi baseline yang dibandingkan Scenario Generator sudah mempertimbangkan forecast, bukan cuma `TrafficState` sesaat
+  - Hasil simulasi (`saveSimulationResult()`) sekarang mencatat `forecastApplied`/`forecastWeight`/`forecastFallbackUsed`/`forecastSource` ke `simulationMetrics` — bisa diaudit run mana yang benar-benar pakai forecast vs fallback
+- [x] **Bobot forecast sengaja kecil (0.3), bukan 0.5:** keputusan konservatif — 70% state aktual, 30% forecast — konsisten dengan peringatan validitas yang sudah ditulis di bagian 6.3 lama (data training kecil, model belum divalidasi khusus buat simpang ini). Tidak all-in ke prediksi
+- [x] **Diverifikasi:** 6 test baru murni Python di `backend/tests/test_forecast_decision_integration.py` (termasuk `test_forecast_can_change_rule_based_priority` — bukti forecast BENERAN bisa mengubah lengan yang direkomendasikan, bukan cuma nempel tidak berpengaruh) + 2 test baru di `test_signal_service.py` + 8 test baru di `simulation/tests/test_forecast_client.py` — semua lolos
+- [ ] **Belum ada studi "dengan forecast vs tanpa forecast"** — sesuai peringatan 6.3 lama, forecast SUDAH tersambung secara arsitektur tapi belum ada perbandingan terpisah yang mengukur apakah rekomendasi hasil blending forecast benar-benar lebih baik (delay/queue/LOS lebih rendah) dibanding tanpa forecast. Kalau sempat sebelum 31 Agustus, jadi bahan kuat buat laporan teknis; kalau tidak, tulis jujur sebagai kerja lanjutan (lihat 6.3 versi baru untuk detail angka evaluasi model)
+- [ ] **Catatan lingkungan (bukan bug):** `simulation/.venv` tidak punya `supabase`, jadi `pytest tests/test_forecast_client.py` di venv itu gagal 1 dari 8 test (`ModuleNotFoundError: No module named 'supabase'` saat `run_tls_simulation.py` diimpor). Sama seperti pola yang sudah didokumentasikan di item 1.5 — jalankan pakai `backend/.venv` (yang punya `supabase`) untuk test itu, bukan regresi
 
 ---
 
@@ -148,57 +162,61 @@ Rekomendasi: **Opsi A** — script training PyTorch Yuli sudah jalan & teruji (5
 - [x] Rahmat sudah commit fix `sumo_controller.py` (item 1.1)? — **sudah** (`26e4d48`), dan simulasinya sudah diverifikasi jalan pasca-fix (`simulations` id 7)
 - [ ] Rahmat sudah time-box PPO (item 1.6) — jangan biarkan tanpa batas waktu jelas
 - [x] **Baru:** model LSTM Yuli sudah di-commit (`5d2e594`) dan sudah diverifikasi jalan (2.2/2.3) — sudah sepakat forecast → decision engine (2.4/bagian 6) jadi fokus 26 Agustus sore, menggantikan prioritas P2 lama
+- [x] **Update 26 Agustus malam:** forecast → decision engine (2.4/bagian 6) **sudah selesai** dikerjakan Yuli (`d5ec395`, `3c6ee4c`) — kotak 6 di diagram arsitektur tidak lagi berdiri sendiri
 - [ ] **Baru:** siapa yang jalankan `run_ingest.py` (CV → Supabase) secara rutin sebelum demo — sekarang manual, tidak ada scheduler (lihat bagian 7.2). Perlu SOP jelas siapa & kapan, supaya data di dashboard demo tidak basi
 - [x] `backend/app/models/lstm_forecast.py` + `backend/tests/test_lstm_forecaster.py` (kode mati, lihat 2.3) sudah dihapus
+- [ ] **Baru:** belum ada studi "dengan forecast vs tanpa forecast" yang membandingkan kualitas rekomendasi (lihat 6.3) — kalau ada waktu sebelum 31 Agustus, siapa yang mengerjakan?
 
 ---
 
 ## 6. Integrasi Pipa Penuh — fokus 26 Agustus sore/malam
 
-Ditulis setelah scan menyeluruh siang ini. Ini menjawab arahan: TrafficState live → LSTM → Scenario Generator → Traffic Simulation → Performance Analysis → Decision Engine (rule-based dulu) → Recommendation.
+Ditulis setelah scan menyeluruh siang ini, **diperbarui 26 Agustus malam** setelah Yuli menutup item 2.4 (lihat detail lengkap di 2.4 di atas). Ini menjawab arahan: TrafficState live → LSTM → Scenario Generator → Traffic Simulation → Performance Analysis → Decision Engine (rule-based dulu) → Recommendation.
 
-### 6.1 Peta status tiap kotak (per 26 Agustus siang)
+### 6.1 Peta status tiap kotak (per 26 Agustus malam)
 
 | Kotak (diagram arsitektur) | Status | Kode |
 |---|---|---|
 | 1-3. CV → Traffic State | **Hidup, tapi bukan realtime streaming** — proses video REKAMAN (43 menit), hasilnya di-ingest MANUAL ke Supabase | `cv/vehicle_counter_pingit.py` → `run_ingest.py` (lihat 7.1-7.2) |
 | 4-5. Virtual Intersection / Realtime Traffic State | **Hidup** — `TrafficStateBuilder` baca Supabase, dipakai `/recommendation` & `/signal/status` tiap poll | `backend/app/pipeline/traffic_state_builder.py` |
-| 6. Traffic Forecast (LSTM) | **Model jalan** (diverifikasi 26 Agustus siang, lihat 2.2/2.3) — TAPI **berdiri sendiri**, tidak dipanggil siapa pun untuk pengambilan keputusan | `backend/app/services/forecast_service.py`, endpoint `POST /api/forecast` |
-| 7-9. Scenario Generator + Simulasi + Performance Analysis (LOS) | **Jalan, terbukti (1.5)** — TAPI cuma di jalur batch manual (`run_tls_simulation.py`), tidak nempel ke dashboard live sama sekali | `simulation/scenario_generator.py` |
-| 10. Decision Engine | **Hidup** — `RuleBasedEngine` (live, `/recommendation` & `/signal/status`) DAN `ScenarioEngine` (batch). PPO belum ada (1.6) | `decision_engine/rule_based_engine.py` |
-| 11. Signal Timing Recommendation | **Hidup & live** — siklus 4 lengan beneran berputar (1.7) | `SignalService`, `RecommendationService` |
+| 6. Traffic Forecast (LSTM) | **Hidup DAN tersambung** — model per-approach baru (`per_approach_forecast_service.py`) dipanggil langsung oleh kotak 10, di jalur live maupun batch (lihat 2.4) | `backend/app/services/per_approach_forecast_service.py`, endpoint `POST /api/forecast/approaches` |
+| 7-9. Scenario Generator + Simulasi + Performance Analysis (LOS) | **Jalan (1.5), dan sekarang baseline-nya juga mempertimbangkan forecast** (2.4, jalur batch) — tapi masih cuma di `run_tls_simulation.py`, tidak nempel ke dashboard live | `simulation/scenario_generator.py`, `simulation/forecast_client.py` |
+| 10. Decision Engine | **Hidup, dan sekarang forecast-aware** — `RuleBasedEngine.recommend()`/`recommend_cycle()` terima parameter `forecast` opsional (dipakai `SignalService`, `RecommendationService`, DAN `ScenarioEngine`). PPO belum ada (1.6) | `decision_engine/rule_based_engine.py` |
+| 11. Signal Timing Recommendation | **Hidup & live**, sekarang blend 70% state aktual + 30% forecast 60 detik ke depan | `SignalService`, `RecommendationService` |
 | 12. Dashboard | **Hidup**, sinkron dengan 11 | `frontend/src/components/RecommendationPanel.tsx`, `SignalStatusPanel.tsx` |
 
-**Kesimpulan:** rantai **1→5→10→11→12 sudah nyambung penuh dan live**. Yang **belum nyambung**: kotak 6 (LSTM) ke kotak 10 (Decision Engine), dan kotak 7-9 (Scenario Generator+LOS) ke kotak 11-12 (cuma nempel ke jalur batch `run_tls_simulation.py`, bukan dashboard).
+**Kesimpulan:** rantai **1→5→6→10→11→12 sekarang nyambung penuh dan live** — kotak 6 (LSTM) yang sebelumnya "berdiri sendiri" sudah masuk ke kotak 10 di jalur live maupun batch. Yang **masih belum nyambung**: kotak 7-9 (Scenario Generator+LOS) ke kotak 11-12 (cuma nempel ke jalur batch `run_tls_simulation.py`, bukan dashboard — tetap seperti keputusan sadar di 1.5, bukan berubah), dan siklus 4-lengan penuh (`CyclePlan`) belum diterapkan ke SUMO live (lihat sisa item terbuka di 1.7).
 
-### 6.2 Rencana sambungkan LSTM → Decision Engine (item 2.4, P0 baru)
+### 6.2 [SELESAI 26 Agustus malam] Sambungkan LSTM → Decision Engine — apa yang benar-benar dikerjakan
 
-Dua pertanyaan desain yang perlu diputuskan tim dulu (bukan cuma kerjaan solo):
+Dokumen versi siang tadi menyusun 2 opsi desain dan merekomendasikan mulai dari Opsi 2 (risiko rendah, batch dulu). **Yang benar-benar terjadi: Yuli mengerjakan DUA-DUANYA sekaligus**, bukan cuma salah satu:
 
-**A. Forecast dipakai di jalur mana?**
-- **Opsi 1 — Siklus lampu live (`SignalService`):** tiap kali fase pindah, sebelum panggil `recommend_cycle()` pakai `TrafficState` SEKARANG, tambahkan langkah panggil `POST /api/forecast` dulu (butuh 12 baris histori terakhir), pakai HASIL PREDIKSI sebagai input `recommend_cycle()` alih-alih data sekarang. Lebih "sesuai visi" (antisipatif), tapi tiap transisi fase jadi butuh 1 panggilan forecast tambahan (masih cepat, LSTM bukan simulasi berat)
-- **Opsi 2 — Cuma di Scenario Generator (batch):** `ScenarioEngine` pakai forecast buat memilih baseline sebelum generate 3 kandidat, tapi siklus live (`SignalService`) tetap reaktif seperti sekarang. Risiko lebih rendah (tidak menyentuh jalur live yang sudah stabil), tapi manfaatnya kurang kelihatan di demo dashboard
-- **Rekomendasi:** mulai dari Opsi 2 dulu (risiko rendah, `ScenarioEngine` sudah punya slot alami buat ini di `generate_candidate_plans()`), baru kalau waktu masih ada pindah ke Opsi 1
+- **Opsi 1 (jalur live, `SignalService`/`RecommendationService`)** — diimplementasi. Tiap transisi fase / tiap `POST /recommendation`, service ambil 24 `TrafficState` terakhir, panggil model forecast, hasilnya di-blend (bobot 0.3) ke input `recommend_cycle()`/`recommend()`.
+- **Opsi 2 (jalur batch, `ScenarioEngine`)** — diimplementasi juga, lewat `simulation/forecast_client.py` yang baru + `run_tls_simulation.py::loadForecast()`.
 
-**B. Bagaimana kalau forecast gagal/tidak tersedia?**
-Sama seperti pola fallback yang sudah dipakai di seluruh proyek ini (`RecommendationService`, `SignalService`) — forecast yang gagal HARUS jatuh ke data `TrafficState` sekarang, bukan bikin request gagal. Pola `forecast: ForecastResult | None` yang sudah didesain di `rencana-lstm-forecast.md` bagian 8 sudah benar arahnya, tinggal diimplementasikan dengan try/except yang sama gayanya dengan kode lain di proyek ini.
+Pertanyaan B (bagaimana kalau forecast gagal) dijawab dengan pola fallback yang sama gayanya dengan seluruh proyek ini di kedua jalur: exception ditangkap, jatuh ke `forecast=None`, `source` tetap `"rule-based"` (bukan `"rule-based+forecast"`) — dites eksplisit di kedua jalur. Detail teknis lengkap (nama file, nama fungsi, cakupan test) ada di item **2.4** di atas, tidak diulang di sini.
 
-### 6.3 Peringatan jujur — forecast belum tentu bikin "lebih valid"
+### 6.3 Peringatan jujur — forecast belum tentu bikin "lebih valid" (diperbarui dengan angka evaluasi nyata)
 
-Dicatat di sini supaya tidak lupa pas nulis laporan teknis (sudah dibahas user & Claude siang ini): mengantisipasi kondisi ke depan itu SECARA KONSEP lebih canggih dari reaktif — tapi cuma valid kalau forecast-nya akurat, dan itu **belum terbukti** untuk Simpang Pingit spesifik:
-- Data training cuma ~538 baris (~45 menit) — kecil untuk time-series
-- `queueLengthVeh`/`queueLengthMEst` (2 dari 4 fitur) baru punya data antrean ASLI sejak 25 Agustus (item 1.2) — sebelumnya selalu 0, jadi model belajar dari data yang sangat baru/sedikit khusus utk fitur ini
-- Kalau forecast-nya meleset, rekomendasi bisa JADI LEBIH BURUK daripada pakai data real-time apa adanya
+Peringatan versi siang tadi (data kecil, 2 fitur antrean baru) sudah **sebagian tertutup** — `queueLengthVeh`/`queueLengthMEst` sudah punya data asli sejak 25 Agustus DAN dipakai training (lihat 2.3). Tapi peringatan intinya (forecast belum tentu memperbaiki hasil) **masih berlaku**, sekarang dengan angka evaluasi nyata dari `forecasting/outputs/lstm/per_approach/metadata.json` (dicek Rahmat 26 Agustus malam):
 
-**Jangan klaim "forecast bikin sistem lebih akurat"** tanpa validasi terpisah (bandingkan hasil rekomendasi pakai forecast vs tanpa forecast, pakai metrik yang sama seperti 1.5/LOS). Kalau tidak sempat validasi sebelum 31 Agustus, tulis di laporan sebagai "diintegrasikan secara arsitektur, validasi akurasi prediksi untuk keputusan sinyal adalah kerja lanjutan" — jujur, bukan diklaim selesai.
+- **Model mengalahkan naive baseline** (prediksi = ulangi nilai terakhir) di ke-4 lengan — MAE gabungan 1.65 vs baseline 2.30, dan `beatsNaiveBaseline: true` di west/south/east/north. Ini sinyal positif nyata, bukan cuma "modelnya jalan"
+- **TAPI test set-nya sangat kecil: cuma 16 sequence total (4 per lengan)** dari 1044 sequence training — `beatsNaiveBaseline` di angka sekecil ini belum bisa diklaim signifikan secara statistik, cuma indikasi arah yang benar
+- MAE/RMSE di file metadata ini dalam **satuan asli** (kendaraan, meter) — bukan satuan ternormalisasi seperti catatan PeMS04 di `CLAUDE.md`. Misal `queueLengthMEst` MAE 4.22m dari rentang data 0-41m — cukup masuk akal untuk laporan
+- Data training tetap kecil untuk time-series (~538 baris mentah, ~45 menit, satu sesi rekaman) — keterbatasan generalisasi yang sama seperti dibahas di `rencana-lstm-forecast.md`/`CLAUDE.md`
+- **Mitigasi yang sudah diambil (bukan diabaikan):** bobot forecast sengaja dikecilkan ke 0.3 (70% tetap state aktual), justru karena ketidakpastian ini — keputusan desain yang konsisten dengan peringatan ini, bukan bertentangan
 
-### 6.4 Pembagian kerja bagian ini
+**Masih berlaku:** belum ada studi terpisah yang membandingkan hasil rekomendasi PAKAI forecast vs TANPA forecast pada metrik yang sama (delay/queue/LOS). Kalau sempat sebelum 31 Agustus, itu jadi bukti kuat buat laporan teknis. Kalau tidak, tulis di laporan sebagai "diintegrasikan secara arsitektur dengan bobot konservatif (30%) karena data training kecil; validasi dampaknya terhadap kualitas rekomendasi adalah kerja lanjutan" — jujur, bukan diklaim terbukti akurat.
 
-| Siapa | Kerjaan |
-|---|---|
-| Rahmat | Implementasi 6.2 (pilih Opsi 1/2, sambungkan kode), rapikan `backend/requirements.txt` (tambah `torch`, lihat 2.3), putuskan nasib `lstm_forecast.py` mati (2.3) |
-| Yuli | Update dokumentasi (`forecasting/README.md`, tabel fitur `rencana-lstm-forecast.md` — 2.2/2.3), kalau ada waktu: evaluasi akurasi forecast di data baru (buat bahan keputusan 6.3) |
-| Melpi | Beres-beres UI kecil yang sudah didelegasikan (3.3), TIDAK perlu ikut bagian 6 ini — tetap di jalur frontend |
+### 6.4 Pembagian kerja bagian ini — hasil aktual, bukan rencana
+
+Rencana siang tadi menugaskan implementasi 6.2 ke Rahmat. **Yang terjadi: Yuli mengerjakannya sendiri**, dua-duanya (jalur live dan batch) sekaligus, plus dokumentasi (`forecasting/README.md`, tabel fitur `rencana-lstm-forecast.md`) — lebih menyeluruh dari rencana awal. Wajar karena forecast tetap satu domain dengan LSTM yang sudah dipegang Yuli sejak awal; tidak perlu koordinasi ulang untuk item ini.
+
+| Siapa | Rencana siang tadi | Yang terjadi malam ini |
+|---|---|---|
+| Rahmat | Implementasi 6.2 | **Tidak jadi mengerjakan ini** — Yuli sudah menutupnya duluan. Kerjaan Rahmat malam ini: verifikasi ulang (`pytest`), audit dokumen ini |
+| Yuli | Dokumentasi saja (README/tabel fitur), evaluasi akurasi kalau sempat | **Semuanya**: model baru (per-approach), serving baru, wiring ke `RuleBasedEngine`/`SignalService`/`RecommendationService`/`ScenarioEngine`, `forecast_client.py` baru, dokumentasi, DAN evaluasi akurasi (lihat 6.3) |
+| Melpi | Beres-beres UI kecil (3.3), tidak ikut bagian 6 | Tidak berubah — tetap di jalur frontend |
 
 ---
 
