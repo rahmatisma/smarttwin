@@ -71,6 +71,49 @@ except ImportError:
 
 
 # ============================================================
+# CYCLE PLAN (rekomendasi 4 lengan sekaligus)
+#
+# Rotasi lampu di simpang ini TETAP (barat -> selatan -> timur ->
+# utara -> barat, siklus real-world biasa) -- yang direkomendasikan
+# BUKAN "lengan mana dapat giliran" (itu domain Recommendation di
+# atas), tapi "berapa detik tiap lengan" dalam satu putaran siklus.
+# ============================================================
+
+FIXED_CYCLE_ORDER = ["west", "south", "east", "north"]
+
+try:
+
+    class ApproachPhase(BaseModel):
+        approach: str
+        greenSeconds: int
+        demandScore: float = Field(default=0.0)
+
+    class CyclePlan(BaseModel):
+        phases: list[ApproachPhase]
+        cycleLengthSeconds: int
+        currentPhase: str
+        source: str = "rule-based"
+
+except NameError:
+    # BaseModel tidak terdefinisi kalau blok pydantic di atas gagal
+    # import -- pakai dataclass yang sama seperti Recommendation.
+    from dataclasses import dataclass, field
+
+    @dataclass
+    class ApproachPhase:
+        approach: str
+        greenSeconds: int
+        demandScore: float = 0.0
+
+    @dataclass
+    class CyclePlan:
+        phases: list = field(default_factory=list)
+        cycleLengthSeconds: int = 0
+        currentPhase: str = "west"
+        source: str = "rule-based"
+
+
+# ============================================================
 # RULE BASED ENGINE
 # ============================================================
 
@@ -432,6 +475,99 @@ class RuleBasedEngine:
             source="rule-based",
 
             reason=reason,
+        )
+
+    # ========================================================
+    # RECOMMEND CYCLE (4 lengan sekaligus)
+    # ========================================================
+
+    def recommend_cycle(
+        self,
+        state: TrafficState,
+        currentPhase: str = "west",
+    ) -> CyclePlan:
+        """
+        Rekomendasi durasi hijau untuk KE-4 lengan sekaligus, dalam
+        urutan rotasi tetap FIXED_CYCLE_ORDER (barat-selatan-timur-
+        utara). Beda dari recommend(): di sana cuma SATU lengan
+        pemenang yang dapat durasi, di sini KE-4-nya dihitung, tiap
+        lengan independen pakai calculate_demand_score() +
+        calculate_green_time() yang sama persis dengan recommend()
+        -- tidak ada rumus baru, cuma dipanggil 4x.
+
+        Lengan yang tidak ada datanya di state (approaches tidak
+        lengkap) dapat demandScore=0.0 dan greenSeconds minimum --
+        bukan error, karena TrafficState di lapangan bisa saja belum
+        punya semua 4 lengan pada suatu window.
+        """
+
+        if state is None:
+
+            raise ValueError(
+                "TrafficState tidak boleh None"
+            )
+
+        approaches = getattr(
+            state,
+            "approaches",
+            None,
+        )
+
+        if approaches is None:
+
+            raise ValueError(
+                "TrafficState tidak memiliki approach"
+            )
+
+        approach_by_name = {
+            self._approach_to_string(approach): approach
+            for approach in approaches
+        }
+
+        phases: list[ApproachPhase] = []
+
+        for approach_name in FIXED_CYCLE_ORDER:
+
+            approach = approach_by_name.get(
+                approach_name
+            )
+
+            if approach is None:
+
+                phases.append(
+                    ApproachPhase(
+                        approach=approach_name,
+                        greenSeconds=self.min_green_seconds,
+                        demandScore=0.0,
+                    )
+                )
+
+                continue
+
+            score = self._calculateDemandScore(
+                approach
+            )
+
+            green_seconds = self._calculateGreenTime(
+                score
+            )
+
+            phases.append(
+                ApproachPhase(
+                    approach=approach_name,
+                    greenSeconds=green_seconds,
+                    demandScore=score,
+                )
+            )
+
+        return CyclePlan(
+            phases=phases,
+            cycleLengthSeconds=sum(
+                phase.greenSeconds
+                for phase in phases
+            ),
+            currentPhase=str(currentPhase),
+            source="rule-based",
         )
 
     # ========================================================

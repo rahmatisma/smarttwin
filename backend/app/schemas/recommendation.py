@@ -53,6 +53,41 @@ class RecommendationMetrics(
 
 
 # ============================================================
+# CYCLE PLAN (rekomendasi 4 lengan sekaligus, rotasi tetap)
+# ============================================================
+
+class ApproachPhaseSchema(
+    CamelCaseModel
+):
+
+    approach: str
+
+    greenSeconds: int = Field(
+        ge=0
+    )
+
+    demandScore: float = Field(
+        ge=0.0,
+        le=1.0,
+    )
+
+
+class CyclePlanSchema(
+    CamelCaseModel
+):
+
+    phases: list[ApproachPhaseSchema]
+
+    cycleLengthSeconds: int = Field(
+        ge=0
+    )
+
+    currentPhase: str
+
+    source: str = "rule-based"
+
+
+# ============================================================
 # SIGNAL RECOMMENDATION
 # ============================================================
 
@@ -86,6 +121,8 @@ class SignalRecommendation(
     metrics: RecommendationMetrics
 
     source: str = "pending"
+
+    cyclePlan: CyclePlanSchema | None = None
 
 
 # ============================================================

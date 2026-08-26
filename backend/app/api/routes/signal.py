@@ -15,12 +15,7 @@ router = APIRouter(
     response_model=SignalStatus,
 )
 def get_signal_status():
-    status = signal_service.get_status()
-
-    if status is None:
-        status = signal_service.get_demo_status()
-
-    return status
+    return signal_service.get_live_status()
 
 
 @router.post(

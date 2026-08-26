@@ -67,6 +67,14 @@ class SignalStatus(
         default_factory=dict
     )
 
+    # Lengan berikutnya dalam rotasi (FIXED_CYCLE_ORDER) -- durasinya
+    # bisa dilihat lewat phases[nextPhase].durationSeconds, SAMA
+    # sumbernya dengan yang ditampilkan di panel Rekomendasi Sinyal
+    # (lihat SignalService._cycle_plan / RecommendationService).
+    nextPhase: str = ""
+
+    nextPhaseName: str = ""
+
     source: str = "simulation"
 
 

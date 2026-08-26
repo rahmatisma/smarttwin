@@ -1,7 +1,8 @@
 import logging
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from app.api.routes.traffic import (
     router as traffic_router,
@@ -88,7 +89,43 @@ app.add_middleware(
     allow_methods=["*"],
 
     allow_headers=["*"],
+
+    # Chrome mengirim Access-Control-Request-Private-Network di preflight
+    # saat halaman publik (localhost dianggap begitu di beberapa konteks)
+    # mengakses alamat privat (127.0.0.1). Tanpa ini, preflight ditolak
+    # 400 total -- bukan cuma PNA yang gagal, SEMUA request ke backend
+    # dari browser (termasuk yang lama, bukan cuma /recommendation).
+    allow_private_network=True,
 )
+
+
+# =========================================================
+# GLOBAL EXCEPTION HANDLER
+# =========================================================
+#
+# Exception yang tidak tertangkap di route/service (mis. koneksi
+# Supabase putus sesaat -- httpx.RemoteProtocolError) sebelumnya lolos
+# ke ServerErrorMiddleware bawaan Starlette, yang berada DI LUAR
+# CORSMiddleware -- jadi response 500-nya tidak pernah dapat header
+# CORS. Browser lalu melaporkan ini sebagai "blocked by CORS policy"
+# yang membingungkan, padahal akar masalahnya cuma error 500 biasa.
+#
+# Handler ini membuat FastAPI's ExceptionMiddleware (yang ada DI DALAM
+# CORSMiddleware) yang menangkap exception-nya, jadi response error
+# tetap lewat CORSMiddleware dan dapat header yang benar.
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(
+    request: Request, exc: Exception
+) -> JSONResponse:
+    logger.exception(
+        "Unhandled exception saat memproses %s %s",
+        request.method,
+        request.url.path,
+    )
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "Internal server error"},
+    )
 
 
 # =========================================================

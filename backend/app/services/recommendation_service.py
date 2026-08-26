@@ -1,13 +1,16 @@
+import logging
 from datetime import datetime, timezone
 
 from app.schemas.recommendation import (
+    ApproachPhaseSchema,
+    CyclePlanSchema,
     RecommendationMetrics,
     RecommendationRequest,
     RecommendationResponse,
     SignalRecommendation,
 )
 from app.schemas.traffic import TrafficState, ApproachState
-from app.services.traffic_service import TrafficService
+from app.services.traffic_service import TrafficService, TrafficServiceError
 
 import sys
 from pathlib import Path
@@ -19,6 +22,10 @@ if project_root not in sys.path:
 
 from decision_engine.rule_based_engine import RuleBasedEngine
 
+from app.services.signal_service import signal_service
+
+logger = logging.getLogger("uvicorn.error")
+
 class RecommendationService:
     def __init__(self):
         self.traffic_service = TrafficService()
@@ -29,10 +36,35 @@ class RecommendationService:
         request: RecommendationRequest,
     ) -> RecommendationResponse:
 
-        latest_traffic_list = self.traffic_service.get_latest_traffic(
-            intersection_id=request.intersectionId,
-            limit=1
-        )
+        try:
+            latest_traffic_list = self.traffic_service.get_latest_traffic(
+                intersection_id=request.intersectionId,
+                limit=1
+            )
+        except TrafficServiceError:
+            # intersectionId tidak dikenal di database (mis. intersection
+            # demo/mock di frontend yang belum ada datanya) -- perlakukan
+            # sama seperti "belum ada traffic data", bukan crash 500.
+            latest_traffic_list = []
+        except Exception as exc:
+            # Kegagalan tak terduga (mis. httpx.RemoteProtocolError saat
+            # koneksi ke Supabase putus sesaat) TIDAK boleh bikin endpoint
+            # ini 500 -- browser melaporkan 500 tanpa header CORS sebagai
+            # "blocked by CORS policy" yang membingungkan (bug lama
+            # FastAPI/Starlette: ServerErrorMiddleware ada di luar
+            # CORSMiddleware). Fallback yang sama seperti "belum ada
+            # data" jauh lebih baik daripada dashboard yang crash.
+            # logger.warning (bukan .exception) sengaja -- ini sudah
+            # ditangani, bukan crash. Traceback penuh cuma bikin log
+            # terlihat seperti error fatal padahal endpoint tetap 200.
+            logger.warning(
+                "get_latest_traffic gagal untuk intersectionId=%s "
+                "(%s: %s), jatuh ke fallback",
+                request.intersectionId,
+                type(exc).__name__,
+                exc,
+            )
+            latest_traffic_list = []
 
         if not latest_traffic_list:
             # Fallback jika tidak ada data
@@ -77,6 +109,34 @@ class RecommendationService:
                 None,
             )
 
+            # Rekomendasi 4 lengan sekaligus (rotasi tetap
+            # barat-selatan-timur-utara), TERPISAH dari
+            # engine.recommend() di atas (yang cuma pilih 1 lengan
+            # pemenang). Dua konsep berbeda -- lihat FIXED_CYCLE_ORDER
+            # di rule_based_engine.py.
+            #
+            # SENGAJA baca dari signal_service.get_cycle_plan(), BUKAN
+            # menghitung recommend_cycle() sendiri lagi -- supaya
+            # angka di panel Rekomendasi Sinyal SELALU sama dengan
+            # yang dipakai simulasi rotasi live (panel Status Sinyal).
+            # Sebelumnya dua-duanya hitung sendiri-sendiri dan bisa
+            # beda angka untuk lengan yang sama.
+            cycle_plan_result = signal_service.get_cycle_plan()
+
+            cycle_plan = CyclePlanSchema(
+                phases=[
+                    ApproachPhaseSchema(
+                        approach=phase.approach,
+                        greenSeconds=phase.greenSeconds,
+                        demandScore=phase.demandScore,
+                    )
+                    for phase in cycle_plan_result.phases
+                ],
+                cycleLengthSeconds=cycle_plan_result.cycleLengthSeconds,
+                currentPhase=cycle_plan_result.currentPhase,
+                source=cycle_plan_result.source,
+            )
+
             recommendation = SignalRecommendation(
                 intersectionId=request.intersectionId,
                 timestamp=datetime.now(timezone.utc),
@@ -92,6 +152,7 @@ class RecommendationService:
                     averageSpeedKmh=(selected_approach.avgSpeedKmh or 0) if selected_approach else 0,
                 ),
                 source=engine_result.source,
+                cyclePlan=cycle_plan,
             )
 
         return RecommendationResponse(
