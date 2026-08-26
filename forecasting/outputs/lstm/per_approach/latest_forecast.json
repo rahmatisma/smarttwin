@@ -1,0 +1,403 @@
+{
+  "model": "SharedApproachLSTM",
+  "generatedFrom": {
+    "west": "2026-08-15T17:19:15",
+    "south": "2026-08-15T17:19:15",
+    "east": "2026-08-15T17:19:15",
+    "north": "2026-08-15T17:19:15"
+  },
+  "forecasts": {
+    "west": [
+      {
+        "timestamp": "2026-08-15T17:19:20",
+        "secondsAhead": 5,
+        "vehicleCount": 2.7246,
+        "queueLengthVeh": 2.6713,
+        "queueLengthMEst": 11.4181,
+        "densityIndex": 0.1794
+      },
+      {
+        "timestamp": "2026-08-15T17:19:25",
+        "secondsAhead": 10,
+        "vehicleCount": 2.6239,
+        "queueLengthVeh": 2.8276,
+        "queueLengthMEst": 12.0653,
+        "densityIndex": 0.1863
+      },
+      {
+        "timestamp": "2026-08-15T17:19:30",
+        "secondsAhead": 15,
+        "vehicleCount": 2.4099,
+        "queueLengthVeh": 2.9868,
+        "queueLengthMEst": 12.4985,
+        "densityIndex": 0.1787
+      },
+      {
+        "timestamp": "2026-08-15T17:19:35",
+        "secondsAhead": 20,
+        "vehicleCount": 2.3833,
+        "queueLengthVeh": 3.0035,
+        "queueLengthMEst": 12.1664,
+        "densityIndex": 0.1791
+      },
+      {
+        "timestamp": "2026-08-15T17:19:40",
+        "secondsAhead": 25,
+        "vehicleCount": 2.4405,
+        "queueLengthVeh": 2.8532,
+        "queueLengthMEst": 12.4012,
+        "densityIndex": 0.178
+      },
+      {
+        "timestamp": "2026-08-15T17:19:45",
+        "secondsAhead": 30,
+        "vehicleCount": 2.3565,
+        "queueLengthVeh": 2.722,
+        "queueLengthMEst": 12.0256,
+        "densityIndex": 0.1846
+      },
+      {
+        "timestamp": "2026-08-15T17:19:50",
+        "secondsAhead": 35,
+        "vehicleCount": 2.6981,
+        "queueLengthVeh": 2.9565,
+        "queueLengthMEst": 11.5838,
+        "densityIndex": 0.1763
+      },
+      {
+        "timestamp": "2026-08-15T17:19:55",
+        "secondsAhead": 40,
+        "vehicleCount": 2.8075,
+        "queueLengthVeh": 2.5044,
+        "queueLengthMEst": 11.4028,
+        "densityIndex": 0.1717
+      },
+      {
+        "timestamp": "2026-08-15T17:20:00",
+        "secondsAhead": 45,
+        "vehicleCount": 2.9998,
+        "queueLengthVeh": 2.1878,
+        "queueLengthMEst": 10.3374,
+        "densityIndex": 0.171
+      },
+      {
+        "timestamp": "2026-08-15T17:20:05",
+        "secondsAhead": 50,
+        "vehicleCount": 3.1011,
+        "queueLengthVeh": 1.5906,
+        "queueLengthMEst": 8.8272,
+        "densityIndex": 0.1678
+      },
+      {
+        "timestamp": "2026-08-15T17:20:10",
+        "secondsAhead": 55,
+        "vehicleCount": 3.4219,
+        "queueLengthVeh": 1.3114,
+        "queueLengthMEst": 8.1196,
+        "densityIndex": 0.163
+      },
+      {
+        "timestamp": "2026-08-15T17:20:15",
+        "secondsAhead": 60,
+        "vehicleCount": 3.4505,
+        "queueLengthVeh": 1.2715,
+        "queueLengthMEst": 7.4579,
+        "densityIndex": 0.1504
+      }
+    ],
+    "south": [
+      {
+        "timestamp": "2026-08-15T17:19:20",
+        "secondsAhead": 5,
+        "vehicleCount": 2.847,
+        "queueLengthVeh": 7.237,
+        "queueLengthMEst": 18.2928,
+        "densityIndex": 0.3442
+      },
+      {
+        "timestamp": "2026-08-15T17:19:25",
+        "secondsAhead": 10,
+        "vehicleCount": 3.1771,
+        "queueLengthVeh": 7.0478,
+        "queueLengthMEst": 16.7734,
+        "densityIndex": 0.3399
+      },
+      {
+        "timestamp": "2026-08-15T17:19:30",
+        "secondsAhead": 15,
+        "vehicleCount": 3.0845,
+        "queueLengthVeh": 7.2455,
+        "queueLengthMEst": 15.5001,
+        "densityIndex": 0.3042
+      },
+      {
+        "timestamp": "2026-08-15T17:19:35",
+        "secondsAhead": 20,
+        "vehicleCount": 2.8464,
+        "queueLengthVeh": 6.0942,
+        "queueLengthMEst": 13.9761,
+        "densityIndex": 0.2786
+      },
+      {
+        "timestamp": "2026-08-15T17:19:40",
+        "secondsAhead": 25,
+        "vehicleCount": 2.8853,
+        "queueLengthVeh": 5.6819,
+        "queueLengthMEst": 13.4868,
+        "densityIndex": 0.29
+      },
+      {
+        "timestamp": "2026-08-15T17:19:45",
+        "secondsAhead": 30,
+        "vehicleCount": 1.9926,
+        "queueLengthVeh": 6.1979,
+        "queueLengthMEst": 14.0573,
+        "densityIndex": 0.2847
+      },
+      {
+        "timestamp": "2026-08-15T17:19:50",
+        "secondsAhead": 35,
+        "vehicleCount": 1.6032,
+        "queueLengthVeh": 6.2012,
+        "queueLengthMEst": 14.5985,
+        "densityIndex": 0.2703
+      },
+      {
+        "timestamp": "2026-08-15T17:19:55",
+        "secondsAhead": 40,
+        "vehicleCount": 1.0242,
+        "queueLengthVeh": 6.4089,
+        "queueLengthMEst": 15.1366,
+        "densityIndex": 0.2688
+      },
+      {
+        "timestamp": "2026-08-15T17:20:00",
+        "secondsAhead": 45,
+        "vehicleCount": 0.6748,
+        "queueLengthVeh": 7.3765,
+        "queueLengthMEst": 18.3184,
+        "densityIndex": 0.2924
+      },
+      {
+        "timestamp": "2026-08-15T17:20:05",
+        "secondsAhead": 50,
+        "vehicleCount": 0.2694,
+        "queueLengthVeh": 8.1098,
+        "queueLengthMEst": 21.827,
+        "densityIndex": 0.3067
+      },
+      {
+        "timestamp": "2026-08-15T17:20:10",
+        "secondsAhead": 55,
+        "vehicleCount": 0.2329,
+        "queueLengthVeh": 8.8829,
+        "queueLengthMEst": 21.6225,
+        "densityIndex": 0.315
+      },
+      {
+        "timestamp": "2026-08-15T17:20:15",
+        "secondsAhead": 60,
+        "vehicleCount": 0.0164,
+        "queueLengthVeh": 9.857,
+        "queueLengthMEst": 24.5477,
+        "densityIndex": 0.3143
+      }
+    ],
+    "east": [
+      {
+        "timestamp": "2026-08-15T17:19:20",
+        "secondsAhead": 5,
+        "vehicleCount": 2.3846,
+        "queueLengthVeh": 1.2829,
+        "queueLengthMEst": 6.1027,
+        "densityIndex": 0.076
+      },
+      {
+        "timestamp": "2026-08-15T17:19:25",
+        "secondsAhead": 10,
+        "vehicleCount": 2.0228,
+        "queueLengthVeh": 1.3135,
+        "queueLengthMEst": 5.8939,
+        "densityIndex": 0.0719
+      },
+      {
+        "timestamp": "2026-08-15T17:19:30",
+        "secondsAhead": 15,
+        "vehicleCount": 1.7393,
+        "queueLengthVeh": 1.46,
+        "queueLengthMEst": 6.0438,
+        "densityIndex": 0.0678
+      },
+      {
+        "timestamp": "2026-08-15T17:19:35",
+        "secondsAhead": 20,
+        "vehicleCount": 1.6245,
+        "queueLengthVeh": 1.3115,
+        "queueLengthMEst": 6.5143,
+        "densityIndex": 0.0652
+      },
+      {
+        "timestamp": "2026-08-15T17:19:40",
+        "secondsAhead": 25,
+        "vehicleCount": 1.3602,
+        "queueLengthVeh": 1.4389,
+        "queueLengthMEst": 6.3918,
+        "densityIndex": 0.068
+      },
+      {
+        "timestamp": "2026-08-15T17:19:45",
+        "secondsAhead": 30,
+        "vehicleCount": 1.4727,
+        "queueLengthVeh": 1.4621,
+        "queueLengthMEst": 6.8486,
+        "densityIndex": 0.0661
+      },
+      {
+        "timestamp": "2026-08-15T17:19:50",
+        "secondsAhead": 35,
+        "vehicleCount": 1.4232,
+        "queueLengthVeh": 1.5695,
+        "queueLengthMEst": 6.7111,
+        "densityIndex": 0.0657
+      },
+      {
+        "timestamp": "2026-08-15T17:19:55",
+        "secondsAhead": 40,
+        "vehicleCount": 1.5053,
+        "queueLengthVeh": 1.5776,
+        "queueLengthMEst": 6.5972,
+        "densityIndex": 0.0622
+      },
+      {
+        "timestamp": "2026-08-15T17:20:00",
+        "secondsAhead": 45,
+        "vehicleCount": 1.6854,
+        "queueLengthVeh": 1.4341,
+        "queueLengthMEst": 6.3167,
+        "densityIndex": 0.0626
+      },
+      {
+        "timestamp": "2026-08-15T17:20:05",
+        "secondsAhead": 50,
+        "vehicleCount": 1.7157,
+        "queueLengthVeh": 1.4069,
+        "queueLengthMEst": 6.0143,
+        "densityIndex": 0.0537
+      },
+      {
+        "timestamp": "2026-08-15T17:20:10",
+        "secondsAhead": 55,
+        "vehicleCount": 1.8729,
+        "queueLengthVeh": 1.1673,
+        "queueLengthMEst": 5.8825,
+        "densityIndex": 0.0567
+      },
+      {
+        "timestamp": "2026-08-15T17:20:15",
+        "secondsAhead": 60,
+        "vehicleCount": 1.9295,
+        "queueLengthVeh": 1.2999,
+        "queueLengthMEst": 5.6832,
+        "densityIndex": 0.0591
+      }
+    ],
+    "north": [
+      {
+        "timestamp": "2026-08-15T17:19:20",
+        "secondsAhead": 5,
+        "vehicleCount": 1.9884,
+        "queueLengthVeh": 0.6092,
+        "queueLengthMEst": 2.5538,
+        "densityIndex": 0.0529
+      },
+      {
+        "timestamp": "2026-08-15T17:19:25",
+        "secondsAhead": 10,
+        "vehicleCount": 2.1427,
+        "queueLengthVeh": 0.7529,
+        "queueLengthMEst": 2.8739,
+        "densityIndex": 0.0597
+      },
+      {
+        "timestamp": "2026-08-15T17:19:30",
+        "secondsAhead": 15,
+        "vehicleCount": 2.2462,
+        "queueLengthVeh": 0.7983,
+        "queueLengthMEst": 2.9375,
+        "densityIndex": 0.0598
+      },
+      {
+        "timestamp": "2026-08-15T17:19:35",
+        "secondsAhead": 20,
+        "vehicleCount": 2.4138,
+        "queueLengthVeh": 0.7819,
+        "queueLengthMEst": 2.6855,
+        "densityIndex": 0.0601
+      },
+      {
+        "timestamp": "2026-08-15T17:19:40",
+        "secondsAhead": 25,
+        "vehicleCount": 2.5421,
+        "queueLengthVeh": 0.6999,
+        "queueLengthMEst": 2.962,
+        "densityIndex": 0.0662
+      },
+      {
+        "timestamp": "2026-08-15T17:19:45",
+        "secondsAhead": 30,
+        "vehicleCount": 2.4486,
+        "queueLengthVeh": 0.8087,
+        "queueLengthMEst": 3.0393,
+        "densityIndex": 0.0661
+      },
+      {
+        "timestamp": "2026-08-15T17:19:50",
+        "secondsAhead": 35,
+        "vehicleCount": 2.5242,
+        "queueLengthVeh": 0.7901,
+        "queueLengthMEst": 3.2387,
+        "densityIndex": 0.0714
+      },
+      {
+        "timestamp": "2026-08-15T17:19:55",
+        "secondsAhead": 40,
+        "vehicleCount": 2.5784,
+        "queueLengthVeh": 0.876,
+        "queueLengthMEst": 3.3938,
+        "densityIndex": 0.07
+      },
+      {
+        "timestamp": "2026-08-15T17:20:00",
+        "secondsAhead": 45,
+        "vehicleCount": 2.5546,
+        "queueLengthVeh": 0.8796,
+        "queueLengthMEst": 3.3849,
+        "densityIndex": 0.0706
+      },
+      {
+        "timestamp": "2026-08-15T17:20:05",
+        "secondsAhead": 50,
+        "vehicleCount": 2.56,
+        "queueLengthVeh": 0.8171,
+        "queueLengthMEst": 3.3359,
+        "densityIndex": 0.0695
+      },
+      {
+        "timestamp": "2026-08-15T17:20:10",
+        "secondsAhead": 55,
+        "vehicleCount": 2.5365,
+        "queueLengthVeh": 0.8109,
+        "queueLengthMEst": 3.2235,
+        "densityIndex": 0.0693
+      },
+      {
+        "timestamp": "2026-08-15T17:20:15",
+        "secondsAhead": 60,
+        "vehicleCount": 2.5003,
+        "queueLengthVeh": 0.8227,
+        "queueLengthMEst": 3.1084,
+        "densityIndex": 0.0652
+      }
+    ]
+  }
+}

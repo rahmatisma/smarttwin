@@ -1,5 +1,16 @@
 # Rencana LSTM Forecast — apa yang diprediksi, dari data apa, dan kenapa
 
+> **Pembaruan implementasi 26 Agustus 2026:** `queueLengthVeh` dan
+> `queueLengthMEst` sekarang berisi estimasi CV yang bervariasi dan model sudah
+> dilatih dengan empat fitur. Sequence training yang melintasi gap observasi
+> sekarang ditolak dan evaluasi menyertakan baseline last-value. Backend
+> menyediakan `POST /api/forecast/approaches`; hasil agregat dialokasikan ke
+> pendekat berdasarkan proporsi 12 timestep terakhir. `RuleBasedEngine` dan
+> `ScenarioEngine` menerima forecast secara opsional dengan fallback penuh ke
+> perilaku lama. Predicted demand belum diinjeksi sebagai kendaraan baru ke
+> SUMO, jadi bagian itu tetap pekerjaan lanjutan. Catatan lama di bawah
+> dipertahankan sebagai audit trail dan superseded oleh pembaruan ini.
+
 Ditulis 25 Agustus 2026 setelah diskusi panjang soal kenapa implementasi LSTM yang sudah ada malam ini (ada 3 versi berbeda, saling tidak sinkron) belum benar-benar cocok buat tujuan aslinya: bantu atur durasi lampu hijau. Dokumen ini rencana yang disepakati, bukan yang sudah diimplementasikan — checklist di bagian akhir yang menandai mana yang sudah/belum.
 
 ---

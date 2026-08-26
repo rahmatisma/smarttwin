@@ -337,6 +337,8 @@ class ScenarioEngine:
         state: Any,
         currentGreenSeconds: int = 15,
         currentPhase: str = "north",
+        forecast: dict[str, Any] | None = None,
+        forecastWeight: float = 0.5,
     ) -> Recommendation:
 
         # ----------------------------------------------------
@@ -347,6 +349,8 @@ class ScenarioEngine:
             state=state,
             currentGreenSeconds=currentGreenSeconds,
             currentPhase=currentPhase,
+            forecast=forecast,
+            forecastWeight=forecastWeight,
         )
 
         sumoPhase = self.approach_to_phase.get(

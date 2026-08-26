@@ -1,0 +1,123 @@
+{
+  "overall": {
+    "mae": 1.6527540683746338,
+    "mse": 8.895845413208008,
+    "rmse": 2.982590386427209,
+    "featureMae": {
+      "vehicleCount": 1.1431883573532104,
+      "queueLengthVeh": 1.21194589138031,
+      "queueLengthMEst": 4.223639011383057,
+      "densityIndex": 0.03224298730492592
+    }
+  },
+  "naiveBaseline": {
+    "mae": 2.2972843647003174,
+    "mse": 23.478700637817383,
+    "rmse": 4.845482497937371,
+    "featureMae": {
+      "vehicleCount": 1.9635416269302368,
+      "queueLengthVeh": 1.5220485925674438,
+      "queueLengthMEst": 5.651041507720947,
+      "densityIndex": 0.05250421166419983
+    }
+  },
+  "byApproach": {
+    "west": {
+      "mae": 3.0360472202301025,
+      "mse": 24.70608139038086,
+      "rmse": 4.970521239304874,
+      "featureMae": {
+        "vehicleCount": 1.5394753217697144,
+        "queueLengthVeh": 1.7342292070388794,
+        "queueLengthMEst": 8.85054874420166,
+        "densityIndex": 0.019937699660658836
+      },
+      "naiveBaseline": {
+        "mae": 3.9841175079345703,
+        "mse": 68.76697540283203,
+        "rmse": 8.292585568013877,
+        "featureMae": {
+          "vehicleCount": 1.8541666269302368,
+          "queueLengthVeh": 2.495833396911621,
+          "queueLengthMEst": 11.550000190734863,
+          "densityIndex": 0.036468859761953354
+        }
+      },
+      "beatsNaiveBaseline": true,
+      "samples": 4
+    },
+    "south": {
+      "mae": 1.324371576309204,
+      "mse": 5.247676372528076,
+      "rmse": 2.2907807342755606,
+      "featureMae": {
+        "vehicleCount": 0.7601917386054993,
+        "queueLengthVeh": 1.3547673225402832,
+        "queueLengthMEst": 3.119276762008667,
+        "densityIndex": 0.063250832259655
+      },
+      "naiveBaseline": {
+        "mae": 2.4006943702697754,
+        "mse": 15.790884971618652,
+        "rmse": 3.9737746503316784,
+        "featureMae": {
+          "vehicleCount": 1.3958333730697632,
+          "queueLengthVeh": 1.8916664123535156,
+          "queueLengthMEst": 6.236805438995361,
+          "densityIndex": 0.07847221940755844
+        }
+      },
+      "beatsNaiveBaseline": true,
+      "samples": 4
+    },
+    "east": {
+      "mae": 0.9841614365577698,
+      "mse": 2.44831919670105,
+      "rmse": 1.5647105792129898,
+      "featureMae": {
+        "vehicleCount": 1.1518173217773438,
+        "queueLengthVeh": 0.5867908000946045,
+        "queueLengthMEst": 2.1734659671783447,
+        "densityIndex": 0.024571875110268593
+      },
+      "naiveBaseline": {
+        "mae": 1.1899778842926025,
+        "mse": 3.428884267807007,
+        "rmse": 1.851724673866773,
+        "featureMae": {
+          "vehicleCount": 2.1458332538604736,
+          "queueLengthVeh": 0.5562500357627869,
+          "queueLengthMEst": 2.0145833492279053,
+          "densityIndex": 0.04324495419859886
+        }
+      },
+      "beatsNaiveBaseline": true,
+      "samples": 4
+    },
+    "north": {
+      "mae": 1.2664353847503662,
+      "mse": 3.1813178062438965,
+      "rmse": 1.783624906263617,
+      "featureMae": {
+        "vehicleCount": 1.1212695837020874,
+        "queueLengthVeh": 1.1719961166381836,
+        "queueLengthMEst": 2.7512638568878174,
+        "densityIndex": 0.02121155895292759
+      },
+      "naiveBaseline": {
+        "mae": 1.6143467426300049,
+        "mse": 5.9280314445495605,
+        "rmse": 2.434754904410208,
+        "featureMae": {
+          "vehicleCount": 2.4583332538604736,
+          "queueLengthVeh": 1.1444443464279175,
+          "queueLengthMEst": 2.8027780055999756,
+          "densityIndex": 0.05183080956339836
+        }
+      },
+      "beatsNaiveBaseline": true,
+      "samples": 4
+    }
+  },
+  "beatsNaiveBaseline": true
+}

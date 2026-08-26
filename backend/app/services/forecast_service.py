@@ -1192,6 +1192,118 @@ class ForecastService:
             dataframe
         )
 
+    def predict_approach_records(
+        self,
+        records: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        """Forecast agregat lalu alokasikan hasilnya ke setiap pendekat.
+
+        Model aktif masih dilatih pada total simpang. Karena itu pendekatan
+        tidak diinferensikan oleh model terpisah; total hasil LSTM dialokasikan
+        menggunakan proporsi rata-rata 12 timestep input terakhir. Kontrak ini
+        menjaga kompatibilitas model lama sekaligus memberi Scenario/Decision
+        Engine data per-lengan. Field ``allocationMethod`` membuat batasan ini
+        eksplisit dan tidak boleh diklaim sebagai LSTM per-pendekat.
+        """
+
+        if not records:
+            raise ValueError("records tidak boleh kosong.")
+
+        aggregate_rows: list[dict[str, Any]] = []
+        approach_totals: dict[str, dict[str, float]] = {}
+
+        for record in records:
+            approaches = list(record.get("approaches") or [])
+            if not approaches:
+                raise ValueError(
+                    "Setiap record forecast per-approach wajib memiliki approaches."
+                )
+
+            aggregate_rows.append({
+                "timestamp": record.get("timestamp"),
+                "vehicleCount": sum(float(a.get("vehicleCount", 0)) for a in approaches),
+                "queueLengthVeh": sum(float(a.get("queueLengthVeh", 0)) for a in approaches),
+                "queueLengthMEst": max(float(a.get("queueLengthMEst", 0)) for a in approaches),
+                "densityIndex": sum(float(a.get("densityIndex", 0)) for a in approaches) / len(approaches),
+            })
+
+            for approach in approaches:
+                name = str(approach.get("approach", "")).lower()
+                if not name:
+                    raise ValueError("Nama approach tidak boleh kosong.")
+                totals = approach_totals.setdefault(
+                    name,
+                    {feature: 0.0 for feature in FEATURES},
+                )
+                for feature in FEATURES:
+                    totals[feature] += float(approach.get(feature, 0.0))
+
+        result = self.predict_records(aggregate_rows)
+        feature_totals = {
+            feature: sum(values[feature] for values in approach_totals.values())
+            for feature in FEATURES
+        }
+        approach_count = max(len(approach_totals), 1)
+        queue_meter_reference = max(
+            (values["queueLengthMEst"] for values in approach_totals.values()),
+            default=0.0,
+        )
+        density_reference = (
+            feature_totals["densityIndex"] / approach_count
+            if approach_count
+            else 0.0
+        )
+
+        shares: dict[str, dict[str, float]] = {}
+        for name, values in approach_totals.items():
+            shares[name] = {}
+            for feature in FEATURES:
+                if feature == "queueLengthMEst":
+                    reference = queue_meter_reference
+                    fallback = 1.0
+                elif feature == "densityIndex":
+                    reference = density_reference
+                    fallback = 1.0
+                else:
+                    reference = feature_totals[feature]
+                    fallback = 1.0 / approach_count
+
+                shares[name][feature] = (
+                    values[feature] / reference
+                    if reference > 0
+                    else fallback
+                )
+
+        approach_forecasts = []
+        for aggregate_prediction in result["forecast"]:
+            per_approach = []
+            for name in sorted(shares):
+                prediction = {"approach": name}
+                for feature in FEATURES:
+                    prediction[feature] = round(
+                        float(aggregate_prediction[feature]) * shares[name][feature],
+                        4,
+                    )
+                prediction["densityIndex"] = min(
+                    1.0,
+                    prediction["densityIndex"],
+                )
+                per_approach.append(prediction)
+
+            approach_forecasts.append({
+                "timestamp": aggregate_prediction["timestamp"],
+                "secondsAhead": aggregate_prediction["secondsAhead"],
+                "approaches": per_approach,
+            })
+
+        result["approachForecasts"] = approach_forecasts
+        result["allocationMethod"] = "recent-approach-share"
+        result["allocationNote"] = (
+            "LSTM memprediksi total simpang; nilai per pendekat dialokasikan "
+            "dari proporsi 12 timestep input terakhir."
+        )
+        return result
+
     # ========================================================
     # PREDICT FROM VALUES
     # ========================================================

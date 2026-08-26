@@ -319,6 +319,8 @@ class RuleBasedEngine:
         state: TrafficState,
         currentGreenSeconds: int = 15,
         currentPhase: str = "north",
+        forecast: dict[str, Any] | None = None,
+        forecastWeight: float = 0.5,
     ) -> Recommendation:
         """
         Menghasilkan rekomendasi traffic signal.
@@ -332,8 +334,17 @@ class RuleBasedEngine:
                 "TrafficState tidak boleh None"
             )
 
-        approaches = getattr(
+        decision_state = self.apply_forecast(
             state,
+            forecast,
+            forecastWeight=forecastWeight,
+        )
+        forecast_used = bool(
+            (forecast or {}).get("approachForecasts")
+        )
+
+        approaches = getattr(
+            decision_state,
             "approaches",
             None,
         )
@@ -472,7 +483,11 @@ class RuleBasedEngine:
                 expected_delay_reduction
             ),
 
-            source="rule-based",
+            source=(
+                "rule-based+forecast"
+                if forecast_used
+                else "rule-based"
+            ),
 
             reason=reason,
         )
@@ -485,6 +500,8 @@ class RuleBasedEngine:
         self,
         state: TrafficState,
         currentPhase: str = "west",
+        forecast: dict[str, Any] | None = None,
+        forecastWeight: float = 0.5,
     ) -> CyclePlan:
         """
         Rekomendasi durasi hijau untuk KE-4 lengan sekaligus, dalam
@@ -507,8 +524,17 @@ class RuleBasedEngine:
                 "TrafficState tidak boleh None"
             )
 
-        approaches = getattr(
+        decision_state = self.apply_forecast(
             state,
+            forecast,
+            forecastWeight=forecastWeight,
+        )
+        forecast_used = bool(
+            (forecast or {}).get("approachForecasts")
+        )
+
+        approaches = getattr(
+            decision_state,
             "approaches",
             None,
         )
@@ -567,8 +593,96 @@ class RuleBasedEngine:
                 for phase in phases
             ),
             currentPhase=str(currentPhase),
-            source="rule-based",
+            source=(
+                "rule-based+forecast"
+                if forecast_used
+                else "rule-based"
+            ),
         )
+
+    def apply_forecast(
+        self,
+        state: TrafficState,
+        forecast: dict[str, Any] | None,
+        *,
+        forecastWeight: float = 0.5,
+    ) -> TrafficState:
+        """Gabungkan state saat ini dengan horizon forecast terakhir.
+
+        Fungsi ini opsional: tanpa forecast perilaku engine tetap identik.
+        Bobot 0.5 membuat keputusan mempertimbangkan kondisi sekarang dan
+        prediksi 60 detik ke depan secara seimbang.
+        """
+
+        if forecast is None:
+            return state
+
+        weight = self._clamp(float(forecastWeight), 0.0, 1.0)
+        horizons = forecast.get("approachForecasts") or []
+        if not horizons:
+            return state
+
+        predicted_approaches = horizons[-1].get("approaches") or []
+        predicted_by_name = {
+            str(item.get("approach", "")).lower(): item
+            for item in predicted_approaches
+        }
+
+        projected_approaches = []
+        for approach in state.approaches:
+            name = self._approach_to_string(approach)
+            predicted = predicted_by_name.get(name)
+            if predicted is None:
+                projected_approaches.append(approach)
+                continue
+
+            def blend(current: float, future: float) -> float:
+                return (1.0 - weight) * current + weight * future
+
+            current_volume = self._safe_float(
+                getattr(approach, "volume", 0)
+            )
+            projected_volume = round(blend(
+                current_volume,
+                self._safe_float(predicted.get("vehicleCount", 0)),
+            ))
+            composition_scale = (
+                projected_volume / current_volume
+                if current_volume > 0
+                else 1.0
+            )
+
+            updates = {
+                "volume": projected_volume,
+                "queueLengthVeh": round(blend(
+                    self._safe_float(getattr(approach, "queueLengthVeh", 0)),
+                    self._safe_float(predicted.get("queueLengthVeh", 0)),
+                )),
+                "queueLengthMEst": max(0.0, blend(
+                    self._safe_float(getattr(approach, "queueLengthMEst", 0)),
+                    self._safe_float(predicted.get("queueLengthMEst", 0)),
+                )),
+                "densityIndex": self._clamp(blend(
+                    self._safe_float(getattr(approach, "densityIndex", 0)),
+                    self._safe_float(predicted.get("densityIndex", 0)),
+                ), 0.0, 1.0),
+            }
+            for count_field in (
+                "carCount",
+                "motorcycleCount",
+                "busCount",
+                "truckCount",
+            ):
+                updates[count_field] = max(
+                    0,
+                    round(
+                        self._safe_float(getattr(approach, count_field, 0))
+                        * composition_scale
+                    ),
+                )
+            projected_approaches.append(approach.model_copy(update=updates))
+
+        return state.model_copy(update={"approaches": projected_approaches})
 
     # ========================================================
     # CONFIDENCE

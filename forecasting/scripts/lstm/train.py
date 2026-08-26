@@ -361,13 +361,19 @@ def resample_crossing(
         df["timestamp"]
     )
 
+    df["_crossingObserved"] = 1
+
     df = (
         df.set_index("timestamp")
-        [["vehicleCount"]]
         .resample("5s")
-        .sum()
+        .agg({
+            "vehicleCount": "sum",
+            "_crossingObserved": "max",
+        })
         .reset_index()
     )
+
+    df["_crossingObserved"] = df["_crossingObserved"].fillna(0)
 
     return df
 
@@ -386,13 +392,15 @@ def resample_snapshot(
         df["timestamp"]
     )
 
+    df["_snapshotObserved"] = 1
+
     # Kolom antrean ikut MEAN, dan di sini itu memang benar --
     # beda dari agregasi LINTAS-LENGAN di load_snapshot_dataset()
     # yang pakai sum/max. Yang ini agregasi LINTAS-WAKTU (beberapa
     # detik di dalam satu jendela 5 detik), dan antrean itu besaran
     # KEHADIRAN: menjumlahkannya antar-detik akan menghitung
     # kendaraan diam yang sama berkali-kali.
-    kolom_dipakai = ["densityIndex"]
+    kolom_dipakai = ["densityIndex", "_snapshotObserved"]
 
     for kolom_antrean in (
         "queue_length_veh",
@@ -405,9 +413,18 @@ def resample_snapshot(
         df.set_index("timestamp")
         [kolom_dipakai]
         .resample("5s")
-        .mean()
+        .agg({
+            **{
+                column: "mean"
+                for column in kolom_dipakai
+                if column != "_snapshotObserved"
+            },
+            "_snapshotObserved": "max",
+        })
         .reset_index()
     )
+
+    df["_snapshotObserved"] = df["_snapshotObserved"].fillna(0)
 
     return df
 
@@ -459,6 +476,14 @@ def merge_datasets(
     merged = merged.sort_values(
         "timestamp"
     ).reset_index(drop=True)
+
+    # Jangan mengubah lubang rekaman menjadi observasi nol palsu.
+    # Baris tanpa data asli dibuang; create_sequences() kemudian akan
+    # menolak sequence yang melintasi gap timestamp tersebut.
+    merged = merged[
+        (merged["_crossingObserved"] > 0)
+        & (merged["_snapshotObserved"] > 0)
+    ].copy()
 
     # ========================================================
     # QUEUE
@@ -638,6 +663,7 @@ def fit_scaler(
 
 def create_sequences(
     data: np.ndarray,
+    timestamps: pd.Series | np.ndarray | None = None,
     input_steps: int = INPUT_STEPS,
     output_steps: int = OUTPUT_STEPS,
 ):
@@ -654,7 +680,36 @@ def create_sequences(
         + 1
     )
 
+    rejected_gap_sequences = 0
+
+    if timestamps is not None:
+        parsed_timestamps = pd.to_datetime(
+            pd.Series(timestamps).reset_index(drop=True),
+            errors="coerce",
+        )
+
+        if len(parsed_timestamps) != total_length:
+            raise ValueError(
+                "Jumlah timestamp harus sama dengan jumlah baris data."
+            )
+    else:
+        parsed_timestamps = None
+
     for i in range(max_start):
+
+        if parsed_timestamps is not None:
+            sequence_end = i + input_steps + output_steps
+            sequence_timestamps = parsed_timestamps.iloc[i:sequence_end]
+            intervals = (
+                sequence_timestamps.diff().dropna().dt.total_seconds()
+            )
+
+            if (
+                sequence_timestamps.isna().any()
+                or not intervals.eq(INTERVAL_SECONDS).all()
+            ):
+                rejected_gap_sequences += 1
+                continue
 
         x.append(
             data[
@@ -671,10 +726,48 @@ def create_sequences(
             ]
         )
 
+    if rejected_gap_sequences:
+        print(
+            "Sequence ditolak karena gap timestamp: "
+            f"{rejected_gap_sequences}"
+        )
+
     return (
         np.asarray(x, dtype=np.float32),
         np.asarray(y, dtype=np.float32),
     )
+
+
+def calculate_naive_baseline(
+    x_true: np.ndarray,
+    y_true: np.ndarray,
+) -> dict:
+    """Baseline persistence: nilai input terakhir diulang ke semua horizon."""
+
+    if len(x_true) != len(y_true):
+        raise ValueError("Jumlah sample input dan target baseline harus sama.")
+
+    baseline_prediction = np.repeat(
+        x_true[:, -1:, :],
+        y_true.shape[1],
+        axis=1,
+    )
+
+    mae, mse, rmse, feature_mae = calculate_metrics(
+        y_true,
+        baseline_prediction,
+    )
+
+    return {
+        "method": "last-value-persistence",
+        "mae": float(mae),
+        "mse": float(mse),
+        "rmse": float(rmse),
+        "feature_mae": {
+            key: float(value)
+            for key, value in feature_mae.items()
+        },
+    }
 
 
 # ============================================================
@@ -1180,6 +1273,10 @@ def save_training_plot(
     output_path: Path,
 ):
 
+    import matplotlib
+
+    # Training dijalankan headless pada backend/CI; jangan bergantung pada Tk.
+    matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
     output_path.parent.mkdir(
@@ -1493,15 +1590,18 @@ def main():
     print("\n[5] Creating sequences...")
 
     x_train, y_train = create_sequences(
-        train_scaled
+        train_scaled,
+        train_df["timestamp"],
     )
 
     x_val, y_val = create_sequences(
-        val_scaled
+        val_scaled,
+        val_df["timestamp"],
     )
 
     x_test, y_test = create_sequences(
-        test_scaled
+        test_scaled,
+        test_df["timestamp"],
     )
 
     print(
@@ -1727,6 +1827,11 @@ def main():
         scaler,
     )
 
+    x_test_original = inverse_scale_sequences(
+        x_test,
+        scaler,
+    )
+
     # ========================================================
     # METRICS
     # ========================================================
@@ -1791,7 +1896,15 @@ def main():
             for key, value
             in feature_mae.items()
         },
+        "naive_baseline": calculate_naive_baseline(
+            x_test_original,
+            y_true,
+        ),
     }
+
+    metrics["beatsNaiveBaseline"] = (
+        metrics["mae"] < metrics["naive_baseline"]["mae"]
+    )
 
     save_metadata(
         METADATA_FILE,
