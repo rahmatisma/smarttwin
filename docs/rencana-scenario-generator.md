@@ -124,19 +124,57 @@ Bukan program *actuated* bawaan network file lagi — sekarang ada program ekspl
 
 ## 4. Yang BELUM ada — ini kerjaan buat tim yang mengambil alih
 
-### 4.1 [Prioritas tertinggi] Kotak 7-9 belum nyambung ke dashboard live
+### 4.1 [DIPUTUSKAN 27 Agustus: Opsi A] Kotak 7-9 belum nyambung ke dashboard live
 
-Ini yang paling substansial. Sekarang `ScenarioEngine` **cuma jalan di jalur batch** (`run_tls_simulation.py`, dijalankan manual dari terminal). Dashboard live (`/recommendation`, `/signal/status`, dipoll tiap 5 detik oleh frontend) masih pakai `RuleBasedEngine` polos, TIDAK lewat Scenario Generator sama sekali.
+Ini yang paling substansial. Sekarang `ScenarioEngine` **cuma jalan di jalur batch** (`run_tls_simulation.py`, dijalankan manual dari terminal). Dashboard live (`/recommendation`, `/signal/status`, dipoll tiap 5 detik oleh frontend) masih pakai `RuleBasedEngine` polos, TIDAK lewat Scenario Generator sama sekali — **0% keputusan yang tampil di dashboard pernah melalui simulasi/LOS**, dikonfirmasi lewat `grep ScenarioEngine` di seluruh `backend/app/` (nol hasil). Detail temuan ini ada di `docs/status-integrasi-diagram-arsitektur.md`.
 
 **Kenapa belum disambungkan dari awal:** menjalankan 3 sesi simulasi SUMO penuh per HTTP request itu terlalu berat untuk endpoint yang dipoll tiap 5 detik — bisa berujung timeout / server macet kalau 2 user buka dashboard bersamaan.
 
-**Opsi desain buat tim baru pertimbangkan** (pola sama seperti keputusan 6.2 untuk LSTM→Decision Engine dulu):
+**Tiga opsi desain sempat dibahas (Opsi B/C ada di riwayat dokumen ini) — user memutuskan 27 Agustus: pakai Opsi A.** Alasan: paling dekat dengan diagram arsitektur asli (keputusan live BENERAN diuji simulasi, bukan didekati), dan infrastrukturnya (pola cache) sudah ada presedennya di `SignalService._cycle_plan`.
 
-- **Opsi A — Cache dengan interval lebih longgar.** `ScenarioEngine` dijalankan di BACKGROUND (bukan tiap request), misal tiap kali fase berganti (setiap ~40 detik, bukan tiap 5 detik poll), hasilnya di-cache, endpoint live baca cache itu. Mirip pola `SignalService._cycle_plan` yang sudah ada (lihat `signal_service.py`) — tapi ScenarioEngine butuh proses SUMO terpisah, jadi perlu dipikirkan apakah dijalankan di thread terpisah/proses terpisah dari backend API (SUMO/TraCI itu blocking dan berat, tidak boleh jalan di request-handling thread FastAPI utama).
-- **Opsi B — Simulasi lebih ringan/cepat khusus live** (`step_limit` lebih kecil dari 90, atau ganti ke model delay analitik non-SUMO untuk keputusan cepat, SUMO cuma untuk validasi periodik). Lebih cepat tapi butuh kalibrasi ulang supaya hasilnya tetap representatif.
-- **Opsi C — Biarkan tetap batch-only untuk demo ini**, dokumentasikan jujur bahwa Scenario Generator adalah komponen "siap pakai, terverifikasi, tapi belum live" — kalau waktu tim terbatas, ini pilihan yang sah dan sudah pernah diambil sebelumnya (bukan berarti gagal).
+#### Rancangan Opsi A — Cache background job
 
-**Rekomendasi:** mulai dari Opsi C dulu (dokumentasikan apa adanya) kalau waktu mepet; kalau ada slot waktu, Opsi A paling realistis karena infrastrukturnya (pola cache) sudah ada presedennya di `SignalService`.
+```
+[Worker terpisah, loop terus-menerus]           [Backend FastAPI, tidak berubah bentuknya]
+                                                    |
+TrafficState + forecast terbaru                    |
+     |  (reuse ForecastClient, forecast_client.py) |
+     v                                              |
+ScenarioEngine.recommend()                          |
+  (3 kandidat, SUMO beneran, ~90 step/kandidat)      |
+     |                                              |
+     v                                              |
+tulis ke tabel cache baru (Supabase)  ------------> baca baris TERBARU dari tabel cache
+     |                                                    |
+     v                                                    v
+sleep ~40-60 detik, ulangi                          kalau cache masih SEGAR (umur < ambang):
+                                                       pakai hasil ScenarioEngine (source="scenario-generator")
+                                                     kalau cache STALE/belum ada:
+                                                       fallback ke RuleBasedEngine.recommend_cycle() apa
+                                                       adanya (persis seperti sekarang, TIDAK ada yang rusak)
+```
+
+**Prinsip desain yang WAJIB dipegang (supaya tidak mengulang masalah lama):**
+1. **Satu tabel cache baru yang jelas fungsinya**, JANGAN pakai ulang `simulations`/`simulationMetrics` (itu untuk histori run manual/demo, beda semantik) — dan JANGAN buat tabel ambigu seperti `recommendations` yang akhirnya ditinggalkan tanpa penjelasan (lihat item 1.4/3.2 di `pembagian-tugas-tahap-akhir.md`, ini persis kesalahan yang harus dihindari lagi). Tulis di docstring tabel baru ini: siapa yang menulis, siapa yang baca, dan apa artinya kalau baris-nya basi.
+2. **Fallback WAJIB ada dan aman** — pola yang sudah dipakai konsisten di seluruh proyek ini (forecast gagal → fallback, TrafficState gagal → fallback). Kalau worker mati/belum pernah jalan/cache basi, endpoint live harus tetap jalan dengan `RuleBasedEngine` seperti sekarang, BUKAN error atau macet.
+3. **Worker dijalankan MANUAL untuk sekarang** (`python simulation/scenario_worker.py` di terminal terpisah, sama seperti `run_ingest.py` sekarang) — JANGAN over-engineer dengan infrastruktur deployment (systemd/docker/scheduler OS) untuk demo 4 hari ke depan. Itu di luar scope.
+
+#### Pembagian kerja Opsi A (diputuskan 27 Agustus: Yuli + Melpi, bukan Rahmat — lihat alasan di bagian 6.4 `pembagian-tugas-tahap-akhir.md`)
+
+**Yuli — backend & simulasi:**
+- Buat `simulation/scenario_worker.py`: loop yang narik histori TrafficState (reuse `ForecastClient.fetch_traffic_history()`, sudah ada), panggil `ScenarioEngine.recommend()` (sudah ada, tidak perlu ditulis ulang), tulis hasilnya ke tabel cache baru
+- Desain skema tabel cache baru (nama disarankan: `liveScenarioCache` atau serupa — satu baris per `intersectionId`, di-upsert tiap siklus, kolom minimal: `intersectionId`, `updatedAt`, payload `Recommendation` lengkap sebagai JSON, plus field simulasi (`avgDelaySeconds`, `avgQueueLengthM`, `los`, `candidateId` pemenang) supaya bisa ditampilkan Melpi kalau mau
+- Tambah method baca-cache di backend (`SignalService`/`RecommendationService` atau service baru kecil) — cek umur baris cache, pakai kalau segar, fallback ke `RuleBasedEngine.recommend_cycle()` kalau tidak
+- Test: mock/stub pembaca cache (pola sama seperti `test_recompute_cycle_plan_falls_back_when_forecast_fails` yang sudah Yuli tulis sendiri 26 Agustus) — pastikan fallback teruji, bukan cuma jalur bahagia
+
+**Melpi — frontend:**
+- Setelah backend expose `source` yang membedakan `"scenario-generator"` (hasil cache, BENERAN diuji simulasi) vs `"rule-based"`/`"rule-based+forecast"` (estimasi langsung) — tambahkan indikator visual kecil di `RecommendationPanel`/`SignalStatusPanel` (mis. badge "Diuji simulasi SUMO" vs "Estimasi langsung"). Field `source` ini SUDAH ADA di skema, tidak perlu field baru untuk versi minimal ini
+- **Opsional kalau ada waktu lebih:** kalau Yuli sempat expose `avgDelaySeconds`/`avgQueueLengthM`/`los` juga di payload cache, tampilkan sebagai badge performa tambahan — TIDAK wajib untuk versi minimal, jangan sampai menahan progres kalau waktu mepet
+- Verifikasi lewat browser sungguhan setelah backend selesai — bandingkan `source` yang tampil vs kondisi cache (matikan worker sebentar, pastikan dashboard tidak rusak, cuma balik ke `"rule-based"`)
+
+**Titik integrasi Yuli↔Melpi:** begitu Yuli selesai bagian backend (endpoint tetap `/recommendation`/`/signal/status`, cuma `source` dan field baru di payload yang berubah), Melpi bisa mulai tanpa nunggu worker beneran jalan 24 jam — cukup jalankan `scenario_worker.py` manual sebentar buat isi satu baris cache, lalu dites dari situ.
+
+**Kalau waktu ternyata tidak cukup untuk semua ini:** versi minimal yang tetap bernilai adalah cuma sampai "worker jalan + backend baca cache dengan fallback aman" (tanpa perubahan frontend sama sekali) — dashboard tetap tampil normal, cuma `source`-nya diam-diam sudah `"scenario-generator"` kalau cache segar. Itu sudah menutup temuan inti (0% → mayoritas keputusan live benar-benar teruji simulasi), badge visual di frontend itu penyempurnaan, bukan syarat.
 
 ### 4.2 Siklus 4-lengan penuh belum diterapkan ke SUMO live
 

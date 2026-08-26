@@ -260,3 +260,32 @@ Tidak ditemukan ground truth, precision/recall, atau mAP yang pernah dihitung un
 ### 7.6 `hitung_antrean()` — keterbatasan yang didokumentasikan sendiri di kode (bukan bug tersembunyi)
 
 Dicatat langsung sebagai docstring di `vehicle_counter_pingit.py` (25 Agustus): (1) ID-switch ByteTrack saat antrean padat bisa menurunkan `queue_length_veh` secara sistematis justru saat kondisi paling macet — kebalikan dari yang diinginkan; (2) state tracking antrean tidak dibersihkan kalau track_id hilang total (leak kecil, tidak masalah untuk rekaman 49 menit, tapi perlu dibersihkan untuk rekaman berjam-jam). Kedua-duanya trade-off sadar, bukan sesuatu yang "belum sempat" — aman dibawakan ke laporan sebagai keterbatasan yang diketahui.
+
+---
+
+## 8. Rencana Integrasi Live — 27 Agustus (H-4)
+
+Dipicu temuan audit 27 Agustus: dashboard live dan jalur simulasi (kotak 4/7/8/9) ternyata **2 pipeline yang tidak pernah bertemu** — 0% keputusan yang tampil di dashboard pernah melalui Scenario Generator/Traffic Simulation/Performance Analysis. Detail lengkap temuan ada di `docs/status-integrasi-diagram-arsitektur.md`. Dua keputusan didiskusikan dengan user (bukan diputuskan sepihak) sebelum pembagian ini ditulis:
+
+1. **Desain unifikasi: Opsi A (cache background job)** — dipilih dari 3 opsi yang dibahas di `docs/rencana-scenario-generator.md` bagian 4.1. Rancangan teknis lengkap ada di dokumen itu, tidak diulang di sini.
+2. **Penanggung jawab: dibagi Yuli (backend/simulasi) + Melpi (frontend)** — BUKAN Rahmat, karena sudah dinyatakan tidak bisa pegang bagian ini untuk saat ini.
+
+### 8.1 Pembagian kerja lengkap (integrasi + sisa item lama yang masih terbuka)
+
+| Siapa | Kerjaan | Rujukan |
+|---|---|---|
+| **Yuli** | `simulation/scenario_worker.py` baru (loop background, panggil `ScenarioEngine.recommend()`, tulis ke tabel cache baru) + endpoint backend baca cache dengan fallback aman ke `RuleBasedEngine` | `rencana-scenario-generator.md` 4.1, "Yuli — backend & simulasi" |
+| **Yuli** | Studi validasi "rekomendasi DENGAN forecast vs TANPA forecast" (item 2.4 yang masih terbuka) — sinergi alami dengan kerjaan cache di atas, bisa pakai data yang sama | item 2.4 |
+| **Melpi** | Tampilkan indikator `source` (`"scenario-generator"` vs `"rule-based"`) di `RecommendationPanel`/`SignalStatusPanel` setelah backend Yuli siap; opsional: badge LOS/delay kalau ada waktu | `rencana-scenario-generator.md` 4.1, "Melpi — frontend" |
+| **Melpi** | Verifikasi manual lewat browser hidup untuk perbaikan regresi `SharedSignalPanels` (item 3.4) — baru lolos `npm run build`, belum dites manual | item 3.4 |
+| **Melpi** | 2 item P2 lama yang masih belum: Digital Twin hardcode 32s/18s, indikator loading sebelum poll pertama | item 3.3 |
+| **Rahmat** | PPO (1.6, bonus non-blocking, tidak berubah), kalibrasi kandidat "agresif" +20% kalau ada waktu (P2), SOP/scheduler ingest CV (7.2) | item 1.6, `rencana-scenario-generator.md` 4.3, temuan 7.2 |
+
+### 8.2 Item yang SENGAJA belum dapat pemilik — flag, bukan lupa
+
+- **Siklus 4-lengan penuh ke SUMO live** (`traci.trafficlight.setProgramLogic()`, item 1.7 & `rencana-scenario-generator.md` 4.2) — berbeda dari kerjaan 8.1 di atas (itu soal WHO memutuskan, ini soal SUMO menjalankan rotasi 4 lengan penuh, bukan cuma 1 fase menang per run). Belum ditugaskan ke siapa pun — kalau mau diprioritaskan sebelum 31 Agustus, perlu didiskusikan dulu siapa yang pegang, jangan diasumsikan otomatis masuk kerjaan Yuli di 8.1
+- **Kalibrasi ulang `north`** (temuan 7.4) — masih belum jelas siapa yang cek ulang, domain CV yang selama ini Rahmat pegang tapi belum eksplisit di-assign ulang setelah perubahan kapasitas Rahmat
+
+### 8.3 Realita waktu
+
+4 hari tersisa sebelum 31 Agustus (per 27 Agustus). Kerjaan 8.1 untuk Yuli (worker + endpoint cache) itu yang paling berat dari semua item terbuka — kalau ternyata tidak cukup waktu, versi minimal yang tetap bernilai sudah ditulis eksplisit di `rencana-scenario-generator.md` ("Kalau waktu ternyata tidak cukup untuk semua ini..."), jangan dipaksakan versi penuh sampai mengorbankan item lain yang lebih pasti selesai.
