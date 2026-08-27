@@ -1,3 +1,4 @@
+import { useState, useEffect } from "react";
 import type { SignalStatus, Recommendation } from "@/types/traffic";
 import { APPROACH_OPTIONS } from "@/lib/intersections";
 
@@ -15,19 +16,37 @@ export default function SignalStatusPanel({
   sharedVisualPhase,
   sharedVisualPhaseState,
   sharedVisualRemaining,
+  isLoading,
 }: {
   signal: SignalStatus;
   recommendation?: Recommendation | null;
   sharedVisualPhase: string | null;
   sharedVisualPhaseState: "GREEN" | "YELLOW";
   sharedVisualRemaining: number;
+  isLoading?: boolean;
 }) {
-  if (signal.source === "mock" && !recommendation) {
+  const [hasReceivedData, setHasReceivedData] = useState(false);
+  const [lastValidSignal, setLastValidSignal] = useState<SignalStatus | null>(null);
+
+  useEffect(() => {
+    if (signal && signal.source !== "mock") {
+      setHasReceivedData(true);
+      setLastValidSignal(signal);
+    }
+  }, [signal]);
+
+  const showLoading = isLoading && !hasReceivedData;
+  const displaySignal = (signal.source !== "mock" ? signal : (lastValidSignal || signal));
+
+  if (showLoading) {
     return (
       <div className="rounded-lg border border-border bg-surface p-4">
         <div className="mb-3 flex items-center justify-between">
-          <h2 className="font-display text-sm font-semibold text-text">
+          <h2 className="flex items-center gap-2 font-display text-sm font-semibold text-text">
             Signal Status
+            <span className="rounded-full bg-accent-blue/10 px-2 py-0.5 text-[10px] font-medium text-accent-blue ring-1 ring-accent-blue/20">
+              Live
+            </span>
           </h2>
           <span className="text-xs text-text-muted">
             Memuat...
@@ -102,12 +121,18 @@ export default function SignalStatusPanel({
     <div className="rounded-lg border border-border bg-surface p-4">
       {/* HEADER */}
       <div className="mb-3 flex items-center justify-between">
-        <h2 className="font-display text-sm font-semibold text-text">
+        <h2 className="flex items-center gap-2 font-display text-sm font-semibold text-text">
           Signal Status
+          {displaySignal.source === "mock" ? (
+             <span className="rounded-full bg-signal-amber/10 px-2 py-0.5 text-[10px] font-medium text-signal-amber ring-1 ring-signal-amber/20">
+               Simulated
+             </span>
+          ) : (
+             <span className="rounded-full bg-accent-blue/10 px-2 py-0.5 text-[10px] font-medium text-accent-blue ring-1 ring-accent-blue/20">
+               Live
+             </span>
+          )}
         </h2>
-        <span className={signal.source === "mock" ? "text-xs text-signal-amber" : "text-xs text-signal-green"}>
-          {signal.source === "mock" ? "Simulated" : "● Live"}
-        </span>
       </div>
 
       <div className="space-y-4">
@@ -213,19 +238,25 @@ export default function SignalStatusPanel({
             <div>
               <div className="text-[10px] text-text-muted">Intersection</div>
               <div className="mt-0.5 font-mono text-[10px] text-text-secondary">
-                {signal.intersectionId}
+                {displaySignal.intersectionId}
               </div>
             </div>
             <div>
               <div className="text-[10px] text-text-muted">Last Update</div>
               <div className="mt-0.5 font-mono text-[10px] text-text-secondary">
-                {new Date(signal.timestamp).toLocaleString("id-ID")}
+                {new Date(displaySignal.timestamp).toLocaleString("id-ID")}
               </div>
             </div>
             <div>
-              <div className="text-[10px] text-text-muted">Data Source</div>
-              <div className="mt-0.5 text-[10px] font-medium text-text-secondary">
-                {signal.source}
+              <div className="text-[10px] text-text-muted mb-1">Data Source</div>
+              <div className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium ${
+                displaySignal.source === "scenario-generator"
+                  ? "bg-signal-green/10 text-signal-green border border-signal-green/20"
+                  : displaySignal.source === "mock"
+                  ? "bg-signal-amber/10 text-signal-amber border border-signal-amber/20"
+                  : "bg-surface-2 text-text-secondary border border-border"
+              }`}>
+                {displaySignal.source === "scenario-generator" ? "Diuji simulasi SUMO" : displaySignal.source === "mock" ? "Simulated" : "Estimasi langsung"}
               </div>
             </div>
           </div>

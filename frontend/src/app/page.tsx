@@ -16,7 +16,6 @@ import {
   fetchTrafficState,
   fetchSignalStatus,
   fetchRecommendation,
-  fetchForecast,
   fetchIntersectionCoords,
 } from "@/lib/supabaseData";
 
@@ -287,8 +286,52 @@ function DashboardSkeleton() {
   );
 }
 
-const API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
+
+async function fetchLiveForecast(databaseId: string): Promise<ForecastResponse | null> {
+  try {
+    const trafficRes = await fetch(`${API_BASE_URL}/api/v1/traffic/${databaseId}?limit=12`);
+    if (!trafficRes.ok) return null;
+    const trafficList = await trafficRes.json();
+    if (!trafficList.data || trafficList.data.length < 12) return null;
+    
+    const records = trafficList.data.map((state: any) => {
+      const approaches = state.approaches || [];
+      const totalVolume = approaches.reduce((sum: number, app: any) => sum + (app.volume || 0), 0);
+      const totalQueueVeh = approaches.reduce((sum: number, app: any) => sum + (app.queueLengthVeh || 0), 0);
+      const totalQueueM = approaches.reduce((sum: number, app: any) => sum + (app.queueLengthMEst || 0), 0);
+      const avgDensity = approaches.length > 0
+        ? approaches.reduce((sum: number, app: any) => sum + (app.densityIndex || 0), 0) / approaches.length
+        : 0;
+      
+      const normalizedDensity = Math.min(1, Math.max(0, avgDensity / 100));
+
+      return {
+        timestamp: state.trafficState?.windowEnd || new Date().toISOString(),
+        vehicleCount: totalVolume,
+        queueLengthVeh: totalQueueVeh,
+        queueLengthMEst: totalQueueM,
+        densityIndex: normalizedDensity
+      };
+    });
+    
+    records.sort((a: any, b: any) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+    
+    const forecastRes = await fetch(`${API_BASE_URL}/api/forecast`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ records: records.slice(-12) })
+    });
+    
+    if (forecastRes.ok) return await forecastRes.json();
+    return null;
+  } catch (err) {
+    // Gunakan console.warn alih-alih console.error agar Next.js dev server
+    // tidak memunculkan overlay merah menutupi layar saat backend offline sementara
+    console.warn("Gagal mendapatkan forecast dari LSTM API (kemungkinan backend offline atau koneksi terputus).");
+    return null;
+  }
+}
 
 const WS_URL = `${API_BASE_URL.replace(/^http/, "ws")}/api/v1/traffic/ws`;
 
@@ -382,6 +425,44 @@ export default function DashboardPage() {
 
   /*
    * =========================================================
+   * AUTO START SUMO
+   * =========================================================
+   */
+  useEffect(() => {
+    let isMounted = true;
+    async function autoStartSim() {
+      try {
+        const stateRes = await fetch(`${API_BASE_URL}/api/v1/simulation/state`);
+        if (!stateRes.ok) return;
+        const state = await stateRes.json();
+        
+        // Cek jika simulasi benar-benar idle (tidak running)
+        // Jika sedang running atau paused, kita TIDAK start ulang (reuse)
+        if (!state.running && isMounted) {
+          await fetch(`${API_BASE_URL}/api/v1/simulation/run`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              intersectionId: ALL_INTERSECTIONS[0].databaseId,
+              durationSeconds: 60,
+              gui: true,
+              guiDelayMs: 100,
+              seed: 42
+            }),
+          });
+        }
+      } catch (err) {
+        console.error("Auto start simulation error:", err);
+      }
+    }
+    
+    autoStartSim();
+    
+    return () => { isMounted = false; };
+  }, []);
+
+  /*
+   * =========================================================
    * FETCH DARI SUPABASE
    * =========================================================
    */
@@ -408,7 +489,7 @@ export default function DashboardPage() {
                   fetchTrafficState(inter.databaseId, videoTimeRef.current),
                   fetchSignalStatus(inter.databaseId),
                   fetchRecommendation(inter.databaseId),
-                  fetchForecast(inter.databaseId),
+                  fetchLiveForecast(inter.databaseId),
                   fetchIntersectionCoords(inter.databaseId),
                 ]);
                 return {
@@ -497,7 +578,7 @@ export default function DashboardPage() {
                 fetchTrafficState(inter.databaseId, videoTimeRef.current),
                 fetchSignalStatus(inter.databaseId),
                 fetchRecommendation(inter.databaseId),
-                fetchForecast(inter.databaseId),
+                fetchLiveForecast(inter.databaseId),
               ]);
               return {
                 id: inter.id,

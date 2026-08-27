@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 
 import Sidebar from "@/components/Sidebar";
+import { useScenario, ScenarioType } from "@/context/ScenarioContext";
 import { fetchSignalStatus } from "@/lib/supabaseData";
 
 type SimulationStatus = "idle" | "running" | "paused";
@@ -176,7 +177,8 @@ export default function DigitalTwinView() {
                     durationSeconds: 60,
                     gui: true,
                     guiDelayMs: 100,
-                    seed: 42
+                    seed: 42,
+                    scenario: scenario
                 }),
             });
 
@@ -205,6 +207,7 @@ export default function DigitalTwinView() {
             setVehicles([]);
             setSignals([]);
             setSimulationTime(0);
+            setScenario("Baseline");
         } catch (error) {
             console.error("Failed to stop simulation", error);
         } finally {
@@ -234,10 +237,40 @@ export default function DigitalTwinView() {
         }
     }
 
+    const SCENARIO_CONFIG: Record<ScenarioType, { level: string; flow: string; queue: string; policy: string; description: string }> = {
+        "Traffic Realtime": {
+            level: "Live",
+            flow: "Live Data",
+            queue: "Live Data",
+            policy: "Actuated / RuleBasedEngine",
+            description: "Data sinkron dengan lalu lintas aktual di lapangan"
+        },
+        "Baseline": {
+            level: "Normal",
+            flow: "Measured",
+            queue: "Real-time",
+            policy: "RuleBasedEngine",
+            description: "Original RuleBasedEngine duration"
+        },
+        "Aggressive": {
+            level: "High",
+            flow: "Heavy",
+            queue: "Increased",
+            policy: "Aggressive Clearing",
+            description: "Baseline +20%, max 60s"
+        },
+        "Balanced": {
+            level: "Low",
+            flow: "Smooth",
+            queue: "Minimal",
+            policy: "Energy Saving",
+            description: "Between baseline and 15s"
+        }
+    };
+
     const [speed, setSpeed] = useState("1x");
 
-    const [scenario, setScenario] =
-        useState("Adaptive Signal");
+    const { scenario, setScenario } = useScenario();
 
     return (
         <div className="flex min-h-screen bg-background text-text">
@@ -567,9 +600,11 @@ export default function DigitalTwinView() {
                             {/* Scenario */}
 
                             <div>
-
-                                <label className="mb-2 block text-xs font-medium text-text-secondary">
-                                    Scenario
+                                <label className="mb-2 flex items-center justify-between text-xs font-medium text-text-secondary">
+                                    <span>Traffic Scenario</span>
+                                    {scenario !== "Traffic Realtime" && (
+                                        <span className="text-[10px] text-accent-blue">Simulated</span>
+                                    )}
                                 </label>
 
                                 <div className="relative">
@@ -578,26 +613,16 @@ export default function DigitalTwinView() {
                                         value={scenario}
                                         onChange={(e) =>
                                             setScenario(
-                                                e.target.value
+                                                e.target.value as ScenarioType
                                             )
                                         }
                                         className="w-full appearance-none rounded-xl border border-border bg-surface px-3 py-2.5 pr-9 text-sm outline-none transition focus:border-text-muted"
                                     >
-                                        <option>
-                                            Adaptive Signal
-                                        </option>
-
-                                        <option>
-                                            Fixed Time
-                                        </option>
-
-                                        <option>
-                                            High Traffic
-                                        </option>
-
-                                        <option>
-                                            Low Traffic
-                                        </option>
+                                        {Object.keys(SCENARIO_CONFIG).map((key) => (
+                                            <option key={key} value={key}>
+                                                {key}
+                                            </option>
+                                        ))}
                                     </select>
 
                                     <ChevronDown

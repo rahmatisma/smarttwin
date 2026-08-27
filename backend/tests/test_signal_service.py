@@ -230,7 +230,7 @@ def test_recompute_cycle_plan_passes_forecast_to_decision_engine():
         )
 
     service.engine.recommend_cycle = recommend_cycle
-    plan = service._recompute_cycle_plan("west")
+    plan = service._recompute_cycle_plan("north")
 
     assert captured["forecast"] is forecast
     assert captured["forecastWeight"] == 0.3
@@ -251,6 +251,6 @@ def test_recompute_cycle_plan_falls_back_when_forecast_fails():
         forecast_service=_ForecastStub(error=ValueError("history belum cukup")),
     )
 
-    plan = service._recompute_cycle_plan("west")
+    plan = service._recompute_cycle_plan("north")
 
     assert plan.source == "rule-based"

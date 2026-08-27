@@ -1,3 +1,4 @@
+import { useState, useEffect } from "react";
 import type { ApproachPhase, Recommendation, SignalStatus } from "@/types/traffic";
 import { APPROACH_OPTIONS, type ApproachSelection } from "@/lib/intersections";
 
@@ -92,6 +93,7 @@ export default function RecommendationPanel({
   sharedVisualPhase,
   sharedVisualPhaseState,
   sharedVisualRemaining,
+  isLoading,
 }: {
   recommendation?: Recommendation | null;
   signal?: SignalStatus;
@@ -100,8 +102,22 @@ export default function RecommendationPanel({
   sharedVisualPhase: string | null;
   sharedVisualPhaseState: "GREEN" | "YELLOW";
   sharedVisualRemaining: number;
+  isLoading?: boolean;
 }) {
-  const phases = recommendation?.cyclePlan?.phases ?? [];
+  const [hasReceivedData, setHasReceivedData] = useState(false);
+  const [lastValidRec, setLastValidRec] = useState<Recommendation | null>(null);
+
+  useEffect(() => {
+    if (recommendation && !isLoading) {
+      setHasReceivedData(true);
+      setLastValidRec(recommendation);
+    }
+  }, [recommendation, isLoading]);
+
+  const displayRec = recommendation || lastValidRec;
+  const showLoading = (isLoading || !displayRec) && !hasReceivedData;
+
+  const phases = displayRec?.cyclePlan?.phases ?? [];
 
   const getStatus = (approach: string): "GREEN" | "YELLOW" | "RED" => {
     if (sharedVisualPhase === approach) return sharedVisualPhaseState;
@@ -130,16 +146,7 @@ export default function RecommendationPanel({
     return waitTime;
   };
 
-  /*
-   * =========================================================
-   * NO RECOMMENDATION DATA
-   * =========================================================
-   *
-   * Backend belum menyediakan recommendation.
-   *
-   * Jangan menggunakan data dummy.
-   */
-  if (!recommendation) {
+  if (showLoading || !displayRec) {
     return (
       <div className="rounded-lg border border-border bg-surface p-4">
         <div className="mb-3 flex items-center justify-between">
@@ -164,7 +171,7 @@ export default function RecommendationPanel({
     );
   }
 
-  const cyclePlan = recommendation.cyclePlan;
+  const cyclePlan = displayRec.cyclePlan;
 
   const phaseByApproach: Record<string, ApproachPhase> = {};
   for (const phase of cyclePlan?.phases ?? []) {
@@ -296,7 +303,7 @@ export default function RecommendationPanel({
           </div>
 
           <div className="mt-1 font-mono text-sm font-semibold text-signal-green">
-            {recommendation.expectedDelayReductionPercent.toFixed(1)}%
+            {displayRec.expectedDelayReductionPercent.toFixed(1)}%
           </div>
         </div>
 
@@ -307,21 +314,44 @@ export default function RecommendationPanel({
           </div>
 
           <div className="mt-1 font-mono text-sm font-semibold text-text">
-            {(recommendation.confidence * 100).toFixed(1)}%
+            {(displayRec.confidence * 100).toFixed(1)}%
           </div>
         </div>
 
 
 
         {/* Source */}
-        <div className="flex items-center justify-between border-t border-border pt-2">
-          <span className="text-[10px] text-text-muted">
-            Source
-          </span>
-
-          <span className="text-[10px] text-text-secondary">
-            {recommendation.source}
-          </span>
+        <div className="flex flex-col gap-2 border-t border-border pt-3">
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] uppercase tracking-wider font-semibold text-text-muted">
+              Source
+            </span>
+            <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium ${
+              displayRec.source === "scenario-generator"
+                ? "bg-signal-green/10 text-signal-green border border-signal-green/20"
+                : "bg-signal-amber/10 text-signal-amber border border-signal-amber/20"
+            }`}>
+              {displayRec.source === "scenario-generator" ? "Diuji simulasi SUMO" : "Estimasi langsung"}
+              <span className="ml-1 opacity-70">({displayRec.source})</span>
+            </span>
+          </div>
+          
+          {typeof displayRec.avgDelaySeconds === 'number' && (
+            <div className="mt-2 grid grid-cols-3 gap-2">
+              <div className="rounded border border-border bg-surface-2 p-2 text-center">
+                <div className="text-[9px] uppercase tracking-wider text-text-muted">LOS</div>
+                <div className="mt-1 font-mono text-xs font-bold text-text">{displayRec.los ?? "-"}</div>
+              </div>
+              <div className="rounded border border-border bg-surface-2 p-2 text-center">
+                <div className="text-[9px] uppercase tracking-wider text-text-muted">Delay</div>
+                <div className="mt-1 font-mono text-xs font-bold text-text">{displayRec.avgDelaySeconds.toFixed(1)}s</div>
+              </div>
+              <div className="rounded border border-border bg-surface-2 p-2 text-center">
+                <div className="text-[9px] uppercase tracking-wider text-text-muted">Antrean</div>
+                <div className="mt-1 font-mono text-xs font-bold text-text">{displayRec.avgQueueLengthM?.toFixed(1) ?? "-"}m</div>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>

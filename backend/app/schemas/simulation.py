@@ -14,6 +14,11 @@ class SimulationRequest(BaseModel):
         description="ID traffic state. Jika null, gunakan traffic state terbaru.",
     )
 
+    scenario: str = Field(
+        default="Baseline",
+        description="Scenario yang digunakan untuk simulasi (Baseline, Aggressive, Balanced).",
+    )
+
     durationSeconds: int = Field(
         default=60,
         ge=1,

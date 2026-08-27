@@ -43,7 +43,7 @@ def test_recommend_cycle_returns_four_phases_in_fixed_order():
     engine = RuleBasedEngine()
     state = _make_state()
 
-    plan = engine.recommend_cycle(state, currentPhase="west")
+    plan = engine.recommend_cycle(state, currentPhase="north")
 
     assert [p.approach for p in plan.phases] == FIXED_CYCLE_ORDER
     assert len(plan.phases) == 4

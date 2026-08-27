@@ -14,6 +14,22 @@ from app.simulation.sumo.sumo_controller import SumoController
 from app.simulation.sumo.traffic_state_adapter import (
     SumoTrafficStateAdapter,
 )
+from app.decision_engine.rule_based_engine import RuleBasedEngine, FIXED_CYCLE_ORDER
+
+# Konstanta State String SUMO diambil dari spesifikasi scenario_generator
+_GREEN_STATE_BY_APPROACH = {
+    "south": "GGGggrrrrrrrrrrrrrrr",
+    "east": "rrrrrGGGggrrrrrrrrrr",
+    "north": "rrrrrrrrrrGGGggrrrrr",
+    "west": "rrrrrrrrrrrrrrrGGGgg",
+}
+_YELLOW_STATE_BY_APPROACH = {
+    "south": "yyyyyrrrrrrrrrrrrrrr",
+    "east": "rrrrryyyyyrrrrrrrrrr",
+    "north": "rrrrrrrrrryyyyyrrrrr",
+    "west": "rrrrrrrrrrrrrrryyyyy",
+}
+YELLOW_SECONDS = 4
 
 
 # ================================================================
@@ -413,6 +429,7 @@ class SimulationService:
             controller = SumoController(
                 config_file=config_file,
                 seed=request.seed,
+                scenario=request.scenario,
             )
 
             print(
@@ -582,6 +599,49 @@ class SimulationService:
             controller = (
                 self._ensure_sumo(request)
             )
+
+            # ====================================================
+            # 2.5 APPLY SCENARIO LOGIC TO TRAFFIC LIGHT
+            # ====================================================
+
+            if request.scenario != "Traffic Realtime" and traffic_state is not None:
+                try:
+                    engine = RuleBasedEngine()
+                    # Hitung baseline duration untuk seluruh cycle
+                    baseline_cycle = engine.recommend_cycle(traffic_state)
+                    
+                    # Convert ke dictionary for easier lookup
+                    baseline_green = {p.approach: p.greenSeconds for p in baseline_cycle.phases}
+                    
+                    import traci
+                    tls_phases = []
+                    
+                    for approach in FIXED_CYCLE_ORDER:
+                        green = baseline_green.get(approach, 30)
+                        
+                        if request.scenario == "Aggressive":
+                            green = min(60, round(green * 1.2))
+                        elif request.scenario == "Balanced":
+                            green = round((green + 15) / 2)
+                            
+                        tls_phases.append(
+                            traci.trafficlight.Phase(
+                                green, _GREEN_STATE_BY_APPROACH[approach]
+                            )
+                        )
+                        tls_phases.append(
+                            traci.trafficlight.Phase(
+                                YELLOW_SECONDS, _YELLOW_STATE_BY_APPROACH[approach]
+                            )
+                        )
+
+                    controller.apply_scenario_logic(
+                        logic_phases=tls_phases,
+                        scenario_id=request.scenario
+                    )
+
+                except Exception as exc:
+                    print(f"Gagal apply scenario logic: {exc}")
 
             # ====================================================
             # 3. CREATE ADAPTER

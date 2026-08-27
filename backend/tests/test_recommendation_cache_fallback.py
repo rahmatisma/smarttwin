@@ -64,7 +64,7 @@ class _SignalService:
         return CyclePlan(
             phases=phases,
             cycleLengthSeconds=80,
-            currentPhase="west",
+            currentPhase="north",
             source="rule-based",
         )
 

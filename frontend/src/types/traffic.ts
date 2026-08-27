@@ -185,4 +185,9 @@ export interface Recommendation {
   // null kalau belum ada TrafficState (fallback) -- lihat
   // recommendation_service.py.
   cyclePlan?: CyclePlan | null;
+
+  avgDelaySeconds?: number;
+  avgQueueLengthM?: number;
+  los?: string;
+  candidateId?: string;
 }

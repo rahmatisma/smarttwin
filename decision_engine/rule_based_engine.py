@@ -79,7 +79,7 @@ except ImportError:
 # atas), tapi "berapa detik tiap lengan" dalam satu putaran siklus.
 # ============================================================
 
-FIXED_CYCLE_ORDER = ["west", "south", "east", "north"]
+FIXED_CYCLE_ORDER = ["north", "east", "south", "west"]
 
 try:
 
@@ -91,7 +91,7 @@ try:
     class CyclePlan(BaseModel):
         phases: list[ApproachPhase]
         cycleLengthSeconds: int
-        currentPhase: str
+        currentPhase: str = Field(default="north")
         source: str = "rule-based"
 
 except NameError:
@@ -109,7 +109,7 @@ except NameError:
     class CyclePlan:
         phases: list = field(default_factory=list)
         cycleLengthSeconds: int = 0
-        currentPhase: str = "west"
+        currentPhase: str = "north"
         source: str = "rule-based"
 
 
@@ -499,7 +499,7 @@ class RuleBasedEngine:
     def recommend_cycle(
         self,
         state: TrafficState,
-        currentPhase: str = "west",
+        currentPhase: str = "north",
         forecast: dict[str, Any] | None = None,
         forecastWeight: float = 0.5,
     ) -> CyclePlan:
