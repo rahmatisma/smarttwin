@@ -1,0 +1,75 @@
+{
+  "selectionMetric": "validationMaeOriginal",
+  "selectionRule": "minimum; test metrics tidak dipakai untuk pemilihan",
+  "seed": 42,
+  "outputSteps": 12,
+  "intervalSeconds": 5,
+  "maxEpochs": 40,
+  "patience": 8,
+  "candidates": [
+    {
+      "inputSteps": 6,
+      "historySeconds": 30,
+      "status": "trained",
+      "epochsRun": 40,
+      "sequenceCounts": {
+        "train": 1164,
+        "validation": 136,
+        "test": 64
+      },
+      "rejectedGapSequences": {
+        "train": 272,
+        "validation": 116,
+        "test": 196
+      },
+      "bestValidationMseNormalized": 0.027621270869584644,
+      "validationMaeOriginal": 1.884087324142456,
+      "testMaeOriginal": 1.840038776397705
+    },
+    {
+      "inputSteps": 12,
+      "historySeconds": 60,
+      "status": "trained",
+      "epochsRun": 32,
+      "sequenceCounts": {
+        "train": 1044,
+        "validation": 100,
+        "test": 16
+      },
+      "rejectedGapSequences": {
+        "train": 368,
+        "validation": 128,
+        "test": 220
+      },
+      "bestValidationMseNormalized": 0.023794592916965486,
+      "validationMaeOriginal": 1.8046118021011353,
+      "testMaeOriginal": 1.7924071550369263
+    },
+    {
+      "inputSteps": 18,
+      "historySeconds": 90,
+      "status": "infeasible",
+      "reason": "Tidak ada sequence valid setelah pemeriksaan gap timestamp."
+    },
+    {
+      "inputSteps": 30,
+      "historySeconds": 150,
+      "status": "infeasible",
+      "reason": "Tidak ada sequence valid setelah pemeriksaan gap timestamp."
+    },
+    {
+      "inputSteps": 60,
+      "historySeconds": 300,
+      "status": "infeasible",
+      "reason": "Tidak ada sequence valid setelah pemeriksaan gap timestamp."
+    },
+    {
+      "inputSteps": 120,
+      "historySeconds": 600,
+      "status": "infeasible",
+      "reason": "Tidak ada sequence valid setelah pemeriksaan gap timestamp."
+    }
+  ],
+  "selectedInputSteps": 12,
+  "selectedHistorySeconds": 60
+}

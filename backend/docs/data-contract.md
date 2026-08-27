@@ -63,11 +63,11 @@ Nama field harus konsisten dari CV → Backend → Forecast → Frontend.
 | Field             | Type                             | CV | Forecast | Frontend | Keterangan                           |
 | ----------------- | -------------------------------- | -: | -------: | -------: | ------------------------------------ |
 | `approach`        | `north \| south \| east \| west` |  ✅ |        ✅ |        ✅ | Arah pendekatan                      |
-| `volume`          | `int`                            |  ✅ |        ✅ |        ✅ | Total kendaraan dari `vehicle_count` |
-| `carCount`        | `int`                            |  ✅ |        ✅ |        ✅ | Jumlah mobil                         |
-| `motorcycleCount` | `int`                            |  ✅ |        ✅ |        ✅ | Jumlah motor                         |
-| `busCount`        | `int`                            |  ✅ |        ✅ |        ✅ | Jumlah bus                           |
-| `truckCount`      | `int`                            |  ✅ |        ✅ |        ✅ | Jumlah truk                          |
+| `volume`          | `int`                            |  ✅ |        ✅ |        ✅ | Flow: kendaraan yang memotong counting line dalam window |
+| `carCount`        | `int`                            |  ✅ |        ✅ |        ✅ | Rata-rata kehadiran mobil di zona    |
+| `motorcycleCount` | `int`                            |  ✅ |        ✅ |        ✅ | Rata-rata kehadiran motor di zona    |
+| `busCount`        | `int`                            |  ✅ |        ✅ |        ✅ | Rata-rata kehadiran bus di zona      |
+| `truckCount`      | `int`                            |  ✅ |        ✅ |        ✅ | Rata-rata kehadiran truk di zona     |
 | `queueLengthVeh`  | `int`                            |  ✅ |        ✅ |        ✅ | Jumlah kendaraan dalam antrean       |
 | `queueLengthMEst` | `float`                          |  ✅ |        ✅ |        ✅ | Estimasi panjang antrean dalam meter |
 | `densityIndex`    | `float`                          |  ✅ |        ✅ |        ✅ | Proxy lane occupancy/kepadatan       |
@@ -75,6 +75,12 @@ Nama field harus konsisten dari CV → Backend → Forecast → Frontend.
 
 
 > **⚠️ `avgSpeedKmh` boleh `null`.**
+
+`volume` dan jumlah breakdown kelas sengaja **tidak wajib sama**: volume adalah
+aliran/crossing, sedangkan class count adalah kehadiran di zona. `volume=0`
+dengan class count atau antrean lebih dari nol berarti tidak ada kendaraan yang
+melintasi garis pada window tersebut tetapi kendaraan masih berada/menunggu di
+zona; itu kondisi sah, bukan data hilang.
 
 
 

@@ -11,7 +11,7 @@
 > SUMO, jadi bagian itu tetap pekerjaan lanjutan. Catatan lama di bawah
 > dipertahankan sebagai audit trail dan superseded oleh pembaruan ini.
 
-Ditulis 25 Agustus 2026 setelah diskusi panjang soal kenapa implementasi LSTM yang sudah ada malam ini (ada 3 versi berbeda, saling tidak sinkron) belum benar-benar cocok buat tujuan aslinya: bantu atur durasi lampu hijau. Dokumen ini rencana yang disepakati, bukan yang sudah diimplementasikan — checklist di bagian akhir yang menandai mana yang sudah/belum.
+Ditulis 25 Agustus 2026 sebagai rencana, lalu disinkronkan dengan implementasi aktual 27 Agustus. Bagian historis dipertahankan untuk menjelaskan perubahan keputusan; status terkini dan checklist di bagian akhir menjadi acuan.
 
 ---
 
@@ -38,7 +38,7 @@ Kalau desainnya tidak mengarah ke pertanyaan itu, dia tidak berguna buat sistem 
 
 **Status terbaru:** dua fitur antrean sudah berasal dari `hitung_antrean()` pada pipeline CV dan tidak lagi konstan nol. Model agregat dan shared LSTM per-approach sudah dilatih dengan empat fitur penuh. Nilainya tetap merupakan estimasi berbasis zona/tracking, bukan pengukuran fisik manual; khusus north, density dan antrean memakai zona `simpang_tengah` sebagai proxy.
 
-### 2.1 Rencana bertahap (disepakati 25 Agustus)
+### 2.1 Rencana bertahap (historis, sudah superseded)
 
 Supaya Yuli tidak nunggu (waktu tersisa cuma H-6 ke 31 Agustus), disepakati jalan **2 fase paralel**, bukan satu jalur berurutan:
 
@@ -47,13 +47,15 @@ Supaya Yuli tidak nunggu (waktu tersisa cuma H-6 ke 31 Agustus), disepakati jala
 
 Jadi bukan "Yuli pegang kerjaan lain dulu sambil nunggu" — dia tetap di LSTM dari sekarang, cuma scope datanya yang bertahap.
 
+**Hasil aktual:** Fase 1 dua fitur tidak dijalankan karena data antrean selesai lebih cepat. Yuli langsung melatih model empat fitur. Ini perubahan urutan kerja yang disengaja, bukan tugas yang terlewat.
+
 ---
 
 ## 3. Sumber data — gabungan, bukan satu CSV
 
 LSTM butuh `vehicleCount` (dari crossing) DAN `densityIndex` (dari zona) sekaligus. Tidak ada satu CSV pun di `cv/output/` yang punya keduanya sudah tergabung — kecuali data yang **sudah masuk Supabase** (`trafficStates` + `trafficApproachStates`), karena itu hasil gabungan `crossing_simpang.csv` + `snapshot_zona.csv` lewat `backend/app/pipeline/cv_csv_bridge.py`.
 
-**Rekomendasi: latih langsung dari histori `TrafficState` di Supabase**, bukan dari CSV mentah manapun. Alasannya bukan cuma "lebih gampang" — ini soal **konsistensi training vs serving**: `ForecastRepository.get_recent_traffic_states()` (yang dipakai pas prediksi live nanti) baca dari Supabase. Kalau training pakai sumber lain (CSV mentah, atau CSV yang digabung manual dengan cara berbeda), ada risiko datanya sedikit beda dari yang dilihat model pas serving — model bisa "kaget" sama distribusi data yang berbeda dari waktu latihan.
+**Rekomendasi awal:** latih langsung dari histori `TrafficState` di Supabase. **Keputusan implementasi aktual:** training memakai snapshot CSV beku (`crossing_simpang.csv` + `snapshot_zona.csv`) agar reproducible, sedangkan serving membaca kontrak `TrafficState` dari Supabase. Pipeline CSV memakai nama, satuan, interval lima detik, dan empat fitur yang sama dengan kontrak runtime. Risiko distribution mismatch tetap dicatat; retraining berikutnya sebaiknya menambahkan uji kesetaraan tensor CSV versus record Supabase yang merepresentasikan window sama.
 
 Kalau terpaksa pakai CSV (misal Supabase belum lengkap): gabung `crossing_simpang.csv` (`vehicleCount`) + `snapshot_zona.csv` (`densityIndex`) persis dengan logika yang ada di `cv_csv_bridge.py::_load_merged()` — jangan bikin logika gabung baru yang beda, biar konsisten sama apa yang sudah ada di Supabase.
 
@@ -91,11 +93,22 @@ Output-nya jadi deret: prediksi detik ke-5, ke-10, ke-15, ..., ke-60 — bukan c
 
 ---
 
-## 6. `SEQUENCE_LENGTH` (seberapa jauh model "melihat ke belakang")
+## 6. `SEQUENCE_LENGTH` (seberapa jauh model "melihat ke belakang") — SUDAH DIUJI
 
 Sekarang `SEQUENCE_LENGTH = 30`, didesain buat skala menit (artinya "lihat 30 menit ke belakang" — masuk akal buat tren jam sibuk). Kalau pindah ke skala 5 detik, `SEQUENCE_LENGTH = 30` cuma berarti "lihat 150 detik (2,5 menit) ke belakang" — beda makna total, dan belum tentu masih pilihan yang tepat.
 
-**Belum ada jawaban pasti** untuk angka yang benar di skala 5 detik — ini butuh eksperimen (coba beberapa nilai, lihat mana yang hasil validasinya paling baik), bukan ditebak dari dokumen ini. Titik awal yang masuk akal: coba `SEQUENCE_LENGTH` setara 5-10 menit histori (60-120 langkah) dulu, sesuaikan dari hasil.
+Eksperimen reproducible dijalankan 27 Agustus lewat `forecasting/scripts/lstm/per_approach/sequence_length_experiment.py`. Pemilihan memakai **validation MAE dalam satuan asli**, bukan test MAE, supaya test tidak bocor ke pemilihan konfigurasi.
+
+| Input steps | Histori | Sequence train/val/test | Validation MAE | Status |
+|---:|---:|---:|---:|---|
+| 6 | 30 detik | 1164 / 136 / 64 | 1,8841 | Layak |
+| **12** | **60 detik** | **1044 / 100 / 16** | **1,8046** | **Terpilih** |
+| 18 | 90 detik | — | — | Tidak layak: satu split tidak punya sequence kontinu |
+| 30 | 150 detik | — | — | Tidak layak |
+| 60 | 300 detik | — | — | Tidak layak |
+| 120 | 600 detik | — | — | Tidak layak |
+
+Hasil lengkap tersimpan di `forecasting/outputs/lstm/per_approach/sequence_length_experiment.json`. Dengan dataset dan aturan sadar-gap sekarang, 12 langkah adalah kandidat layak terbaik. Kandidat 5-10 menit yang semula disarankan tidak dapat diuji secara sah karena gap dan pendeknya blok kontinu pada validation/test.
 
 ---
 
@@ -107,11 +120,11 @@ Sekarang `SEQUENCE_LENGTH = 30`, didesain buat skala menit (artinya "lihat 30 me
 
 ---
 
-## 8. Bagaimana hasil prediksi dipakai `RuleBasedEngine` — BELUM diimplementasikan
+## 8. Bagaimana hasil prediksi dipakai `RuleBasedEngine` — SUDAH diimplementasikan
 
-Sampai dokumen ini ditulis, **belum ada kode yang menyambungkan** hasil forecast ke `RuleBasedEngine.recommend()`. Decision engine sekarang murni reaktif (lihat kondisi SEKARANG dari `TrafficState`), belum memakai prediksi masa depan sama sekali. Ini pekerjaan terpisah, belum masuk scope siapa pun secara eksplisit — perlu diputuskan di rapat tim apakah ini dikerjakan sebelum 31 Agustus atau didokumentasikan sebagai "arsitektur mendukung, implementasi belum", mengingat sisa waktu H-6.
+`RuleBasedEngine.recommend()` dan `recommend_cycle()` sekarang menerima forecast opsional. Jalur live (`RecommendationService`/`SignalService`) dan jalur simulasi (`ScenarioEngine`) mencampur 70% state aktual dengan 30% forecast horizon +60 detik. Jika histori/model gagal, forecast menjadi `None` dan perilaku kembali identik ke rule-based lama. Worker cache juga sudah menghubungkan hasil Scenario Generator ke `/recommendation` dan terverifikasi end-to-end.
 
-Kalau dikerjakan, pola yang masuk akal: `RuleBasedEngine.recommend()` menerima parameter opsional `forecast: ForecastResult | None` — kalau ada, dipakai buat menyesuaikan `green_time` (misal: kalau prediksi kepadatan lengan itu naik terus 60 detik ke depan, kasih hijau lebih lama dari yang dihitung murni dari kondisi sekarang). Kalau `None`, tetap jalan seperti sekarang (murni rule-based dari kondisi saat ini) — supaya forecast jadi PENYEMPURNA, bukan SYARAT WAJIB (kalau LSTM gagal/model belum ada, sistem tetap jalan).
+**Batas klaim:** LSTM tidak action-conditioned—model tidak menerima fase/durasi lampu sebagai input. Ia memprediksi tren demand 60 detik mendatang, bukan kontrafaktual “apa yang terjadi jika south diberi hijau X detik”. Dampak timing diuji setelahnya oleh SUMO. Predicted demand juga belum diinjeksi sebagai kendaraan baru ke route SUMO.
 
 ---
 
@@ -119,11 +132,11 @@ Kalau dikerjakan, pola yang masuk akal: `RuleBasedEngine.recommend()` menerima p
 
 Audit awal dokumen ini (ditulis siang 25 Agustus) menyimpulkan `realtime_forecast_service.py` yang aktif dan `forecast_service.py` yang mati. **Itu salah** — waktu itu belum dicek langsung apa yang benar-benar di-import `forecast.py`. Audit ulang malam ini (lewat `grep` ke seluruh repo, bukan menduga dari nama file) membalik kesimpulannya:
 
-1. **`backend/app/services/forecast_service.py`** (`ForecastService`) — **inilah yang aktif dipakai sekarang.** Di-import langsung oleh `app/api/routes/forecast.py`. Sudah PyTorch (bukan TensorFlow), 4 fitur, `INPUT_TIMESTEPS=12` / `OUTPUT_TIMESTEPS=3` di skala 5 detik — cocok dengan rencana granularitas di bagian 4-5 dokumen ini, dan cocok dengan output `forecasting/scripts/lstm/train.py` (`traffic_lstm.pt` + `scaler.json`).
+1. **`backend/app/services/forecast_service.py`** (`ForecastService`) — model agregat aktif dan fallback. Sudah PyTorch, 4 fitur, `INPUT_TIMESTEPS=12` / `OUTPUT_TIMESTEPS=12` pada skala 5 detik (60 detik histori → 60 detik forecast).
 2. **`backend/app/services/realtime_forecast_service.py`** (`RealtimeForecastService`) — **DIHAPUS 25 Agustus malam.** Tidak di-import siapa pun (dikonfirmasi lewat grep, nol hasil di luar dirinya sendiri dan satu baris komentar di `prepare_data.py`), dan tidak bisa jalan sama sekali kalau diinstansiasi (`load_model(...)` dipanggil tanpa pernah di-import — `NameError` instan). Menunjuk ke `.keras`/`backend/models/` yang direktorinya tidak ada. File ini adalah sisa desain lama (agregasi per-menit, masalah yang dibahas di bagian 4) yang tidak pernah disambungkan ke apa pun.
 3. **`backend/app/repositories/forecast_repository.py`** (`ForecastRepository`) — **DIHAPUS bersamaan**, karena satu-satunya pemakainya adalah `RealtimeForecastService` di atas. Sebagai catatan audit trail: query-nya sendiri sebenarnya tidak pernah bisa jalan — memfilter kolom `intersectionId`/`windowStart` yang tidak ada di tabel `trafficApproachStates` (kolom itu ada di `trafficStates`), jadi akan melempar `APIError 42703` kalau sempat dipanggil.
 4. **`backend/tests/test_forecast_realtime.py`** — **DIHAPUS bersamaan.** Bukan test pytest asli (`def main()`, nol `def test_*`), sama persis polanya dengan 4 file basi yang sudah dihapus di item 2.5 `pembagian-tugas-24-agustus.md`. Sebelum dihapus, file ini aktif MEMBUAT `pytest -q` gagal collection total (bukan cuma 1 test gagal) karena mengimpor dua kelas yang sudah dihapus. Regresi ini tidak tercatat di mana pun sebelum ditemukan malam ini.
-5. **`decision_engine/rule_based_engine.py`** — ini BUKAN LSTM (rule-based, dibahas di `pembagian-tugas-24-agustus.md`), disebut di sini cuma buat menegaskan: **LSTM dan RuleBasedEngine masih dua sistem terpisah yang belum saling bicara** (lihat bagian 8).
+5. **`decision_engine/rule_based_engine.py`** — ini bukan model LSTM, tetapi sekarang menjadi konsumen forecast. `recommend()` dan `recommend_cycle()` menerima forecast opsional berbobot runtime 0,3 dengan fallback aman ke state aktual.
 
 **Pembaruan 26 Agustus:** modul ONNX legacy `backend/app/models/lstm_forecast.py` dan test pasangannya sudah dihapus setelah dipastikan tidak dipakai kode produksi. Serving aktif memakai `backend/app/services/forecast_service.py`; shared LSTM per-approach memiliki pipeline dan artefak terpisah di `forecasting/outputs/lstm/per_approach/`.
 
@@ -131,19 +144,19 @@ Audit awal dokumen ini (ditulis siang 25 Agustus) menyimpulkan `realtime_forecas
 
 ## 10. Checklist
 
-### Fase 1 — Yuli, mulai sekarang
+### Fase 1 — Yuli (hasil aktual)
 
-- [ ] Putuskan: latih dari histori Supabase (`ForecastRepository`) atau gabungan CSV manual (lihat bagian 3) — Supabase lebih disarankan
-- [ ] Ganti agregasi dari per-menit (`.dt.floor("min")`) ke per-5-detik (window native `WINDOW_SECONDS`)
-- [ ] Eksperimen ulang `SEQUENCE_LENGTH` di skala 5 detik (bagian 6) — jangan asumsikan `30` masih benar
-- [ ] Latih cuma dari `vehicleCount` + `densityIndex` (2 fitur, data asli) — jangan sertakan `queueLengthVeh`/`queueLengthMEst` dulu (lihat bagian 2.1, masih selalu 0)
-- [ ] Simpan model (`lstm_model.keras` + `scaler.pkl`) + commit hasilnya (jangan lupa — `forecasting/outputs/` sekarang kosong, lihat `pembagian-tugas-24-agustus.md` item 2.7)
-- [ ] Putuskan nasib `forecast_service.py` (versi lama) — hapus atau biarkan
-- [ ] Kalau ada waktu: mulai sambungkan hasil forecast ke `RuleBasedEngine.recommend()` (bagian 8) — kalau tidak sempat sebelum 31 Agustus, dokumentasikan sebagai keterbatasan, jangan diklaim sudah terintegrasi kalau belum
+- [ ] Sumber training diputuskan: gabungan CSV beku yang reproducible; serving tetap dari `TrafficState` Supabase
+- [ ] Granularitas lima detik (window native)
+- [ ] Eksperimen `SEQUENCE_LENGTH`: 12 langkah terpilih berdasar validation MAE; kandidat lebih panjang tidak feasible karena gap
+- [ ] Fase dua fitur superseded; langsung empat fitur karena data antrean sudah siap
+- [ ] Model dan scaler tersimpan/ter-track dalam format keputusan tim: PyTorch `.pt` + JSON, bukan Keras `.keras` + pickle
+- [ ] `forecast_service.py` dipertahankan sebagai model agregat/fallback; shared model per-approach menjadi jalur utama
+- [ ] Forecast tersambung ke `RuleBasedEngine.recommend()`/`recommend_cycle()`, jalur live, ScenarioEngine, dan cache dashboard
 
 ### Fase 2 — Rahmat, jalankan logika antrean → Yuli retrain 4 fitur
 
-- [ ] Rahmat: desain ulang definisi "antrean" buat pendekatan zona (bukan crossing lama) + logika deteksi kendaraan berhenti
-- [ ] Rahmat: jalankan logika itu ke rekaman yang ada, hasilnya CSV baru berisi `queueLengthVeh`/`queueLengthMEst` yang bukan nol
+- [ ] Rahmat: desain ulang definisi "antrean" buat pendekatan zona + logika kendaraan berhenti
+- [ ] Rahmat: jalankan ke rekaman; CSV antrean berisi nilai bervariasi dan sudah di-ingest
 - [x] Yuli: retrain ulang pipeline dari Fase 1, sekarang 4 fitur penuh (`vehicleCount`, `densityIndex`, `queueLengthVeh`, `queueLengthMEst`)
 - [x] Update tabel di bagian 2 dokumen ini — status `queueLengthVeh`/`queueLengthMEst` sudah diperbarui menjadi data estimasi CV asli

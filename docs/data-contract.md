@@ -21,6 +21,10 @@ class ApproachState(BaseModel):
     # Nama level-kontrak; di CSV CV kolomnya bernama vehicle_count.
     volume: int
 
+    # Breakdown kelas berasal dari snapshot ZONA (kehadiran rata-rata),
+    # bukan crossing. Karena itu jumlah kelas tidak wajib sama dengan volume;
+    # volume=0 saat kendaraan masih menunggu di zona adalah kondisi sah.
+
     # Antrean sebagai JUMLAH KENDARAAN (mentah, hasil pengamatan)
     queue_length_veh: int
 

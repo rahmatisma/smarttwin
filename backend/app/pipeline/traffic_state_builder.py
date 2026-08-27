@@ -1353,7 +1353,7 @@ class TrafficStateBuilder:
 
             print(
                 f"{approach.approach.upper():<8} | "
-                f"volume={approach.volume:<5} | "
+                f"flow={approach.volume:<5} | "
                 f"car={approach.carCount:<5} | "
                 f"motor={approach.motorcycleCount:<5} | "
                 f"bus={approach.busCount:<5} | "

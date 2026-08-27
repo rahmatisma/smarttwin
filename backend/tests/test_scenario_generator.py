@@ -9,11 +9,19 @@ simulation_root = str(Path(project_root) / "simulation")
 if simulation_root not in sys.path:
     sys.path.insert(0, simulation_root)
 
-from decision_engine.rule_based_engine import Recommendation  # noqa: E402
+from decision_engine.rule_based_engine import (  # noqa: E402
+    ApproachPhase,
+    CyclePlan,
+    FIXED_CYCLE_ORDER,
+    Recommendation,
+)
 from scenario_generator import (  # noqa: E402
     MAX_GREEN_SECONDS,
     MIN_GREEN_SECONDS,
+    AGGRESSIVE_GREEN_INCREMENT_SECONDS,
     calculate_los,
+    build_dynamic_tls_logic,
+    generate_cycle_candidate_plans,
     generate_candidate_plans,
     select_best_scenario,
 )
@@ -50,7 +58,7 @@ def test_generate_candidate_plans_returns_three_candidates_same_approach():
     assert all(c["approach"] == "south" for c in candidates)
 
 
-def test_generate_candidate_plans_aggressive_is_20_percent_higher():
+def test_generate_candidate_plans_aggressive_uses_calibrated_increment():
     baseline = _make_baseline(green_seconds=40)
 
     candidates = {
@@ -58,14 +66,16 @@ def test_generate_candidate_plans_aggressive_is_20_percent_higher():
     }
 
     assert candidates["baseline"]["greenSeconds"] == 40
-    assert candidates["aggressive"]["greenSeconds"] == round(40 * 1.2)
+    assert candidates["aggressive"]["greenSeconds"] == (
+        40 + AGGRESSIVE_GREEN_INCREMENT_SECONDS
+    )
     assert candidates["balanced"]["greenSeconds"] == round(
         (40 + MIN_GREEN_SECONDS) / 2
     )
 
 
 def test_generate_candidate_plans_aggressive_clamped_to_max_green():
-    # baseline sudah dekat MAX_GREEN_SECONDS -- +20% tidak boleh
+    # baseline sudah dekat MAX_GREEN_SECONDS -- increment tidak boleh
     # melebihi batas atas RuleBasedEngine.
     baseline = _make_baseline(green_seconds=MAX_GREEN_SECONDS - 2)
 
@@ -81,6 +91,60 @@ def test_generate_candidate_plans_all_within_allowed_range():
 
     for candidate in generate_candidate_plans(baseline):
         assert MIN_GREEN_SECONDS <= candidate["greenSeconds"] <= MAX_GREEN_SECONDS
+
+
+def _baseline_cycle() -> CyclePlan:
+    return CyclePlan(
+        phases=[
+            ApproachPhase(approach="west", greenSeconds=20, demandScore=0.1),
+            ApproachPhase(approach="south", greenSeconds=40, demandScore=0.8),
+            ApproachPhase(approach="east", greenSeconds=25, demandScore=0.3),
+            ApproachPhase(approach="north", greenSeconds=30, demandScore=0.4),
+        ],
+        cycleLengthSeconds=115,
+        currentPhase="west",
+        source="rule-based",
+    )
+
+
+def test_generate_full_cycle_candidates_keep_four_approaches():
+    candidates = generate_cycle_candidate_plans(_baseline_cycle())
+    assert [item["candidateId"] for item in candidates] == [
+        "baseline", "aggressive", "balanced"
+    ]
+    assert all(
+        [phase["approach"] for phase in item["phases"]]
+        == FIXED_CYCLE_ORDER
+        for item in candidates
+    )
+
+
+def test_full_cycle_aggressive_only_extends_busiest_approach():
+    candidates = {
+        item["candidateId"]: item
+        for item in generate_cycle_candidate_plans(_baseline_cycle())
+    }
+    base = {p["approach"]: p["greenSeconds"] for p in candidates["baseline"]["phases"]}
+    aggressive = {
+        p["approach"]: p["greenSeconds"]
+        for p in candidates["aggressive"]["phases"]
+    }
+    assert aggressive["south"] == 41
+    assert all(
+        aggressive[name] == base[name]
+        for name in ("west", "east", "north")
+    )
+
+
+def test_dynamic_tls_logic_has_green_and_yellow_for_every_approach():
+    candidate = generate_cycle_candidate_plans(_baseline_cycle())[0]
+    logic = build_dynamic_tls_logic(candidate)
+    assert logic.programID == "smarttwin-baseline"
+    assert len(logic.phases) == 8
+    assert [round(phase.duration) for phase in logic.phases[::2]] == [
+        20, 40, 25, 30
+    ]
+    assert [round(phase.duration) for phase in logic.phases[1::2]] == [4, 4, 4, 4]
 
 
 # ============================================================

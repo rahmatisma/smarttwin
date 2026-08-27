@@ -454,7 +454,7 @@ class RuleBasedEngine:
             f"Approach {selected_phase} memiliki "
             f"demand tertinggi dengan score "
             f"{selected_score:.2f}. "
-            f"Volume={int(volume)}, "
+            f"flowCrossing={int(volume)}, "
             f"queue={int(queue)} kendaraan, "
             f"density={density:.3f}. "
             f"Direkomendasikan green "

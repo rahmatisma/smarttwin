@@ -295,3 +295,13 @@ Dipicu temuan audit 27 Agustus: dashboard live dan jalur simulasi (kotak 4/7/8/9
 ### 8.3 Realita waktu
 
 4 hari tersisa sebelum 31 Agustus (per 27 Agustus). Kerjaan 8.1 untuk Yuli (worker + endpoint cache) itu yang paling berat dari semua item terbuka — kalau ternyata tidak cukup waktu, versi minimal yang tetap bernilai sudah ditulis eksplisit di `rencana-scenario-generator.md` ("Kalau waktu ternyata tidak cukup untuk semua ini..."), jangan dipaksakan versi penuh sampai mengorbankan item lain yang lebih pasti selesai.
+
+### 8.4 Update implementasi Yuli — 27 Agustus
+
+- [x] `simulation/scenario_worker.py` sudah dibuat: loop 60 detik, reuse `ForecastClient` dan `ScenarioEngine`, upsert satu cache per simpang, serta tidak mematikan proses bila satu iterasi gagal.
+- [x] Backend sudah membaca `liveScenarioCache` dengan batas kesegaran 120 detik dan fallback aman ke rule-based jika tabel/cache tidak tersedia atau basi. Payload `/recommendation` sekarang juga dapat membawa `avgDelaySeconds`, `avgQueueLengthM`, `los`, dan `candidateId`.
+- [x] Skema tabel tersedia di `backend/app/db/live_scenario_cache.sql`; harus dijalankan sekali di Supabase SQL Editor sebelum worker pertama.
+- [x] Studi forecast vs tanpa forecast sudah dibuat reproducible lewat `python scenario_worker.py --compare-forecast`; hasil ditulis ke `simulation/outputs/forecast_impact.json` dan memuat delta delay, antrean, dan throughput.
+- [x] Unit test cache segar/basi/error dan regression test terkait lulus (21 test terpilih). Full suite lokal: 47 passed; 8 test integrasi Supabase gagal karena akses jaringan sandbox ditolak, bukan kegagalan assertion kode baru.
+- [x] Verifikasi end-to-end selesai 27 Agustus: worker `--once` berhasil meng-upsert kandidat `balanced` (22s, delay 13,37s, antrean 35m, throughput 9, LOS B), lalu `POST /recommendation` mengembalikan HTTP 200 dengan `source="scenario-generator"` dan metrik yang sama. Fallback cache basi/error sudah dicakup unit test `test_live_scenario_cache.py`.
+- [x] Studi dijalankan 27 Agustus pada satu snapshot yang sama. Dengan forecast: delay **13,37s vs 15,57s** (-2,20s), antrean **35m vs 42m** (-7m), throughput **9 vs 6** (+3), LOS tetap B. Bukti lengkap ada di `docs/hasil-studi-forecast.md` dan data mentah `simulation/outputs/forecast_impact.json`. Ini hasil satu eksperimen, bukan bukti signifikansi statistik atau generalisasi model.

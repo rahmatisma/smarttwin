@@ -99,11 +99,14 @@ def get_default_density_path() -> Path:
 def _load_merged(cross_path: Path, density_path: Path) -> pd.DataFrame:
     """Satu baris per (windowStart, approach), sudah gabungan crossing+density.
 
-    vehicleCount/carCount/motorcycleCount/busCount/truckCount diambil
-    dari CROSSING (ALIRAN -- kendaraan yang melintas jendela itu).
-    densityIndex diambil dari DENSITY (KEHADIRAN -- rata-rata kendaraan
-    di zona selama jendela itu). Ini dua populasi berbeda -- lihat
-    catatan besar di vehicle_counter.py soal ALIRAN vs KEHADIRAN.
+    vehicleCount diambil dari CROSSING (ALIRAN -- kendaraan yang
+    memotong counting line pada jendela itu). Breakdown kelas,
+    density, dan antrean diambil dari snapshot ZONA (KEHADIRAN).
+    Karena itu vehicleCount TIDAK harus sama dengan jumlah carCount +
+    motorcycleCount + busCount + truckCount. Contoh yang sah: tidak ada
+    crossing pada lima detik ini (vehicleCount=0), tetapi masih ada
+    kendaraan menunggu di zona. Jangan "memperbaiki" volume dengan
+    menjumlahkan class count karena itu akan mencampur flow dan presence.
     """
 
     df_cross = pd.read_csv(cross_path)

@@ -12,6 +12,10 @@ from app.schemas.recommendation import (
 from app.schemas.traffic import TrafficState, ApproachState
 from app.services.traffic_service import TrafficService, TrafficServiceError
 from app.services.per_approach_forecast_service import per_approach_forecast_service
+from app.services.live_scenario_cache_service import (
+    LiveScenarioCacheService,
+    live_scenario_cache_service,
+)
 
 import sys
 from pathlib import Path
@@ -28,8 +32,11 @@ from app.services.signal_service import signal_service
 logger = logging.getLogger("uvicorn.error")
 
 class RecommendationService:
-    def __init__(self):
-        self.traffic_service = TrafficService()
+    def __init__(self, traffic_service=None, cache_service=None):
+        self.traffic_service = traffic_service or TrafficService()
+        self.cache_service: LiveScenarioCacheService = (
+            cache_service or live_scenario_cache_service
+        )
         self.engine = RuleBasedEngine()
 
     def get_recommendation(
@@ -95,6 +102,10 @@ class RecommendationService:
                 ]
             )
 
+            # Hasil worker SUMO diprioritaskan hanya selama masih segar.
+            # Cache miss/error tidak boleh mengubah availability endpoint.
+            cached = self.cache_service.get_fresh(request.intersectionId)
+
             forecast = None
             try:
                 forecast = per_approach_forecast_service.predict_records(latest_traffic_list)
@@ -149,6 +160,37 @@ class RecommendationService:
                 source=cycle_plan_result.source,
             )
 
+            cached_payload = cached.get("recommendation") if cached else None
+            if not isinstance(cached_payload, dict):
+                cached_payload = None
+
+            if cached_payload:
+                engine_result.recommendedPhase = cached_payload["recommendedPhase"]
+                engine_result.recommendedGreenSeconds = int(
+                    cached_payload["recommendedGreenSeconds"]
+                )
+                engine_result.expectedDelayReductionPercent = float(
+                    cached_payload.get("expectedDelayReductionPercent", 0)
+                )
+                engine_result.confidence = float(cached_payload.get("confidence", 0.5))
+                engine_result.reason = str(cached_payload.get("reason", ""))
+                engine_result.source = "scenario-generator"
+                cached_cycle = cached_payload.get("cyclePlan")
+                if isinstance(cached_cycle, dict):
+                    # Jalur full-cycle worker sudah diuji sebagai satu program
+                    # SUMO utuh. Gunakan plan itu agar recommendation dan panel
+                    # siklus tidak membawa dua keputusan berbeda.
+                    cycle_plan = CyclePlanSchema(**cached_cycle)
+                    cycle_plan.source = "scenario-generator"
+                selected_approach = next(
+                    (
+                        app for app in traffic_state.approaches
+                        if str(getattr(app.approach, "value", app.approach)).lower()
+                        == engine_result.recommendedPhase
+                    ),
+                    None,
+                )
+
             recommendation = SignalRecommendation(
                 intersectionId=request.intersectionId,
                 timestamp=datetime.now(timezone.utc),
@@ -165,6 +207,10 @@ class RecommendationService:
                 ),
                 source=engine_result.source,
                 cyclePlan=cycle_plan,
+                avgDelaySeconds=cached.get("avgDelaySeconds") if cached else None,
+                avgQueueLengthM=cached.get("avgQueueLengthM") if cached else None,
+                los=cached.get("los") if cached else None,
+                candidateId=cached.get("candidateId") if cached else None,
             )
 
         return RecommendationResponse(

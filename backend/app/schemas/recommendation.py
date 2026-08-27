@@ -124,6 +124,14 @@ class SignalRecommendation(
 
     cyclePlan: CyclePlanSchema | None = None
 
+    avgDelaySeconds: float | None = Field(default=None, ge=0)
+
+    avgQueueLengthM: float | None = Field(default=None, ge=0)
+
+    los: str | None = None
+
+    candidateId: str | None = None
+
 
 # ============================================================
 # RESPONSE

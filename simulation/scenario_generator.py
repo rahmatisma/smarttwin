@@ -50,6 +50,9 @@ except ModuleNotFoundError:
 
 
 from decision_engine.rule_based_engine import (
+    ApproachPhase,
+    CyclePlan,
+    FIXED_CYCLE_ORDER,
     MAX_GREEN_SECONDS,
     MIN_GREEN_SECONDS,
     Recommendation,
@@ -73,6 +76,30 @@ SHORT_SIM_STEPS = 90
 # rata-rata), bukan pengukuran -- sama seperti pola "_est" lain yang
 # sudah dipakai di project ini untuk metrik turunan serupa.
 METERS_PER_QUEUED_VEHICLE = 7.0
+YELLOW_SECONDS = 4
+
+# Kalibrasi SUMO 27 Agustus 2026 pada snapshot trafficState 13784
+# menyapu baseline 28 detik sampai kandidat lama +20% (34 detik).
+# Semua penambahan memperburuk delay; +1 detik adalah stress-test
+# agresif dengan degradasi paling kecil (13.85 -> 13.98 detik) dan
+# antrean tetap 35 m. Karena itu kandidat agresif tidak lagi memakai
+# persentase ilustratif, tetapi increment minimum yang terukur.
+AGGRESSIVE_GREEN_INCREMENT_SECONDS = 1
+
+# State string berasal dari tls_safe.add.xml. Mapping eksplisit mencegah
+# urutan program dinamis bergantung pada index program statis lama.
+_GREEN_STATE_BY_APPROACH = {
+    "south": "GGGggrrrrrrrrrrrrrrr",
+    "east": "rrrrrGGGggrrrrrrrrrr",
+    "north": "rrrrrrrrrrGGGggrrrrr",
+    "west": "rrrrrrrrrrrrrrrGGGgg",
+}
+_YELLOW_STATE_BY_APPROACH = {
+    "south": "yyyyyrrrrrrrrrrrrrrr",
+    "east": "rrrrryyyyyrrrrrrrrrr",
+    "north": "rrrrrrrrrryyyyyrrrrr",
+    "west": "rrrrrrrrrrrrrrryyyyy",
+}
 
 # HCM 2000, Level of Service simpang bersinyal berdasarkan rata-rata
 # control delay per kendaraan (detik). Ambang atas tiap kelas.
@@ -118,7 +145,7 @@ def generate_candidate_plans(
 
     Sesuai docs/pembagian-tugas-tahap-akhir.md item 1.5:
       (a) hasil RuleBasedEngine apa adanya
-      (b) lebih agresif ke lengan tersibuk (+20%)
+      (b) lebih agresif ke lengan tersibuk (+1 detik hasil kalibrasi SUMO)
       (c) lebih merata antar lengan (ditarik ke arah minimum)
     """
 
@@ -126,7 +153,7 @@ def generate_candidate_plans(
 
     aggressiveGreen = min(
         MAX_GREEN_SECONDS,
-        round(baselineGreen * 1.2),
+        baselineGreen + AGGRESSIVE_GREEN_INCREMENT_SECONDS,
     )
 
     balancedGreen = round(
@@ -152,6 +179,97 @@ def generate_candidate_plans(
     ]
 
 
+def generate_cycle_candidate_plans(
+    baseline: CyclePlan,
+) -> list[dict[str, Any]]:
+    """Tiga kandidat CyclePlan penuh; tidak mengubah generator satu-lengan."""
+    phases = [
+        {
+            "approach": phase.approach,
+            "greenSeconds": phase.greenSeconds,
+            "demandScore": phase.demandScore,
+        }
+        for phase in baseline.phases
+    ]
+    busiest = max(phases, key=lambda phase: phase["demandScore"])["approach"]
+
+    def variant(candidate_id: str) -> dict[str, Any]:
+        result = []
+        for phase in phases:
+            green = phase["greenSeconds"]
+            if candidate_id == "aggressive" and phase["approach"] == busiest:
+                green = min(
+                    MAX_GREEN_SECONDS,
+                    green + AGGRESSIVE_GREEN_INCREMENT_SECONDS,
+                )
+            elif candidate_id == "balanced":
+                green = round((green + MIN_GREEN_SECONDS) / 2)
+            result.append({**phase, "greenSeconds": green})
+        return {
+            "candidateId": candidate_id,
+            "phases": result,
+            "cycleLengthSeconds": sum(item["greenSeconds"] for item in result),
+            "busiestApproach": busiest,
+        }
+
+    return [variant(name) for name in ("baseline", "aggressive", "balanced")]
+
+
+def build_dynamic_tls_logic(candidate: dict[str, Any]):
+    """Bangun program TraCI: empat hijau adaptif + kuning empat detik."""
+    phase_by_approach = {
+        phase["approach"]: phase for phase in candidate["phases"]
+    }
+    tls_phases = []
+    for approach in FIXED_CYCLE_ORDER:
+        phase = phase_by_approach[approach]
+        tls_phases.append(
+            traci.trafficlight.Phase(
+                phase["greenSeconds"], _GREEN_STATE_BY_APPROACH[approach]
+            )
+        )
+        tls_phases.append(
+            traci.trafficlight.Phase(
+                YELLOW_SECONDS, _YELLOW_STATE_BY_APPROACH[approach]
+            )
+        )
+    return traci.trafficlight.Logic(
+        f"smarttwin-{candidate['candidateId']}", 0, 0, phases=tls_phases
+    )
+
+
+def simulate_cycle_candidate(
+    candidate: dict[str, Any],
+    *,
+    sumo_binary: Any,
+    sumo_config: Any,
+    tls_id: str,
+    run_simulation_fn: Callable[..., dict[str, Any]],
+    step_limit: int,
+) -> dict[str, Any]:
+    """Jalankan satu CyclePlan penuh pada horizon yang sama antar kandidat."""
+    traci.start([str(sumo_binary), "-c", str(sumo_config), "--start"])
+    try:
+        logic = build_dynamic_tls_logic(candidate)
+        traci.trafficlight.setProgramLogic(tls_id, logic)
+        traci.trafficlight.setProgram(tls_id, logic.programID)
+        traci.trafficlight.setPhase(tls_id, 0)
+        metrics = run_simulation_fn(step_limit=step_limit)
+    finally:
+        traci.close()
+
+    delay = metrics["averageWaitingTimeSeconds"]
+    queue_veh = metrics["queueLengthVeh"]
+    return {
+        **candidate,
+        "avgDelaySeconds": delay,
+        "avgQueueLengthM": round(queue_veh * METERS_PER_QUEUED_VEHICLE, 1),
+        "queueLengthVeh": queue_veh,
+        "throughputVeh": metrics["throughputVeh"],
+        "los": calculate_los(delay),
+    }
+
+
 # ============================================================
 # KOTAK 8 -- TRAFFIC SIMULATION (per kandidat)
 # ============================================================
@@ -165,6 +283,7 @@ def simulate_candidate(
     sumo_phase: int,
     run_simulation_fn: Callable[..., dict[str, Any]],
     step_limit: int = SHORT_SIM_STEPS,
+    seed: int | None = None,
 ) -> dict[str, Any]:
     """
     Jalankan SATU kandidat lewat simulasi singkat.
@@ -182,6 +301,8 @@ def simulate_candidate(
         str(sumo_config),
         "--start",
     ]
+    if seed is not None:
+        command.extend(["--seed", str(seed)])
 
     traci.start(command)
 
@@ -336,6 +457,100 @@ class ScenarioEngine:
         self.short_sim_steps = short_sim_steps
 
         self._rule_based_engine = RuleBasedEngine()
+        self.last_winner: dict[str, Any] | None = None
+        self.last_results: list[dict[str, Any]] = []
+        self.last_cycle_plan: CyclePlan | None = None
+
+    def recommend_full_cycle(
+        self,
+        state: Any,
+        currentGreenSeconds: int = 15,
+        currentPhase: str = "west",
+        forecast: dict[str, Any] | None = None,
+        forecastWeight: float = 0.5,
+    ) -> Recommendation:
+        """Uji tiga CyclePlan empat-lengan tanpa mengganti recommend() lama."""
+        baseline_recommendation = self._rule_based_engine.recommend(
+            state=state,
+            currentGreenSeconds=currentGreenSeconds,
+            currentPhase=currentPhase,
+            forecast=forecast,
+            forecastWeight=forecastWeight,
+        )
+        baseline_cycle = self._rule_based_engine.recommend_cycle(
+            state=state,
+            currentPhase=currentPhase,
+            forecast=forecast,
+            forecastWeight=forecastWeight,
+        )
+        candidates = generate_cycle_candidate_plans(baseline_cycle)
+        # Semua kandidat berjalan pada horizon sama dan minimal mencakup cycle
+        # terpanjang, supaya kandidat berdurasi pendek tidak diuntungkan.
+        step_limit = max(
+            self.short_sim_steps,
+            max(candidate["cycleLengthSeconds"] for candidate in candidates)
+            + YELLOW_SECONDS * len(FIXED_CYCLE_ORDER),
+        )
+        results = [
+            simulate_cycle_candidate(
+                candidate,
+                sumo_binary=self.sumo_binary,
+                sumo_config=self.sumo_config,
+                tls_id=self.tls_id,
+                run_simulation_fn=self.run_simulation_fn,
+                step_limit=step_limit,
+            )
+            for candidate in candidates
+        ]
+        winner = select_best_scenario(results)
+        self.last_results = results
+        self.last_winner = winner
+        self.last_cycle_plan = CyclePlan(
+            phases=[ApproachPhase(**phase) for phase in winner["phases"]],
+            cycleLengthSeconds=winner["cycleLengthSeconds"],
+            # Program dinamis selalu dipasang mulai index 0, yaitu west.
+            currentPhase=FIXED_CYCLE_ORDER[0],
+            source="scenario-generator",
+        )
+
+        selected_green = next(
+            phase["greenSeconds"]
+            for phase in winner["phases"]
+            if phase["approach"] == baseline_recommendation.recommendedPhase
+        )
+        baseline_result = next(
+            result for result in results if result["candidateId"] == "baseline"
+        )
+        reduction = 0.0
+        if baseline_result["avgDelaySeconds"] > 0:
+            reduction = round(max(
+                0.0,
+                (baseline_result["avgDelaySeconds"] - winner["avgDelaySeconds"])
+                / baseline_result["avgDelaySeconds"] * 100,
+            ), 2)
+        print(
+            f"Scenario Generator full-cycle: {winner['candidateId']} menang | "
+            f"cycle={winner['cycleLengthSeconds']}s | "
+            f"delay={winner['avgDelaySeconds']:.2f}s | LOS={winner['los']}"
+        )
+        return Recommendation(
+            recommendedPhase=baseline_recommendation.recommendedPhase,
+            recommendedGreenSeconds=selected_green,
+            currentGreenSeconds=baseline_recommendation.currentGreenSeconds,
+            currentPhase=self.last_cycle_plan.currentPhase,
+            confidence=baseline_recommendation.confidence,
+            expectedDelayReductionPercent=reduction,
+            source="scenario-generator",
+            reason=(
+                "Scenario Generator menguji tiga program siklus empat lengan "
+                f"selama horizon yang sama ({step_limit} langkah). Kandidat "
+                f"'{winner['candidateId']}' terpilih: cycle="
+                f"{winner['cycleLengthSeconds']}s, delay="
+                f"{winner['avgDelaySeconds']:.2f}s (LOS {winner['los']}), "
+                f"queue={winner['avgQueueLengthM']:.1f}m, throughput="
+                f"{winner['throughputVeh']} kendaraan."
+            ),
+        )
 
     def recommend(
         self,
@@ -410,6 +625,8 @@ class ScenarioEngine:
         # ----------------------------------------------------
 
         winner = select_best_scenario(results)
+        self.last_results = results
+        self.last_winner = winner
 
         print(
             f"  -> Terpilih: '{winner['candidateId']}' "
