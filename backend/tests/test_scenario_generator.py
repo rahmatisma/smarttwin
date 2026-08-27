@@ -96,13 +96,13 @@ def test_generate_candidate_plans_all_within_allowed_range():
 def _baseline_cycle() -> CyclePlan:
     return CyclePlan(
         phases=[
-            ApproachPhase(approach="west", greenSeconds=20, demandScore=0.1),
-            ApproachPhase(approach="south", greenSeconds=40, demandScore=0.8),
-            ApproachPhase(approach="east", greenSeconds=25, demandScore=0.3),
             ApproachPhase(approach="north", greenSeconds=30, demandScore=0.4),
+            ApproachPhase(approach="east", greenSeconds=25, demandScore=0.3),
+            ApproachPhase(approach="south", greenSeconds=40, demandScore=0.8),
+            ApproachPhase(approach="west", greenSeconds=20, demandScore=0.1),
         ],
         cycleLengthSeconds=115,
-        currentPhase="west",
+        currentPhase="north",
         source="rule-based",
     )
 

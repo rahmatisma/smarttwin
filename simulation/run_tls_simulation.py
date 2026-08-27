@@ -270,6 +270,7 @@ from app.services.simulation_result_writer import (
 
 from scenario_generator import (
     ScenarioEngine,
+    build_dynamic_tls_logic,
 )
 
 from forecast_client import (
@@ -765,7 +766,7 @@ def createDecision(
     )
 
     recommendation = (
-        engine.recommend(
+        engine.recommend_full_cycle(
             state=trafficState,
             currentGreenSeconds=15,
             currentPhase="south",
@@ -791,6 +792,8 @@ def createDecision(
         recommendation.recommendedPhase
     )
 
+    # Note: sumoPhase mapping is no longer strictly required for the full cycle
+    # as build_dynamic_tls_logic will handle it, but we keep it for fallback/logging.
     sumoPhase = (
         approachToPhase.get(
             recommendedApproach
@@ -915,6 +918,9 @@ def createDecision(
             if forecast is not None
             else "none"
         ),
+        
+        "cyclePlan":
+            engine.last_cycle_plan,
     }
 
     print()
@@ -937,6 +943,12 @@ def createDecision(
         f"  Duration   : "
         f"{phasePlan['duration']}s"
     )
+    
+    if phasePlan['cyclePlan']:
+        print(
+            f"  CyclePlan  : "
+            f"4-arm cycle generated, length {phasePlan['cyclePlan'].cycleLengthSeconds}s"
+        )
 
     return (
         recommendation,
@@ -1102,15 +1114,42 @@ def applyTls(
         "TLS PHASE APPLIED"
     )
 
-    traci.trafficlight.setPhase(
-        tlsId,
-        phasePlan["sumoPhase"],
-    )
+    cycle_plan = phasePlan.get("cyclePlan")
+    if cycle_plan:
+        print("[SUMO] Applying full CyclePlan")
+        print(f"TLS: {tlsId}")
+        print("Order: north -> east -> south -> west")
+        print(f"Cycle: {cycle_plan.cycleLengthSeconds}s")
 
-    traci.trafficlight.setPhaseDuration(
-        tlsId,
-        phasePlan["duration"],
-    )
+        candidate = {
+            "candidateId": "live",
+            "phases": [
+                {
+                    "approach": phase.approach,
+                    "greenSeconds": phase.greenSeconds,
+                    "demandScore": phase.demandScore,
+                }
+                for phase in cycle_plan.phases
+            ],
+            "cycleLengthSeconds": cycle_plan.cycleLengthSeconds,
+        }
+        
+        logic = build_dynamic_tls_logic(candidate)
+        traci.trafficlight.setProgramLogic(tlsId, logic)
+        traci.trafficlight.setProgram(tlsId, logic.programID)
+        traci.trafficlight.setPhase(tlsId, 0)
+        
+    else:
+        # Fallback
+        traci.trafficlight.setPhase(
+            tlsId,
+            phasePlan["sumoPhase"],
+        )
+
+        traci.trafficlight.setPhaseDuration(
+            tlsId,
+            phasePlan["duration"],
+        )
 
     print(
         f"TLS       : "

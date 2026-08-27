@@ -204,6 +204,7 @@ class SumoController:
         sumo_binary: str | Path | None = None,
         config_file: str | Path | None = None,
         seed: int | None = None,
+        scenario: str = "Baseline",
     ) -> None:
     
         os.makedirs("cache/simulation", exist_ok=True)
@@ -229,6 +230,7 @@ class SumoController:
         )
 
         self.seed = seed
+        self.scenario = scenario
 
         # --------------------------------------------------------
         # TRACI
@@ -653,6 +655,32 @@ class SumoController:
                 "membuat vehicle types.\n\n"
                 f"Error: {exc}"
             ) from exc
+
+    def apply_scenario_logic(
+        self,
+        logic_phases: list,
+        scenario_id: str,
+        tls_id: str = "SIMPANG_CENTER",
+    ) -> None:
+        """Suntikkan dynamic phase timing ke SUMO TraCI."""
+        if self.traci is None or not self.running:
+            return
+
+        with self._traci_lock:
+            try:
+                logic = self.traci.trafficlight.Logic(
+                    f"smarttwin-{scenario_id.lower()}", 0, 0, phases=logic_phases
+                )
+                self.traci.trafficlight.setProgramLogic(tls_id, logic)
+                self.traci.trafficlight.setProgram(tls_id, logic.programID)
+                self.traci.trafficlight.setPhase(tls_id, 0)
+                logger.info(
+                    f"Berhasil menerapkan scenario '{scenario_id}' pada SUMO TLS {tls_id} "
+                    f"dengan siklus: {[p.duration for p in logic_phases]} s"
+                )
+            except Exception as exc:
+                logger.error(f"Gagal set program logic TraCI: {exc}")
+
 
         # ========================================================
         # BACKGROUND THREAD

@@ -221,8 +221,7 @@ function DashboardSkeleton() {
   );
 }
 
-const API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
 
 const WS_URL = `${API_BASE_URL.replace(/^http/, "ws")}/api/v1/traffic/ws`;
 
@@ -312,6 +311,11 @@ export default function DashboardPage() {
     return () => clearInterval(intervalId);
   }, []);
 
+  /*
+   * =========================================================
+   * AUTO START SUMO
+   * =========================================================
+   */
   /*
    * =========================================================
    * FETCH DARI SUPABASE
@@ -412,7 +416,7 @@ export default function DashboardPage() {
     let socket: WebSocket | null = null;
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
     let cancelled = false;
-    const currentRequestId = ++requestIdRef.current;
+    ++requestIdRef.current;
 
     async function refetchAllData() {
       if (cancelled) return;

@@ -94,7 +94,7 @@ try:
     class CyclePlan(BaseModel):
         phases: list[ApproachPhase]
         cycleLengthSeconds: int
-        currentPhase: str
+        currentPhase: str = Field(default="north")
         source: str = "rule-based"
         totalCycleSeconds: int = Field(default=0, ge=0)
 
@@ -115,7 +115,7 @@ except NameError:
     class CyclePlan:
         phases: list = field(default_factory=list)
         cycleLengthSeconds: int = 0
-        currentPhase: str = "west"
+        currentPhase: str = "north"
         source: str = "rule-based"
         totalCycleSeconds: int = 0
 
@@ -506,7 +506,7 @@ class RuleBasedEngine:
     def recommend_cycle(
         self,
         state: TrafficState,
-        currentPhase: str = "west",
+        currentPhase: str = "north",
         forecast: dict[str, Any] | None = None,
         forecastWeight: float = 0.5,
     ) -> CyclePlan:
