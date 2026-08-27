@@ -10,6 +10,7 @@
 import { supabase } from "@/lib/supabaseClient";
 
 import type {
+  Approach,
   TrafficState,
   SignalStatus,
   Recommendation,
@@ -20,6 +21,17 @@ export const DEFAULT_INTERSECTION_ID = "simpang4-pingit";
 
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
+
+const FORECAST_ZONE_CAPACITY = 33;
+const FORECAST_REFRESH_INTERVAL_MS = 15_000;
+
+let forecastCache: ForecastResponse | null = null;
+let forecastCacheTime = 0;
+let forecastRequestInFlight: Promise<ForecastResponse | null> | null = null;
+let signalStatusCache: SignalStatus | null = null;
+let signalStatusRequestInFlight: Promise<SignalStatus | null> | null = null;
+let recommendationCache: Recommendation | null = null;
+let recommendationRequestInFlight: Promise<Recommendation | null> | null = null;
 
 /* =========================================================
  * INTERSECTION LOOKUP
@@ -210,15 +222,21 @@ export async function fetchTrafficState(
 export async function fetchSignalStatus(
   intersectionId: string = DEFAULT_INTERSECTION_ID
 ): Promise<SignalStatus | null> {
-  void intersectionId;
+  if (intersectionId !== DEFAULT_INTERSECTION_ID) return null;
+  if (signalStatusRequestInFlight) return signalStatusRequestInFlight;
 
-  const response = await fetch(`${API_BASE_URL}/signal/status`);
+  signalStatusRequestInFlight = fetch(`${API_BASE_URL}/signal/status`)
+    .then(async (response) => {
+      if (!response.ok) return signalStatusCache;
+      signalStatusCache = (await response.json()) as SignalStatus;
+      return signalStatusCache;
+    })
+    .catch(() => signalStatusCache)
+    .finally(() => {
+      signalStatusRequestInFlight = null;
+    });
 
-  if (!response.ok) {
-    throw new Error(`Gagal mengambil signal status: ${response.status}`);
-  }
-
-  return (await response.json()) as SignalStatus;
+  return signalStatusRequestInFlight;
 }
 
 /* =========================================================
@@ -238,76 +256,195 @@ export async function fetchSignalStatus(
 export async function fetchRecommendation(
   intersectionId: string = DEFAULT_INTERSECTION_ID
 ): Promise<Recommendation | null> {
-  const response = await fetch(`${API_BASE_URL}/recommendation`, {
+  if (intersectionId !== DEFAULT_INTERSECTION_ID) return null;
+  if (recommendationRequestInFlight) return recommendationRequestInFlight;
+
+  recommendationRequestInFlight = fetch(`${API_BASE_URL}/recommendation`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ intersectionId }),
-  });
+  })
+    .then(async (response) => {
+      if (!response.ok) return recommendationCache;
 
-  if (!response.ok) {
-    throw new Error(
-      `Gagal mengambil recommendation: ${response.status}`
-    );
-  }
+      const body = await response.json();
+      if (!body.success || !body.recommendation) return recommendationCache;
 
-  const body = await response.json();
+      recommendationCache = body.recommendation as Recommendation;
+      return recommendationCache;
+    })
+    .catch(() => recommendationCache)
+    .finally(() => {
+      recommendationRequestInFlight = null;
+    });
 
-  if (!body.success || !body.recommendation) {
-    return null;
-  }
-
-  return body.recommendation as Recommendation;
+  return recommendationRequestInFlight;
 }
 
 /* =========================================================
  * FORECAST
  * ========================================================= */
 
-export async function fetchForecast(
+async function requestForecast(
   intersectionId: string = DEFAULT_INTERSECTION_ID
 ): Promise<ForecastResponse | null> {
-  const rowId = await getIntersectionRowId(intersectionId);
+  // Saat ini hanya simpang Pingit yang mempunyai TrafficState nyata.
+  // Tiga ID lain tetap ada untuk konfigurasi kamera lama, tetapi jangan
+  // dipanggil ke endpoint forecast karena backend memang akan menjawab 404.
+  if (intersectionId !== DEFAULT_INTERSECTION_ID) return null;
 
-  if (rowId === null) {
-    return null;
-  }
+  type TrafficHistoryRow = {
+    trafficState: { windowStart: string; windowEnd: string };
+    approaches: Array<{
+      approach: Approach;
+      volume: number;
+      queueLengthVeh: number;
+      queueLengthMEst: number;
+      densityIndex: number;
+    }>;
+  };
 
-  const { data: forecast, error: forecastError } = await supabase
-    .from("forecasts")
-    .select("id, horizonMinutes, model")
-    .eq("intersectionId", rowId)
-    .order("createdAt", { ascending: false })
-    .limit(1)
-    .maybeSingle();
+  type ApproachForecast = {
+    timestamp: string;
+    approaches: Array<{
+      approach: Approach;
+      vehicleCount: number;
+      queueLengthVeh: number;
+      queueLengthMEst: number;
+      densityIndex: number;
+    }>;
+  };
 
-  if (forecastError) {
-    throw new Error(`Gagal mengambil forecast: ${forecastError.message}`);
-  }
+  type ApproachForecastResponse = {
+    model?: { name?: string };
+    approachForecasts?: ApproachForecast[];
+    forecastSource?: string;
+    fallbackUsed?: boolean;
+  };
 
-  if (!forecast) {
-    return null;
-  }
+  // Endpoint LSTM memerlukan 12 TrafficState lengkap sebagai input.
+  const historyResponse = await fetch(
+    `${API_BASE_URL}/api/v1/traffic/${encodeURIComponent(intersectionId)}?limit=12`
+  );
 
-  const { data: predictions, error: predictionError } = await supabase
-    .from("forecastPredictions")
-    .select(
-      "timestamp, predictedVehicleCount, predictedQueueLengthVeh, predictedQueueLengthMEst, predictedDensityIndex, predictedSpeedKmh"
+  // Intersection yang belum memiliki data tidak boleh menggagalkan panel lain.
+  if (!historyResponse.ok) return null;
+
+  const historyBody = (await historyResponse.json()) as {
+    data?: TrafficHistoryRow[];
+  };
+  const history = [...(historyBody.data ?? [])]
+    .sort(
+      (a, b) =>
+        new Date(a.trafficState.windowStart).getTime() -
+        new Date(b.trafficState.windowStart).getTime()
     )
-    .eq("forecastId", forecast.id)
-    .order("timestamp", { ascending: true });
+    .slice(-12);
 
-  if (predictionError) {
-    throw new Error(
-      `Gagal mengambil forecast prediction: ${predictionError.message}`
-    );
-  }
+  if (history.length < 12) return null;
+
+  const forecastResponse = await fetch(`${API_BASE_URL}/api/forecast/approaches`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      records: history.map(({ trafficState, approaches }) => ({
+        timestamp: trafficState.windowEnd,
+        approaches: approaches.map((approach) => ({
+          approach: approach.approach,
+          vehicleCount: approach.volume,
+          queueLengthVeh: approach.queueLengthVeh,
+          queueLengthMEst: approach.queueLengthMEst,
+          // Nilai TrafficState adalah okupansi zona (0..33), sedangkan
+          // kontrak input model memakai nilai ternormalisasi 0..1.
+          densityIndex: Math.min(
+            1,
+            Math.max(0, approach.densityIndex / FORECAST_ZONE_CAPACITY)
+          ),
+        })),
+      })),
+    }),
+  });
+
+  if (!forecastResponse.ok) return null;
+
+  const result = (await forecastResponse.json()) as ApproachForecastResponse;
+  const rows = result.approachForecasts ?? [];
+  if (rows.length === 0) return null;
+
+  const toPrediction = (
+    timestamp: string,
+    approaches: ApproachForecast["approaches"]
+  ) => ({
+    timestamp,
+    predictedVehicleCount: approaches.reduce((sum, item) => sum + item.vehicleCount, 0),
+    predictedQueueLengthVeh: approaches.reduce((sum, item) => sum + item.queueLengthVeh, 0),
+    predictedQueueLengthMEst: approaches.reduce((sum, item) => sum + item.queueLengthMEst, 0),
+    predictedDensityIndex:
+      approaches.reduce((sum, item) => sum + item.densityIndex, 0) /
+      Math.max(approaches.length, 1),
+    predictedSpeedKmh: null,
+  });
+
+  const approachNames: Approach[] = ["north", "south", "east", "west"];
+  const predictionsByApproach = Object.fromEntries(
+    approachNames.map((approach) => [
+      approach,
+      rows.map((row) =>
+        toPrediction(
+          row.timestamp,
+          row.approaches.filter((item) => item.approach === approach)
+        )
+      ),
+    ])
+  ) as Record<Approach, ForecastResponse["predictions"]>;
 
   return {
     intersectionId,
-    horizonMinutes: forecast.horizonMinutes,
-    model: forecast.model,
-    predictions: predictions ?? [],
+    horizonMinutes: 1,
+    model: result.model?.name ?? "Traffic LSTM",
+    predictions: rows.map((row) => toPrediction(row.timestamp, row.approaches)),
+    predictionsByApproach,
+    forecastSource: result.forecastSource,
+    fallbackUsed: result.fallbackUsed,
   };
+}
+
+export async function fetchForecast(
+  intersectionId: string = DEFAULT_INTERSECTION_ID
+): Promise<ForecastResponse | null> {
+  if (intersectionId !== DEFAULT_INTERSECTION_ID) return null;
+
+  // Forecast memiliki horizon 60 detik. Tidak perlu menembak dua endpoint
+  // backend pada setiap poll dashboard 5 detik atau event WebSocket.
+  if (
+    forecastCache &&
+    Date.now() - forecastCacheTime < FORECAST_REFRESH_INTERVAL_MS
+  ) {
+    return forecastCache;
+  }
+
+  // Initial load, poll, dan WebSocket dapat terjadi bersamaan. Semua pemanggil
+  // menunggu request yang sama agar koneksi Supabase tidak dibanjiri.
+  if (forecastRequestInFlight) return forecastRequestInFlight;
+
+  forecastRequestInFlight = requestForecast(intersectionId)
+    .then((forecast) => {
+      if (forecast) {
+        forecastCache = forecast;
+        forecastCacheTime = Date.now();
+      }
+      return forecast ?? forecastCache;
+    })
+    .catch(() => {
+      // Gangguan backend/Supabase sesaat adalah kondisi fallback, bukan error
+      // dashboard. Pertahankan hasil terakhir dan jangan reject Promise.all.
+      return forecastCache;
+    })
+    .finally(() => {
+      forecastRequestInFlight = null;
+    });
+
+  return forecastRequestInFlight;
 }
 
 /* =========================================================

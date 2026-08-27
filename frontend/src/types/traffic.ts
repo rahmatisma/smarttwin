@@ -98,6 +98,14 @@ export interface ForecastResponse {
   model: string;
 
   predictions: ForecastPrediction[];
+
+  // Diisi oleh endpoint forecast per-approach. `predictions` tetap
+  // tersedia sebagai agregat supaya komponen lama tetap kompatibel.
+  predictionsByApproach?: Partial<Record<Approach, ForecastPrediction[]>>;
+
+  forecastSource?: string;
+
+  fallbackUsed?: boolean;
 }
 
 
@@ -143,12 +151,16 @@ export interface SignalStatus {
  * ========================================================= */
 
 // Rekomendasi durasi hijau utk SATU lengan (rotasi tetap
-// barat-selatan-timur-utara). Lihat RuleBasedEngine.recommend_cycle()
+// utara-timur-selatan-barat). Lihat RuleBasedEngine.recommend_cycle()
 // di decision_engine/rule_based_engine.py.
 export interface ApproachPhase {
   approach: string;
 
   greenSeconds: number;
+
+  yellowSeconds?: number;
+
+  redSeconds?: number;
 
   demandScore: number;
 }
@@ -161,6 +173,8 @@ export interface CyclePlan {
   currentPhase: string;
 
   source: string;
+
+  totalCycleSeconds?: number;
 }
 
 export interface Recommendation {
@@ -185,4 +199,12 @@ export interface Recommendation {
   // null kalau belum ada TrafficState (fallback) -- lihat
   // recommendation_service.py.
   cyclePlan?: CyclePlan | null;
+
+  candidateId?: string | null;
+
+  avgDelaySeconds?: number | null;
+
+  avgQueueLengthM?: number | null;
+
+  los?: string | null;
 }

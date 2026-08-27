@@ -71,6 +71,10 @@ class ApproachPhaseSchema(
         le=1.0,
     )
 
+    yellowSeconds: int = Field(default=4, ge=0)
+
+    redSeconds: int = Field(default=0, ge=0)
+
 
 class CyclePlanSchema(
     CamelCaseModel
@@ -85,6 +89,8 @@ class CyclePlanSchema(
     currentPhase: str
 
     source: str = "rule-based"
+
+    totalCycleSeconds: int = Field(default=0, ge=0)
 
 
 # ============================================================

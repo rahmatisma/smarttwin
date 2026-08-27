@@ -241,13 +241,22 @@ class SignalService:
             )
 
         else:
-
+            total_cycle_seconds = (
+                (DEFAULT_GREEN_SECONDS + YELLOW_SECONDS)
+                * len(FIXED_CYCLE_ORDER)
+            )
             plan = CyclePlan(
                 phases=[
                     ApproachPhase(
                         approach=approach_name,
                         greenSeconds=DEFAULT_GREEN_SECONDS,
                         demandScore=0.0,
+                        yellowSeconds=YELLOW_SECONDS,
+                        redSeconds=(
+                            total_cycle_seconds
+                            - DEFAULT_GREEN_SECONDS
+                            - YELLOW_SECONDS
+                        ),
                     )
                     for approach_name in FIXED_CYCLE_ORDER
                 ],
@@ -256,6 +265,7 @@ class SignalService:
                 ),
                 currentPhase=active_approach,
                 source="rule-based",
+                totalCycleSeconds=total_cycle_seconds,
             )
 
         self._cycle_plan = plan

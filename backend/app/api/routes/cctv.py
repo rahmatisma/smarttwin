@@ -304,8 +304,10 @@ async def stream_cctv_video(video_id: int, request: Request):
     except CctvServiceError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
-    if settings.video_cache_enabled:
-        _spawn_cache_task(video_id, repository_id, file_path)
+    # Jangan mengunduh salinan penuh bersamaan dengan browser yang sedang
+    # memutar video. Dua transfer file besar dari sumber yang sama membuat
+    # koneksi playback kehabisan bandwidth dan tampak berhenti/buffering.
+    # Cache yang sudah tersedia tetap dilayani oleh cabang FileResponse di atas.
 
     hf_url = (
         f"https://huggingface.co/datasets/{repository_id}/resolve/main/{file_path}"

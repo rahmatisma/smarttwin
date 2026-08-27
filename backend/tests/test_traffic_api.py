@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi.testclient import TestClient
 
 from app.main import app
+from app.api.routes import traffic as traffic_routes
 
 
 client = TestClient(app)
@@ -78,3 +79,24 @@ def test_get_invalid_intersection():
     )
 
     assert response.status_code == 404
+
+
+def test_get_latest_traffic_returns_controlled_503_on_connection_error(monkeypatch):
+    def fail_temporarily(**_kwargs):
+        raise RuntimeError("temporary upstream disconnect")
+
+    monkeypatch.setattr(
+        traffic_routes.traffic_service,
+        "get_latest_traffic",
+        fail_temporarily,
+    )
+
+    response = client.get(
+        f"/api/v1/traffic/{INTERSECTION_ID}",
+        params={"limit": 12},
+        headers={"Origin": "http://localhost:3000"},
+    )
+
+    assert response.status_code == 503
+    assert response.json() == {"detail": "Data traffic sementara tidak tersedia."}
+    assert response.headers["access-control-allow-origin"] == "http://localhost:3000"

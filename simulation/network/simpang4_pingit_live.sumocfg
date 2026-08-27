@@ -1,0 +1,14 @@
+<configuration>
+    <input>
+        <net-file value="simpang4_pingit.net.xml.gz"/>
+        <!-- Demand live hanya dimasukkan melalui TraCI dari TrafficState. -->
+        <additional-files value="tls_safe.add.xml"/>
+    </input>
+    <time>
+        <begin value="0"/>
+        <end value="86400"/>
+    </time>
+    <report>
+        <no-warnings value="true"/>
+    </report>
+</configuration>

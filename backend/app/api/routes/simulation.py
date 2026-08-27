@@ -1,5 +1,6 @@
 from fastapi import APIRouter, HTTPException
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
+from pathlib import Path
 from app.schemas.simulation import SimulationRequest, SimulationResult
 from app.services.simulation_service import (
 	SimulationServiceError,
@@ -59,5 +60,18 @@ def get_simulation_stream():
 	return StreamingResponse(
 		stream_simulation(fps=10),
 		media_type="multipart/x-mixed-replace; boundary=frame"
+	)
+
+
+@router.get("/frame")
+def get_simulation_frame():
+	"""Satu frame SUMO; request finite supaya shutdown Ctrl+C bersih."""
+	frame_path = Path(__file__).resolve().parents[4] / "cache" / "simulation" / "frame.jpg"
+	if not frame_path.exists():
+		raise HTTPException(status_code=404, detail="Frame SUMO belum tersedia.")
+	return FileResponse(
+		frame_path,
+		media_type="image/jpeg",
+		headers={"Cache-Control": "no-store"},
 	)
 

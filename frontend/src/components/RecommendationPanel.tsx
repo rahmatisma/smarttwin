@@ -80,13 +80,17 @@ function ApproachBox({
           style={{ width: `${barPercent}%` }}
         />
       </div>
+
+      <div className="mt-1.5 flex justify-center gap-2 font-mono text-[9px]">
+        <span className="text-signal-green">H {phase.greenSeconds}s</span>
+        <span className="text-signal-red">M {phase.redSeconds ?? "-"}s</span>
+      </div>
     </div>
   );
 }
 
 export default function RecommendationPanel({
   recommendation,
-  signal,
   selectedApproach,
   activeCycleSeconds,
   sharedVisualPhase,
@@ -168,7 +172,19 @@ export default function RecommendationPanel({
 
   const phaseByApproach: Record<string, ApproachPhase> = {};
   for (const phase of cyclePlan?.phases ?? []) {
-    phaseByApproach[phase.approach] = phase;
+    const yellowSeconds = phase.yellowSeconds ?? YELLOW_SECONDS;
+    const totalCycleSeconds = cyclePlan?.totalCycleSeconds
+      || (cyclePlan?.cycleLengthSeconds ?? 0)
+        + (cyclePlan?.phases.length ?? 0) * YELLOW_SECONDS;
+    phaseByApproach[phase.approach] = {
+      ...phase,
+      yellowSeconds,
+      // Cache lama belum mempunyai redSeconds. Turunkan dari siklus agar
+      // frontend tetap langsung berguna sebelum worker menulis cache baru.
+      redSeconds: phase.redSeconds && phase.redSeconds > 0
+        ? phase.redSeconds
+        : Math.max(0, totalCycleSeconds - phase.greenSeconds - yellowSeconds),
+    };
   }
 
   /*
@@ -203,11 +219,12 @@ export default function RecommendationPanel({
           <div className="rounded-md border border-border bg-surface-2 p-3">
             <div className="mb-2 flex items-center justify-between">
               <span className="text-xs text-text-muted">
-                Durasi Hijau per Lengan
+                Rekomendasi Durasi per Lengan
               </span>
 
               <span className="font-mono text-[10px] text-text-muted">
-                siklus {cyclePlan.cycleLengthSeconds}s
+                siklus {cyclePlan.totalCycleSeconds
+                  || cyclePlan.cycleLengthSeconds + phases.length * YELLOW_SECONDS}s
               </span>
             </div>
 
@@ -262,7 +279,7 @@ export default function RecommendationPanel({
         )}
 
 
-        {/* Green Time */}
+        {/* Green and red recommendation */}
         <div className="grid grid-cols-2 gap-3">
           <div className="rounded-md border border-border bg-surface-2 p-3">
             <div className="text-xs text-text-muted">
@@ -278,12 +295,12 @@ export default function RecommendationPanel({
 
           <div className="rounded-md border border-border bg-surface-2 p-3">
             <div className="text-xs text-text-muted">
-              Current Green Phase
+              Recommendation Red
             </div>
 
-            <div className="mt-1 font-mono text-sm font-semibold text-text">
-              {sharedVisualPhase && signal?.phases?.[sharedVisualPhase]
-                ? `${signal.phases[sharedVisualPhase].durationSeconds}s`
+            <div className="mt-1 font-mono text-sm font-semibold text-signal-red">
+              {sharedVisualPhase
+                ? `${phaseByApproach[sharedVisualPhase]?.redSeconds ?? "-"}s`
                 : "Memuat..."}
             </div>
           </div>

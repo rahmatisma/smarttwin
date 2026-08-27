@@ -72,6 +72,13 @@ def test_recommend_cycle_length_is_sum_of_phases():
     assert plan.cycleLengthSeconds == sum(
         p.greenSeconds for p in plan.phases
     )
+    assert plan.totalCycleSeconds == sum(
+        p.greenSeconds + p.yellowSeconds for p in plan.phases
+    )
+    for phase in plan.phases:
+        assert phase.redSeconds == (
+            plan.totalCycleSeconds - phase.greenSeconds - phase.yellowSeconds
+        )
 
 
 def test_recommend_cycle_all_within_allowed_range():

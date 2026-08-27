@@ -73,13 +73,14 @@ except ImportError:
 # ============================================================
 # CYCLE PLAN (rekomendasi 4 lengan sekaligus)
 #
-# Rotasi lampu di simpang ini TETAP (barat -> selatan -> timur ->
-# utara -> barat, siklus real-world biasa) -- yang direkomendasikan
+# Rotasi lampu di simpang ini TETAP (utara -> timur -> selatan ->
+# barat -> utara, sesuai urutan fisik sistem) -- yang direkomendasikan
 # BUKAN "lengan mana dapat giliran" (itu domain Recommendation di
 # atas), tapi "berapa detik tiap lengan" dalam satu putaran siklus.
 # ============================================================
 
-FIXED_CYCLE_ORDER = ["west", "south", "east", "north"]
+FIXED_CYCLE_ORDER = ["north", "east", "south", "west"]
+YELLOW_SECONDS = 4
 
 try:
 
@@ -87,12 +88,15 @@ try:
         approach: str
         greenSeconds: int
         demandScore: float = Field(default=0.0)
+        yellowSeconds: int = Field(default=YELLOW_SECONDS, ge=0)
+        redSeconds: int = Field(default=0, ge=0)
 
     class CyclePlan(BaseModel):
         phases: list[ApproachPhase]
         cycleLengthSeconds: int
         currentPhase: str
         source: str = "rule-based"
+        totalCycleSeconds: int = Field(default=0, ge=0)
 
 except NameError:
     # BaseModel tidak terdefinisi kalau blok pydantic di atas gagal
@@ -104,6 +108,8 @@ except NameError:
         approach: str
         greenSeconds: int
         demandScore: float = 0.0
+        yellowSeconds: int = YELLOW_SECONDS
+        redSeconds: int = 0
 
     @dataclass
     class CyclePlan:
@@ -111,6 +117,7 @@ except NameError:
         cycleLengthSeconds: int = 0
         currentPhase: str = "west"
         source: str = "rule-based"
+        totalCycleSeconds: int = 0
 
 
 # ============================================================
@@ -505,8 +512,8 @@ class RuleBasedEngine:
     ) -> CyclePlan:
         """
         Rekomendasi durasi hijau untuk KE-4 lengan sekaligus, dalam
-        urutan rotasi tetap FIXED_CYCLE_ORDER (barat-selatan-timur-
-        utara). Beda dari recommend(): di sana cuma SATU lengan
+        urutan rotasi tetap FIXED_CYCLE_ORDER (utara-timur-selatan-
+        barat). Beda dari recommend(): di sana cuma SATU lengan
         pemenang yang dapat durasi, di sini KE-4-nya dihitung, tiap
         lengan independen pakai calculate_demand_score() +
         calculate_green_time() yang sama persis dengan recommend()
@@ -586,18 +593,30 @@ class RuleBasedEngine:
                 )
             )
 
+        green_cycle_seconds = sum(phase.greenSeconds for phase in phases)
+        total_cycle_seconds = green_cycle_seconds + YELLOW_SECONDS * len(phases)
+        phases = [
+            ApproachPhase(
+                approach=phase.approach,
+                greenSeconds=phase.greenSeconds,
+                demandScore=phase.demandScore,
+                yellowSeconds=YELLOW_SECONDS,
+                # Merah berlangsung selama semua fase lain + kuningnya.
+                redSeconds=total_cycle_seconds - phase.greenSeconds - YELLOW_SECONDS,
+            )
+            for phase in phases
+        ]
+
         return CyclePlan(
             phases=phases,
-            cycleLengthSeconds=sum(
-                phase.greenSeconds
-                for phase in phases
-            ),
+            cycleLengthSeconds=green_cycle_seconds,
             currentPhase=str(currentPhase),
             source=(
                 "rule-based+forecast"
                 if forecast_used
                 else "rule-based"
             ),
+            totalCycleSeconds=total_cycle_seconds,
         )
 
     def apply_forecast(

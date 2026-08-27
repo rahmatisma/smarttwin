@@ -56,8 +56,8 @@ def test_create_adapter_maps_all_four_approaches():
 def test_get_config_file_points_to_simpang4_pingit():
     config_file = SimulationService._get_config_file()
 
-    assert config_file.name == "simpang4_pingit.sumocfg"
+    assert config_file.name == "simpang4_pingit_live.sumocfg"
     assert config_file.exists(), (
         "Config SUMO tidak ditemukan -- jalankan dari checkout yang "
-        "punya simulation/network/simpang4_pingit.sumocfg"
+        "punya simulation/network/simpang4_pingit_live.sumocfg"
     )

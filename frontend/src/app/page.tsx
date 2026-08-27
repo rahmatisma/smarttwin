@@ -10,14 +10,13 @@ import CameraFeedPanel from "@/components/CameraFeedPanel";
 import SharedSignalPanels from "@/components/SharedSignalPanels";
 import ForecastChart from "@/components/ForecastChart";
 
-import { useTrafficSimulation } from "@/hooks/useTrafficSimulaton";
-
 import {
   fetchTrafficState,
   fetchSignalStatus,
   fetchRecommendation,
   fetchForecast,
   fetchIntersectionCoords,
+  DEFAULT_INTERSECTION_ID,
 } from "@/lib/supabaseData";
 
 import {
@@ -32,72 +31,7 @@ import type {
   Recommendation,
   ForecastResponse,
   VehicleClassCount,
-  ForecastPrediction,
 } from "@/types/traffic";
-
-/*
- * =========================================================
- * AGGREGATION HELPERS
- * =========================================================
- */
-
-function getAggregatedForecast(
-  forecasts: ForecastResponse[]
-): ForecastResponse | null {
-  const activeForecasts = forecasts.filter(
-    (f) => f && f.predictions && f.predictions.length > 0
-  );
-  if (activeForecasts.length === 0) return null;
-
-  const numPredictions = Math.min(
-    ...activeForecasts.map((f) => f.predictions.length)
-  );
-  const aggregatedPredictions: ForecastPrediction[] = [];
-
-  for (let i = 0; i < numPredictions; i++) {
-    const timestamp = activeForecasts[0].predictions[i].timestamp;
-    const sumCount = activeForecasts.reduce(
-      (sum, f) => sum + f.predictions[i].predictedVehicleCount,
-      0
-    );
-    const sumQueueVeh = activeForecasts.reduce(
-      (sum, f) => sum + f.predictions[i].predictedQueueLengthVeh,
-      0
-    );
-    const sumQueueM = activeForecasts.reduce(
-      (sum, f) => sum + f.predictions[i].predictedQueueLengthMEst,
-      0
-    );
-    const avgDensity =
-      activeForecasts.reduce(
-        (sum, f) => sum + f.predictions[i].predictedDensityIndex,
-        0
-      ) / activeForecasts.length;
-    const speeds = activeForecasts
-      .map((f) => f.predictions[i].predictedSpeedKmh)
-      .filter((s): s is number => s !== null);
-    const avgSpeed =
-      speeds.length > 0
-        ? speeds.reduce((sum, s) => sum + s, 0) / speeds.length
-        : null;
-
-    aggregatedPredictions.push({
-      timestamp,
-      predictedVehicleCount: sumCount,
-      predictedQueueLengthVeh: sumQueueVeh,
-      predictedQueueLengthMEst: sumQueueM,
-      predictedDensityIndex: avgDensity,
-      predictedSpeedKmh: avgSpeed,
-    });
-  }
-
-  return {
-    intersectionId: "Semua Simpang",
-    horizonMinutes: activeForecasts[0].horizonMinutes,
-    model: "Aggregated LSTM",
-    predictions: aggregatedPredictions,
-  };
-}
 
 /*
  * =========================================================
@@ -302,8 +236,6 @@ export default function DashboardPage() {
    * Dipakai hanya kalau signalStatuses di Supabase kosong.
    */
 
-  const simulatedSignal = useTrafficSimulation();
-
   /*
    * =========================================================
    * STATE
@@ -398,6 +330,8 @@ export default function DashboardPage() {
         const results = await Promise.all(
           ALL_INTERSECTIONS.map(async (inter) => {
             try {
+                const hasLiveBackend =
+                  inter.databaseId === DEFAULT_INTERSECTION_ID;
                 const [
                   trafficState,
                   signalStatus,
@@ -406,9 +340,9 @@ export default function DashboardPage() {
                   coords,
                 ] = await Promise.all([
                   fetchTrafficState(inter.databaseId, videoTimeRef.current),
-                  fetchSignalStatus(inter.databaseId),
-                  fetchRecommendation(inter.databaseId),
-                  fetchForecast(inter.databaseId),
+                  hasLiveBackend ? fetchSignalStatus(inter.databaseId) : null,
+                  hasLiveBackend ? fetchRecommendation(inter.databaseId) : null,
+                  hasLiveBackend ? fetchForecast(inter.databaseId) : null,
                   fetchIntersectionCoords(inter.databaseId),
                 ]);
                 return {
@@ -488,6 +422,8 @@ export default function DashboardPage() {
         const results = await Promise.all(
           ALL_INTERSECTIONS.map(async (inter) => {
             try {
+              const hasLiveBackend =
+                inter.databaseId === DEFAULT_INTERSECTION_ID;
               const [
                 trafficState,
                 signalStatus,
@@ -495,9 +431,9 @@ export default function DashboardPage() {
                 forecast,
               ] = await Promise.all([
                 fetchTrafficState(inter.databaseId, videoTimeRef.current),
-                fetchSignalStatus(inter.databaseId),
-                fetchRecommendation(inter.databaseId),
-                fetchForecast(inter.databaseId),
+                hasLiveBackend ? fetchSignalStatus(inter.databaseId) : null,
+                hasLiveBackend ? fetchRecommendation(inter.databaseId) : null,
+                hasLiveBackend ? fetchForecast(inter.databaseId) : null,
               ]);
               return {
                 id: inter.id,
@@ -556,7 +492,7 @@ export default function DashboardPage() {
         setAllForecasts((prev) => {
           const next = { ...prev };
           results.forEach((res) => {
-            if (res) next[res.id] = res.forecast;
+            if (res?.forecast) next[res.id] = res.forecast;
           });
           return next;
         });
@@ -637,10 +573,6 @@ export default function DashboardPage() {
   const activeSignal = useMemo(() => {
     // 1. Single Source of Truth: LIVE SIMULATION (kalau ada sesi SUMO
     //    interaktif berjalan dari Digital Twin panel)
-    if (simulatedSignal) {
-      return simulatedSignal;
-    }
-
     // 2. simpang4-pingit adalah satu-satunya intersection nyata -- sama
     //    seperti activeRecommendation/lenganFilteredApproaches, langsung
     //    ambil dari situ, tidak lewat selectedIntersection (konsep lama)
@@ -659,7 +591,7 @@ export default function DashboardPage() {
       cycleTimeSeconds: 0,
       source: "mock",
     } as SignalStatus;
-  }, [allSignalStatuses, simulatedSignal]);
+  }, [allSignalStatuses]);
 
   // simpang4-pingit adalah satu-satunya intersection nyata (lihat
   // catatan di lib/intersections.ts) -- sama seperti
@@ -671,16 +603,30 @@ export default function DashboardPage() {
   }, [allRecommendations]);
 
   const activeForecast = useMemo(() => {
-    if (selectedIntersection !== "all") {
-      return allForecasts[selectedIntersection] ?? null;
-    }
+    const forecast = allForecasts["intersection4"] ?? null;
+    if (!forecast || selectedApproach === "all") return forecast;
 
-    const fcst = ALL_INTERSECTIONS.map(
-      (inter) => allForecasts[inter.id]
-    ).filter((f): f is ForecastResponse => f != null);
+    const approachPredictions = forecast.predictionsByApproach?.[selectedApproach];
+    if (!approachPredictions) return forecast;
 
-    return getAggregatedForecast(fcst);
-  }, [selectedIntersection, allForecasts]);
+    return {
+      ...forecast,
+      intersectionId: `${forecast.intersectionId}-${selectedApproach}`,
+      predictions: approachPredictions,
+    };
+  }, [allForecasts, selectedApproach]);
+
+  const currentForecastTraffic = useMemo<TrafficState | null>(() => {
+    const state = allTrafficStates["intersection4"];
+    if (!state) return null;
+    if (selectedApproach === "all") return state;
+    return {
+      ...state,
+      approaches: state.approaches.filter(
+        (approach) => approach.approach === selectedApproach
+      ),
+    };
+  }, [allTrafficStates, selectedApproach]);
 
   /*
    * Approaches dari simpang4-pingit (satu-satunya intersection nyata
@@ -895,6 +841,9 @@ export default function DashboardPage() {
               <DigitalTwinPanel
                 approaches={semuaApproaches}
                 signal={activeSignal}
+                cyclePlan={activeRecommendation?.cyclePlan}
+                trafficTimestamp={allTrafficStates["intersection4"]?.windowEnd}
+                candidateId={activeRecommendation?.candidateId}
               />
             </div>
 
@@ -932,7 +881,7 @@ export default function DashboardPage() {
           <div className="w-full">
             <ForecastChart
               data={activeForecast}
-              current={activeTrafficState}
+              current={currentForecastTraffic}
             />
           </div>
 

@@ -58,13 +58,11 @@ const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
 
 function resolveVideoSrc(source: string): string {
-  // Add cache buster to prevent browser from using corrupted cached responses
-  const t = Date.now();
   if (source.startsWith("/api/")) {
-    return `${API_BASE_URL}${source}?t=${t}`;
+    return `${API_BASE_URL}${source}`;
   }
 
-  return `${source}${source.includes("?") ? "&" : "?"}t=${t}`;
+  return source;
 }
 
 // =====================================================
@@ -326,7 +324,7 @@ export default function CameraFeedPanel({
                     autoPlay
                     loop
                     playsInline
-                    preload="metadata"
+                    preload="auto"
                     className="h-full w-full object-contain"
                     onTimeUpdate={(e) => {
                       if (onTimeUpdate && camera.id === cameras[0].id) {

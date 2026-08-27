@@ -177,7 +177,7 @@ class SimulationService:
             project_root
             / "simulation"
             / "network"
-            / "simpang4_pingit.sumocfg"
+            / "simpang4_pingit_live.sumocfg"
         )
 
         print()
@@ -338,6 +338,16 @@ class SimulationService:
     ) -> SumoController:
 
         with self._lock:
+
+            # Bila mode berubah (misalnya sesi lama masih memakai SUMO-GUI),
+            # restart sekali agar permintaan headless benar-benar diterapkan.
+            if (
+                self.controller is not None
+                and self.controller.is_running()
+                and self.controller.is_gui != request.gui
+            ):
+                self.controller.close()
+                self.controller = None
 
             # ====================================================
             # SUMO SUDAH RUNNING
@@ -571,9 +581,14 @@ class SimulationService:
             # 1. BUILD TRAFFIC STATE
             # ====================================================
 
-            traffic_state = (
-                self._build_traffic_state(request)
-            )
+            if request.approaches is not None:
+                traffic_state = None
+                self.active_intersection_id = request.intersectionId
+                self.active_traffic_state_id = (
+                    str(request.trafficStateId) if request.trafficStateId is not None else None
+                )
+            else:
+                traffic_state = self._build_traffic_state(request)
 
             # ====================================================
             # 2. START / REUSE SUMO
@@ -591,7 +606,9 @@ class SimulationService:
             adapter = self._create_adapter()
             demand = None
 
-            if traffic_state is not None:
+            if request.approaches is not None:
+                demand = [item.model_dump() for item in request.approaches]
+            elif traffic_state is not None:
                 try:
 
                     demand = (
@@ -625,7 +642,25 @@ class SimulationService:
             # 5. INJECT DEMAND
             # ====================================================
 
-            if demand:
+            if request.cyclePlan is not None:
+                try:
+                    controller.apply_cycle_plan(request.cyclePlan.model_dump())
+                except Exception as exc:
+                    raise SimulationServiceError(
+                        f"Gagal memasang CyclePlan ke TLS SUMO: {exc}"
+                    ) from exc
+
+            if demand and request.approaches is not None:
+                try:
+                    injected = controller.sync_demand(
+                        demand,
+                        traffic_timestamp=request.trafficTimestamp,
+                    )
+                except Exception as exc:
+                    raise SimulationServiceError(
+                        f"Gagal menyinkronkan demand dashboard ke SUMO: {exc}"
+                    ) from exc
+            elif demand:
 
                 try:
 
@@ -803,7 +838,10 @@ class SimulationService:
                 "paused": self.controller.paused,
                 "vehicles": self.controller.active_vehicles_data,
                 "signals": self.controller.active_signals_data,
-                "simulationTimeSeconds": self.controller.last_simulation_time
+                "simulationTimeSeconds": self.controller.last_simulation_time,
+                "detectedVehicles": self.controller.detected_vehicle_count,
+                "trafficTimestamp": self.controller.traffic_timestamp,
+                "cyclePlan": self.controller.active_cycle_plan,
             }
 
     # ============================================================

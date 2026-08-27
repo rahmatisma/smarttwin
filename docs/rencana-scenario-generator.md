@@ -183,7 +183,7 @@ Keempat butir di atas sudah diimplementasikan dan diverifikasi. Skema tabel ada 
 
 ### 4.2 Siklus 4-lengan penuh — tersedia sebagai jalur opt-in
 
-Jalur lama satu-lengan tetap dipertahankan untuk kompatibilitas. Jalur baru `ScenarioEngine.recommend_full_cycle()` membentuk tiga kandidat CyclePlan, memasang delapan fase dinamis melalui `traci.trafficlight.setProgramLogic()` (west→kuning→south→kuning→east→kuning→north→kuning), dan menjalankan seluruh kandidat pada horizon sama yang minimal mencakup cycle terpanjang.
+Jalur lama satu-lengan tetap dipertahankan untuk kompatibilitas. Jalur baru `ScenarioEngine.recommend_full_cycle()` membentuk tiga kandidat CyclePlan, memasang delapan fase dinamis melalui `traci.trafficlight.setProgramLogic()` (north→kuning→east→kuning→south→kuning→west→kuning), dan menjalankan seluruh kandidat pada horizon sama yang minimal mencakup cycle terpanjang.
 
 Aktifkan secara eksplisit:
 

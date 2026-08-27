@@ -133,7 +133,7 @@ class RecommendationService:
             )
 
             # Rekomendasi 4 lengan sekaligus (rotasi tetap
-            # barat-selatan-timur-utara), TERPISAH dari
+            # utara-timur-selatan-barat), TERPISAH dari
             # engine.recommend() di atas (yang cuma pilih 1 lengan
             # pemenang). Dua konsep berbeda -- lihat FIXED_CYCLE_ORDER
             # di rule_based_engine.py.
@@ -152,12 +152,15 @@ class RecommendationService:
                         approach=phase.approach,
                         greenSeconds=phase.greenSeconds,
                         demandScore=phase.demandScore,
+                        yellowSeconds=phase.yellowSeconds,
+                        redSeconds=phase.redSeconds,
                     )
                     for phase in cycle_plan_result.phases
                 ],
                 cycleLengthSeconds=cycle_plan_result.cycleLengthSeconds,
                 currentPhase=cycle_plan_result.currentPhase,
                 source=cycle_plan_result.source,
+                totalCycleSeconds=cycle_plan_result.totalCycleSeconds,
             )
 
             cached_payload = cached.get("recommendation") if cached else None

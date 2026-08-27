@@ -183,13 +183,17 @@ def generate_cycle_candidate_plans(
     baseline: CyclePlan,
 ) -> list[dict[str, Any]]:
     """Tiga kandidat CyclePlan penuh; tidak mengubah generator satu-lengan."""
+    phase_by_approach = {
+        phase.approach: phase for phase in baseline.phases
+    }
     phases = [
         {
             "approach": phase.approach,
             "greenSeconds": phase.greenSeconds,
             "demandScore": phase.demandScore,
         }
-        for phase in baseline.phases
+        for approach in FIXED_CYCLE_ORDER
+        for phase in [phase_by_approach[approach]]
     ]
     busiest = max(phases, key=lambda phase: phase["demandScore"])["approach"]
 
@@ -205,10 +209,28 @@ def generate_cycle_candidate_plans(
             elif candidate_id == "balanced":
                 green = round((green + MIN_GREEN_SECONDS) / 2)
             result.append({**phase, "greenSeconds": green})
+        green_cycle_seconds = sum(item["greenSeconds"] for item in result)
+        total_cycle_seconds = (
+            green_cycle_seconds + YELLOW_SECONDS * len(FIXED_CYCLE_ORDER)
+        )
+        result = [
+            {
+                **phase,
+                "yellowSeconds": YELLOW_SECONDS,
+                "redSeconds": (
+                    total_cycle_seconds
+                    - phase["greenSeconds"]
+                    - YELLOW_SECONDS
+                ),
+            }
+            for phase in result
+        ]
         return {
             "candidateId": candidate_id,
             "phases": result,
-            "cycleLengthSeconds": sum(item["greenSeconds"] for item in result),
+            # Field lama tetap green-only untuk kompatibilitas.
+            "cycleLengthSeconds": green_cycle_seconds,
+            "totalCycleSeconds": total_cycle_seconds,
             "busiestApproach": busiest,
         }
 
@@ -511,6 +533,7 @@ class ScenarioEngine:
             # Program dinamis selalu dipasang mulai index 0, yaitu west.
             currentPhase=FIXED_CYCLE_ORDER[0],
             source="scenario-generator",
+            totalCycleSeconds=winner["totalCycleSeconds"],
         )
 
         selected_green = next(

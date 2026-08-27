@@ -18,6 +18,7 @@ from app.api.routes.signal import router as signal_router
 from app.api.routes.recommendation import router as recommendation_router
 from app.api.routes.simulation import router as simulation_router
 from app.api.routes.health import router as health_router
+from app.services.simulation_service import simulation_service
 
 
 logger = logging.getLogger("uvicorn.error")
@@ -183,5 +184,8 @@ async def root():
 # =========================================================
 
 @app.on_event("shutdown")
-async def shutdown_hf_client():
+async def shutdown_services():
+    # Tutup thread/TraCI lebih dahulu supaya process SUMO tidak tertinggal
+    # setelah Ctrl+C, baru tutup koneksi HTTP eksternal.
+    simulation_service.stop()
     await close_hf_client()

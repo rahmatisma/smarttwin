@@ -218,6 +218,16 @@ def get_latest_traffic(
             detail=str(exc),
         ) from exc
 
+    except Exception as exc:
+
+        # Gangguan koneksi Supabase sesaat (mis. RemoteProtocolError)
+        # harus menjadi respons HTTP yang tetap memiliki header CORS,
+        # bukan exception ASGI yang terlihat browser sebagai "Failed to fetch".
+        raise HTTPException(
+            status_code=503,
+            detail="Data traffic sementara tidak tersedia.",
+        ) from exc
+
 
 # ============================================================
 # REALTIME TRAFFIC WEBSOCKET

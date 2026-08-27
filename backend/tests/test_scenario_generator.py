@@ -117,6 +117,17 @@ def test_generate_full_cycle_candidates_keep_four_approaches():
         == FIXED_CYCLE_ORDER
         for item in candidates
     )
+    for candidate in candidates:
+        assert candidate["totalCycleSeconds"] == (
+            candidate["cycleLengthSeconds"] + 4 * 4
+        )
+        for phase in candidate["phases"]:
+            assert phase["yellowSeconds"] == 4
+            assert phase["redSeconds"] == (
+                candidate["totalCycleSeconds"]
+                - phase["greenSeconds"]
+                - phase["yellowSeconds"]
+            )
 
 
 def test_full_cycle_aggressive_only_extends_busiest_approach():
@@ -142,7 +153,7 @@ def test_dynamic_tls_logic_has_green_and_yellow_for_every_approach():
     assert logic.programID == "smarttwin-baseline"
     assert len(logic.phases) == 8
     assert [round(phase.duration) for phase in logic.phases[::2]] == [
-        20, 40, 25, 30
+        30, 25, 40, 20
     ]
     assert [round(phase.duration) for phase in logic.phases[1::2]] == [4, 4, 4, 4]
 

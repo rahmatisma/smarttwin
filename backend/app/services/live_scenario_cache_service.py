@@ -111,6 +111,12 @@ class LiveScenarioCacheService:
                     or phase["greenSeconds"] < 0
                 ):
                     return False
+                for duration_field in ("yellowSeconds", "redSeconds"):
+                    duration = phase.get(duration_field)
+                    if duration is not None and (
+                        not isinstance(duration, (int, float)) or duration < 0
+                    ):
+                        return False
 
         return True
 

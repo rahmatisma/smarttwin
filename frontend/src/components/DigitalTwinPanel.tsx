@@ -3,6 +3,7 @@ import type {
   ApproachState,
   SignalStatus,
   Approach,
+  CyclePlan,
 } from "@/types/traffic";
 
 /*
@@ -22,6 +23,17 @@ const SIGNAL_COLOR = {
   amber: "#f5a623",
   green: "#2ecc71",
 } as const;
+
+// Kalibrasi khusus SUMO live dari observasi durasi merah CCTV:
+// Selatan 177 dtk, Barat 180 dtk, Timur 163 dtk. Dengan kuning 4 dtk
+// dan siklus 227 dtk diperoleh hijau U/T/S/B = 62/60/46/43 dtk.
+// Nilai ini sengaja TIDAK dipakai oleh card rekomendasi/status sinyal.
+const LIVE_SUMO_PHASES = [
+  { approach: "north", greenSeconds: 62, yellowSeconds: 4 },
+  { approach: "east", greenSeconds: 60, yellowSeconds: 4 },
+  { approach: "south", greenSeconds: 46, yellowSeconds: 4 },
+  { approach: "west", greenSeconds: 43, yellowSeconds: 4 },
+] as const;
 
 /*
  * =========================================================
@@ -225,6 +237,12 @@ function getSignalColor(
   return "red";
 }
 
+type LiveSumoSignal = {
+  state: "GREEN" | "YELLOW";
+  activeApproach: Approach;
+  remainingSeconds: number;
+};
+
 /*
  * =========================================================
  * DIGITAL TWIN PANEL
@@ -234,13 +252,22 @@ function getSignalColor(
 export default function DigitalTwinPanel({
   approaches,
   signal,
+  cyclePlan,
+  trafficTimestamp,
+  candidateId,
 }: {
   approaches: ApproachState[];
   signal: SignalStatus;
+  cyclePlan?: CyclePlan | null;
+  trafficTimestamp?: string;
+  candidateId?: string | null;
 }) {
   const [simRunning, setSimRunning] = useState(false);
   const [simTime, setSimTime] = useState(0);
   const [vehiclesCount, setVehiclesCount] = useState(0);
+  const [detectedVehicles, setDetectedVehicles] = useState(0);
+  const [liveSignal, setLiveSignal] = useState<LiveSumoSignal | null>(null);
+  const [frameVersion, setFrameVersion] = useState(0);
 
   const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
 
@@ -255,13 +282,75 @@ export default function DigitalTwinPanel({
         if (data.running) {
           setSimTime(data.simulationTimeSeconds ?? 0);
           setVehiclesCount(data.vehicles?.length ?? 0);
+          setDetectedVehicles(data.detectedVehicles ?? 0);
+          setLiveSignal(data.signals?.[0] ?? null);
         }
-      } catch (err) {
+      } catch {
         setSimRunning(false);
       }
     }, 500);
     return () => clearInterval(interval);
   }, [API_BASE_URL]);
+
+  useEffect(() => {
+    if (!simRunning) return;
+    const interval = window.setInterval(
+      () => setFrameVersion((version) => version + 1),
+      500
+    );
+    return () => window.clearInterval(interval);
+  }, [simRunning]);
+
+  const livePayloadSignature = JSON.stringify({
+    trafficTimestamp,
+    approaches: approaches.map((approach) => ({
+      approach: approach.approach,
+      targetVehicleCount: Math.max(0, Math.round(approach.densityIndex)),
+      motorcycleCount: approach.motorcycleCount,
+      carCount: approach.carCount,
+      busCount: approach.busCount,
+      truckCount: approach.truckCount,
+    })),
+    cyclePlan,
+    candidateId,
+  });
+  const canStartSimulation = approaches.length === 4 && Boolean(cyclePlan?.phases?.length);
+
+  useEffect(() => {
+    if (!canStartSimulation) return;
+
+    const payload = JSON.parse(livePayloadSignature);
+    let cancelled = false;
+    void fetch(`${API_BASE_URL}/api/v1/simulation/run`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        intersectionId: "simpang4-pingit",
+        durationSeconds: 86400,
+        gui: true,
+        guiDelayMs: 0,
+        seed: 42,
+        trafficTimestamp: payload.trafficTimestamp,
+        approaches: payload.approaches,
+        cyclePlan: {
+          phases: LIVE_SUMO_PHASES,
+          candidateId: "observed-cctv-live",
+          source: "observed-cctv",
+          totalCycleSeconds: 227,
+        },
+      }),
+    })
+      .then((response) => {
+        if (!cancelled && response.ok) setSimRunning(true);
+      })
+      .catch(() => {
+        // Polling state menampilkan denah fallback jika backend/SUMO mati.
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [API_BASE_URL, canStartSimulation, livePayloadSignature]);
   /*
    * Mapping approach berdasarkan arah.
    */
@@ -371,10 +460,34 @@ export default function DigitalTwinPanel({
         {simRunning ? (
           <>
             <img
-              src={`${API_BASE_URL}/api/v1/simulation/stream?t=${Date.now()}`}
-              alt="Live SUMO Simulation Stream"
+              src={`${API_BASE_URL}/api/v1/simulation/frame?v=${frameVersion}`}
+              alt="Live SUMO Simpang Pingit"
               className="absolute inset-0 h-full w-full object-contain"
             />
+            {([
+              ["north", "UTARA · Jl. Magelang", "left-1/2 top-1 -translate-x-1/2"],
+              ["east", "TIMUR · Jl. Diponegoro", "right-1 top-1/2 -translate-y-1/2"],
+              ["south", "SELATAN · Jl. Tentara Pelajar", "bottom-1 left-1/2 -translate-x-1/2"],
+              ["west", "BARAT · Jl. Kyai Mojo", "left-1 top-1/2 -translate-y-1/2"],
+            ] as const).map(([approach, label, position]) => {
+              const isActive = liveSignal?.activeApproach === approach;
+              const lampClass = !isActive
+                ? "bg-signal-red"
+                : liveSignal.state === "YELLOW"
+                  ? "bg-signal-amber"
+                  : "bg-signal-green";
+              return (
+                <div key={approach} className={`absolute ${position} flex items-center gap-1 rounded bg-black/75 px-1.5 py-0.5 text-[9px] font-semibold text-white`}>
+                  <i className={`h-2.5 w-2.5 shrink-0 rounded-full border border-white/40 ${lampClass}`} />
+                  {label}
+                </div>
+              );
+            })}
+            <div className="absolute left-2 top-2 flex gap-2 rounded-md border border-white/10 bg-black/55 px-2 py-1 text-[10px] text-white backdrop-blur-sm">
+              <span className="flex items-center gap-1"><i className="h-2 w-2 rounded-full bg-signal-red" />Merah</span>
+              <span className="flex items-center gap-1"><i className="h-2 w-2 rounded-full bg-signal-amber" />Kuning</span>
+              <span className="flex items-center gap-1"><i className="h-2 w-2 rounded-full bg-signal-green" />Hijau</span>
+            </div>
             <div className="absolute bottom-2 right-2 rounded-lg border border-white/10 bg-black/50 px-2 py-1 backdrop-blur-sm">
               <p className="font-mono text-xs font-medium text-white">
                 {Math.floor(simTime / 60).toString().padStart(2, '0')}:{(Math.floor(simTime) % 60).toString().padStart(2, '0')}
@@ -382,7 +495,7 @@ export default function DigitalTwinPanel({
             </div>
             <div className="absolute bottom-2 left-2 rounded-lg border border-white/10 bg-black/50 px-2 py-1 backdrop-blur-sm">
               <p className="font-mono text-xs font-medium text-white">
-                Vehicles: {vehiclesCount}
+                Deteksi: {detectedVehicles} · Aktif SUMO: {vehiclesCount}
               </p>
             </div>
           </>
@@ -612,8 +725,7 @@ export default function DigitalTwinPanel({
 
       <div className="mt-2 text-center">
         <p className="text-xs text-text-muted">
-          Simulasi SUMO — posisi kendaraan indikatif,
-          bukan video langsung
+          SUMO live · demand dari TrafficState dashboard
         </p>
 
         <p className="mt-1 text-[10px] text-text-muted">

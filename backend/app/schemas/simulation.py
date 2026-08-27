@@ -3,6 +3,29 @@ from __future__ import annotations
 from pydantic import BaseModel, Field
 
 
+class SimulationApproachDemand(BaseModel):
+    approach: str
+    targetVehicleCount: int = Field(ge=0)
+    motorcycleCount: int = Field(default=0, ge=0)
+    carCount: int = Field(default=0, ge=0)
+    busCount: int = Field(default=0, ge=0)
+    truckCount: int = Field(default=0, ge=0)
+
+
+class SimulationPhasePlan(BaseModel):
+    approach: str
+    greenSeconds: int = Field(ge=1)
+    yellowSeconds: int = Field(default=4, ge=1)
+
+
+class SimulationCyclePlan(BaseModel):
+    phases: list[SimulationPhasePlan] = Field(min_length=4, max_length=4)
+    candidateId: str | None = None
+    source: str = "rule-based"
+    totalCycleSeconds: int | None = Field(default=None, ge=0)
+    totalCycleSeconds: int | None = Field(default=None, ge=0)
+
+
 class SimulationRequest(BaseModel):
     intersectionId: str = Field(
         ...,
@@ -35,6 +58,12 @@ class SimulationRequest(BaseModel):
         default=42,
         description="Random seed untuk simulasi.",
     )
+
+    approaches: list[SimulationApproachDemand] | None = None
+
+    cyclePlan: SimulationCyclePlan | None = None
+
+    trafficTimestamp: str | None = None
 
 
 class SimulationResult(BaseModel):

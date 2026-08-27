@@ -7,7 +7,7 @@ async def stream_simulation(fps: int = 10):
     Generator yang membaca screenshot simulasi SUMO secara kontinu
     dan menghasilkan MJPEG stream.
     """
-    frame_path = Path("cache/simulation/frame.jpg")
+    frame_path = Path(__file__).resolve().parents[3] / "cache" / "simulation" / "frame.jpg"
     wait_time = 1.0 / fps
     
     last_mtime = 0

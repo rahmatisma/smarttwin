@@ -6,6 +6,7 @@ import threading
 import time
 import logging
 import os
+import subprocess
 from collections import defaultdict
 from pathlib import Path
 from typing import Any
@@ -44,6 +45,7 @@ class SumoController:
     PROJECT_ROOT = Path(__file__).resolve().parents[4]
 
     SIMULATION_DIR = PROJECT_ROOT / "simulation"
+    SIMULATION_VENV_DIR = SIMULATION_DIR / ".venv"
 
     # SENGAJA pakai sys.prefix (root venv Python yang lagi jalan),
     # BUKAN simulation/.venv -- backend/requirements.txt sudah
@@ -179,6 +181,20 @@ class SumoController:
         "west",
     }
 
+    CYCLE_ORDER = ("north", "east", "south", "west")
+    GREEN_STATE_BY_APPROACH = {
+        "south": "GGGggrrrrrrrrrrrrrrr",
+        "east": "rrrrrGGGggrrrrrrrrrr",
+        "north": "rrrrrrrrrrGGGggrrrrr",
+        "west": "rrrrrrrrrrrrrrrGGGgg",
+    }
+    YELLOW_STATE_BY_APPROACH = {
+        "south": "yyyyyrrrrrrrrrrrrrrr",
+        "east": "rrrrryyyyyrrrrrrrrrr",
+        "north": "rrrrrrrrrryyyyyrrrrr",
+        "west": "rrrrrrrrrrrrrrryyyyy",
+    }
+
     # ============================================================
     # INIT
     # ============================================================
@@ -288,6 +304,11 @@ class SumoController:
             str,
             str,
         ] = {}
+        self._vehicle_type: dict[str, str] = {}
+        self.detected_vehicle_count = 0
+        self.traffic_timestamp: str | None = None
+        self.active_cycle_plan: dict[str, Any] | None = None
+        self._last_screenshot_at = 0.0
 
         # --------------------------------------------------------
         # CURRENT DEMAND
@@ -322,6 +343,11 @@ class SumoController:
 
             cls.SUMO_BIN_DIR
             / "sumo.exe",
+
+            cls.SIMULATION_VENV_DIR / "Scripts" / "sumo.exe",
+
+            cls.SIMULATION_VENV_DIR
+            / "Lib" / "site-packages" / "sumo" / "bin" / "sumo.exe",
         ]
 
         for candidate in candidates:
@@ -347,6 +373,11 @@ class SumoController:
 
             cls.SUMO_BIN_DIR
             / "sumo-gui.exe",
+
+            cls.SIMULATION_VENV_DIR / "Scripts" / "sumo-gui.exe",
+
+            cls.SIMULATION_VENV_DIR
+            / "Lib" / "site-packages" / "sumo" / "bin" / "sumo-gui.exe",
         ]
 
         for candidate in candidates:
@@ -489,6 +520,12 @@ class SumoController:
                 ]
             )
 
+        if gui:
+            # Renderer SUMO-GUI tetap dipakai untuk screenshot TraCI, tetapi
+            # jendelanya ditempatkan di luar desktop. Frame hanya dikonsumsi
+            # oleh dashboard melalui endpoint stream.
+            command.extend(["--window-pos", "-10000,-10000", "--window-size", "800,800"])
+
         # ========================================================
         # PATH RESOLUTION & LOGGING
         # ========================================================
@@ -526,9 +563,25 @@ class SumoController:
             pass
             
         try:
-            traci.start(
-                command
-            )
+            if gui and os.name == "nt":
+                import traci.main as traci_main
+
+                original_popen = traci_main.subprocess.Popen
+
+                def hidden_popen(*args: Any, **kwargs: Any):
+                    startupinfo = subprocess.STARTUPINFO()
+                    startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                    startupinfo.wShowWindow = subprocess.SW_HIDE
+                    kwargs["startupinfo"] = startupinfo
+                    return original_popen(*args, **kwargs)
+
+                traci_main.subprocess.Popen = hidden_popen
+                try:
+                    traci.start(command)
+                finally:
+                    traci_main.subprocess.Popen = original_popen
+            else:
+                traci.start(command)
             logger.info("STEP 2: TraCI connected")
             
             tls_ids = traci.trafficlight.getIDList()
@@ -536,6 +589,11 @@ class SumoController:
             
             traci.simulationStep()
             logger.info("STEP 4: Simulation step successful")
+
+            if gui:
+                # Crop viewport tepat 100 meter dari pusat simpang pada
+                # keempat lengan (total bidang 200 x 200 meter).
+                traci.gui.setBoundary("View #0", 210.63, 419.01, 410.63, 619.01)
             
         except Exception as exc:
             logger.exception("Failed to start SUMO through TraCI")
@@ -804,6 +862,7 @@ class SumoController:
             self._vehicle_approach[
                 vehicle_id
             ] = approach
+            self._vehicle_type[vehicle_id] = vehicle_type
 
             self.spawned_total += 1
 
@@ -943,6 +1002,123 @@ class SumoController:
 
         return result
 
+    def sync_demand(
+        self,
+        demand: list[dict[str, Any]],
+        *,
+        traffic_timestamp: str | None = None,
+    ) -> dict[str, int]:
+        """Samakan kendaraan SmartTwin dengan snapshot deteksi terbaru.
+
+        Tidak pernah membuat demand dari route demo. Kendaraan yang berlebih
+        terhadap snapshot dihapus; kekurangan ditambahkan melalui TraCI.
+        """
+        if self.traci is None:
+            raise RuntimeError("SUMO belum dijalankan.")
+
+        added = 0
+        removed = 0
+        target_total = sum(
+            max(0, int(item.get("targetVehicleCount", 0) or 0))
+            for item in demand
+        )
+
+        with self._traci_lock:
+            for item in demand:
+                approach = str(item.get("approach", "")).lower().strip()
+                if approach not in self.VALID_APPROACHES:
+                    continue
+
+                target = max(0, int(item.get("targetVehicleCount", 0) or 0))
+                raw_counts = {
+                    "motorcycle": max(0, int(item.get("motorcycleCount", 0) or 0)),
+                    "car": max(0, int(item.get("carCount", 0) or 0)),
+                    "bus": max(0, int(item.get("busCount", 0) or 0)),
+                    "truck": max(0, int(item.get("truckCount", 0) or 0)),
+                }
+                raw_total = sum(raw_counts.values())
+                if target > 0 and raw_total == 0:
+                    raw_counts["car"] = target
+                    raw_total = target
+
+                # Alokasi kelas diskalakan agar jumlah persis densityIndex/card.
+                desired = {name: 0 for name in self.VEHICLE_TYPES}
+                remaining = target
+                if raw_total > 0:
+                    for name in list(desired)[:-1]:
+                        value = round(target * raw_counts[name] / raw_total)
+                        desired[name] = min(remaining, value)
+                        remaining -= desired[name]
+                    desired[list(desired)[-1]] = remaining
+
+                for vehicle_type, wanted in desired.items():
+                    existing = [
+                        vehicle_id
+                        for vehicle_id, vehicle_approach in self._vehicle_approach.items()
+                        if vehicle_approach == approach
+                        and self._vehicle_type.get(vehicle_id) == vehicle_type
+                    ]
+                    for vehicle_id in existing[wanted:]:
+                        try:
+                            self.traci.vehicle.remove(vehicle_id)
+                            self._vehicle_approach.pop(vehicle_id, None)
+                            self._vehicle_type.pop(vehicle_id, None)
+                            removed += 1
+                        except self.traci.TraCIException:
+                            pass
+                    for _ in range(max(0, wanted - len(existing))):
+                        if self.add_vehicle(vehicle_type=vehicle_type, approach=approach):
+                            added += 1
+
+                self.current_demand[approach] = desired
+
+            self.detected_vehicle_count = target_total
+            self.traffic_timestamp = traffic_timestamp
+
+        return {"added": added, "removed": removed, "total": target_total}
+
+    def apply_cycle_plan(self, cycle_plan: dict[str, Any]) -> None:
+        """Pasang siklus N-E-S-W sebagai program TLS nyata di TraCI."""
+        if self.traci is None:
+            raise RuntimeError("SUMO belum dijalankan.")
+
+        phase_by_approach = {
+            str(phase.get("approach", "")).lower(): phase
+            for phase in cycle_plan.get("phases", [])
+        }
+        if set(phase_by_approach) != set(self.CYCLE_ORDER):
+            raise ValueError("CyclePlan wajib berisi north, east, south, west.")
+
+        normalized_plan = {
+            **cycle_plan,
+            "phases": [phase_by_approach[name] for name in self.CYCLE_ORDER],
+        }
+        if self.active_cycle_plan == normalized_plan:
+            return
+
+        with self._traci_lock:
+            tls_ids = list(self.traci.trafficlight.getIDList())
+            if not tls_ids:
+                raise RuntimeError("Traffic light SUMO tidak ditemukan.")
+            tls_id = tls_ids[0]
+            phases = []
+            for approach in self.CYCLE_ORDER:
+                phase = phase_by_approach[approach]
+                green = max(1, int(phase.get("greenSeconds", 1)))
+                yellow = max(1, int(phase.get("yellowSeconds", 4)))
+                phases.append(self.traci.trafficlight.Phase(
+                    green, self.GREEN_STATE_BY_APPROACH[approach]
+                ))
+                phases.append(self.traci.trafficlight.Phase(
+                    yellow, self.YELLOW_STATE_BY_APPROACH[approach]
+                ))
+            program_id = "smarttwin-live"
+            logic = self.traci.trafficlight.Logic(program_id, 0, 0, phases=phases)
+            self.traci.trafficlight.setProgramLogic(tls_id, logic)
+            self.traci.trafficlight.setProgram(tls_id, program_id)
+            self.traci.trafficlight.setPhase(tls_id, 0)
+            self.active_cycle_plan = normalized_plan
+
     # ============================================================
     # SIMULATION LOOP
     # ============================================================
@@ -1044,6 +1220,7 @@ class SumoController:
                                     "unknown",
                                 )
                             )
+                            self._vehicle_type.pop(vehicle_id, None)
 
                             self.arrived_total[
                                 approach
@@ -1087,15 +1264,35 @@ class SumoController:
                             
                             remaining_seconds = max(0, next_switch - self.last_simulation_time)
                             
-                            # Determine dominant state (Red or Green, ignoring yellow as requested by user)
-                            dominant_state = "RED"
-                            if 'g' in state_str or 'G' in state_str:
-                                dominant_state = "GREEN"
+                            # Jangan menebak arah dari nomor index fase. Baca
+                            # raw state yang benar-benar sedang diterapkan SUMO
+                            # agar label dashboard dan lampu/jalur kendaraan
+                            # selalu menunjuk approach yang sama.
+                            active_approach = next(
+                                (
+                                    approach
+                                    for approach, value in self.GREEN_STATE_BY_APPROACH.items()
+                                    if value == state_str
+                                ),
+                                None,
+                            )
+                            phase_state = "GREEN"
+                            if active_approach is None:
+                                active_approach = next(
+                                    (
+                                        approach
+                                        for approach, value in self.YELLOW_STATE_BY_APPROACH.items()
+                                        if value == state_str
+                                    ),
+                                    self.CYCLE_ORDER[(phase // 2) % 4],
+                                )
+                                phase_state = "YELLOW"
                                 
                             current_signals_data.append({
                                 "trafficLightId": tls_id,
-                                "state": dominant_state,
+                                "state": phase_state,
                                 "phase": phase,
+                                "activeApproach": active_approach,
                                 "remainingSeconds": remaining_seconds,
                                 "rawState": state_str,
                             })
@@ -1107,9 +1304,12 @@ class SumoController:
                     # ==========================================
                     # SCREENSHOT (MJPEG STREAM)
                     # ==========================================
-                    if self.is_gui:
+                    if self.is_gui and time.monotonic() - self._last_screenshot_at >= 0.25:
                         try:
-                            self.traci.gui.screenshot("View #0", "cache/simulation/frame.jpg")
+                            frame_path = self.PROJECT_ROOT / "cache" / "simulation" / "frame.jpg"
+                            frame_path.parent.mkdir(parents=True, exist_ok=True)
+                            self.traci.gui.screenshot("View #0", str(frame_path))
+                            self._last_screenshot_at = time.monotonic()
                         except Exception:
                             pass
 
@@ -1523,6 +1723,7 @@ class SumoController:
         # ========================================================
 
         self._vehicle_approach.clear()
+        self._vehicle_type.clear()
 
         self.current_demand.clear()
 

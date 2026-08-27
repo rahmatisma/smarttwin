@@ -13,15 +13,12 @@ import {
 import type { ForecastResponse, TrafficState } from "@/types/traffic";
 
 function formatForecastData(data: ForecastResponse) {
-  return data.predictions.map((prediction) => {
-    const currentTime = new Date(prediction.timestamp);
-
+  return data.predictions.map((prediction, index) => {
     return {
-      horizonMinutes: Math.round(
-        (currentTime.getTime() -
-          new Date(data.predictions[0].timestamp).getTime()) /
-          60000
-      ),
+      // Endpoint menghasilkan 12 horizon berinterval lima detik.
+      // Memakai menit yang dibulatkan membuat hampir semua titik punya
+      // nilai X sama (0 atau 1), sehingga grafik tampak kosong/menumpuk.
+      horizonSeconds: (index + 1) * 5,
       predictedVehicleCount: prediction.predictedVehicleCount,
       predictedQueueLengthVeh:
         prediction.predictedQueueLengthVeh,
@@ -68,9 +65,7 @@ export default function ForecastChart({
             Traffic Forecast
           </h2>
 
-          <span className="text-xs text-text-muted">
-            kendaraan / 15 menit
-          </span>
+          <span className="text-xs text-text-muted">60 detik ke depan</span>
         </div>
 
         <div className="flex min-h-[160px] flex-1 items-center justify-center">
@@ -95,7 +90,7 @@ export default function ForecastChart({
     // To make a continuous line, the actual point is also the start of the prediction
     series = [
       {
-        horizonMinutes: 0,
+        horizonSeconds: 0,
         actualVehicleCount: currentVolume,
         predictedVehicleCount: currentVolume,
         predictedQueueLengthVeh: 0,
@@ -109,7 +104,7 @@ export default function ForecastChart({
   }
 
   const maxVehicle = Math.max(...series.map((s) => s.predictedVehicleCount));
-  const peakTime = series.find((s) => s.predictedVehicleCount === maxVehicle)?.horizonMinutes ?? 0;
+  const peakTime = series.find((s) => s.predictedVehicleCount === maxVehicle)?.horizonSeconds ?? 0;
   const maxQueue = Math.max(...series.map((s) => s.predictedQueueLengthMEst));
   const avgDensity = series.reduce((sum, s) => sum + s.predictedDensityIndex, 0) / (series.length || 1);
 
@@ -120,12 +115,12 @@ export default function ForecastChart({
           Traffic Forecast
         </h2>
 
-        <span className="text-xs text-text-muted">
-          kendaraan / 15 menit
-        </span>
+          <span className="text-xs text-text-muted">
+            {data.model} · 60 detik ke depan
+          </span>
       </div>
 
-      <div className="min-h-[160px] w-full flex-1">
+      <div className="h-[220px] w-full">
         <ResponsiveContainer width="100%" height="100%">
           <AreaChart
             data={series}
@@ -164,8 +159,11 @@ export default function ForecastChart({
             />
 
             <XAxis
-              dataKey="horizonMinutes"
-              tickFormatter={(m) => `+${m}m`}
+              dataKey="horizonSeconds"
+              type="number"
+              domain={[0, 60]}
+              ticks={[0, 10, 20, 30, 40, 50, 60]}
+              tickFormatter={(seconds) => `+${seconds}s`}
               tick={{
                 fill: "#5b6472",
                 fontSize: 11,
@@ -193,7 +191,7 @@ export default function ForecastChart({
                 borderRadius: 8,
                 fontSize: 12,
               }}
-              labelFormatter={(m) => `+${m} menit`}
+              labelFormatter={(seconds) => `+${seconds} detik`}
               formatter={(value, name) => [
                 `${value} kendaraan`,
                 name,
@@ -232,7 +230,7 @@ export default function ForecastChart({
           <div className="flex flex-col gap-2">
             <div className="flex items-center justify-between text-text-secondary">
               <span>Puncak Volume</span>
-              <span className="font-mono text-text">{maxVehicle} <span className="text-text-muted">(+{peakTime}m)</span></span>
+              <span className="font-mono text-text">{maxVehicle.toFixed(1)} <span className="text-text-muted">(+{peakTime}s)</span></span>
             </div>
             <div className="flex items-center justify-between text-text-secondary">
               <span>Antrean Terpanjang</span>
