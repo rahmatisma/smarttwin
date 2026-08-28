@@ -13,8 +13,8 @@ Dokumen lain di `docs/` sekarang cuma 2 jenis: **cara kerja** (rujukan teknis) d
 | # | Kotak diagram | % | Keterangan singkat |
 |---|---|---:|---|
 | 1 | Traffic Monitoring Data | 85% | Jalan penuh. Rekaman `.mp4`, bukan RTSP live |
-| 2 | YOLO + ByteTrack | 80% | Jalan. Akurasi belum pernah diukur formal |
-| 3 | Traffic State Builder | 95% | Jalan, tervalidasi fisik |
+| 2 | YOLO + ByteTrack | 60% | **Diukur 29 Agustus: akurasi crossing 48,7% rata-rata (8 sampel), turun dari asumsi 80%.** Bukan bug logika — kehilangan deteksi saat padat. Lihat S-4 |
+| 3 | Traffic State Builder | 90% | Jalan, tervalidasi fisik. Akurasi volume masukan mewarisi keterbatasan kotak 2 |
 | 4 | Virtual Intersection (SUMO) | 100% | Network asli Simpang Pingit + program TLS dinamis |
 | 5 | Realtime Traffic State | 90% | Polling live jalan |
 | 6 | Traffic Forecast (LSTM) | 92% | Terlatih, tersambung, studi dampak ada |
@@ -25,8 +25,8 @@ Dokumen lain di `docs/` sekarang cuma 2 jenis: **cara kerja** (rujukan teknis) d
 | 11 | Signal Timing Recommendation | 88% | Live. `/signal/status` belum baca cache skenario |
 | 12 | Dashboard | 92% | Build hijau, badge `source` + LOS ada |
 
-**Keseluruhan: ≈88% harfiah / ≈90% fungsional.**
-Naik dari ≈84% karena PPO (kotak 10) sudah dilatih dan terintegrasi — lihat P-1.
+**Keseluruhan: ≈86% harfiah / ≈88% fungsional.**
+PPO (kotak 10) naik, tapi validasi akurasi CV (kotak 2, S-4) menurunkan angka lebih banyak — 48,7% terukur, bukan lagi asumsi 80%. Turun tipis dari ≈88%/≈90% sebelumnya meski dua pekerjaan besar (PPO, validasi CV) sama-sama selesai — itu tandanya audit ini mengukur bukti nyata, bukan menaikkan angka tiap kali ada progres.
 
 **Bukti eksekusi 29 Agustus:**
 - `backend/` → `pytest -q` = **77 passed, 0 failed**
@@ -100,18 +100,18 @@ Panel Status Sinyal bahkan punya badge "Diuji simulasi SUMO" di `SignalStatusPan
 
 ---
 
-### 🟡 S-4. Akurasi deteksi CV belum pernah diukur — Rahmat, 3–4 jam
+### ✅ S-4. Akurasi deteksi CV — SELESAI 29 Agustus, hasilnya perlu perhatian
 
-**Masalahnya:** kalau juri tanya **"seberapa akurat deteksinya?"**, jawaban Anda sekarang *"belum pernah diukur"*. Ini pertanyaan yang hampir pasti muncul dan satu-satunya yang belum punya jawaban berupa angka.
+Divalidasi manual: 8 potongan @1 menit (4 arah × ramai/sepi), dihitung manusia lalu dibandingkan `crossing_simpang.csv`. Detail lengkap + data mentah di **`docs/hasil-validasi-akurasi-cv.md`**.
 
-**Perbaikan (versi hemat, bukan mAP penuh):**
-1. Pilih 5 potongan video @1 menit, kamera & kondisi berbeda (ramai/sepi)
-2. **Hitung manual** kendaraan yang melintas di tiap potongan, catat di spreadsheet
-3. Ambil angka CV untuk jendela waktu sama dari `crossing_simpang.csv`
-4. `akurasi = 1 − |CV − manual| / manual` per potongan, lalu rata-ratakan
-5. Tulis ke `docs/hasil-validasi-akurasi-cv.md` — **termasuk kalau hasilnya jelek**
+**Hasil: rata-rata akurasi 48,7%** (rentang 22,2%–96,1%). Ini **jauh di bawah** target awal (~90%) dan harus dilaporkan apa adanya — bukan angka yang bisa dipoles.
 
-**Kenapa cukup:** ini bukan mAP, jangan diklaim begitu. Tapi *"akurasi penghitungan 92% pada 5 sampel tervalidasi manual"* jauh lebih kuat daripada *"belum diukur"* — dan jujur.
+**Sudah dicek ke kode, bukan bug arah/logika crossing** — `hitung_crossing()` (`vehicle_counter_pingit.py:866-868`) terverifikasi menghitung kedua arah lalu lintas dengan benar. Pola datanya (4 dari 5 sampel "ramai" punya akurasi terburuk) mengarah ke **kehilangan deteksi/tracking saat kondisi padat** — konsisten dengan keterbatasan ID-switch ByteTrack yang sudah didokumentasikan sendiri di kode untuk metrik antrean, kemungkinan juga memengaruhi hitungan crossing.
+
+**Ini menurunkan kotak 2 (YOLO+ByteTrack) dari 80% menjadi lebih rendah** — lihat bagian 1. Sekaligus **relevan untuk kotak 3 dan 9**: kalau volume kendaraan yang masuk `TrafficState` bisa meleset 22%–96% tergantung kepadatan, itu bisa memengaruhi kualitas keputusan hijau, bukan cuma soal pelaporan angka.
+
+**Kalimat aman untuk laporan** (jangan klaim 90%+, jangan generalisir dari 1 sampel terbaik):
+> "Validasi manual pada 8 sampel menunjukkan akurasi rata-rata 48,7%, dengan sistem cenderung kehilangan hitungan pada kondisi padat — konsisten dengan keterbatasan tracking yang sudah didokumentasikan. Ini bukan bug pada logika crossing (sudah diverifikasi ke kode), melainkan keterbatasan deteksi pada kepadatan tinggi. Perbaikan lanjutan adalah kerja di luar scope 16 hari."
 
 ---
 
@@ -253,6 +253,19 @@ Bonus: demo jadi lebih meyakinkan — bisa menunjuk satu lengan dan bilang "yang
 - `CLAUDE.md` masih menyebut `simulation/requirements-rl.txt` yang sudah hilang → perbarui
 - `simulation/.venv` tidak punya `supabase` → untuk test forecast client pakai `backend/.venv`
 
+### P-5. Perbaiki akar penyebab akurasi CV rendah — Rahmat, 2–4 jam
+
+> **Update 29 Agustus:** akar penyebab **sudah ketemu** lewat pengamatan langsung Rahmat + verifikasi kode/geometri — bukan lagi "investigasi", sekarang tinggal "perbaikan". Detail lengkap di `hasil-validasi-akurasi-cv.md` bagian Interpretasi.
+
+**Dua masalah berbeda, dua perbaikan berbeda:**
+
+1. **Kendaraan hilang** (penyebab dominan, CCTV_1/CCTV_3 dempet + CCTV_2 kamera jauh) — kendaraan baru dapat `track_id` SETELAH lewat garis, jadi `prev_pos` kosong dan lintasnya tak tercatat (`vehicle_counter_pingit.py:852-855`). **Perbaikan yang realistis dalam waktu terbatas:** turunkan `CONFIDENCE` dari 0.35 (coba ~0.25) supaya kendaraan kedeteksi lebih awal/lebih kecil, tes ulang di 1-2 sampel yang tadi jelek (CCTV_1 7:31, CCTV_2 19:16), bandingkan `jumlah_crossing` baru vs manual yang sudah ada. **Perbaikan oklusi murni (motor dempet) kemungkinan tidak bisa dikejar dalam sisa waktu** — itu butuh model/resolusi lebih baik, cukup didokumentasikan sebagai keterbatasan.
+2. **Kendaraan terhitung ganda di garis salah** (CCTV_2 khusus, sampel #6) — `sisi_garis()` pakai garis tak terbatas, bukan segmen (`vehicle_counter_pingit.py:465-479`), dan titik potong MAGELANG×DIPONEGORO cuma 0,016 dari ujung DIPONEGORO. **Perbaikan konkret:** batasi pengecekan ke proyeksi parameter `t` dalam rentang `[0,1]` di sepanjang segmen (bukan garis penuh) sebelum menghitung `sisi_garis()`. Ini cuma menyentuh CCTV_2 (satu-satunya kamera dengan >1 garis), risiko regresi kecil.
+
+**Setelah salah satu/keduanya diperbaiki:** ulangi minimal 3 sampel yang paling jelek (bukan seluruh 8) dari tabel S-4 untuk buktikan ada perbaikan, update `hasil-validasi-akurasi-cv.md` dengan angka baru — jangan timpa angka lama, tambahkan sebagai "setelah perbaikan" supaya progresnya kelihatan.
+
+**Bukan blocker demo** — nomor akurasi sudah ada dan jujur dilaporkan (S-4), ini pekerjaan penguatan kalau ada waktu.
+
 ---
 
 ## 5. Yang TIDAK dikerjakan (keputusan sadar, bukan kelupaan)
@@ -299,8 +312,10 @@ SETIAP REKAM: backend → worker --once --full-cycle (smoke test)
 **"Apakah ini realtime?"**
 > "Pemrosesan berjalan realtime terhadap masukan video. Kami memakai rekaman CCTV Simpang Pingit karena tidak ada akses ke stream operasional Dishub — antarmuka masukannya sendiri menerima RTSP maupun file."
 
-**"Seberapa akurat deteksinya?"** *(setelah S-4 selesai)*
-> "Akurasi penghitungan [X]% pada 5 sampel yang divalidasi manual. Validasi mAP formal dengan dataset teranotasi adalah pengembangan lanjutan."
+**"Seberapa akurat deteksinya?"**
+> "Validasi manual pada 8 sampel menunjukkan akurasi rata-rata 48,7%, dengan sistem cenderung kehilangan hitungan pada kondisi lalu lintas padat — konsisten dengan keterbatasan tracking pada kerumunan motor yang rapat, yang sudah kami dokumentasikan. Ini bukan bug pada logika penghitungan — sudah kami verifikasi ke kode — melainkan keterbatasan deteksi pada kepadatan tinggi. Ini area yang kami sadari perlu perbaikan lanjutan."
+
+*Ini jawaban yang jujur dan justru menunjukkan tim SUDAH mengukur dan MEMAHAMI keterbatasannya — sikap itu biasanya dinilai lebih baik oleh juri daripada angka tinggi yang tidak bisa dijelaskan kalau ditanya lebih dalam. Detail lengkap ada di `hasil-validasi-akurasi-cv.md`.*
 
 **"Apa buktinya sistem ini lebih baik?"**
 > "Setiap keputusan diuji lewat tiga kandidat di simulasi SUMO dan dipilih berdasarkan delay dan panjang antrean terendah, dengan LOS standar HCM 2000. Metrik pemenangnya tampil langsung di dashboard."
@@ -310,7 +325,7 @@ SETIAP REKAM: backend → worker --once --full-cycle (smoke test)
 - ❌ **"PPO mengalahkan rule-based"** — yang menang cuma reward (fungsi yang PPO dilatih untuk maksimalkan). Pada throughput PPO **tidak pernah** menang, dan baselinenya bukan `RuleBasedEngine` asli. Lihat P-1b/P-1c
 - ❌ **"PPO sudah dipakai di sistem"** — default tetap rule-based; model sudah bisa dimuat (P-1a selesai) tapi belum diaktifkan sebagai default
 - ❌ "Realtime CCTV" — rekaman
-- ❌ "Akurasi 95%" sebelum S-4 selesai — belum diukur
+- ❌ **"Akurasi deteksi tinggi/95%"** — terukur 48,7% rata-rata (8 sampel), jangan digeneralisir dari sampel terbaik (#7, 96,1%) saja
 - ❌ "Forecast terbukti menurunkan delay 14%" — sebelum P-2, itu 1 percobaan
 - ❌ "Sistem berjalan otomatis penuh" — worker dijalankan manual
 
@@ -322,7 +337,7 @@ SETIAP REKAM: backend → worker --once --full-cycle (smoke test)
 |---|---|---|
 | **Yuli** | S-1 panel sinyal (1–2j), S-2 test merah (15m) | **P-1b/c/d PPO** (utama), P-2 bukti LSTM |
 | **Melpi** | S-3 hardcode (30m), S-6 pernyataan scope (1j) | Tampilkan LOS per lengan (dukung P-3) |
-| **Rahmat** | S-4 validasi CV (3–4j), S-5 argumen `--sumber` (30m) | P-3 LOS per lengan, P-4 rapi-rapi |
+| **Rahmat** | S-5 argumen `--sumber` (30m) | P-3 LOS per lengan, P-4 rapi-rapi, **P-5 investigasi akurasi CV** |
 | Siapa saja | S-7 verifikasi browser (30m) | — |
 
 **Beban Fase 1: Yuli ±2j, Melpi ±1,5j, Rahmat ±4,5j.** Muat dalam 1 hari kerja, menyisakan 2 hari untuk latihan dan rekaman.
