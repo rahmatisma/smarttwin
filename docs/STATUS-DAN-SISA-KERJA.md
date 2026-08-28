@@ -265,7 +265,14 @@ Bonus: demo jadi lebih meyakinkan — bisa menunjuk satu lengan dan bilang "yang
 
 **Kenapa dikembalikan, bukan diperdalam lebih jauh:** hasil campur/negatif pada bukti yang ada, dan investigasi lanjutan (kenapa MAGELANG regresi) akan makan waktu GPU + analisis lagi tanpa jaminan hasil, sementara tenggat 31 Agustus masih punya item wajib lain (S-5, latihan, rekaman). Keputusan sadar: **kode dikembalikan ke `git show 9387c13:cv/vehicle_counter_pingit.py`** (versi sebelum commit `82f63f1`), angka 48,7% dari S-4 tetap jadi laporan resmi.
 
-**Efek samping yang harus dibereskan:** dua kali proses ulang video (CCTV_1 & CCTV_2) otomatis meng-upload video anotasi ke HuggingFace **dengan path tetap** (`videos/simpang4-pingit/annotated/anotasi_CCTV_X.mp4`, lihat `hf_writer.py:58`) — artinya **menimpa video produksi asli**, bukan cuma menambah baris baru. Ini pola yang **sudah pernah terjadi 2× sebelumnya** (lihat riwayat commit HF: "Restore anotasi_CCTV_1.mp4 (accidentally overwritten by ...)", 23 & 25 Agustus). Dipulihkan dengan pola yang sama: download versi baik dari commit HF sebelumnya (`8cb05f945a...` untuk CCTV_1, `4005778a5...` untuk CCTV_2), upload ulang sebagai commit "Restore". 2 baris orphan di tabel Supabase `cameraVideos` (id yang dibuat proses test) juga dihapus.
+**✅ Efek samping sudah dibereskan.** Dua kali proses ulang video (CCTV_1 & CCTV_2) otomatis meng-upload video anotasi ke HuggingFace **dengan path tetap** (`videos/simpang4-pingit/annotated/anotasi_CCTV_X.mp4`, lihat `hf_writer.py:58`) — artinya **menimpa video produksi asli**, bukan cuma menambah baris baru. Ini pola yang **sudah pernah terjadi 2× sebelumnya** (lihat riwayat commit HF: "Restore anotasi_CCTV_1.mp4 (accidentally overwritten by ...)", 23 & 25 Agustus).
+
+Dipulihkan dengan pola yang sama persis:
+1. Download versi baik dari commit HF terakhir sebelum test (`8cb05f945a...` untuk CCTV_1, `4005778a5...` untuk CCTV_2)
+2. Upload ulang sebagai commit baru "Restore ... (accidentally overwritten by P-5 confidence-threshold test run)" — **terverifikasi** ukuran file kembali persis sama (260.974.538 & 261.868.146 byte, cocok dengan versi produksi asli)
+3. 2 baris orphan di tabel Supabase `cameraVideos` (id 41 & 42, dikonfirmasi dulu isinya sebelum dihapus — cocok waktu upload & ukuran dengan 2 test run) sudah dihapus
+
+Supabase dan HuggingFace sekarang bersih, tidak ada sisa dari eksperimen P-5.
 
 **⚠️ Untuk siapa pun yang menjalankan `vehicle_counter_pingit.py` untuk eksperimen ke depannya:** proses ini SELALU upload ke HuggingFace di akhir (bukan cuma tulis CSV lokal) kecuali kamera itu tidak terdaftar di `CAMERA_ID_MAP`. Backup lokal CSV **tidak cukup** — pertimbangkan juga risiko ke Supabase/HuggingFace. Lihat `cv/CATATAN.md`.
 
