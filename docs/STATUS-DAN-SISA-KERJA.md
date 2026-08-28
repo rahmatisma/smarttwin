@@ -259,16 +259,21 @@ Bonus: demo jadi lebih meyakinkan — bisa menunjuk satu lengan dan bilang "yang
 
 1. ✅ **SELESAI — Kendaraan terhitung ganda di garis salah** (CCTV_2, sampel #6). `sisi_garis()` dulu pakai garis tak terbatas, bukan segmen. **Diperbaiki:** fungsi baru `segmen_berpotongan()` di [`vehicle_counter_pingit.py:465-508`](../cv/vehicle_counter_pingit.py#L465-L508) — syarat interseksi segmen standar (2 kondisi, bukan cuma 1), dipakai di `hitung_crossing()` menggantikan pengecekan `sisi_garis()` langsung. **Terverifikasi lewat simulasi titik** (tidak butuh proses ulang video, karena ini bug logika murni): kasus kontaminasi lama (kendaraan dekat ujung DIPONEGORO memicu MAGELANG juga) sekarang **tidak lagi terpicu di keduanya**, sementara 3 kasus crossing sah (tengah segmen DIPONEGORO, tengah MAGELANG, tengah selatan CCTV_1) **tetap terdeteksi identik** seperti sebelumnya — tidak ada regresi.
 
-2. ❌ **DICOBA 29 Agustus, HIPOTESIS DITOLAK — jangan pakai `--conf` rendah.** Parameter `--conf` sudah ditambahkan di CLI dan diuji Rahmat di GPU-nya sendiri (`--kamera CCTV_1 --conf 0.25 --durasi 600`). Hasilnya **kebalikan dari dugaan**: `jumlah_crossing` justru turun, bukan naik.
+2. ❌ **DICOBA 29 Agustus, HIPOTESIS DITOLAK (dengan catatan metodologi) — jangan pakai `--conf` rendah.** Parameter `--conf` sudah ditambahkan di CLI dan diuji Rahmat di GPU-nya sendiri (`--kamera CCTV_1 --conf 0.25 --durasi 600`, cuma memproses 10 menit pertama video).
+
+   **Bukti yang benar-benar valid cuma 1 titik** — koreksi dari klaim awal yang sempat menyertakan "total 600 detik pertama" sebagai bukti tambahan. Itu salah: dari 600 detik yang diproses, cuma jendela sampel #1 (60 detik) yang punya hitungan manual sebagai pembanding. Membandingkan total agregat CV lawan CV tanpa hitungan manusia tidak membuktikan apa-apa (diam-diam berasumsi "angka lebih besar = lebih akurat", padahal belum tentu).
 
    | | conf=0.35 (default) | conf=0.25 (dicoba) |
    |---|---:|---:|
-   | Sampel #1 (manual=65) | 33 (50,8%) | **24 (36,9%)** — lebih buruk |
-   | Total 600 detik pertama, selatan | 131 | **83** — lebih buruk |
+   | Sampel #1 — 7:31–8:31 (manual=65, **satu-satunya bukti valid**) | 33 (50,8%) | **24 (36,9%)** — lebih buruk |
+
+   Sampel #2 (24:16–25:11) **tidak ikut ter-uji** — di luar cakupan 10 menit yang diproses, butuh `--durasi` lebih panjang (~1520 detik) kalau mau divalidasi.
 
    **Dugaan penyebab** (belum diverifikasi lebih jauh, sekadar hipotesis kerja): confidence lebih rendah membuat lebih banyak kotak deteksi tidak stabil muncul, yang kemungkinan mengacaukan pencocokan ByteTrack antar-frame alih-alih membantunya — track_id yang sah malah lebih sering putus tepat di momen kritis. Kalau benar, akar masalahnya ada di tracker, bukan di ambang confidence.
 
-   **Keputusan: `CONFIDENCE` default (0.35) DIPERTAHANKAN.** Parameter `--conf` tetap ada di CLI (berguna untuk eksperimen lanjutan), tapi jangan dipakai untuk produksi. File `cv/output/*.csv` sudah dipulihkan ke kondisi semula dari backup manual — **PENTING:** file-file ini (`crossing_simpang.csv`, `percobaan_logic_simpang.csv`, `snapshot_zona.csv`) ternyata **tidak ter-track git** (`.gitignore:53`, `cv/output/*.csv`), jadi `git checkout` TIDAK BISA memulihkannya kalau tertimpa — cadangan fisik (copy manual) adalah **satu-satunya** jalan pulih. Selalu backup manual dulu sebelum menjalankan ulang skrip CV ini.
+   **Keputusan: `CONFIDENCE` default (0.35) DIPERTAHANKAN** — berdasar 1 titik data yang valid, arahnya konsisten memburuk, tapi ini bukti tipis (n=1). Kalau ada waktu, uji ulang di jendela lain (mis. sampel #3/#5 yang paling jelek) sebelum menganggap kesimpulan ini final. Parameter `--conf` tetap ada di CLI untuk eksperimen lanjutan, tidak dipakai produksi.
+
+   File `cv/output/*.csv` sudah dipulihkan ke kondisi semula dari backup manual — **PENTING:** file-file ini (`crossing_simpang.csv`, `percobaan_logic_simpang.csv`, `snapshot_zona.csv`) ternyata **tidak ter-track git** (`.gitignore:53`, `cv/output/*.csv`), jadi `git checkout` TIDAK BISA memulihkannya kalau tertimpa — cadangan fisik (copy manual) adalah **satu-satunya** jalan pulih. Selalu backup manual dulu sebelum menjalankan ulang skrip CV ini.
 
    **Perbaikan oklusi murni (motor dempet) tetap belum terjawab** — kemungkinan butuh model/resolusi lebih baik atau perbaikan di sisi tracker (bukan confidence), di luar scope waktu 16 hari. Cukup didokumentasikan sebagai keterbatasan yang diketahui, dengan bukti bahwa satu percobaan perbaikan sudah dicoba dan hasilnya jujur dilaporkan.
 
