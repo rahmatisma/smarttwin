@@ -96,6 +96,28 @@ class LiveScenarioCacheService:
         if not isinstance(row.get("candidateId"), str) or not row["candidateId"]:
             return False
 
+        candidates = row.get("candidates")
+        # Format legacy tanpa candidates tetap valid untuk RecommendationService,
+        # tetapi endpoint Digital Twin akan menandainya unavailable.
+        if candidates is not None:
+            if not isinstance(candidates, list):
+                return False
+            ids = {item.get("candidateId") for item in candidates if isinstance(item, dict)}
+            if candidates and ids != {"baseline", "aggressive", "balanced"}:
+                return False
+            for candidate in candidates:
+                if not isinstance(candidate, dict):
+                    return False
+                for field in (
+                    "avgDelaySeconds", "avgQueueLengthM", "queueLengthVeh",
+                    "throughputVeh", "cycleLengthSeconds", "totalCycleSeconds",
+                ):
+                    if not isinstance(candidate.get(field), (int, float)) or candidate[field] < 0:
+                        return False
+                phases = candidate.get("phases")
+                if not isinstance(phases, list) or len(phases) != 4:
+                    return False
+
         cycle_plan = recommendation.get("cyclePlan")
         if cycle_plan is not None:
             if not isinstance(cycle_plan, dict):

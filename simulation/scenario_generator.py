@@ -530,7 +530,7 @@ class ScenarioEngine:
         self.last_cycle_plan = CyclePlan(
             phases=[ApproachPhase(**phase) for phase in winner["phases"]],
             cycleLengthSeconds=winner["cycleLengthSeconds"],
-            # Program dinamis selalu dipasang mulai index 0, yaitu west.
+            # Program dinamis selalu dipasang mulai index 0, yaitu north.
             currentPhase=FIXED_CYCLE_ORDER[0],
             source="scenario-generator",
             totalCycleSeconds=winner["totalCycleSeconds"],

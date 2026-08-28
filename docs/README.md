@@ -38,6 +38,7 @@ Dirapikan **28 Agustus 2026**. Sebelumnya ada 20 dokumen yang saling bertentanga
 - [`database.md`](database.md) — skema database. ⚠️ Ini draft awal dan **sebagian sudah terbukti salah** (lihat banner di atas filenya). Kalau butuh skema pasti, cek langsung ke Supabase
 
 **Frontend:**
+- [`KONTRAK-DIGITAL-TWIN-SCENARIOS.md`](KONTRAK-DIGITAL-TWIN-SCENARIOS.md) — endpoint tiga kandidat, mapping nama skenario, state UI, dan cara menjalankan kandidat terpilih di SUMO
 - [`kontrak-rekomendasi-scenario-generator.md`](kontrak-rekomendasi-scenario-generator.md) — arti tiap nilai `recommendation.source` dan kapan boleh menampilkan badge/metrik SUMO
 - [`audit-kontrak-scenario-result.md`](audit-kontrak-scenario-result.md) — pemetaan field kontrak vs payload runtime
 

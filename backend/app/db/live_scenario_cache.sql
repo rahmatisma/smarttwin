@@ -8,8 +8,13 @@ create table if not exists public."liveScenarioCache" (
   "avgQueueLengthM" double precision not null check ("avgQueueLengthM" >= 0),
   los text not null,
   "candidateId" text not null,
-  "throughputVeh" integer not null check ("throughputVeh" >= 0)
+  "throughputVeh" integer not null check ("throughputVeh" >= 0),
+  candidates jsonb not null default '[]'::jsonb
 );
+
+-- Aman dijalankan ulang pada tabel yang sudah dibuat sebelum kolom candidates.
+alter table public."liveScenarioCache"
+  add column if not exists candidates jsonb not null default '[]'::jsonb;
 
 comment on table public."liveScenarioCache" is
   'Cache terbaru dari simulation/scenario_worker.py untuk endpoint live. Baris basi diabaikan backend dan fallback ke rule-based.';

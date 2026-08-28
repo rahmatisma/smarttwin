@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 
@@ -23,7 +25,6 @@ class SimulationCyclePlan(BaseModel):
     candidateId: str | None = None
     source: str = "rule-based"
     totalCycleSeconds: int | None = Field(default=None, ge=0)
-    totalCycleSeconds: int | None = Field(default=None, ge=0)
 
 
 class SimulationRequest(BaseModel):
@@ -37,7 +38,7 @@ class SimulationRequest(BaseModel):
         description="ID traffic state. Jika null, gunakan traffic state terbaru.",
     )
 
-    scenario: str = Field(
+    scenario: Literal["Traffic Realtime", "Baseline", "Aggressive", "Balanced"] = Field(
         default="Baseline",
         description="Scenario yang digunakan untuk simulasi (Baseline, Aggressive, Balanced).",
     )

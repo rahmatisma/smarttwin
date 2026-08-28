@@ -80,17 +80,30 @@ def evaluate_state(state, *, forecast=None, full_cycle: bool = False) -> dict[st
 
 
 def write_cache(supabase, payload: dict[str, Any]) -> None:
-    # ``candidates`` disimpan di artefak studi, bukan tabel live yang hanya
-    # memerlukan pemenang terbaru.
-    cache_payload = {
-        key: value for key, value in payload.items()
-        if key != "candidates"
-    }
-    (
-        supabase.table(CACHE_TABLE)
-        .upsert(cache_payload, on_conflict="intersectionId")
-        .execute()
-    )
+    # Simpan ketiga hasil agar Digital Twin tidak menghitung logic sendiri.
+    # Retry legacy menjaga worker tetap hidup bila migrasi kolom `candidates`
+    # belum dijalankan; endpoint akan mengembalikan candidates=[] secara jujur.
+    try:
+        (
+            supabase.table(CACHE_TABLE)
+            .upsert(payload, on_conflict="intersectionId")
+            .execute()
+        )
+    except Exception as exc:
+        legacy_payload = {
+            key: value for key, value in payload.items()
+            if key != "candidates"
+        }
+        print(
+            "[WARN] Kolom liveScenarioCache.candidates belum tersedia; "
+            "menulis format legacy. Jalankan backend/app/db/live_scenario_cache.sql. "
+            f"Detail: {exc}"
+        )
+        (
+            supabase.table(CACHE_TABLE)
+            .upsert(legacy_payload, on_conflict="intersectionId")
+            .execute()
+        )
 
 
 def evaluate_once(supabase, *, full_cycle: bool = False) -> dict[str, Any]:
@@ -229,8 +242,16 @@ def main() -> int:
     parser.add_argument("--compare-forecast", action="store_true")
     parser.add_argument(
         "--full-cycle",
+        dest="full_cycle",
         action="store_true",
-        help="Uji tiga program CyclePlan empat lengan (jalur baru opt-in).",
+        default=True,
+        help="Uji tiga program CyclePlan empat lengan (default).",
+    )
+    parser.add_argument(
+        "--single-phase",
+        dest="full_cycle",
+        action="store_false",
+        help="Mode studi lama satu fase; jangan dipakai untuk halaman Digital Twin.",
     )
     parser.add_argument(
         "--comparison-output",
