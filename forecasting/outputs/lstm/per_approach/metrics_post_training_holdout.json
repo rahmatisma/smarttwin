@@ -1,0 +1,145 @@
+{
+  "overall": {
+    "mae": 1.6714762449264526,
+    "mse": 9.82030963897705,
+    "rmse": 3.1337373276930935,
+    "featureMae": {
+      "vehicleCount": 1.268905520439148,
+      "queueLengthVeh": 1.20674729347229,
+      "queueLengthMEst": 4.163600444793701,
+      "densityIndex": 0.046653762459754944
+    }
+  },
+  "naiveBaseline": {
+    "mae": 2.0563089847564697,
+    "mse": 18.53617286682129,
+    "rmse": 4.305365590379206,
+    "featureMae": {
+      "vehicleCount": 1.8090986013412476,
+      "queueLengthVeh": 1.4715702533721924,
+      "queueLengthMEst": 4.893495082855225,
+      "densityIndex": 0.05106421187520027
+    }
+  },
+  "byApproach": {
+    "west": {
+      "mae": 2.5391597747802734,
+      "mse": 21.964181900024414,
+      "rmse": 4.686595982162791,
+      "featureMae": {
+        "vehicleCount": 1.3674209117889404,
+        "queueLengthVeh": 1.4753154516220093,
+        "queueLengthMEst": 7.270242691040039,
+        "densityIndex": 0.043659698218107224
+      },
+      "naiveBaseline": {
+        "mae": 3.0659680366516113,
+        "mse": 39.62726974487305,
+        "rmse": 6.295019439594531,
+        "featureMae": {
+          "vehicleCount": 1.9863945245742798,
+          "queueLengthVeh": 1.8352607488632202,
+          "queueLengthMEst": 8.389908790588379,
+          "densityIndex": 0.052298493683338165
+        }
+      },
+      "beatsNaiveBaseline": true,
+      "samples": 49
+    },
+    "south": {
+      "mae": 1.9031742811203003,
+      "mse": 10.948912620544434,
+      "rmse": 3.3089141150148387,
+      "featureMae": {
+        "vehicleCount": 0.7970194220542908,
+        "queueLengthVeh": 2.231879234313965,
+        "queueLengthMEst": 4.501915454864502,
+        "densityIndex": 0.08188463002443314
+      },
+      "naiveBaseline": {
+        "mae": 2.8724722862243652,
+        "mse": 26.6603946685791,
+        "rmse": 5.163370475627243,
+        "featureMae": {
+          "vehicleCount": 1.0816326141357422,
+          "queueLengthVeh": 2.974886655807495,
+          "queueLengthMEst": 7.343140602111816,
+          "densityIndex": 0.09022881090641022
+        }
+      },
+      "beatsNaiveBaseline": true,
+      "samples": 49
+    },
+    "east": {
+      "mae": 1.2502473592758179,
+      "mse": 3.8165276050567627,
+      "rmse": 1.9535935107019482,
+      "featureMae": {
+        "vehicleCount": 1.4509845972061157,
+        "queueLengthVeh": 0.5755664706230164,
+        "queueLengthMEst": 2.9446091651916504,
+        "densityIndex": 0.029828736558556557
+      },
+      "naiveBaseline": {
+        "mae": 1.1807869672775269,
+        "mse": 3.835456609725952,
+        "rmse": 1.95843218154879,
+        "featureMae": {
+          "vehicleCount": 2.3333332538604736,
+          "queueLengthVeh": 0.5387188196182251,
+          "queueLengthMEst": 1.8256802558898926,
+          "densityIndex": 0.025414003059267998
+        }
+      },
+      "beatsNaiveBaseline": false,
+      "samples": 49
+    },
+    "north": {
+      "mae": 0.9933249950408936,
+      "mse": 2.5516395568847656,
+      "rmse": 1.5973852249488116,
+      "featureMae": {
+        "vehicleCount": 1.4601970911026,
+        "queueLengthVeh": 0.5442278385162354,
+        "queueLengthMEst": 1.9376338720321655,
+        "densityIndex": 0.03124198131263256
+      },
+      "naiveBaseline": {
+        "mae": 1.1060036420822144,
+        "mse": 4.021701335906982,
+        "rmse": 2.005417995308455,
+        "featureMae": {
+          "vehicleCount": 1.8350340127944946,
+          "queueLengthVeh": 0.5374149680137634,
+          "queueLengthMEst": 2.015249252319336,
+          "densityIndex": 0.03631553426384926
+        }
+      },
+      "beatsNaiveBaseline": true,
+      "samples": 49
+    }
+  },
+  "beatsNaiveBaseline": true,
+  "evaluationScope": "post-training-holdout",
+  "independentTest": false,
+  "disclosure": "Gabungan validation+test setelah batas train 70%. Validation pernah dipakai untuk early stopping; gunakan sebagai robustness evidence, bukan estimasi generalisasi independent.",
+  "rows": 648,
+  "sequences": 196,
+  "rejectedGapSequences": 360,
+  "sequenceComparison": {
+    "sequences": 196,
+    "lstmWins": 114,
+    "naiveWins": 82,
+    "ties": 0,
+    "lstmWinRatePercent": 58.16326530612245,
+    "meanSequenceMaeLstm": 1.6714767217636108,
+    "meanSequenceMaeNaive": 2.056306838989258
+  },
+  "trafficFeatures": [
+    "vehicleCount",
+    "queueLengthVeh",
+    "queueLengthMEst",
+    "densityIndex"
+  ],
+  "device": "cpu"
+}

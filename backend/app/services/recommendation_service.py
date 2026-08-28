@@ -180,13 +180,6 @@ class RecommendationService:
                 engine_result.confidence = float(cached_payload.get("confidence", 0.5))
                 engine_result.reason = str(cached_payload.get("reason", ""))
                 engine_result.source = "scenario-generator"
-                cached_cycle = cached_payload.get("cyclePlan")
-                if isinstance(cached_cycle, dict):
-                    # Jalur full-cycle worker sudah diuji sebagai satu program
-                    # SUMO utuh. Gunakan plan itu agar recommendation dan panel
-                    # siklus tidak membawa dua keputusan berbeda.
-                    cycle_plan = CyclePlanSchema(**cached_cycle)
-                    cycle_plan.source = "scenario-generator"
                 selected_approach = next(
                     (
                         app for app in traffic_state.approaches

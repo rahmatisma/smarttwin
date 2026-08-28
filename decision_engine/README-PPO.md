@@ -72,9 +72,9 @@ Sudah tersedia:
 - script training dan penyimpanan checkpoint;
 - script evaluasi PPO melawan baseline pada seed sama.
 
-Checkpoint final belum disertakan karena harus dilatih dan lolos evaluasi pada
-mesin tim. Panduan operasional paling lengkap ada di
-`README-PPO-UNTUK-TIM.md`.
+Checkpoint eksperimen tersedia, tetapi default produksi tetap `rule-based` dan
+checkpoint baru hanya boleh diaktifkan setelah lolos quality gate. Panduan
+operasional paling lengkap ada di `README-PPO-UNTUK-TIM.md`.
 
 ## 4. Observation dan action contract
 
@@ -92,9 +92,10 @@ Total traffic: `4 x 5 = 20`, ditambah one-hot fase aktif `4`, dan green-time
 aktif `1`, sehingga total `25`.
 
 Jika forecast tersedia, state diproyeksikan memakai 70% state aktual dan 30%
-forecast LSTM sebelum dibentuk menjadi observation. Kontrak ini ada di
-`PPOEngine.build_observation()` dan tidak boleh diubah setelah checkpoint
-dilatih tanpa retraining.
+forecast LSTM sebelum dibentuk menjadi observation. Normalisasi tunggal berada
+di `ppo_features.py` dan dipakai bersama oleh environment training dan
+`PPOEngine` inference. Kontrak ini tidak boleh diubah setelah checkpoint dilatih
+tanpa retraining.
 
 ### Action: fase + empat green-time
 
@@ -217,25 +218,22 @@ Ketentuan penting:
 
 ## 9. Reward: apa yang dihargai dan dihukum?
 
-Reward awal yang sederhana:
+Reward aktif versi 2 menjadikan throughput komponen terbesar:
 
 ```text
-reward = -(
-    0.45 * normalized_delay
-  + 0.35 * normalized_queue
-  + 0.15 * normalized_waiting_time
-  + 0.05 * phase_change_penalty
-) + 0.10 * normalized_throughput
+reward = +0.45 * throughput_norm
+         -0.35 * queue_norm
+         -0.20 * wait_norm
+         -starvation_penalty
 ```
 
-Tambahkan penalti besar untuk action invalid dan starvation. Semua metrik harus
-dinormalisasi terhadap run rule-based dengan snapshot/seed sama:
+Starvation diberi penalti terpisah. Komponen environment dinormalisasi dengan
+batas operasional berikut:
 
 ```text
-normalized_delay      = ppo_delay / max(rule_delay, 1)
-normalized_queue      = ppo_queue / max(rule_queue, 1)
-normalized_waiting    = ppo_waiting / max(rule_waiting, 1)
-normalized_throughput = ppo_throughput / max(rule_throughput, 1)
+queue_norm      = min(queue_vehicle / 40, 1)
+wait_norm       = min(total_wait / (vehicle_aktif * 120), 1)
+throughput_norm = min(vehicle_tiba_dalam_interval / 15, 1)
 ```
 
 Reward ini titik awal, bukan formula optimum. SUMO-RL memakai perubahan total

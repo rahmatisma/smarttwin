@@ -39,6 +39,41 @@ class _ForecastStub:
         return self.result
 
 
+class _ScenarioCacheStub:
+    def __init__(self, row):
+        self.row = row
+
+    def get_fresh(self, _intersection_id):
+        return self.row
+
+
+def _scenario_cache_row():
+    greens = {"north": 31, "east": 26, "south": 41, "west": 21}
+    green_cycle = sum(greens.values())
+    total_cycle = green_cycle + 4 * YELLOW_SECONDS
+    return {
+        "intersectionId": "simpang4-pingit",
+        "recommendation": {
+            "cyclePlan": {
+                "phases": [
+                    {
+                        "approach": approach,
+                        "greenSeconds": green,
+                        "demandScore": 0.5,
+                        "yellowSeconds": YELLOW_SECONDS,
+                        "redSeconds": total_cycle - green - YELLOW_SECONDS,
+                    }
+                    for approach, green in greens.items()
+                ],
+                "cycleLengthSeconds": green_cycle,
+                "totalCycleSeconds": total_cycle,
+                "currentPhase": "north",
+                "source": "scenario-generator",
+            }
+        },
+    }
+
+
 def _service_with_fixed_green(seconds: int) -> SignalService:
     """
     SignalService dengan _recompute_cycle_plan() DIPATCH supaya semua
@@ -70,14 +105,14 @@ def _service_with_fixed_green(seconds: int) -> SignalService:
     return service
 
 
-def test_first_call_starts_at_first_cycle_order_with_default_green():
+def test_first_call_starts_at_first_cycle_order_with_cycle_plan_green():
     service = _service_with_fixed_green(30)
     t0 = datetime(2026, 8, 26, 8, 0, 0, tzinfo=timezone.utc)
 
     status = service.get_live_status(now=t0)
 
     assert status.currentPhase == FIXED_CYCLE_ORDER[0]
-    assert status.remainingSeconds == DEFAULT_GREEN_SECONDS + YELLOW_SECONDS
+    assert status.remainingSeconds == 30 + YELLOW_SECONDS
 
 
 def test_stays_on_same_phase_before_elapsed():
@@ -90,9 +125,7 @@ def test_stays_on_same_phase_before_elapsed():
     )
 
     assert status.currentPhase == FIXED_CYCLE_ORDER[0]
-    assert status.remainingSeconds == (
-        DEFAULT_GREEN_SECONDS + YELLOW_SECONDS - 10
-    )
+    assert status.remainingSeconds == 30 + YELLOW_SECONDS - 10
 
 
 def test_advances_to_next_phase_after_elapsed():
@@ -101,7 +134,7 @@ def test_advances_to_next_phase_after_elapsed():
 
     service.get_live_status(now=t0)
 
-    first_phase_total = DEFAULT_GREEN_SECONDS + YELLOW_SECONDS
+    first_phase_total = 30 + YELLOW_SECONDS
     status = service.get_live_status(
         now=t0 + timedelta(seconds=first_phase_total + 1)
     )
@@ -118,7 +151,7 @@ def test_skips_multiple_overdue_phases_without_getting_stuck():
 
     service.get_live_status(now=t0)
 
-    first_phase_total = DEFAULT_GREEN_SECONDS + YELLOW_SECONDS
+    first_phase_total = 10 + YELLOW_SECONDS
     later_phase_total = 10 + YELLOW_SECONDS
 
     # Lewati fase 1 penuh + 2 fase later_phase_total penuh + 3 detik
@@ -139,7 +172,7 @@ def test_wraps_around_after_last_approach():
 
     service.get_live_status(now=t0)
 
-    first_phase_total = DEFAULT_GREEN_SECONDS + YELLOW_SECONDS
+    first_phase_total = 10 + YELLOW_SECONDS
     later_phase_total = 10 + YELLOW_SECONDS
 
     # Lewati semua 4 fase penuh -- harus balik ke fase pertama lagi.
@@ -163,7 +196,7 @@ def test_phases_dict_only_marks_active_approach_green():
     for approach_name, phase in status.phases.items():
         if approach_name == active:
             assert phase.state == "green"
-            assert phase.durationSeconds == DEFAULT_GREEN_SECONDS
+            assert phase.durationSeconds == 30
         else:
             # Lengan lain BUKAN 0 lagi -- harus angka asli dari cycle
             # plan yang sama (di sini di-patch tetap 30), supaya
@@ -195,12 +228,6 @@ def test_get_cycle_plan_matches_phases_shown_in_live_status():
     plan_by_approach = {p.approach: p.greenSeconds for p in plan.phases}
 
     for approach_name, phase in status.phases.items():
-        if approach_name == status.currentPhase:
-            # Fase aktif pakai DEFAULT_GREEN_SECONDS (bootstrap),
-            # bukan nilai cycle plan -- itu memang beda secara
-            # desain (lihat komentar di SignalService).
-            continue
-
         assert phase.durationSeconds == plan_by_approach[approach_name]
 
 
@@ -254,3 +281,62 @@ def test_recompute_cycle_plan_falls_back_when_forecast_fails():
     plan = service._recompute_cycle_plan("north")
 
     assert plan.source == "rule-based"
+
+
+def test_recompute_cycle_plan_uses_fresh_scenario_cache_for_both_panels():
+    service = SignalService(
+        traffic_service=_TrafficHistoryStub([]),
+        forecast_service=_ForecastStub(),
+        cache_service=_ScenarioCacheStub(_scenario_cache_row()),
+    )
+
+    plan = service._recompute_cycle_plan("east")
+    status = service.get_live_status(
+        now=datetime(2026, 8, 29, 8, 0, 0, tzinfo=timezone.utc)
+    )
+
+    assert plan.source == "scenario-generator"
+    assert plan.currentPhase == "east"
+    assert {phase.approach: phase.greenSeconds for phase in plan.phases} == {
+        "north": 31, "east": 26, "south": 41, "west": 21
+    }
+    assert status.source == "scenario-generator"
+    assert status.phases["north"].durationSeconds == 31
+    assert service.get_cycle_plan().source == "scenario-generator"
+
+
+def test_recompute_cycle_plan_uses_existing_fallback_when_cache_is_stale():
+    service = SignalService(
+        traffic_service=_TrafficHistoryStub([]),
+        forecast_service=_ForecastStub(),
+        # LiveScenarioCacheService merepresentasikan cache basi sebagai None.
+        cache_service=_ScenarioCacheStub(None),
+    )
+
+    plan = service._recompute_cycle_plan("north")
+    status = service.get_live_status(
+        now=datetime(2026, 8, 29, 8, 0, 0, tzinfo=timezone.utc)
+    )
+
+    assert plan.source == "rule-based"
+    assert all(phase.greenSeconds == DEFAULT_GREEN_SECONDS for phase in plan.phases)
+    assert status.source == "rule-based"
+    assert service.get_cycle_plan().source == "rule-based"
+
+
+def test_live_panels_return_to_fallback_when_scenario_cache_expires():
+    cache = _ScenarioCacheStub(_scenario_cache_row())
+    service = SignalService(
+        traffic_service=_TrafficHistoryStub([]),
+        forecast_service=_ForecastStub(),
+        cache_service=cache,
+    )
+    t0 = datetime(2026, 8, 29, 8, 0, 0, tzinfo=timezone.utc)
+
+    assert service.get_live_status(now=t0).source == "scenario-generator"
+    assert service.get_cycle_plan().source == "scenario-generator"
+
+    # LiveScenarioCacheService mengubah cache >120 detik menjadi cache miss.
+    cache.row = None
+    assert service.get_live_status(now=t0 + timedelta(seconds=5)).source == "rule-based"
+    assert service.get_cycle_plan().source == "rule-based"

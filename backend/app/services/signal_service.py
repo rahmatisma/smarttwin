@@ -16,6 +16,10 @@ from app.services.per_approach_forecast_service import (
     PerApproachForecastService,
     per_approach_forecast_service,
 )
+from app.services.live_scenario_cache_service import (
+    LiveScenarioCacheService,
+    live_scenario_cache_service,
+)
 
 project_root = str(Path(__file__).resolve().parents[3])
 if project_root not in sys.path:
@@ -34,10 +38,9 @@ INTERSECTION_ID = "simpang4-pingit"
 FORECAST_HISTORY_LIMIT = 24
 FORECAST_WEIGHT = 0.3
 
-# Baseline dunia nyata Simpang Pingit (dicari manual, bukan dari
-# formula MIN/MAX_GREEN_SECONDS RuleBasedEngine) -- CUMA dipakai
-# untuk fase PERTAMA sebelum ada rekomendasi sama sekali. Fase
-# berikutnya selalu pakai hasil recommend_cycle() yang adaptif.
+# Baseline dunia nyata Simpang Pingit ketika belum ada TrafficState maupun
+# full-cycle Scenario Generator. Begitu plan tersedia, fase pertama juga memakai
+# durasi plan agar panel Rekomendasi dan Status Sinyal tidak berbeda.
 DEFAULT_GREEN_SECONDS = 50
 
 # Tengah rentang 3-5 detik yang jadi acuan.
@@ -71,6 +74,7 @@ class SignalService:
         self,
         traffic_service: Optional[TrafficService] = None,
         forecast_service: Optional[PerApproachForecastService] = None,
+        cache_service: Optional[LiveScenarioCacheService] = None,
     ) -> None:
 
         self.traffic_service = (
@@ -81,6 +85,7 @@ class SignalService:
 
         self.engine = create_decision_engine()
         self.forecast_service = forecast_service or per_approach_forecast_service
+        self.cache_service = cache_service or live_scenario_cache_service
 
         self._lock = threading.Lock()
 
@@ -204,9 +209,54 @@ class SignalService:
             ],
         )
 
+    def _scenario_cycle_plan(self, active_approach: str) -> CyclePlan | None:
+        """Ambil full-cycle worker yang masih segar; cache miss berarti None."""
+        cached = self.cache_service.get_fresh(INTERSECTION_ID)
+        cached_recommendation = (
+            cached.get("recommendation") if isinstance(cached, dict) else None
+        )
+        cached_cycle = (
+            cached_recommendation.get("cyclePlan")
+            if isinstance(cached_recommendation, dict)
+            else None
+        )
+        if not isinstance(cached_cycle, dict):
+            return None
+        try:
+            phases = [
+                ApproachPhase(
+                    approach=phase["approach"],
+                    greenSeconds=int(phase["greenSeconds"]),
+                    demandScore=float(phase.get("demandScore", 0.0)),
+                    yellowSeconds=int(phase.get("yellowSeconds", YELLOW_SECONDS)),
+                    redSeconds=int(phase.get("redSeconds", 0)),
+                )
+                for phase in cached_cycle["phases"]
+            ]
+            return CyclePlan(
+                phases=phases,
+                cycleLengthSeconds=int(cached_cycle["cycleLengthSeconds"]),
+                currentPhase=active_approach,
+                source="scenario-generator",
+                totalCycleSeconds=int(
+                    cached_cycle.get(
+                        "totalCycleSeconds",
+                        sum(phase.greenSeconds + phase.yellowSeconds for phase in phases),
+                    )
+                ),
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            logger.warning(
+                "CyclePlan Scenario Generator tidak valid, pakai fallback: %s",
+                exc,
+            )
+            return None
+
     def _recompute_cycle_plan(
         self,
         active_approach: str,
+        *,
+        check_scenario_cache: bool = True,
     ) -> CyclePlan:
         """
         Hitung ULANG rencana ke-4 lengan sekaligus (recommend_cycle())
@@ -221,6 +271,16 @@ class SignalService:
         menangani kasus kosong secara khusus, sama seperti fallback
         di RecommendationService.
         """
+
+        # SSOT untuk kedua panel: bila worker Scenario Generator menghasilkan
+        # full-cycle yang masih segar, gunakan plan hasil simulasi itu langsung.
+        # Cache miss/basi/rusak tidak melempar error dan jatuh ke jalur engine
+        # lama di bawah.
+        if check_scenario_cache:
+            scenario_plan = self._scenario_cycle_plan(active_approach)
+            if scenario_plan is not None:
+                self._cycle_plan = scenario_plan
+                return scenario_plan
 
         history = self._fetch_traffic_history()
         state = self._traffic_state_from_record(history[0]) if history else None
@@ -281,11 +341,18 @@ class SignalService:
         """
 
         with self._lock:
-
-            if self._cycle_plan is None:
-
+            active_approach = FIXED_CYCLE_ORDER[self._phase_index]
+            scenario_plan = self._scenario_cycle_plan(active_approach)
+            if scenario_plan is not None:
+                self._cycle_plan = scenario_plan
+            elif (
+                self._cycle_plan is None
+                or self._cycle_plan.source == "scenario-generator"
+            ):
+                # Cache baru saja basi/hilang: segera pulihkan engine lama.
                 self._recompute_cycle_plan(
-                    FIXED_CYCLE_ORDER[self._phase_index]
+                    active_approach,
+                    check_scenario_cache=False,
                 )
 
             return self._cycle_plan
@@ -299,6 +366,20 @@ class SignalService:
 
         with self._lock:
 
+            if self._phase_started_at is not None:
+                active_approach = FIXED_CYCLE_ORDER[self._phase_index]
+                scenario_plan = self._scenario_cycle_plan(active_approach)
+                if scenario_plan is not None:
+                    self._cycle_plan = scenario_plan
+                elif (
+                    self._cycle_plan is not None
+                    and self._cycle_plan.source == "scenario-generator"
+                ):
+                    self._recompute_cycle_plan(
+                        active_approach,
+                        check_scenario_cache=False,
+                    )
+
             if self._phase_started_at is None:
                 # Fase pertama sejak backend nyala -- belum ada
                 # rekomendasi buat lengan AKTIF ini, pakai baseline
@@ -307,9 +388,16 @@ class SignalService:
                 # angka asli sejak awal (bukan nunggu transisi
                 # pertama).
                 self._phase_index = 0
-                self._phase_green_seconds = DEFAULT_GREEN_SECONDS
                 self._phase_started_at = current_time
-                self._recompute_cycle_plan(FIXED_CYCLE_ORDER[0])
+                initial_plan = self._recompute_cycle_plan(FIXED_CYCLE_ORDER[0])
+                self._phase_green_seconds = next(
+                    (
+                        phase.greenSeconds
+                        for phase in initial_plan.phases
+                        if phase.approach == FIXED_CYCLE_ORDER[0]
+                    ),
+                    DEFAULT_GREEN_SECONDS,
+                )
 
             phase_total_seconds = (
                 self._phase_green_seconds + YELLOW_SECONDS
@@ -408,7 +496,11 @@ class SignalService:
                 nextPhaseName=APPROACH_PHASE_NAMES.get(
                     next_approach, next_approach
                 ),
-                source="rule-based",
+                source=(
+                    self._cycle_plan.source
+                    if self._cycle_plan is not None
+                    else "rule-based"
+                ),
             )
 
 

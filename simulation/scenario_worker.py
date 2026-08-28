@@ -33,19 +33,22 @@ INTERSECTION_ID = "simpang4-pingit"
 CACHE_TABLE = "liveScenarioCache"
 
 
-def _make_engine() -> ScenarioEngine:
+def _make_engine(short_sim_steps: int | None = None) -> ScenarioEngine:
+    options = {"short_sim_steps": short_sim_steps} if short_sim_steps is not None else {}
     return ScenarioEngine(
         sumo_binary=sumoBinary,
         sumo_config=sumoConfig,
         tls_id=tlsId,
         approach_to_phase=approachToPhase,
         run_simulation_fn=runSimulation,
+        **options,
     )
 
 
-def evaluate_state(state, *, forecast=None, full_cycle: bool = False) -> dict[str, Any]:
+def evaluate_state(state, *, forecast=None, full_cycle: bool = False,
+                   simulation_steps: int | None = None) -> dict[str, Any]:
     """Evaluasi satu state; fungsi ini tidak menyentuh cache/database."""
-    engine = _make_engine()
+    engine = _make_engine(simulation_steps)
     recommend_method = (
         engine.recommend_full_cycle if full_cycle else engine.recommend
     )
