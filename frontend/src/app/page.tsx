@@ -14,6 +14,7 @@ import {
   fetchTrafficState,
   fetchSignalStatus,
   fetchRecommendation,
+  fetchDigitalTwinScenarios,
   fetchForecast,
   fetchIntersectionCoords,
   DEFAULT_INTERSECTION_ID,
@@ -32,6 +33,8 @@ import type {
   ForecastResponse,
   VehicleClassCount,
 } from "@/types/traffic";
+
+import { useScenario } from "@/context/ScenarioContext";
 
 async function fetchOptional<T>(label: string, request: Promise<T>): Promise<T | null> {
   try {
@@ -250,6 +253,8 @@ export default function DashboardPage() {
    * =========================================================
    */
 
+  const { scenario } = useScenario();
+
   const selectedIntersection: IntersectionSelection = "all";
   
   const videoTimeRef = useRef<number>(0);
@@ -360,7 +365,9 @@ export default function DashboardPage() {
                     ? fetchOptional(`Status sinyal ${inter.name}`, fetchSignalStatus(inter.databaseId))
                     : null,
                   hasLiveBackend
-                    ? fetchOptional(`Rekomendasi ${inter.name}`, fetchRecommendation(inter.databaseId))
+                    ? (scenario === "Traffic Realtime"
+                        ? fetchOptional(`Rekomendasi ${inter.name}`, fetchRecommendation(inter.databaseId))
+                        : fetchOptional(`Digital Twin Scenario ${inter.name}`, fetchDigitalTwinScenarios(inter.databaseId).then(data => data?.scenarios?.[scenario] ?? null)))
                     : null,
                   hasLiveBackend
                     ? fetchOptional(`Forecast ${inter.name}`, fetchForecast(inter.databaseId))
@@ -460,7 +467,9 @@ export default function DashboardPage() {
                   ? fetchOptional(`Status sinyal ${inter.name}`, fetchSignalStatus(inter.databaseId))
                   : null,
                 hasLiveBackend
-                  ? fetchOptional(`Rekomendasi ${inter.name}`, fetchRecommendation(inter.databaseId))
+                  ? (scenario === "Traffic Realtime"
+                      ? fetchOptional(`Rekomendasi ${inter.name}`, fetchRecommendation(inter.databaseId))
+                      : fetchOptional(`Digital Twin Scenario ${inter.name}`, fetchDigitalTwinScenarios(inter.databaseId).then(data => data?.scenarios?.[scenario] ?? null)))
                   : null,
                 hasLiveBackend
                   ? fetchOptional(`Forecast ${inter.name}`, fetchForecast(inter.databaseId))
@@ -564,7 +573,7 @@ export default function DashboardPage() {
       }
     };
 
-  }, []);
+  }, [scenario]);
 
   /*
    * =========================================================

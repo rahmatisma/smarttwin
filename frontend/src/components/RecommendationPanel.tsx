@@ -4,99 +4,147 @@ import { APPROACH_OPTIONS, type ApproachSelection } from "@/lib/intersections";
 // Harus sama dengan YELLOW_SECONDS di backend/app/services/signal_service.py
 const YELLOW_SECONDS = 4;
 
-function approachLabel(approach: string): string {
-  const option = APPROACH_OPTIONS.find((opt) => opt.id === approach);
-  return option ? option.name : approach;
-}
+const CYCLE_ORDER = ["north", "east", "south", "west"];
 
-function approachShortLabel(approach: string): string {
-  switch (approach) {
-    case "north":
-      return "Utara";
-    case "south":
-      return "Selatan";
-    case "east":
-      return "Timur";
-    case "west":
-      return "Barat";
-    default:
-      return approach;
+const APPROACH_NAMES = APPROACH_OPTIONS.reduce((acc, opt) => {
+  if (opt.id === "all") return acc;
+  const match = opt.name.match(/^(.*?)\s*\((.*?)\)$/);
+  if (match) {
+    acc[opt.id] = { dir: match[1], street: match[2] };
+  } else {
+    acc[opt.id] = { dir: opt.name, street: "" };
   }
-}
+  return acc;
+}, {} as Record<string, { dir: string; street: string }>);
 
-/*
- * =========================================================
- * KOTAK SATU LENGAN (dipakai di layout silang di bawah)
- * =========================================================
- */
-function ApproachBox({
-  phase,
-  status,
-  displaySeconds,
-  liveTotalSeconds,
+function ApproachCard({
+  data,
+  isCompact = false,
 }: {
-  phase: ApproachPhase;
-  status: "GREEN" | "YELLOW" | "RED";
-  displaySeconds: number;
-  liveTotalSeconds?: number;
+  data: {
+    approach: string;
+    isActive: boolean;
+    currentState: "GREEN" | "YELLOW" | "RED";
+    rtGreen: number;
+    rtYellow: number;
+    rtRed: number;
+    bsGreen: number;
+    bsYellow: number;
+    bsRed: number;
+  };
+  isCompact?: boolean;
 }) {
-  const barPercent = status === "RED"
-    ? Math.round(Math.min(1, Math.max(0, phase.demandScore)) * 100)
-    : Math.round(
-        Math.min(1, Math.max(0, displaySeconds / (status === "YELLOW" ? YELLOW_SECONDS : (liveTotalSeconds || phase.greenSeconds || 1)))) * 100
-      );
-
-  let ringClass = "border-border bg-surface-2";
-  let dotClass = "bg-signal-red";
-  let textClass = "text-signal-red";
-  let progressClass = "bg-text-muted";
-
-  if (status === "GREEN") {
-    ringClass = "border-signal-green bg-surface-2 ring-1 ring-signal-green";
-    dotClass = "bg-signal-green";
-    textClass = "text-text";
-    progressClass = "bg-signal-green";
-  } else if (status === "YELLOW") {
-    ringClass = "border-signal-amber bg-surface-2 ring-1 ring-signal-amber";
-    dotClass = "bg-signal-amber";
-    textClass = "text-text";
-    progressClass = "bg-signal-amber";
-  }
+  const nameInfo = APPROACH_NAMES[data.approach] || { dir: data.approach, street: "" };
 
   return (
-    <div className={`rounded-md border p-2 text-center transition-colors ${ringClass}`}>
-      <div className="text-[10px] text-text-muted">
-        {approachShortLabel(phase.approach)}
-        <span className={`ml-1 inline-block h-1.5 w-1.5 rounded-full align-middle ${dotClass}`} />
+    <div
+      className={`rounded-md border transition-colors ${isCompact ? "p-2" : "p-3"} ${
+        data.isActive
+          ? "border-signal-green bg-signal-green/5 ring-1 ring-signal-green"
+          : "border-border bg-surface-2"
+      }`}
+    >
+      <div className="mb-3 border-b border-border/50 pb-2">
+        <div className="flex items-center justify-between">
+          <div className="font-display font-bold text-text">{nameInfo.dir}</div>
+          {isCompact ? (
+            <div className="flex gap-1 rounded-full border border-border/50 bg-surface-2 p-1">
+              <div className={`h-2 w-2 rounded-full ${data.currentState === "RED" ? "bg-signal-red shadow-[0_0_6px_rgba(239,68,68,0.8)]" : "bg-surface/50 opacity-40"}`} />
+              <div className={`h-2 w-2 rounded-full ${data.currentState === "YELLOW" ? "bg-signal-amber shadow-[0_0_6px_rgba(245,158,11,0.8)]" : "bg-surface/50 opacity-40"}`} />
+              <div className={`h-2 w-2 rounded-full ${data.currentState === "GREEN" ? "bg-signal-green shadow-[0_0_6px_rgba(16,185,129,0.8)]" : "bg-surface/50 opacity-40"}`} />
+            </div>
+          ) : (
+            data.isActive && (
+              <span className="relative flex h-2.5 w-2.5">
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-signal-green opacity-75"></span>
+                <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-signal-green"></span>
+              </span>
+            )
+          )}
+        </div>
+        <div className="mt-0.5 text-xs text-text-muted">{nameInfo.street}</div>
       </div>
 
-      <div className={`mt-0.5 font-mono text-base font-semibold ${textClass}`}>
-        {displaySeconds}s
-      </div>
+      {isCompact ? (
+        <div className="space-y-1 text-xs">
+          <div className="mb-1 flex items-center justify-between border-b border-border/30 pb-1 text-[9px] uppercase tracking-wider text-text-muted">
+            <span>Phase</span>
+            <span className="w-9 text-right">Real</span>
+            <span className="w-9 text-right">Scen</span>
+          </div>
+          <div className="flex items-center justify-between">
+            <span className="font-semibold text-signal-green">GREEN</span>
+            <span className="w-9 text-right font-mono text-[10px]">{data.rtGreen}s</span>
+            <span className="w-9 text-right font-mono text-[10px] font-bold text-signal-green">{data.bsGreen}s</span>
+          </div>
+          <div className="flex items-center justify-between">
+            <span className="font-semibold text-signal-amber">YELLOW</span>
+            <span className="w-9 text-right font-mono text-[10px]">{data.rtYellow}s</span>
+            <span className="w-9 text-right font-mono text-[10px]">{data.bsYellow}s</span>
+          </div>
+          <div className="flex items-center justify-between">
+            <span className="font-semibold text-signal-red">RED</span>
+            <span className="w-9 text-right font-mono text-[10px]">{data.rtRed}s</span>
+            <span className="w-9 text-right font-mono text-[10px] font-bold text-signal-red">{data.bsRed}s</span>
+          </div>
+        </div>
+      ) : (
+        <div className="space-y-2 text-xs">
+          {/* GREEN */}
+          <div className="flex flex-col rounded border border-border/50 bg-surface p-2">
+            <div className="mb-1.5 font-semibold text-signal-green">GREEN</div>
+            <div className="mb-0.5 flex items-center justify-between">
+              <span className="text-[10px] text-text-muted">Realtime</span>
+              <span className="font-mono font-medium text-text">{data.rtGreen}s</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] text-text-muted">Best Scenario</span>
+              <span className="font-mono font-medium text-text">{data.bsGreen}s</span>
+            </div>
+          </div>
 
-      <div className="mt-1 h-1 w-full overflow-hidden rounded-full bg-border">
-        <div
-          className={`h-full rounded-full transition-all ${progressClass}`}
-          style={{ width: `${barPercent}%` }}
-        />
-      </div>
+          {/* YELLOW */}
+          <div className="flex flex-col rounded border border-border/50 bg-surface p-2">
+            <div className="mb-1.5 font-semibold text-signal-amber">YELLOW</div>
+            <div className="mb-0.5 flex items-center justify-between">
+              <span className="text-[10px] text-text-muted">Realtime</span>
+              <span className="font-mono font-medium text-text">{data.rtYellow}s</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] text-text-muted">Best Scenario</span>
+              <span className="font-mono font-medium text-text">{data.bsYellow}s</span>
+            </div>
+          </div>
 
-      <div className="mt-1.5 flex justify-center gap-2 font-mono text-[9px]">
-        <span className="text-signal-green">H {phase.greenSeconds}s</span>
-        <span className="text-signal-red">M {phase.redSeconds ?? "-"}s</span>
-      </div>
+          {/* RED */}
+          <div className="flex flex-col rounded border border-border/50 bg-surface p-2">
+            <div className="mb-1.5 font-semibold text-signal-red">RED</div>
+            <div className="mb-0.5 flex items-center justify-between">
+              <span className="text-[10px] text-text-muted">Realtime</span>
+              <span className="font-mono font-medium text-text">{data.rtRed}s</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] text-text-muted">Best Scenario</span>
+              <span className="font-mono font-medium text-text">{data.bsRed}s</span>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
 export default function RecommendationPanel({
   recommendation,
+  signal,
   selectedApproach,
   activeCycleSeconds,
   sharedVisualPhase,
   sharedVisualPhaseState,
   sharedVisualRemaining,
+  elapsedSeconds,
   isLoading,
+  layout = "grid",
 }: {
   recommendation?: Recommendation | null;
   signal?: SignalStatus;
@@ -105,39 +153,12 @@ export default function RecommendationPanel({
   sharedVisualPhase: string | null;
   sharedVisualPhaseState: "GREEN" | "YELLOW";
   sharedVisualRemaining: number;
+  elapsedSeconds?: number;
   isLoading?: boolean;
+  layout?: "grid" | "cross";
 }) {
   const displayRec = recommendation ?? null;
   const showLoading = Boolean(isLoading || !displayRec);
-
-  const phases = displayRec?.cyclePlan?.phases ?? [];
-
-  const getStatus = (approach: string): "GREEN" | "YELLOW" | "RED" => {
-    if (sharedVisualPhase === approach) return sharedVisualPhaseState;
-    return "RED";
-  };
-
-  const getDisplaySeconds = (approach: string) => {
-    if (!phases.length || !sharedVisualPhase) return phaseByApproach[approach]?.greenSeconds ?? 0;
-    
-    const currentIndex = phases.findIndex(p => p.approach === sharedVisualPhase);
-    const targetIndex = phases.findIndex(p => p.approach === approach);
-    
-    if (currentIndex === -1 || targetIndex === -1) return phaseByApproach[approach]?.greenSeconds ?? 0;
-    if (currentIndex === targetIndex) return sharedVisualRemaining;
-
-    let waitTime = sharedVisualRemaining;
-    if (sharedVisualPhaseState === "GREEN") {
-      waitTime += YELLOW_SECONDS; // Upcoming yellow phase for current active approach
-    }
-
-    let i = (currentIndex + 1) % phases.length;
-    while (i !== targetIndex) {
-      waitTime += phases[i].greenSeconds + YELLOW_SECONDS; // Green + Yellow
-      i = (i + 1) % phases.length;
-    }
-    return waitTime;
-  };
 
   if (showLoading || !displayRec) {
     return (
@@ -146,18 +167,12 @@ export default function RecommendationPanel({
           <h2 className="font-display text-sm font-semibold text-text">
             Signal Recommendation
           </h2>
-
-          <span className="text-xs text-text-muted">
-            Memuat...
-          </span>
+          <span className="text-xs text-text-muted">Memuat...</span>
         </div>
-
         <div className="flex min-h-[320px] items-center justify-center rounded-md border border-border bg-surface-2 px-4 text-center">
           <div className="flex flex-col items-center justify-center space-y-3">
             <div className="h-5 w-5 animate-spin rounded-full border-2 border-text-muted border-t-transparent"></div>
-            <p className="text-xs text-text-muted">
-              Mengambil data rekomendasi...
-            </p>
+            <p className="text-xs text-text-muted">Mengambil data rekomendasi...</p>
           </div>
         </div>
       </div>
@@ -165,127 +180,195 @@ export default function RecommendationPanel({
   }
 
   const cyclePlan = displayRec.cyclePlan;
+  const phases = cyclePlan?.phases ?? [];
 
+  // Parse best scenario
   const phaseByApproach: Record<string, ApproachPhase> = {};
-  for (const phase of cyclePlan?.phases ?? []) {
+  for (const phase of phases) {
     const yellowSeconds = phase.yellowSeconds ?? YELLOW_SECONDS;
-    const totalCycleSeconds = cyclePlan?.totalCycleSeconds
-      || (cyclePlan?.cycleLengthSeconds ?? 0)
-        + (cyclePlan?.phases.length ?? 0) * YELLOW_SECONDS;
+    const totalCycleSeconds =
+      cyclePlan?.totalCycleSeconds ||
+      (cyclePlan?.cycleLengthSeconds ?? 0) + (cyclePlan?.phases.length ?? 0) * YELLOW_SECONDS;
+    
     phaseByApproach[phase.approach] = {
       ...phase,
       yellowSeconds,
-      // Cache lama belum mempunyai redSeconds. Turunkan dari siklus agar
-      // frontend tetap langsung berguna sebelum worker menulis cache baru.
-      redSeconds: phase.redSeconds && phase.redSeconds > 0
-        ? phase.redSeconds
-        : Math.max(0, totalCycleSeconds - phase.greenSeconds - yellowSeconds),
+      redSeconds:
+        phase.redSeconds && phase.redSeconds > 0
+          ? phase.redSeconds
+          : Math.max(0, totalCycleSeconds - phase.greenSeconds - yellowSeconds),
     };
   }
 
-  /*
-   * =========================================================
-   * RECOMMENDATION DATA
-   * =========================================================
-   *
-   * Semua data di bawah berasal dari backend.
-   * Tidak ada nilai dummy.
-   */
+  const getRealtimeMetrics = (approach: string) => {
+    let rtGreen = 0;
+    let rtYellow = 0;
+    let rtRed = 0;
+
+    const signalPhases = signal?.phases || {};
+
+    if (sharedVisualPhase === approach) {
+      if (sharedVisualPhaseState === "GREEN") {
+        rtGreen = Math.max(0, sharedVisualRemaining - YELLOW_SECONDS);
+        rtYellow = YELLOW_SECONDS;
+      } else {
+        rtGreen = 0;
+        rtYellow = sharedVisualRemaining;
+      }
+      rtRed = 0;
+    } else {
+      rtGreen = 0;
+      rtYellow = 0;
+      const baseRemaining = signalPhases[approach]?.remainingSeconds ?? 0;
+      rtRed = Math.max(0, baseRemaining - (elapsedSeconds ?? 0));
+    }
+
+    return { rtGreen, rtYellow, rtRed };
+  };
+
+  const getBestScenarioMetrics = (approach: string) => {
+    const p = phaseByApproach[approach];
+    if (!p) return { bsGreen: 0, bsYellow: 0, bsRed: 0 };
+    return {
+      bsGreen: p.greenSeconds,
+      bsYellow: p.yellowSeconds ?? YELLOW_SECONDS,
+      bsRed: p.redSeconds ?? 0,
+    };
+  };
+
+  const approachData = CYCLE_ORDER.map((approach) => {
+    const metrics = getRealtimeMetrics(approach);
+    const best = getBestScenarioMetrics(approach);
+    const isActive = sharedVisualPhase === approach;
+    let currentState: "GREEN" | "YELLOW" | "RED" = "RED";
+    if (isActive) {
+      currentState = sharedVisualPhaseState;
+    }
+    return { approach, isActive, currentState, ...metrics, ...best };
+  });
 
   return (
-    <div className="rounded-lg border border-border bg-surface p-4">
-      <div className="mb-3 flex items-center justify-between">
-        <h2 className="font-display text-sm font-semibold text-text">
-          Signal Recommendation
-        </h2>
-
-        <span className="text-xs text-signal-green">
-          Available
-        </span>
+    <div className="flex h-full flex-col rounded-lg border border-border bg-surface p-4 shadow-sm">
+      <div className="mb-4 flex items-center justify-between">
+        <h2 className="font-display text-sm font-semibold text-text">Signal Recommendation</h2>
+        <span className="text-xs text-signal-green">Available</span>
       </div>
 
-      <div className="space-y-3">
+      <div className="space-y-4">
         {/* ===================================================
-            DURASI 4 LENGAN (layout silang, meniru bentuk simpang)
-            Cuma tampil kalau backend sudah kirim cyclePlan --
-            kalau belum (mis. fallback tanpa TrafficState),
-            section ini disembunyikan, info di bawah tetap tampil.
+            DURASI 4 LENGAN (urutan Utara -> Timur -> Selatan -> Barat)
            =================================================== */}
-        {cyclePlan && (
-          <div className="rounded-md border border-border bg-surface-2 p-3">
-            <div className="mb-2 flex items-center justify-between">
-              <span className="text-xs text-text-muted">
-                Rekomendasi Durasi per Lengan
-              </span>
-
-              <span className="font-mono text-[10px] text-text-muted">
-                siklus {cyclePlan.totalCycleSeconds
-                  || cyclePlan.cycleLengthSeconds + phases.length * YELLOW_SECONDS}s
-              </span>
-            </div>
-
-            <div className="grid grid-cols-3 gap-2">
-              <div />
-              {phaseByApproach.north && (
-                <ApproachBox
-                  phase={phaseByApproach.north}
-                  status={getStatus("north")}
-                  displaySeconds={getDisplaySeconds("north")}
-                  liveTotalSeconds={activeCycleSeconds}
-                />
-              )}
-              <div />
-
-              {phaseByApproach.west && (
-                <ApproachBox
-                  phase={phaseByApproach.west}
-                  status={getStatus("west")}
-                  displaySeconds={getDisplaySeconds("west")}
-                  liveTotalSeconds={activeCycleSeconds}
-                />
-              )}
-
-              <div className="flex items-center justify-center text-[10px] text-text-muted">
-                {selectedApproach && selectedApproach !== "all"
-                  ? approachLabel(selectedApproach)
-                  : "Simpang Pingit"}
+        {cyclePlan ? (
+          layout === "cross" ? (
+            <div className="flex flex-col">
+              <div className="mb-4 text-sm font-semibold text-text">
+                Rekomendasi Durasi per Lengan{" "}
+                <span className="ml-2 font-normal text-text-muted">
+                  siklus {cyclePlan.totalCycleSeconds ?? cyclePlan.cycleLengthSeconds ?? 0}s
+                </span>
               </div>
+              <div className="flex w-full flex-col items-center gap-4 lg:px-8">
+                {/* UTARA (Top) */}
+                <div className="w-full sm:w-2/3 lg:w-1/2">
+                  {(() => {
+                    const data = approachData.find(d => d.approach === "north");
+                    return data ? <ApproachCard data={data} isCompact={true} /> : null;
+                  })()}
+                </div>
+                
+                {/* BARAT & TIMUR (Middle) */}
+                <div className="flex w-full flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="w-full sm:w-1/2 lg:w-2/5">
+                    {(() => {
+                      const data = approachData.find(d => d.approach === "west");
+                      return data ? <ApproachCard data={data} isCompact={true} /> : null;
+                    })()}
+                  </div>
+                  <div className="hidden shrink-0 flex-col items-center justify-center rounded-full border border-border bg-surface-2 p-6 text-xs font-bold tracking-widest text-text-muted shadow-inner sm:flex">
+                    Simpang 4 Pingit
+                  </div>
+                  <div className="w-full sm:w-1/2 lg:w-2/5">
+                    {(() => {
+                      const data = approachData.find(d => d.approach === "east");
+                      return data ? <ApproachCard data={data} isCompact={true} /> : null;
+                    })()}
+                  </div>
+                </div>
 
-              {phaseByApproach.east && (
-                <ApproachBox
-                  phase={phaseByApproach.east}
-                  status={getStatus("east")}
-                  displaySeconds={getDisplaySeconds("east")}
-                  liveTotalSeconds={activeCycleSeconds}
-                />
-              )}
-
-              <div />
-              {phaseByApproach.south && (
-                <ApproachBox
-                  phase={phaseByApproach.south}
-                  status={getStatus("south")}
-                  displaySeconds={getDisplaySeconds("south")}
-                  liveTotalSeconds={activeCycleSeconds}
-                />
-              )}
-              <div />
+                {/* SELATAN (Bottom) */}
+                <div className="w-full sm:w-2/3 lg:w-1/2">
+                  {(() => {
+                    const data = approachData.find(d => d.approach === "south");
+                    return data ? <ApproachCard data={data} isCompact={true} /> : null;
+                  })()}
+                </div>
+              </div>
             </div>
+          ) : (
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+              {approachData.map((data) => (
+                <ApproachCard key={data.approach} data={data} />
+              ))}
+            </div>
+          )
+        ) : (
+          <div className="rounded-md border border-border bg-surface-2 p-3 text-center text-xs text-text-muted">
+            Data Cycle Plan belum tersedia
           </div>
         )}
 
-
-        {/* Green and red recommendation */}
-        <div className="grid grid-cols-2 gap-3">
-          <div className="rounded-md border border-border bg-surface-2 p-3">
-            <div className="text-xs text-text-muted">
-              Recommendation Green
+        {/* METRICS & SOURCE */}
+        <div className="flex flex-col gap-3 border-t border-border pt-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-4">
+              <div>
+                <div className="text-[10px] font-semibold uppercase tracking-wider text-text-muted">
+                  Expected Delay Reduction
+                </div>
+                <div className="mt-0.5 font-mono text-sm font-semibold text-signal-green">
+                  {displayRec.expectedDelayReductionPercent.toFixed(1)}%
+                </div>
+              </div>
+              <div>
+                <div className="text-[10px] font-semibold uppercase tracking-wider text-text-muted">
+                  Confidence
+                </div>
+                <div className="mt-0.5 font-mono text-sm font-semibold text-text">
+                  {(displayRec.confidence * 100).toFixed(1)}%
+                </div>
+              </div>
             </div>
 
-            <div className="mt-1 font-mono text-sm font-semibold text-text">
-              {phases.length && sharedVisualPhase
-                ? `${phases.find(p => p.approach === sharedVisualPhase)?.greenSeconds ?? "-"}s`
-                : `${displayRec.recommendedGreenSeconds}s`}
+            <div className="flex flex-col items-end gap-2 text-right">
+              <div>
+                <div className="text-[10px] font-semibold uppercase tracking-wider text-text-muted">
+                  Source
+                </div>
+                <div className="mt-1">
+                  <span
+                    className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-medium ${
+                      displayRec.source === "scenario-generator"
+                        ? "border-signal-green/20 bg-signal-green/10 text-signal-green"
+                        : "border-signal-amber/20 bg-signal-amber/10 text-signal-amber"
+                    }`}
+                  >
+                    {displayRec.source === "scenario-generator"
+                      ? "Diuji simulasi SUMO"
+                      : "Estimasi langsung"}
+                    <span className="ml-1 opacity-70">({displayRec.source})</span>
+                  </span>
+                </div>
+              </div>
+              <div>
+                <div className="text-[10px] font-semibold uppercase tracking-wider text-text-muted">
+                  Green Time
+                </div>
+                <div className="mt-1 font-mono text-sm font-semibold text-text">
+                  {phases.length && sharedVisualPhase
+                    ? `${phases.find(p => p.approach === sharedVisualPhase)?.greenSeconds ?? "-"}s`
+                    : `${displayRec.recommendedGreenSeconds}s`}
+                </div>
+              </div>
             </div>
 
             {!cyclePlan && (
@@ -295,72 +378,25 @@ export default function RecommendationPanel({
             )}
           </div>
 
-          <div className="rounded-md border border-border bg-surface-2 p-3">
-            <div className="text-xs text-text-muted">
-              Recommendation Red
-            </div>
-
-            <div className="mt-1 font-mono text-sm font-semibold text-signal-red">
-              {sharedVisualPhase
-                ? `${phaseByApproach[sharedVisualPhase]?.redSeconds ?? "-"}s`
-                : "Memuat..."}
-            </div>
-          </div>
-        </div>
-
-        {/* Expected Improvement */}
-        <div className="rounded-md border border-border bg-surface-2 p-3">
-          <div className="text-xs text-text-muted">
-            Expected Delay Reduction
-          </div>
-
-          <div className="mt-1 font-mono text-sm font-semibold text-signal-green">
-            {displayRec.expectedDelayReductionPercent.toFixed(1)}%
-          </div>
-        </div>
-
-        {/* Confidence */}
-        <div className="rounded-md border border-border bg-surface-2 p-3">
-          <div className="text-xs text-text-muted">
-            Confidence
-          </div>
-
-          <div className="mt-1 font-mono text-sm font-semibold text-text">
-            {(displayRec.confidence * 100).toFixed(1)}%
-          </div>
-        </div>
-
-
-
-        {/* Source */}
-        <div className="flex flex-col gap-2 border-t border-border pt-3">
-          <div className="flex items-center justify-between">
-            <span className="text-[10px] uppercase tracking-wider font-semibold text-text-muted">
-              Source
-            </span>
-            <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium ${
-              displayRec.source === "scenario-generator"
-                ? "bg-signal-green/10 text-signal-green border border-signal-green/20"
-                : "bg-signal-amber/10 text-signal-amber border border-signal-amber/20"
-            }`}>
-              {displayRec.source === "scenario-generator" ? "Diuji simulasi SUMO" : "Estimasi langsung"}
-              <span className="ml-1 opacity-70">({displayRec.source})</span>
-            </span>
-          </div>
-          
-          {typeof displayRec.avgDelaySeconds === 'number' && (
-            <div className="mt-2 grid grid-cols-3 gap-2">
+          {typeof displayRec.avgDelaySeconds === "number" && (
+            <div className="mt-1 grid grid-cols-3 gap-2">
               <div className="rounded border border-border bg-surface-2 p-2 text-center">
                 <div className="text-[9px] uppercase tracking-wider text-text-muted">LOS</div>
-                <div className="mt-1 font-mono text-xs font-bold text-text">{displayRec.los ?? "-"}</div>
+                <div className="mt-1 font-mono text-xs font-bold text-text">
+                  {displayRec.los ?? "-"}
+                </div>
               </div>
               <div className="rounded border border-border bg-surface-2 p-2 text-center">
                 <div className="text-[9px] uppercase tracking-wider text-text-muted">Delay</div>
-                <div className="mt-1 font-mono text-xs font-bold text-text">{displayRec.avgDelaySeconds.toFixed(1)}s</div>
+                <div className="mt-1 font-mono text-xs font-bold text-text">
+                  {displayRec.avgDelaySeconds.toFixed(1)}s
+                </div>
               </div>
               <div className="rounded border border-border bg-surface-2 p-2 text-center">
                 <div className="text-[9px] uppercase tracking-wider text-text-muted">Antrean</div>
-                <div className="mt-1 font-mono text-xs font-bold text-text">{displayRec.avgQueueLengthM?.toFixed(1) ?? "-"}m</div>
+                <div className="mt-1 font-mono text-xs font-bold text-text">
+                  {displayRec.avgQueueLengthM?.toFixed(1) ?? "-"}m
+                </div>
               </div>
             </div>
           )}
