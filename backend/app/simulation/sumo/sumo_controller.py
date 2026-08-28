@@ -195,6 +195,32 @@ class SumoController:
         "west": "rrrrrrrrrrrrrrryyyyy",
     }
 
+    @staticmethod
+    def _hide_windows_for_process(process_id: int) -> None:
+        """Sembunyikan window SUMO-GUI; renderer tetap hidup untuk screenshot."""
+        if os.name != "nt" or process_id <= 0:
+            return
+
+        try:
+            import ctypes
+            from ctypes import wintypes
+
+            user32 = ctypes.windll.user32
+            enum_callback_type = ctypes.WINFUNCTYPE(
+                wintypes.BOOL, wintypes.HWND, wintypes.LPARAM
+            )
+
+            def hide_if_owned(hwnd: int, _lparam: int) -> bool:
+                owner_pid = wintypes.DWORD()
+                user32.GetWindowThreadProcessId(hwnd, ctypes.byref(owner_pid))
+                if owner_pid.value == process_id:
+                    user32.ShowWindow(hwnd, 0)  # SW_HIDE
+                return True
+
+            user32.EnumWindows(enum_callback_type(hide_if_owned), 0)
+        except Exception as exc:
+            logger.warning("Gagal menyembunyikan window SUMO-GUI: %s", exc)
+
     # ============================================================
     # INIT
     # ============================================================
@@ -526,7 +552,7 @@ class SumoController:
             # Renderer SUMO-GUI tetap dipakai untuk screenshot TraCI, tetapi
             # jendelanya ditempatkan di luar desktop. Frame hanya dikonsumsi
             # oleh dashboard melalui endpoint stream.
-            command.extend(["--window-pos", "-10000,-10000", "--window-size", "800,800"])
+            command.extend(["--window-pos", "-32000,-32000", "--window-size", "960,540"])
 
         # ========================================================
         # PATH RESOLUTION & LOGGING
@@ -593,9 +619,13 @@ class SumoController:
             logger.info("STEP 4: Simulation step successful")
 
             if gui:
-                # Crop viewport tepat 100 meter dari pusat simpang pada
-                # keempat lengan (total bidang 200 x 200 meter).
-                traci.gui.setBoundary("View #0", 210.63, 419.01, 410.63, 619.01)
+                # Rasio 16:9 dan crop lebih dekat agar memenuhi card web tanpa
+                # letterbox, tetapi keempat mulut simpang tetap terlihat.
+                traci.gui.setBoundary("View #0", 240.63, 479.635, 380.63, 558.385)
+                connection = traci.getConnection()
+                process = getattr(connection, "_process", None)
+                if process is not None:
+                    self._hide_windows_for_process(process.pid)
             
         except Exception as exc:
             logger.exception("Failed to start SUMO through TraCI")
@@ -656,6 +686,21 @@ class SumoController:
                 f"Error: {exc}"
             ) from exc
 
+        # Loop harus dimulai untuk semua mode (termasuk dashboard realtime).
+        # Sebelumnya blok ini tidak sengaja berada di apply_scenario_logic(),
+        # sehingga controller berstatus running tetapi waktu tetap 0.
+        if self._simulation_thread is None or not self._simulation_thread.is_alive():
+            self._simulation_thread = threading.Thread(
+                target=self._simulation_loop,
+                name="sumo-realtime-loop",
+                daemon=True,
+            )
+            self._simulation_thread.start()
+
+        print("SUMO berhasil terhubung melalui TraCI.")
+        print("SUMO realtime loop berhasil dimulai.")
+        print("=" * 70)
+
     def apply_scenario_logic(
         self,
         logic_phases: list,
@@ -680,31 +725,6 @@ class SumoController:
                 )
             except Exception as exc:
                 logger.error(f"Gagal set program logic TraCI: {exc}")
-
-
-        # ========================================================
-        # BACKGROUND THREAD
-        # ========================================================
-
-        self._simulation_thread = (
-            threading.Thread(
-                target=self._simulation_loop,
-                name="sumo-realtime-loop",
-                daemon=True,
-            )
-        )
-
-        self._simulation_thread.start()
-
-        print(
-            "SUMO berhasil terhubung melalui TraCI."
-        )
-
-        print(
-            "SUMO realtime loop berhasil dimulai."
-        )
-
-        print("=" * 70)
 
     # ============================================================
     # CREATE VEHICLE TYPES
@@ -1721,11 +1741,25 @@ class SumoController:
 
         self._simulation_thread = None
 
+        # Screenshot/GUI driver kadang tertahan di panggilan TraCI sehingga
+        # thread belum keluar setelah timeout. Jangan menunggu lock selamanya;
+        # hentikan process renderer lalu biarkan cleanup state diteruskan.
+        thread_still_alive = thread is not None and thread.is_alive()
+        if thread_still_alive and self.traci is not None:
+            try:
+                connection = self.traci.getConnection()
+                process = getattr(connection, "_process", None)
+                if process is not None and process.poll() is None:
+                    process.terminate()
+                    process.wait(timeout=2.0)
+            except Exception as exc:
+                logger.warning("Gagal menghentikan paksa renderer SUMO: %s", exc)
+
         # ========================================================
         # CLOSE TRACI
         # ========================================================
 
-        if self.traci is not None:
+        if self.traci is not None and not thread_still_alive:
 
             try:
 
@@ -1745,6 +1779,9 @@ class SumoController:
             finally:
 
                 self.traci = None
+
+        elif thread_still_alive:
+            self.traci = None
 
         # ========================================================
         # RESET

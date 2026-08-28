@@ -6,14 +6,14 @@
         <!-- North -->
         <phase duration="39" state="rrrrrrrrrrGGGggrrrrr"/>
         <phase duration="4"  state="rrrrrrrrrryyyyyrrrrr"/>
-        <!-- West -->
-        <phase duration="39" state="rrrrrrrrrrrrrrrGGGgg"/>
-        <phase duration="4"  state="rrrrrrrrrrrrrrryyyyy"/>
-        <!-- South -->
-        <phase duration="39" state="GGGggrrrrrrrrrrrrrrr"/>
-        <phase duration="4"  state="yyyyyrrrrrrrrrrrrrrr"/>
         <!-- East -->
         <phase duration="39" state="rrrrrGGGggrrrrrrrrrr"/>
         <phase duration="4"  state="rrrrryyyyyrrrrrrrrrr"/>
+        <!-- South -->
+        <phase duration="39" state="GGGggrrrrrrrrrrrrrrr"/>
+        <phase duration="4"  state="yyyyyrrrrrrrrrrrrrrr"/>
+        <!-- West -->
+        <phase duration="39" state="rrrrrrrrrrrrrrrGGGgg"/>
+        <phase duration="4"  state="rrrrrrrrrrrrrrryyyyy"/>
     </tlLogic>
 </additional>

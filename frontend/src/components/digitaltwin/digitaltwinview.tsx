@@ -380,9 +380,9 @@ export default function DigitalTwinView() {
                             {/* SUMO-GUI Live Stream */}
                             {status === "running" ? (
                                 <img
-                                    src={`${API_BASE_URL}/api/v1/simulation/stream?t=${Date.now()}`}
+                                    src={`${API_BASE_URL}/api/v1/simulation/stream`}
                                     alt="Live SUMO Simulation Stream"
-                                    className="absolute inset-0 h-full w-full object-contain"
+                                    className="absolute inset-0 h-full w-full object-cover object-center"
                                 />
                             ) : (
                                 <div className="absolute inset-0 flex items-center justify-center">

@@ -24,14 +24,18 @@ const API_BASE_URL =
 
 const FORECAST_ZONE_CAPACITY = 33;
 const FORECAST_REFRESH_INTERVAL_MS = 15_000;
+const FORECAST_FAILURE_COOLDOWN_MS = 60_000;
 
 let forecastCache: ForecastResponse | null = null;
 let forecastCacheTime = 0;
 let forecastRequestInFlight: Promise<ForecastResponse | null> | null = null;
+let forecastRetryAfter = 0;
 let signalStatusCache: SignalStatus | null = null;
 let signalStatusRequestInFlight: Promise<SignalStatus | null> | null = null;
 let recommendationCache: Recommendation | null = null;
 let recommendationRequestInFlight: Promise<Recommendation | null> | null = null;
+const intersectionRowIdCache = new Map<string, number | null>();
+const intersectionRowIdRequests = new Map<string, Promise<number | null>>();
 
 /* =========================================================
  * INTERSECTION LOOKUP
@@ -40,17 +44,38 @@ let recommendationRequestInFlight: Promise<Recommendation | null> | null = null;
 async function getIntersectionRowId(
   intersectionId: string
 ): Promise<number | null> {
-  const { data, error } = await supabase
-    .from("intersections")
-    .select("id")
-    .eq("intersectionId", intersectionId)
-    .maybeSingle();
-
-  if (error) {
-    throw new Error(`Gagal mengambil intersection: ${error.message}`);
+  if (intersectionRowIdCache.has(intersectionId)) {
+    return intersectionRowIdCache.get(intersectionId) ?? null;
   }
 
-  return data?.id ?? null;
+  const activeRequest = intersectionRowIdRequests.get(intersectionId);
+  if (activeRequest) return activeRequest;
+
+  const request = (async () => {
+    const { data, error } = await supabase
+      .from("intersections")
+      .select("id")
+      .eq("intersectionId", intersectionId)
+      .order("id", { ascending: true })
+      .limit(1)
+      .maybeSingle();
+
+    if (error) {
+      // Gangguan Supabase sesaat tidak boleh menjatuhkan seluruh dashboard.
+      // Nilai yang pernah berhasil dibaca tetap dapat dipakai saat reconnect.
+      console.warn(`Gagal mengambil intersection ${intersectionId}: ${error.message}`);
+      return intersectionRowIdCache.get(intersectionId) ?? null;
+    }
+
+    const rowId = data?.id ?? null;
+    intersectionRowIdCache.set(intersectionId, rowId);
+    return rowId;
+  })().finally(() => {
+    intersectionRowIdRequests.delete(intersectionId);
+  });
+
+  intersectionRowIdRequests.set(intersectionId, request);
+  return request;
 }
 
 export async function fetchIntersectionCoords(
@@ -328,7 +353,10 @@ async function requestForecast(
   );
 
   // Intersection yang belum memiliki data tidak boleh menggagalkan panel lain.
-  if (!historyResponse.ok) return null;
+  if (!historyResponse.ok) {
+    forecastRetryAfter = Date.now() + FORECAST_FAILURE_COOLDOWN_MS;
+    return null;
+  }
 
   const historyBody = (await historyResponse.json()) as {
     data?: TrafficHistoryRow[];
@@ -413,6 +441,7 @@ export async function fetchForecast(
   intersectionId: string = DEFAULT_INTERSECTION_ID
 ): Promise<ForecastResponse | null> {
   if (intersectionId !== DEFAULT_INTERSECTION_ID) return null;
+  if (Date.now() < forecastRetryAfter) return forecastCache;
 
   // Forecast memiliki horizon 60 detik. Tidak perlu menembak dua endpoint
   // backend pada setiap poll dashboard 5 detik atau event WebSocket.

@@ -239,9 +239,32 @@ function getSignalColor(
 
 type LiveSumoSignal = {
   state: "GREEN" | "YELLOW";
-  activeApproach: Approach;
+  activeApproach?: Approach;
   remainingSeconds: number;
+  rawState?: string;
 };
+
+function normalizeLiveSignal(signal: LiveSumoSignal | undefined): LiveSumoSignal | null {
+  if (!signal) return null;
+  if (signal.activeApproach) return signal;
+
+  const rawState = signal.rawState;
+  if (!rawState) return null;
+  const groups: Array<[Approach, string]> = [
+    ["south", rawState.slice(0, 5)],
+    ["east", rawState.slice(5, 10)],
+    ["north", rawState.slice(10, 15)],
+    ["west", rawState.slice(15, 20)],
+  ];
+  const active = groups.find(([, state]) => /[GgyY]/.test(state));
+  if (!active) return null;
+
+  return {
+    ...signal,
+    activeApproach: active[0],
+    state: /[yY]/.test(active[1]) ? "YELLOW" : "GREEN",
+  };
+}
 
 /*
  * =========================================================
@@ -283,7 +306,7 @@ export default function DigitalTwinPanel({
           setSimTime(data.simulationTimeSeconds ?? 0);
           setVehiclesCount(data.vehicles?.length ?? 0);
           setDetectedVehicles(data.detectedVehicles ?? 0);
-          setLiveSignal(data.signals?.[0] ?? null);
+          setLiveSignal(normalizeLiveSignal(data.signals?.[0]));
         }
       } catch {
         setSimRunning(false);
@@ -462,7 +485,7 @@ export default function DigitalTwinPanel({
             <img
               src={`${API_BASE_URL}/api/v1/simulation/frame?v=${frameVersion}`}
               alt="Live SUMO Simpang Pingit"
-              className="absolute inset-0 h-full w-full object-contain"
+              className="absolute inset-0 h-full w-full object-cover object-center"
             />
             {([
               ["north", "UTARA · Jl. Magelang", "left-1/2 top-1 -translate-x-1/2"],

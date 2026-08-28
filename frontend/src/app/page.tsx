@@ -530,7 +530,11 @@ export default function DashboardPage() {
       cancelled = true;
       if (reconnectTimer) clearTimeout(reconnectTimer);
       clearInterval(pollInterval);
-      socket?.close();
+      if (socket?.readyState === WebSocket.OPEN) {
+        socket.close();
+      } else if (socket?.readyState === WebSocket.CONNECTING) {
+        socket.onopen = () => socket?.close();
+      }
     };
 
   }, []);

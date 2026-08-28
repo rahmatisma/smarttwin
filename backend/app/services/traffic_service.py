@@ -86,6 +86,14 @@ class TrafficService:
                 str(exc)
             ) from exc
 
+        except Exception as exc:
+            # httpx dapat melempar RemoteProtocolError ketika koneksi keep-alive
+            # Supabase diputus server. Ubah menjadi error domain agar pemanggil
+            # memakai fallback, bukan mencetak traceback panjang.
+            raise TrafficServiceError(
+                "Koneksi sumber data traffic terputus sementara."
+            ) from exc
+
     # ========================================================
     # GET LATEST TRAFFIC
     # ========================================================
@@ -150,6 +158,11 @@ class TrafficService:
 
             raise TrafficServiceError(
                 str(exc)
+            ) from exc
+
+        except Exception as exc:
+            raise TrafficServiceError(
+                "Koneksi sumber data traffic terputus sementara."
             ) from exc
 
     # ========================================================
