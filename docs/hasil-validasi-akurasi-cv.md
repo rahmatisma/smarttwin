@@ -61,7 +61,7 @@ vs garis DIPONEGORO: LEWAT (dihitung)
 ```
 Satu kendaraan fisik yang sama bisa tercatat sebagai lewat Utara **dan** Timur. Ini **bug nyata dan reproducible**, bukan dugaan — kemungkinan besar penjelas sampel #6 (CV 19 vs manual 12).
 
-**Kalau perlu diperbaiki:** batasi pengecekan lintas ke SEGMEN garis (pakai jarak titik-ke-segmen atau proyeksi parameter `t` dalam rentang `[0,1]`), bukan garis tak terbatas. Ini cuma relevan untuk kamera dengan >1 garis dalam satu frame (CCTV_2), tidak untuk CCTV_1/CCTV_3.
+**✅ Sudah diperbaiki (29 Agustus, sore).** `segmen_berpotongan()` baru di [`vehicle_counter_pingit.py:465-508`](../cv/vehicle_counter_pingit.py#L465-L508) membatasi pengecekan lintas ke SEGMEN garis (syarat interseksi 2-segmen standar), bukan garis tak terbatas. Dipakai menggantikan pengecekan `sisi_garis()` langsung di `hitung_crossing()`. Terverifikasi lewat simulasi titik: kasus kontaminasi (dekat ujung DIPONEGORO memicu MAGELANG) sudah tidak terpicu lagi di keduanya, sementara 3 kasus crossing sah yang diuji tetap terdeteksi identik — tidak ada regresi. Ini cuma menyentuh CCTV_2 (satu-satunya kamera dengan >1 garis dalam satu frame); CCTV_1 dan CCTV_3 tidak terpengaruh sama sekali.
 
 ### Yang belum diverifikasi (di luar scope validasi ini)
 

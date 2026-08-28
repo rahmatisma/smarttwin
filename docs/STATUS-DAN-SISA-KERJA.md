@@ -253,16 +253,20 @@ Bonus: demo jadi lebih meyakinkan — bisa menunjuk satu lengan dan bilang "yang
 - `CLAUDE.md` masih menyebut `simulation/requirements-rl.txt` yang sudah hilang → perbarui
 - `simulation/.venv` tidak punya `supabase` → untuk test forecast client pakai `backend/.venv`
 
-### P-5. Perbaiki akar penyebab akurasi CV rendah — Rahmat, 2–4 jam
+### P-5. Perbaiki akar penyebab akurasi CV rendah — Rahmat
 
-> **Update 29 Agustus:** akar penyebab **sudah ketemu** lewat pengamatan langsung Rahmat + verifikasi kode/geometri — bukan lagi "investigasi", sekarang tinggal "perbaikan". Detail lengkap di `hasil-validasi-akurasi-cv.md` bagian Interpretasi.
+> **Update 29 Agustus (sore):** kedua perbaikan sudah **dikodekan**. #2 sudah **selesai + terverifikasi**. #1 kodenya siap, tapi **butuh dijalankan di komputer ber-GPU Anda** — sesi ini cuma punya CPU (`torch.cuda.is_available() == False`), tidak realistis memproses ulang video YOLO 1280px di sini.
 
-**Dua masalah berbeda, dua perbaikan berbeda:**
+1. ✅ **SELESAI — Kendaraan terhitung ganda di garis salah** (CCTV_2, sampel #6). `sisi_garis()` dulu pakai garis tak terbatas, bukan segmen. **Diperbaiki:** fungsi baru `segmen_berpotongan()` di [`vehicle_counter_pingit.py:465-508`](../cv/vehicle_counter_pingit.py#L465-L508) — syarat interseksi segmen standar (2 kondisi, bukan cuma 1), dipakai di `hitung_crossing()` menggantikan pengecekan `sisi_garis()` langsung. **Terverifikasi lewat simulasi titik** (tidak butuh proses ulang video, karena ini bug logika murni): kasus kontaminasi lama (kendaraan dekat ujung DIPONEGORO memicu MAGELANG juga) sekarang **tidak lagi terpicu di keduanya**, sementara 3 kasus crossing sah (tengah segmen DIPONEGORO, tengah MAGELANG, tengah selatan CCTV_1) **tetap terdeteksi identik** seperti sebelumnya — tidak ada regresi.
 
-1. **Kendaraan hilang** (penyebab dominan, CCTV_1/CCTV_3 dempet + CCTV_2 kamera jauh) — kendaraan baru dapat `track_id` SETELAH lewat garis, jadi `prev_pos` kosong dan lintasnya tak tercatat (`vehicle_counter_pingit.py:852-855`). **Perbaikan yang realistis dalam waktu terbatas:** turunkan `CONFIDENCE` dari 0.35 (coba ~0.25) supaya kendaraan kedeteksi lebih awal/lebih kecil, tes ulang di 1-2 sampel yang tadi jelek (CCTV_1 7:31, CCTV_2 19:16), bandingkan `jumlah_crossing` baru vs manual yang sudah ada. **Perbaikan oklusi murni (motor dempet) kemungkinan tidak bisa dikejar dalam sisa waktu** — itu butuh model/resolusi lebih baik, cukup didokumentasikan sebagai keterbatasan.
-2. **Kendaraan terhitung ganda di garis salah** (CCTV_2 khusus, sampel #6) — `sisi_garis()` pakai garis tak terbatas, bukan segmen (`vehicle_counter_pingit.py:465-479`), dan titik potong MAGELANG×DIPONEGORO cuma 0,016 dari ujung DIPONEGORO. **Perbaikan konkret:** batasi pengecekan ke proyeksi parameter `t` dalam rentang `[0,1]` di sepanjang segmen (bukan garis penuh) sebelum menghitung `sisi_garis()`. Ini cuma menyentuh CCTV_2 (satu-satunya kamera dengan >1 garis), risiko regresi kecil.
-
-**Setelah salah satu/keduanya diperbaiki:** ulangi minimal 3 sampel yang paling jelek (bukan seluruh 8) dari tabel S-4 untuk buktikan ada perbaikan, update `hasil-validasi-akurasi-cv.md` dengan angka baru — jangan timpa angka lama, tambahkan sebagai "setelah perbaikan" supaya progresnya kelihatan.
+2. ⏳ **KODE SIAP, BELUM DIUJI — Kendaraan hilang** (penyebab dominan, CCTV_1/CCTV_3 dempet + CCTV_2 kamera jauh). Kendaraan baru dapat `track_id` SETELAH lewat garis, jadi `prev_pos` kosong dan lintasnya tak tercatat. **Sudah ditambahkan** parameter `--conf` di CLI (default tetap 0.35, perilaku lama tidak berubah kalau tidak dipakai) — lihat `python vehicle_counter_pingit.py --help`. **Yang perlu ANDA jalankan di komputer GPU:**
+   ```powershell
+   cd cv
+   # proses ulang CCTV_1 & CCTV_2 dengan confidence lebih rendah,
+   # cukup 1 kamera dulu buat tes cepat sebelum proses semua
+   .venv\Scripts\python.exe vehicle_counter_pingit.py --kamera CCTV_1 --conf 0.25 --durasi 600 --tanpa-tampilan
+   ```
+   Lalu cek `cv/output/crossing_simpang.csv` untuk `jumlah_crossing` di jendela waktu sampel #1 (7:31–8:31) dan #2 (24:16–25:11) — **hitungan manual Anda sudah ada** (65 dan 36), tinggal bandingkan angka barunya, tidak perlu nonton ulang. Kalau `--conf 0.25` membantu, naikkan cakupan ke semua kamera + durasi penuh dan update `hasil-validasi-akurasi-cv.md` (tambahkan sebagai "setelah perbaikan", jangan timpa angka lama). **Perbaikan oklusi murni (motor dempet) kemungkinan tidak bisa dikejar dalam sisa waktu** — itu butuh model/resolusi lebih baik, cukup didokumentasikan sebagai keterbatasan.
 
 **Bukan blocker demo** — nomor akurasi sudah ada dan jujur dilaporkan (S-4), ini pekerjaan penguatan kalau ada waktu.
 

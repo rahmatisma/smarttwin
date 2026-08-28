@@ -468,15 +468,53 @@ def sisi_garis(px, py, p1, p2):
     product (x2-x1)(py-y1) - (y2-y1)(px-x1). Positif di satu sisi,
     negatif di sisi lain, 0 kalau persis di garis.
 
+    Ini garis TAK TERBATAS (perpanjangan matematis p1->p2 ke segala
+    arah), bukan cuma segmen pendek yang digambar. Jangan dipakai
+    sendirian untuk deteksi crossing kalau kameranya punya >1 garis
+    dalam satu frame -- lihat segmen_berpotongan() untuk kenapa dan
+    perbaikannya.
+
     px/py dan p1/p2 sama-sama RASIO 0.0-1.0, konsisten dengan
-    point_in_polygon(). Dipakai hitung_crossing() untuk mendeteksi
-    kendaraan yang berpindah sisi antar-frame -- itu tandanya
-    melintasi garis.
+    point_in_polygon().
     """
     x1, y1 = p1
     x2, y2 = p2
 
     return (x2 - x1) * (py - y1) - (y2 - y1) * (px - x1)
+
+
+def segmen_berpotongan(p1_gerak, p2_gerak, p1_garis, p2_garis):
+    """
+    True kalau segmen gerak kendaraan (p1_gerak->p2_gerak, posisi
+    antar-frame) benar-benar berpotongan dengan SEGMEN garis hitung
+    (p1_garis->p2_garis) -- bukan garis tak terbatas.
+
+    Ditemukan lewat validasi manual 29 Agustus 2026 (lihat
+    docs/hasil-validasi-akurasi-cv.md): sisi_garis() sendirian cuma
+    mengecek posisi kendaraan relatif SATU garis yang diperpanjang tak
+    terbatas. Kalau kamera itu punya >1 garis dalam satu frame (mis.
+    CCTV_2: MAGELANG dan DIPONEGORO) dan kedua garis itu perpanjangan
+    matematisnya kebetulan berpotongan dekat lokasi kamera, satu
+    kendaraan yang lewat dekat SALAH SATU garis bisa memicu KEDUA
+    garis sekaligus -- dikonfirmasi lewat simulasi, titik potong
+    MAGELANG x DIPONEGORO cuma berjarak 0,016 (skala 0-1 frame) dari
+    ujung sungguhan DIPONEGORO.
+
+    Perbaikannya: syarat interseksi segmen standar, DUA kondisi harus
+    sama-sama benar (bukan cuma satu seperti sebelumnya) --
+      1. endpoint garis hitung ada di sisi BERLAWANAN garis gerak
+         kendaraan (garis["p1"]/["p2"] membingkai posisi kendaraan)
+      2. posisi kendaraan (lama, baru) ada di sisi BERLAWANAN garis
+         hitung (ini yang SEBELUMNYA satu-satunya syarat)
+    Kalau salah satu gagal, titik potong dua garis tak terbatas itu
+    ada DI LUAR segmen yang digambar -- bukan crossing sungguhan.
+    """
+    d1 = sisi_garis(*p1_garis, p1_gerak, p2_gerak)
+    d2 = sisi_garis(*p2_garis, p1_gerak, p2_gerak)
+    d3 = sisi_garis(*p1_gerak, p1_garis, p2_garis)
+    d4 = sisi_garis(*p2_gerak, p1_garis, p2_garis)
+
+    return (d1 * d2 < 0) and (d3 * d4 < 0)
 
 
 def mapping_class(class_id):
@@ -860,12 +898,14 @@ def hitung_crossing(state, detections):
             if track_id in state.sudah_dihitung[label]:
                 continue
 
-            sisi_lama = sisi_garis(*pos_lama, garis["p1"], garis["p2"])
-            sisi_baru = sisi_garis(cx, cy, garis["p1"], garis["p2"])
-
-            # Tanda berlawanan (dan sama-sama bukan nol) berarti
-            # berpindah sisi -- itu crossing.
-            if sisi_lama * sisi_baru < 0:
+            # segmen_berpotongan(), bukan cuma sisi_garis() -- lihat
+            # docstring-nya. Membatasi crossing ke SEGMEN garis yang
+            # digambar, bukan perpanjangan tak terbatasnya, supaya
+            # kamera dengan >1 garis (mis. CCTV_2) tidak saling
+            # memicu satu sama lain.
+            if segmen_berpotongan(
+                pos_lama, (cx, cy), garis["p1"], garis["p2"]
+            ):
                 for akum in (
                     state.crossing_akumulasi[label],
                     state.crossing_total[label],
@@ -1288,11 +1328,12 @@ class KameraState:
     diakumulasi, model YOLO/ByteTrack milik kamera ini sendiri, dan
     frame terakhir yang siap ditampilkan di window kamera ini."""
 
-    def __init__(self, nama_kamera, zona, durasi_detik, imgsz):
+    def __init__(self, nama_kamera, zona, durasi_detik, imgsz, conf):
         self.nama_kamera = nama_kamera
         self.poligon = zona["polygon"]
         self.lengan = zona["nama_lengan"]
         self.imgsz = imgsz
+        self.conf = conf
 
         self.tersedia = False
         self.selesai = False
@@ -1609,7 +1650,7 @@ def proses_tick(
         persist=True,
         tracker="bytetrack.yaml",
         classes=TRACK_CLASSES,
-        conf=CONFIDENCE,
+        conf=state.conf,
         imgsz=state.imgsz,
         verbose=False,
     )
@@ -1706,7 +1747,7 @@ def proses_tick(
 
 
 def jalankan_gabungan(
-    dipilih, durasi_detik, langkah, frame_visual, imgsz,
+    dipilih, durasi_detik, langkah, frame_visual, imgsz, conf,
     penulis_csv, penulis_csv_crossing, penulis_csv_snapshot, tampilkan_live,
 ):
     """
@@ -1730,7 +1771,7 @@ def jalankan_gabungan(
     tersendiri -- isinya memang dimaksudkan dibaca mentah per baris.
     """
     states = [
-        KameraState(nama_kamera, zona, durasi_detik, imgsz)
+        KameraState(nama_kamera, zona, durasi_detik, imgsz, conf)
         for nama_kamera, zona in dipilih.items()
     ]
 
@@ -1957,6 +1998,17 @@ def main():
         ),
     )
     parser.add_argument(
+        "--conf", type=float, default=CONFIDENCE,
+        help=(
+            f"Ambang confidence YOLO (default {CONFIDENCE}). Turunkan "
+            f"(mis. 0.25) kalau kendaraan cepat/jauh baru kedeteksi "
+            f"SETELAH lewat garis crossing -- lihat "
+            f"docs/hasil-validasi-akurasi-cv.md. Override lokal, tidak "
+            f"mengubah CONFIDENCE di vehicle_counter.py yang dipakai "
+            f"fitur lain (upload CCTV, kalibrasi)."
+        ),
+    )
+    parser.add_argument(
         "--kamera", default=None,
         help=(
             "Proses SATU kamera saja, misal CCTV_1. Default: semua. "
@@ -2000,7 +2052,7 @@ def main():
     print("=" * 68)
     print(
         f"Model    : {os.path.basename(MODEL_PATH)} "
-        f"(conf={CONFIDENCE}, imgsz={args.imgsz})"
+        f"(conf={args.conf}, imgsz={args.imgsz})"
     )
     print(f"Acuan    : TEPI BAWAH bbox (posisi roda), bukan centroid")
     print(f"Durasi   : {args.durasi} detik pertama tiap video")
@@ -2048,6 +2100,7 @@ def main():
                 args.langkah,
                 args.frame_visual,
                 args.imgsz,
+                args.conf,
                 penulis,
                 penulis_crossing,
                 penulis_snapshot,
