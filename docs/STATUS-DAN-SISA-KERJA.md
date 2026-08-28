@@ -21,7 +21,7 @@ Dokumen lain di `docs/` sekarang cuma 2 jenis: **cara kerja** (rujukan teknis) d
 | 7 | Scenario Generator | 90% | **Sudah live** lewat cache |
 | 8 | Traffic Simulation | 92% | **Sudah live**, sudah divalidasi multi-seed |
 | 9 | Performance Analysis (LOS) | 90% | 4 metrik nyata, tampil di dashboard |
-| 10 | Adaptive Decision Engine | 55% / 90% | **PPO sudah dilatih & terintegrasi** (naik dari 10%), tapi model belum di-commit. Peran tetap diisi Scenario Generator |
+| 10 | Adaptive Decision Engine | 65% / 90% | PPO dilatih, terintegrasi, model bisa dimuat & lolos test (naik dari 10%). Belum unggul di throughput, jadi peran tetap diisi Scenario Generator |
 | 11 | Signal Timing Recommendation | 88% | Live. `/signal/status` belum baca cache skenario |
 | 12 | Dashboard | 92% | Build hijau, badge `source` + LOS ada |
 
@@ -29,7 +29,7 @@ Dokumen lain di `docs/` sekarang cuma 2 jenis: **cara kerja** (rujukan teknis) d
 Naik dari ≈84% karena PPO (kotak 10) sudah dilatih dan terintegrasi — lihat P-1.
 
 **Bukti eksekusi 29 Agustus:**
-- `backend/` → `pytest -q` = **76 passed, 1 failed** (gagal: `test_real_checkpoint_reaches_recommendation_endpoint`, lihat P-1a)
+- `backend/` → `pytest -q` = **77 passed, 0 failed**
 - `simulation/` → `pytest tests/ -q` = **11 passed, 1 failed** (lihat item S-2)
 - `frontend/` → `npm run build` = **sukses, 13/13 route**
 
@@ -53,6 +53,7 @@ Bagian ini ada supaya tidak ada yang mengerjakan hal yang sudah beres. Beberapa 
 | Kalibrasi `north`, identitas koridor `east` | ✅ **Selesai** | Commit `5b2c18e`, `700140c` |
 | PPO "nol baris kode RL" | ✅ **Sudah tidak berlaku** | Commit `f921ce9` — env Gymnasium, training, evaluasi, integrasi backend, 7 test. Lihat P-1 |
 | PPO tidak pernah menunjukkan tanda belajar | ✅ **Sudah terbukti belajar** | `training_monitor.csv` — reward naik monoton −3,38 → −1,80 selama 8.362 episode |
+| Checkpoint PPO tidak ter-commit, `pytest` backend 1 gagal | ✅ **Selesai 29 Agustus** | Yuli commit model (`f62b7ac`); `stable-baselines3`/`gymnasium` ditambahkan ke `backend/requirements.txt`. `pytest` → 77 passed, 0 failed |
 
 ---
 
@@ -173,21 +174,13 @@ Naik **monoton di setiap desil**, total **+1,58**. Ini kurva belajar sungguhan, 
 
 **3. Environment-nya proper.** Gymnasium `SmartTwinSumoEnv`, ada `check_env`, split train/eval 80/20, seed terkontrol, `traci` pakai `label` unik jadi tidak bentrok antar sesi.
 
-#### 🔴 P-1a. Model hasil training tidak ada di repo — Yuli, 5 menit
+#### ✅ P-1a. Model hasil training tidak ada di repo — SELESAI 29 Agustus
 
-`decision_engine/models/` hanya berisi `evaluation*.json` + `training_monitor.csv`. File **`smarttwin_ppo.zip` yang dicari `ppo_engine.py:24` tidak ada** — ter-gitignore oleh `.gitignore:20` (`*.zip`).
+Yuli sudah commit checkpoint-nya (`f62b7ac "add model"`, `aa9d06d "add smoke train ppo"`) — `decision_engine/models/smarttwin_ppo.zip` dan `smarttwin_ppo_smoke.zip` sekarang ada di repo.
 
-Akibatnya di komputer selain milik Yuli, PPO **selalu** jatuh ke `ppo-fallback-rule-based`, 100% kasus. Ini juga yang membuat `pytest` backend jadi **1 failed** (`test_real_checkpoint_reaches_recommendation_endpoint` gagal di `assert MODEL.exists()`).
+**Sub-masalah yang baru ketemu saat verifikasi:** checkpoint-nya ada, tapi `pytest` backend tetap gagal dengan `ModuleNotFoundError: No module named 'stable_baselines3'` — library pembacanya belum terpasang di `backend/.venv` (beda dari `decision_engine/`'s venv tempat training jalan). **Sudah diperbaiki** hari ini: `stable-baselines3==2.9.0` + `gymnasium==1.3.0` ditambahkan ke `backend/requirements.txt` dan dipasang.
 
-Ini **kesalahan yang sama persis** seperti model LSTM dulu — `CLAUDE.md` sudah mencatat pola `git add -f` untuk artefak ter-gitignore.
-
-```powershell
-git add -f decision_engine/models/smarttwin_ppo.zip
-```
-
-Catatan: `stable_baselines3` juga belum terpasang di `backend/.venv` (`pip install -r decision_engine/requirements-rl.txt`).
-
-**Selesai kalau:** `pytest -q` di `backend/` → **77 passed, 0 failed**.
+**Terverifikasi:** `pytest -q` di `backend/` → **77 passed, 0 failed**.
 
 #### 🔴 P-1b. Klaim "PPO mengalahkan rule-based" belum sahih — Yuli, 2–3 jam
 
@@ -230,10 +223,11 @@ Tambahan: `ppo_env.py:20` melatih dari `cv/output/smarttwin_traffic_data.csv` (2
 
 #### Urutan kerja 1–7 September
 
-1. **P-1a** commit model (5 menit) — tanpa ini semuanya tidak bisa diverifikasi orang lain
-2. **P-1c** ganti baseline ke `RuleBasedEngine` asli
-3. **P-1d** samakan fitur training dengan inference
-4. **P-1b** naikkan bobot throughput, latih ulang, evaluasi ulang
+P-1a ✅ selesai. Sisanya:
+
+1. **P-1c** ganti baseline ke `RuleBasedEngine` asli
+2. **P-1d** samakan fitur training dengan inference
+3. **P-1b** naikkan bobot throughput, latih ulang, evaluasi ulang
 
 **Aturan berhenti:** kalau setelah semua ini PPO tetap kalah pada throughput, **jangan dipaksakan aktif**. Kotak 10 tetap 90% fungsional dengan Scenario Generator, dan PPO tetap layak dilaporkan sebagai pengembangan yang berhasil dilatih. **PPO yang menurunkan throughput lebih buruk daripada rule-based yang bekerja.**
 
@@ -314,7 +308,7 @@ SETIAP REKAM: backend → worker --once --full-cycle (smoke test)
 ### JANGAN dikatakan
 
 - ❌ **"PPO mengalahkan rule-based"** — yang menang cuma reward (fungsi yang PPO dilatih untuk maksimalkan). Pada throughput PPO **tidak pernah** menang, dan baselinenya bukan `RuleBasedEngine` asli. Lihat P-1b/P-1c
-- ❌ **"PPO sudah dipakai di sistem"** — default tetap rule-based, dan model belum di-commit (P-1a)
+- ❌ **"PPO sudah dipakai di sistem"** — default tetap rule-based; model sudah bisa dimuat (P-1a selesai) tapi belum diaktifkan sebagai default
 - ❌ "Realtime CCTV" — rekaman
 - ❌ "Akurasi 95%" sebelum S-4 selesai — belum diukur
 - ❌ "Forecast terbukti menurunkan delay 14%" — sebelum P-2, itu 1 percobaan
@@ -326,7 +320,7 @@ SETIAP REKAM: backend → worker --once --full-cycle (smoke test)
 
 | Siapa | Fase 1 (sebelum 31 Agt) | Fase 2 (1–7 Sept) |
 |---|---|---|
-| **Yuli** | **P-1a commit model PPO (5m)**, S-1 panel sinyal (1–2j), S-2 test merah (15m) | **P-1b/c/d PPO** (utama), P-2 bukti LSTM |
+| **Yuli** | S-1 panel sinyal (1–2j), S-2 test merah (15m) | **P-1b/c/d PPO** (utama), P-2 bukti LSTM |
 | **Melpi** | S-3 hardcode (30m), S-6 pernyataan scope (1j) | Tampilkan LOS per lengan (dukung P-3) |
 | **Rahmat** | S-4 validasi CV (3–4j), S-5 argumen `--sumber` (30m) | P-3 LOS per lengan, P-4 rapi-rapi |
 | Siapa saja | S-7 verifikasi browser (30m) | — |
