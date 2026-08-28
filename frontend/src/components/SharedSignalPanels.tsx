@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import RecommendationPanel from "@/components/RecommendationPanel";
 import SignalStatusPanel from "@/components/SignalStatusPanel";
 import type { SignalStatus, Recommendation } from "@/types/traffic";
@@ -18,93 +19,44 @@ export default function SharedSignalPanels({
 }) {
   const { scenario } = useScenario();
 
-  let transformedRecommendation = activeRecommendation;
-  let transformedSignal = activeSignal;
+  const isInitialLoading = activeSignal.source === "mock" && scenario === "Traffic Realtime" && !activeRecommendation;
 
-  if (scenario !== "Traffic Realtime" && activeRecommendation && activeRecommendation.cyclePlan) {
-    const newPhases = activeRecommendation.cyclePlan.phases.map(p => {
-        const originalGreen = p.greenSeconds;
-        let newGreen = originalGreen;
-        if (scenario === "Aggressive") {
-            newGreen = Math.min(60, Math.round(originalGreen * 1.2));
-        } else if (scenario === "Balanced") {
-            newGreen = Math.round((originalGreen + 15) / 2);
-        }
-        return { ...p, greenSeconds: newGreen };
-    });
-    
-    const newCycleLength = newPhases.reduce((acc, p) => acc + p.greenSeconds + YELLOW_SECONDS, 0);
-    
-    transformedRecommendation = {
-        ...activeRecommendation,
-        cyclePlan: {
-            ...activeRecommendation.cyclePlan,
-            cycleLengthSeconds: newCycleLength,
-            phases: newPhases
-        }
-    };
+  const visualPhase = activeSignal.currentPhase || null;
+  const [now, setNow] = useState(Date.now());
 
-    const newSignalPhases = { ...activeSignal.phases };
-    Object.keys(newSignalPhases).forEach(key => {
-        const phase = newSignalPhases[key];
-        const recPhase = newPhases.find(rp => rp.approach === key);
-        if (recPhase) {
-            newSignalPhases[key] = {
-                ...phase,
-                durationSeconds: recPhase.greenSeconds + YELLOW_SECONDS,
-            };
-        }
-    });
+  // Force re-render setiap 1 detik untuk menghitung ulang elapsedSeconds
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, []);
 
-    let newRemaining = activeSignal.remainingSeconds;
-    const currentRecPhase = activeRecommendation.cyclePlan.phases.find(p => p.approach === activeSignal.currentPhase);
-    const newRecPhase = newPhases.find(p => p.approach === activeSignal.currentPhase);
-    
-    if (currentRecPhase && newRecPhase) {
-        const originalPhaseDuration = currentRecPhase.greenSeconds + YELLOW_SECONDS;
-        const newPhaseDuration = newRecPhase.greenSeconds + YELLOW_SECONDS;
-        if (originalPhaseDuration > 0) {
-            const progress = activeSignal.remainingSeconds / originalPhaseDuration;
-            newRemaining = Math.max(0, Math.round(progress * newPhaseDuration));
-        }
-    }
+  const elapsedSeconds = Math.max(0, Math.floor((now - new Date(activeSignal.timestamp).getTime()) / 1000));
+  const visualRemaining = Math.max(0, activeSignal.remainingSeconds - elapsedSeconds);
 
-    transformedSignal = {
-        ...activeSignal,
-        cycleTimeSeconds: newCycleLength,
-        phases: newSignalPhases,
-        remainingSeconds: newRemaining,
-        // Optional: flag it so SignalStatusPanel knows it's simulated visually
-        source: "mock"
-    };
-  }
-
-  const isInitialLoading = transformedSignal.source === "mock" && scenario === "Traffic Realtime" && !transformedRecommendation;
-
-  const visualPhase = transformedSignal.currentPhase || null;
   const visualPhaseState: "GREEN" | "YELLOW" =
-    transformedSignal.remainingSeconds <= YELLOW_SECONDS ? "YELLOW" : "GREEN";
-  const visualRemaining = transformedSignal.remainingSeconds;
+    visualRemaining <= YELLOW_SECONDS ? "YELLOW" : "GREEN";
 
   return (
     <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
       <RecommendationPanel
-        recommendation={transformedRecommendation}
-        signal={transformedSignal}
+        recommendation={activeRecommendation}
+        signal={activeSignal}
         selectedApproach={selectedApproach}
-        activeCycleSeconds={transformedSignal.cycleTimeSeconds}
+        activeCycleSeconds={activeSignal.cycleTimeSeconds}
         sharedVisualPhase={visualPhase}
         sharedVisualPhaseState={visualPhaseState}
         sharedVisualRemaining={visualRemaining}
+        elapsedSeconds={elapsedSeconds}
         isLoading={isInitialLoading}
       />
 
       <SignalStatusPanel
-        signal={transformedSignal}
-        recommendation={transformedRecommendation}
+        signal={activeSignal}
+        recommendation={activeRecommendation}
         sharedVisualPhase={visualPhase}
         sharedVisualPhaseState={visualPhaseState}
         sharedVisualRemaining={visualRemaining}
+        elapsedSeconds={elapsedSeconds}
         isLoading={isInitialLoading}
       />
     </div>

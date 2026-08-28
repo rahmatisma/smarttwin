@@ -603,3 +603,56 @@ export async function fetchCameras(
     };
   });
 }
+
+/* =========================================================
+ * DIGITAL TWIN SCENARIOS
+ * ========================================================= */
+
+export interface DigitalTwinPhase {
+  approach: "north" | "east" | "south" | "west";
+  greenSeconds: number;
+  yellowSeconds: number;
+  redSeconds: number;
+  demandScore: number;
+}
+
+export interface DigitalTwinCandidate {
+  candidateId: "baseline" | "aggressive" | "balanced";
+  phases: DigitalTwinPhase[];
+  cycleLengthSeconds: number;
+  totalCycleSeconds: number;
+  busiestApproach: string | null;
+  avgDelaySeconds: number;
+  avgQueueLengthM: number;
+  queueLengthVeh: number;
+  throughputVeh: number;
+  los: "A" | "B" | "C" | "D" | "E" | "F";
+  isWinner: boolean;
+}
+
+export interface DigitalTwinScenarioResponse {
+  intersectionId: string;
+  status: "completed" | "unavailable";
+  updatedAt: string | null;
+  winnerId: "baseline" | "aggressive" | "balanced" | null;
+  candidates: DigitalTwinCandidate[];
+  message: string | null;
+}
+
+export async function fetchDigitalTwinScenarios(
+  intersectionId: string = DEFAULT_INTERSECTION_ID
+): Promise<DigitalTwinScenarioResponse | null> {
+  try {
+    const response = await fetch(
+      `${API_BASE_URL}/api/v1/digital-twin/scenarios/latest?intersectionId=${encodeURIComponent(
+        intersectionId
+      )}`
+    );
+    if (!response.ok) return null;
+    return await response.json();
+  } catch (err) {
+    console.error("Failed to fetch scenarios:", err);
+    return null;
+  }
+}
+

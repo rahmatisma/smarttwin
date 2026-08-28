@@ -290,6 +290,31 @@ class SignalService:
 
             return self._cycle_plan
 
+    def _calculate_wait_time(
+        self,
+        active_approach: str,
+        target_approach: str,
+        green_seconds_by_approach: dict[str, int],
+        active_remaining_seconds: int,
+    ) -> int:
+        
+        if active_approach == target_approach:
+            return 0
+            
+        current_idx = FIXED_CYCLE_ORDER.index(active_approach)
+        target_idx = FIXED_CYCLE_ORDER.index(target_approach)
+        
+        wait_time = active_remaining_seconds
+        
+        i = (current_idx + 1) % len(FIXED_CYCLE_ORDER)
+        while i != target_idx:
+            step_approach = FIXED_CYCLE_ORDER[i]
+            step_green = green_seconds_by_approach.get(step_approach, DEFAULT_GREEN_SECONDS)
+            wait_time += step_green + YELLOW_SECONDS
+            i = (i + 1) % len(FIXED_CYCLE_ORDER)
+            
+        return wait_time
+
     def get_live_status(
         self,
         now: Optional[datetime] = None,
@@ -388,7 +413,12 @@ class SignalService:
                     remainingSeconds=(
                         remaining_seconds
                         if approach_name == approach
-                        else 0
+                        else self._calculate_wait_time(
+                            active_approach=approach,
+                            target_approach=approach_name,
+                            green_seconds_by_approach=green_seconds_by_approach,
+                            active_remaining_seconds=remaining_seconds,
+                        )
                     ),
                 )
                 for approach_name in FIXED_CYCLE_ORDER

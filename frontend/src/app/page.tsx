@@ -14,6 +14,7 @@ import {
   fetchTrafficState,
   fetchSignalStatus,
   fetchRecommendation,
+  fetchDigitalTwinScenarios,
   fetchForecast,
   fetchIntersectionCoords,
   DEFAULT_INTERSECTION_ID,
@@ -32,6 +33,8 @@ import type {
   ForecastResponse,
   VehicleClassCount,
 } from "@/types/traffic";
+
+import { useScenario } from "@/context/ScenarioContext";
 
 /*
  * =========================================================
@@ -241,6 +244,8 @@ export default function DashboardPage() {
    * =========================================================
    */
 
+  const { scenario } = useScenario();
+
   const selectedIntersection: IntersectionSelection = "all";
   
   const videoTimeRef = useRef<number>(0);
@@ -345,7 +350,11 @@ export default function DashboardPage() {
                 ] = await Promise.all([
                   fetchTrafficState(inter.databaseId, videoTimeRef.current),
                   hasLiveBackend ? fetchSignalStatus(inter.databaseId) : null,
-                  hasLiveBackend ? fetchRecommendation(inter.databaseId) : null,
+                  hasLiveBackend
+                    ? (scenario === "Traffic Realtime"
+                        ? fetchRecommendation(inter.databaseId)
+                        : fetchDigitalTwinScenarios(inter.databaseId).then(data => data?.scenarios?.[scenario] ?? null))
+                    : null,
                   hasLiveBackend ? fetchForecast(inter.databaseId) : null,
                   fetchIntersectionCoords(inter.databaseId),
                 ]);
@@ -436,7 +445,11 @@ export default function DashboardPage() {
               ] = await Promise.all([
                 fetchTrafficState(inter.databaseId, videoTimeRef.current),
                 hasLiveBackend ? fetchSignalStatus(inter.databaseId) : null,
-                hasLiveBackend ? fetchRecommendation(inter.databaseId) : null,
+                hasLiveBackend
+                  ? (scenario === "Traffic Realtime"
+                      ? fetchRecommendation(inter.databaseId)
+                      : fetchDigitalTwinScenarios(inter.databaseId).then(data => data?.scenarios?.[scenario] ?? null))
+                  : null,
                 hasLiveBackend ? fetchForecast(inter.databaseId) : null,
               ]);
               return {
@@ -537,7 +550,7 @@ export default function DashboardPage() {
       }
     };
 
-  }, []);
+  }, [scenario]);
 
   /*
    * =========================================================

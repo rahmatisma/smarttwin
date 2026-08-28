@@ -19,7 +19,10 @@ import {
 
 import Sidebar from "@/components/Sidebar";
 import { useScenario, ScenarioType } from "@/context/ScenarioContext";
-import { fetchSignalStatus } from "@/lib/supabaseData";
+import { fetchSignalStatus, fetchRecommendation, fetchDigitalTwinScenarios, DigitalTwinScenarioResponse } from "@/lib/supabaseData";
+import type { SignalStatus, Recommendation } from "@/types/traffic";
+import RecommendationPanel from "@/components/RecommendationPanel";
+import SignalStatusPanel from "@/components/SignalStatusPanel";
 
 type SimulationStatus = "idle" | "running" | "paused";
 
@@ -37,19 +40,48 @@ export default function DigitalTwinView() {
     const [loading, setLoading] = useState(false);
     const [vehicles, setVehicles] = useState<VehicleData[]>([]);
 
-    interface SignalStatusData {
-        direction: string;
-        state: "GREEN" | "RED" | "YELLOW";
-        time: number;
-    }
-    const [signalStatuses, setSignalStatuses] = useState<SignalStatusData[]>([
-        { direction: "North", state: "GREEN", time: 32 },
-        { direction: "East", state: "RED", time: 18 },
-        { direction: "South", state: "GREEN", time: 32 },
-        { direction: "West", state: "RED", time: 18 },
-    ]);
+
     const [isInitialLoading, setIsInitialLoading] = useState(true);
     const [isSimStateLoaded, setIsSimStateLoaded] = useState(false);
+
+    const [dbSignalRaw, setDbSignalRaw] = useState<SignalStatus | null>(null);
+    const [dbRecRaw, setDbRecRaw] = useState<Recommendation | null>(null);
+    const [scenarioData, setScenarioData] = useState<DigitalTwinScenarioResponse | null>(null);
+    const [recommendationLoading, setRecommendationLoading] = useState(false);
+    const [runningScenario, setRunningScenario] = useState<ScenarioType | null>("Traffic Realtime");
+
+    const [simSharedPhase, setSimSharedPhase] = useState<string>("north");
+    const [simSharedState, setSimSharedState] = useState<"GREEN" | "YELLOW" | "RED">("RED");
+    const [simSharedRemaining, setSimSharedRemaining] = useState<number>(0);
+
+    useEffect(() => {
+        fetchDigitalTwinScenarios().then(res => setScenarioData(res));
+    }, []);
+
+    useEffect(() => {
+        let isSubscribed = true;
+        const poll = async () => {
+            try {
+                const [sig, rec] = await Promise.all([
+                    fetchSignalStatus("simpang4-pingit"),
+                    fetchRecommendation("simpang4-pingit")
+                ]);
+                if (isSubscribed) {
+                    if (sig) setDbSignalRaw(sig);
+                    if (rec) setDbRecRaw(rec);
+                }
+            } catch (err) {
+                console.error("Failed to fetch recommendation/signal data for Digital Twin", err);
+            }
+        };
+
+        poll();
+        const intervalId = setInterval(poll, 1000);
+        return () => {
+            isSubscribed = false;
+            clearInterval(intervalId);
+        };
+    }, []);
     
     // Auto-calibration bounds
     const boundsRef = useRef({ minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity });
@@ -96,13 +128,6 @@ export default function DigitalTwinView() {
                             const isEW = phase.includes("ew") || phase.includes("east") || phase.includes("west");
                             const isAmber = phase.includes("amber") || phase.includes("yellow");
                             const activeColor = isAmber ? "YELLOW" : "GREEN";
-
-                            setSignalStatuses([
-                                { direction: "North", state: isNS ? activeColor : "RED", time: dbSignal.remainingSeconds },
-                                { direction: "East",  state: isEW ? activeColor : "RED", time: dbSignal.remainingSeconds },
-                                { direction: "South", state: isNS ? activeColor : "RED", time: dbSignal.remainingSeconds },
-                                { direction: "West",  state: isEW ? activeColor : "RED", time: dbSignal.remainingSeconds }
-                            ]);
                             setIsInitialLoading(false);
                         }
                     } catch (dbErr) {
@@ -130,12 +155,17 @@ export default function DigitalTwinView() {
                             return "RED";
                         };
 
-                        setSignalStatuses([
-                            { direction: "North", state: getState(rawState.slice(10, 15)), time: remaining },
-                            { direction: "East",  state: getState(rawState.slice(5, 10)),  time: remaining },
-                            { direction: "South", state: getState(rawState.slice(0, 5)),   time: remaining },
-                            { direction: "West",  state: getState(rawState.slice(15, 20)), time: remaining }
-                        ]);
+                        const slices = [
+                            { approach: "north", state: getState(rawState.substring(0, 5)) },
+                            { approach: "east", state: getState(rawState.substring(5, 10)) },
+                            { approach: "south", state: getState(rawState.substring(10, 15)) },
+                            { approach: "west", state: getState(rawState.substring(15, 20)) }
+                        ];
+                        const active = slices.find(s => s.state !== "RED") || slices[0];
+                        setSimSharedPhase(active.approach);
+                        setSimSharedState(active.state);
+                        setSimSharedRemaining(remaining);
+                        
                         setIsInitialLoading(false);
                     }
                 }
@@ -189,6 +219,13 @@ export default function DigitalTwinView() {
 
             // Simulasi berhasil berjalan
             setStatus("running");
+            setRunningScenario(scenario);
+            
+            // Fetch updated scenario data (in case it was dynamically generated by the run)
+            const updatedScenarioData = await fetchDigitalTwinScenarios();
+            setScenarioData(updatedScenarioData);
+            
+            setRecommendationLoading(false);
         } catch (error) {
             console.error(error);
             alert(error instanceof Error ? error.message : "Terjadi kesalahan saat memulai simulasi");
@@ -208,6 +245,8 @@ export default function DigitalTwinView() {
             setSignals([]);
             setSimulationTime(0);
             setScenario("Baseline");
+            setRunningScenario(null);
+            setRecommendationLoading(true);
         } catch (error) {
             console.error("Failed to stop simulation", error);
         } finally {
@@ -271,6 +310,66 @@ export default function DigitalTwinView() {
     const [speed, setSpeed] = useState("1x");
 
     const { scenario, setScenario } = useScenario();
+
+    const isSimulating = status === "running" || status === "paused";
+    const useRealtimeData = scenario === "Traffic Realtime";
+    
+    let mappedRec = dbRecRaw;
+    
+    if (!useRealtimeData && scenarioData) {
+        const scenarioKey = scenario.toLowerCase() as "baseline" | "aggressive" | "balanced";
+        const candidate = scenarioData.candidates.find(c => c.candidateId === scenarioKey);
+        
+        if (candidate) {
+            mappedRec = {
+                intersectionId: "simpang4-pingit",
+                timestamp: scenarioData.updatedAt || new Date().toISOString(),
+                recommendedPhase: candidate.phases[0]?.approach || "north",
+                recommendedGreenSeconds: candidate.phases[0]?.greenSeconds || 0,
+                currentGreenSeconds: 0,
+                expectedDelayReductionPercent: 0,
+                confidence: 1,
+                reason: "Scenario Generated",
+                metrics: {
+                    queueLength: candidate.queueLengthVeh,
+                    vehicleCount: candidate.throughputVeh,
+                    averageSpeedKmh: 0,
+                },
+                source: "scenario-generator",
+                cyclePlan: {
+                    phases: candidate.phases.map(p => ({
+                        approach: p.approach,
+                        greenSeconds: p.greenSeconds,
+                        demandScore: p.demandScore,
+                        yellowSeconds: p.yellowSeconds,
+                        redSeconds: p.redSeconds
+                    })),
+                    cycleLengthSeconds: candidate.cycleLengthSeconds,
+                    currentPhase: candidate.phases[0]?.approach || "north",
+                    source: "scenario-generator",
+                    totalCycleSeconds: candidate.totalCycleSeconds
+                },
+                avgDelaySeconds: candidate.avgDelaySeconds,
+                avgQueueLengthM: candidate.avgQueueLengthM,
+                los: candidate.los,
+                candidateId: candidate.candidateId,
+            } as Recommendation;
+        }
+    }
+    
+    let mappedPhase = dbSignalRaw?.currentPhase || "north";
+    let mappedState: "GREEN" | "YELLOW" | "RED" = dbSignalRaw && dbSignalRaw.remainingSeconds <= 4 ? "YELLOW" : "GREEN";
+    let mappedRemaining = dbSignalRaw?.remainingSeconds || 0;
+    
+    if (isSimulating) {
+        mappedPhase = simSharedPhase;
+        mappedState = simSharedState;
+        mappedRemaining = simSharedRemaining;
+    } else if (!useRealtimeData && mappedRec?.cyclePlan) {
+        mappedPhase = mappedRec.cyclePlan.phases[0].approach;
+        mappedState = "GREEN";
+        mappedRemaining = mappedRec.cyclePlan.phases[0].greenSeconds;
+    }
 
     return (
         <div className="flex min-h-screen bg-background text-text">
@@ -569,41 +668,37 @@ export default function DigitalTwinView() {
                 {/* BOTTOM SECTION */}
                 {/* ================================================= */}
 
-                <div className="mt-5 grid gap-5 lg:grid-cols-2">
+                <div className="mt-5 grid gap-5 lg:grid-cols-3">
 
                     {/* =============================== */}
                     {/* SIMULATION CONTROLS */}
                     {/* =============================== */}
 
-                    <div className="rounded-2xl border border-border bg-surface p-5 shadow-sm">
+                    <div className="lg:col-span-1 flex flex-col rounded-2xl border border-border bg-surface p-4 shadow-sm">
 
-                        <div className="mb-5 flex items-center gap-3">
+                        <div className="mb-3 flex items-center gap-2.5">
 
-                            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-surface-2">
-                                <Settings2 size={18} />
+                            <div className="flex h-7 w-7 items-center justify-center rounded-md bg-surface-2">
+                                <Settings2 size={14} />
                             </div>
 
                             <div>
                                 <h2 className="text-sm font-semibold">
                                     Simulation Controls
                                 </h2>
-
-                                <p className="text-xs text-text-muted">
-                                    Configure simulation parameters
-                                </p>
                             </div>
 
                         </div>
 
-                        <div className="grid gap-5 sm:grid-cols-2">
+                        <div>
 
                             {/* Scenario */}
 
                             <div>
-                                <label className="mb-2 flex items-center justify-between text-xs font-medium text-text-secondary">
+                                <label className="mb-1.5 flex items-center justify-between text-[11px] font-medium text-text-secondary">
                                     <span>Traffic Scenario</span>
                                     {scenario !== "Traffic Realtime" && (
-                                        <span className="text-[10px] text-accent-blue">Simulated</span>
+                                        <span className="text-[9px] text-accent-blue">Simulated</span>
                                     )}
                                 </label>
 
@@ -611,12 +706,21 @@ export default function DigitalTwinView() {
 
                                     <select
                                         value={scenario}
-                                        onChange={(e) =>
-                                            setScenario(
-                                                e.target.value as ScenarioType
-                                            )
-                                        }
-                                        className="w-full appearance-none rounded-xl border border-border bg-surface px-3 py-2.5 pr-9 text-sm outline-none transition focus:border-text-muted"
+                                        onChange={(e) => {
+                                            const newScenario = e.target.value as ScenarioType;
+                                            setScenario(newScenario);
+                                            
+                                            if (newScenario === "Traffic Realtime") {
+                                                setRecommendationLoading(false);
+                                                setRunningScenario("Traffic Realtime");
+                                            } else if (newScenario !== runningScenario || status !== "running") {
+                                                // Reset state ke loading karena butuh di-run
+                                                setRecommendationLoading(true);
+                                            } else {
+                                                setRecommendationLoading(false);
+                                            }
+                                        }}
+                                        className="w-full appearance-none rounded-lg border border-border bg-surface px-2.5 py-1.5 pr-8 text-xs outline-none transition focus:border-text-muted"
                                     >
                                         {Object.keys(SCENARIO_CONFIG).map((key) => (
                                             <option key={key} value={key}>
@@ -626,45 +730,9 @@ export default function DigitalTwinView() {
                                     </select>
 
                                     <ChevronDown
-                                        size={15}
-                                        className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-text-muted"
+                                        size={14}
+                                        className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-text-muted"
                                     />
-
-                                </div>
-
-                            </div>
-
-                            {/* Speed */}
-
-                            <div>
-
-                                <label className="mb-2 block text-xs font-medium text-text-secondary">
-                                    Simulation Speed
-                                </label>
-
-                                <div className="flex gap-2">
-
-                                    {["1x", "2x", "4x"].map(
-                                        (item) => (
-                                            <button
-                                                key={item}
-                                                type="button"
-                                                onClick={() =>
-                                                    setSpeed(
-                                                        item
-                                                    )
-                                                }
-                                                className={`flex-1 rounded-xl border px-3 py-2.5 text-xs font-medium transition ${
-                                                    speed ===
-                                                    item
-                                                        ? "border-accent bg-accent text-bg"
-                                                        : "border-border text-text-secondary hover:bg-surface-2"
-                                                }`}
-                                            >
-                                                {item}
-                                            </button>
-                                        )
-                                    )}
 
                                 </div>
 
@@ -674,24 +742,24 @@ export default function DigitalTwinView() {
 
                         {/* Buttons */}
 
-                        <div className="mt-6 flex gap-3">
+                        <div className="mt-auto flex gap-2 pt-2">
 
                             {status === "running" ? (
                                 <button
                                     type="button"
                                     onClick={handlePause}
-                                    className="flex items-center gap-2 rounded-xl bg-accent px-5 py-2.5 text-xs font-medium text-bg transition hover:opacity-90"
+                                    className="flex items-center gap-1.5 rounded-lg bg-accent px-4 py-1.5 text-[11px] font-medium text-bg transition hover:opacity-90"
                                 >
-                                    <Pause size={15} />
+                                    <Pause size={13} />
                                     Pause Simulation
                                 </button>
                             ) : status === "paused" ? (
                                 <button
                                     type="button"
                                     onClick={handleResume}
-                                    className="flex items-center gap-2 rounded-xl bg-accent px-5 py-2.5 text-xs font-medium text-bg transition hover:opacity-90"
+                                    className="flex items-center gap-1.5 rounded-lg bg-accent px-4 py-1.5 text-[11px] font-medium text-bg transition hover:opacity-90"
                                 >
-                                    <Play size={15} />
+                                    <Play size={13} />
                                     Resume Simulation
                                 </button>
                             ) : (
@@ -699,77 +767,43 @@ export default function DigitalTwinView() {
                                     type="button"
                                     onClick={handleStartSimulation}
                                     disabled={loading}
-                                    className="flex items-center gap-2 rounded-xl bg-accent px-5 py-2.5 text-xs font-medium text-bg transition hover:opacity-90 disabled:opacity-50"
+                                    className="flex items-center gap-1.5 rounded-lg bg-accent px-4 py-1.5 text-[11px] font-medium text-bg transition hover:opacity-90 disabled:opacity-50"
                                 >
-                                    <Play size={15} />
+                                    <Play size={13} />
                                     {loading ? "Starting..." : "Start Simulation"}
                                 </button>
                             )}
-
-                            <button
-                                type="button"
-                                onClick={handleReset}
-                                disabled={loading}
-                                className={`flex items-center gap-2 rounded-xl border border-border px-5 py-2.5 text-xs font-medium text-text-secondary transition hover:bg-surface-2 ${loading ? 'opacity-50 cursor-not-allowed' : ''}`}
-                            >
-                                <RotateCcw size={15} />
-                                Reset
-                            </button>
 
                         </div>
 
                     </div>
 
                     {/* =============================== */}
-                    {/* SIGNAL STATUS */}
+                    {/* RECOMMENDATION PANEL */}
                     {/* =============================== */}
 
-                    <div className="rounded-2xl border border-border bg-surface p-5 shadow-sm">
-
-                        <div className="mb-5 flex items-center gap-3">
-
-                            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-surface-2">
-                                <Zap size={18} />
+                    <div className="lg:col-span-2 flex h-full flex-col">
+                        {recommendationLoading ? (
+                            <div className="flex h-full flex-col items-center justify-center rounded-2xl border border-border bg-surface p-5 text-center shadow-sm">
+                                <div className="mb-4 h-6 w-6 animate-spin rounded-full border-2 border-accent-blue border-t-transparent"></div>
+                                <h3 className="text-sm font-semibold text-text-primary">Loading...</h3>
+                                <p className="mt-1 text-[11px] text-text-muted">Fetching simulation recommendation</p>
                             </div>
-
-                            <div>
-                                <h2 className="text-sm font-semibold">
-                                    Signal Status
-                                </h2>
-
-                                <p className="text-xs text-text-muted">
-                                    Traffic signal state
-                                </p>
+                        ) : dbSignalRaw ? (
+                            <RecommendationPanel
+                                recommendation={mappedRec}
+                                signal={dbSignalRaw}
+                                sharedVisualPhase={mappedPhase}
+                                sharedVisualPhaseState={mappedState}
+                                sharedVisualRemaining={mappedRemaining}
+                                layout="cross"
+                            />
+                        ) : (
+                            <div className="flex h-full flex-col rounded-2xl border border-border bg-surface p-5 text-center shadow-sm">
+                                <div className="mx-auto mt-auto mb-4 h-5 w-5 animate-spin rounded-full border-2 border-text-muted border-t-transparent"></div>
+                                <p className="mb-auto text-xs text-text-muted">Memuat Recommendation Panel...</p>
                             </div>
-
-                        </div>
-
-                        <div className="space-y-2">
-                            {signalStatuses.map((s, i) => (
-                                isInitialLoading ? (
-                                    <div key={i} className="flex items-center justify-between rounded-xl border border-border p-3">
-                                        <div className="flex items-center gap-3">
-                                            <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-surface-2" />
-                                            <span className="text-xs font-medium text-text-muted">
-                                                {s.direction}
-                                            </span>
-                                        </div>
-                                        <div className="flex items-center gap-3">
-                                            <span className="h-2.5 w-6 animate-pulse rounded bg-surface-2" />
-                                            <span className="h-2.5 w-10 animate-pulse rounded bg-surface-2" />
-                                        </div>
-                                    </div>
-                                ) : (
-                                    <SignalRow
-                                        key={i}
-                                        direction={s.direction}
-                                        state={s.state}
-                                        time={status === "running" ? `${s.time}s` : "--"}
-                                    />
-                                )
-                            ))}
-                        </div>
-
+                        )}
                     </div>
 
                 </div>
