@@ -211,12 +211,33 @@ export default function SignalStatusPanel({
             </div>
           </>
         ) : (
-          <div className="flex min-h-[220px] items-center justify-center rounded-md border border-border bg-surface-2 px-4 text-center">
-            <div className="flex flex-col items-center justify-center space-y-3">
-              <div className="h-5 w-5 animate-spin rounded-full border-2 border-text-muted border-t-transparent"></div>
-              <p className="text-xs text-text-muted">
-                Memuat siklus sinyal...
-              </p>
+          <div className="space-y-3">
+            <div className="grid grid-cols-2 gap-3">
+              <div className="rounded-md border border-border bg-surface-2 p-4 text-center">
+                <div className="text-[10px] font-semibold uppercase tracking-wider text-text-muted">
+                  Current Signal
+                </div>
+                <div className={`mt-2 text-lg font-bold ${statusColorClass}`}>
+                  {sharedVisualPhaseState}
+                </div>
+                <div className="mt-1 font-mono text-4xl font-extrabold tabular-nums text-text">
+                  {sharedVisualRemaining}<span className="ml-1 text-base font-normal text-text-muted">s</span>
+                </div>
+              </div>
+              <div className="rounded-md border border-border bg-surface-2 p-4">
+                <div className="text-[10px] font-semibold uppercase tracking-wider text-text-muted">
+                  Active Phase
+                </div>
+                <div className="mt-2 font-display text-xl font-bold text-text">
+                  {approachLabel(displaySignal.currentPhase)}
+                </div>
+                <div className="mt-1 text-xs text-text-secondary">
+                  Berikutnya: {approachLabel(displaySignal.nextPhase ?? "-")}
+                </div>
+              </div>
+            </div>
+            <div className="rounded-md border border-signal-amber/30 bg-signal-amber/5 px-3 py-2 text-xs text-text-secondary">
+              Rencana siklus belum tersedia; status fase langsung tetap ditampilkan dari backend.
             </div>
           </div>
         )}

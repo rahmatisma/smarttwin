@@ -257,7 +257,7 @@ export default function DigitalTwinView() {
             flow: "Heavy",
             queue: "Increased",
             policy: "Aggressive Clearing",
-            description: "Baseline +20%, max 60s"
+            description: "Baseline +1s pada lengan tersibuk, max 60s"
         },
         "Balanced": {
             level: "Low",

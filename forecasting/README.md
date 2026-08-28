@@ -189,6 +189,29 @@ sequence atau empat sequence per approach. Angka tersebut masih proof of
 concept. West memiliki error tertinggi, sedangkan density/queue north memakai
 zona `simpang_tengah` sebagai proxy, bukan pengukuran north murni.
 
+### Uji robustness tanpa training ulang
+
+Checkpoint yang sama juga diuji pada gabungan rentang validation dan test
+setelah batas data training. Dari 196 sequence valid, LSTM mengalahkan baseline
+last-value pada 114 sequence (58,16%). MAE keseluruhan turun dari 2,0563 menjadi
+1,6715 dan RMSE turun dari 4,3054 menjadi 3,1337. LSTM lebih baik pada west,
+south, dan north; pada east baseline masih sedikit lebih baik (MAE 1,1808 vs
+1,2503).
+
+Rentang ini disebut **post-training holdout/robustness check**, bukan independent
+test, karena bagian validation pernah dipakai untuk early stopping. Bukti ini
+memperluas jumlah sequence yang diperiksa tanpa melebih-lebihkan kemampuan
+generalisasi lintas hari. Hasil lengkap tersimpan di
+`outputs/lstm/per_approach/metrics_post_training_holdout.json`.
+
+Uji dampak operasional pada 10 snapshot historis dengan horizon SUMO identik
+256 langkah menunjukkan forecast memperbaiki delay 10/10, antrean 9/10, dan
+throughput 10/10; ketiga metrik membaik bersamaan pada 9/10 snapshot. Rata-rata
+perubahan adalah delay -3,925 detik, antrean -10,5 meter, dan throughput +3,2
+kendaraan. Seluruh snapshot masih berasal dari satu sesi rekaman, sehingga ini
+belum membuktikan generalisasi lintas hari. Lihat
+`../docs/hasil-studi-forecast-multi-snapshot.md`.
+
 ## API
 
 ### Forecast agregat
@@ -323,7 +346,23 @@ $env:PYTHONUTF8='1'
 .\forecasting\.venv\Scripts\python.exe forecasting/scripts/lstm/predict.py
 .\forecasting\.venv\Scripts\python.exe forecasting/scripts/lstm/per_approach/predict.py
 .\forecasting\.venv\Scripts\python.exe forecasting/scripts/lstm/per_approach/evaluate.py
+.\forecasting\.venv\Scripts\python.exe forecasting/scripts/lstm/per_approach/evaluate_holdout.py
 ```
+
+Evaluasi dampak forecast ke Scenario Generator/SUMO (inference saja, tanpa
+training) dijalankan dari root repo:
+
+```powershell
+$env:PYTHONPATH="$PWD;$PWD\backend;$PWD\simulation"
+.\backend\.venv\Scripts\python.exe simulation/evaluate_forecast_batch.py `
+    --snapshots 10 `
+    --history-limit 100 `
+    --pause-seconds 2
+```
+
+Perintah ini memerlukan backend environment, koneksi Supabase, dan SUMO. Semua
+pasangan forecast OFF/ON memakai horizon 256 langkah yang sama agar throughput
+dapat dibandingkan secara adil.
 
 ## Riwayat eksperimen dataset
 

@@ -33,19 +33,22 @@ INTERSECTION_ID = "simpang4-pingit"
 CACHE_TABLE = "liveScenarioCache"
 
 
-def _make_engine() -> ScenarioEngine:
+def _make_engine(short_sim_steps: int | None = None) -> ScenarioEngine:
+    options = {"short_sim_steps": short_sim_steps} if short_sim_steps is not None else {}
     return ScenarioEngine(
         sumo_binary=sumoBinary,
         sumo_config=sumoConfig,
         tls_id=tlsId,
         approach_to_phase=approachToPhase,
         run_simulation_fn=runSimulation,
+        **options,
     )
 
 
-def evaluate_state(state, *, forecast=None, full_cycle: bool = False) -> dict[str, Any]:
+def evaluate_state(state, *, forecast=None, full_cycle: bool = False,
+                   simulation_steps: int | None = None) -> dict[str, Any]:
     """Evaluasi satu state; fungsi ini tidak menyentuh cache/database."""
-    engine = _make_engine()
+    engine = _make_engine(simulation_steps)
     recommend_method = (
         engine.recommend_full_cycle if full_cycle else engine.recommend
     )
@@ -80,17 +83,30 @@ def evaluate_state(state, *, forecast=None, full_cycle: bool = False) -> dict[st
 
 
 def write_cache(supabase, payload: dict[str, Any]) -> None:
-    # ``candidates`` disimpan di artefak studi, bukan tabel live yang hanya
-    # memerlukan pemenang terbaru.
-    cache_payload = {
-        key: value for key, value in payload.items()
-        if key != "candidates"
-    }
-    (
-        supabase.table(CACHE_TABLE)
-        .upsert(cache_payload, on_conflict="intersectionId")
-        .execute()
-    )
+    # Simpan ketiga hasil agar Digital Twin tidak menghitung logic sendiri.
+    # Retry legacy menjaga worker tetap hidup bila migrasi kolom `candidates`
+    # belum dijalankan; endpoint akan mengembalikan candidates=[] secara jujur.
+    try:
+        (
+            supabase.table(CACHE_TABLE)
+            .upsert(payload, on_conflict="intersectionId")
+            .execute()
+        )
+    except Exception as exc:
+        legacy_payload = {
+            key: value for key, value in payload.items()
+            if key != "candidates"
+        }
+        print(
+            "[WARN] Kolom liveScenarioCache.candidates belum tersedia; "
+            "menulis format legacy. Jalankan backend/app/db/live_scenario_cache.sql. "
+            f"Detail: {exc}"
+        )
+        (
+            supabase.table(CACHE_TABLE)
+            .upsert(legacy_payload, on_conflict="intersectionId")
+            .execute()
+        )
 
 
 def evaluate_once(supabase, *, full_cycle: bool = False) -> dict[str, Any]:
@@ -229,8 +245,16 @@ def main() -> int:
     parser.add_argument("--compare-forecast", action="store_true")
     parser.add_argument(
         "--full-cycle",
+        dest="full_cycle",
         action="store_true",
-        help="Uji tiga program CyclePlan empat lengan (jalur baru opt-in).",
+        default=True,
+        help="Uji tiga program CyclePlan empat lengan (default).",
+    )
+    parser.add_argument(
+        "--single-phase",
+        dest="full_cycle",
+        action="store_false",
+        help="Mode studi lama satu fase; jangan dipakai untuk halaman Digital Twin.",
     )
     parser.add_argument(
         "--comparison-output",

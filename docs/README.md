@@ -38,6 +38,7 @@ Dirapikan **28 Agustus 2026**. Sebelumnya ada 20 dokumen yang saling bertentanga
 - [`database.md`](database.md) — skema database. ⚠️ Ini draft awal dan **sebagian sudah terbukti salah** (lihat banner di atas filenya). Kalau butuh skema pasti, cek langsung ke Supabase
 
 **Frontend:**
+- [`KONTRAK-DIGITAL-TWIN-SCENARIOS.md`](KONTRAK-DIGITAL-TWIN-SCENARIOS.md) — endpoint tiga kandidat, mapping nama skenario, state UI, dan cara menjalankan kandidat terpilih di SUMO
 - [`kontrak-rekomendasi-scenario-generator.md`](kontrak-rekomendasi-scenario-generator.md) — arti tiap nilai `recommendation.source` dan kapan boleh menampilkan badge/metrik SUMO
 - [`audit-kontrak-scenario-result.md`](audit-kontrak-scenario-result.md) — pemetaan field kontrak vs payload runtime
 
@@ -68,6 +69,7 @@ Jangan diubah. Ini yang dikutip di laporan dan dipakai menjawab juri.
 | Dokumen | Membuktikan apa |
 |---|---|
 | [`hasil-studi-forecast.md`](hasil-studi-forecast.md) | Dampak forecast: delay −2,20s, antrean −7m, throughput +3 (satu snapshot) |
+| [`hasil-studi-forecast-multi-snapshot.md`](hasil-studi-forecast-multi-snapshot.md) | Dampak forecast pada 10 snapshot dengan horizon identik: delay 10/10, antrean 9/10, throughput 10/10 membaik |
 | [`hasil-validasi-multisnapshot-multiseed.md`](hasil-validasi-multisnapshot-multiseed.md) | Kandidat `balanced` menang 7 dari 9 run (3 snapshot × 3 seed) |
 | [`hasil-kalibrasi-kandidat-agresif.md`](hasil-kalibrasi-kandidat-agresif.md) | Kenapa kandidat agresif jadi +1 detik, bukan +20% (sweep 28–34 detik) |
 | [`hasil-run-antrean-25-agustus.md`](hasil-run-antrean-25-agustus.md) | Run CV 4 kamera × 43 menit, 538 jendela, data antrean asli |

@@ -283,10 +283,16 @@ export default function RecommendationPanel({
             </div>
 
             <div className="mt-1 font-mono text-sm font-semibold text-text">
-              {sharedVisualPhase 
-                ? `${phases.find(p => p.approach === sharedVisualPhase)?.greenSeconds ?? "-"}s` 
-                : "Memuat..."}
+              {phases.length && sharedVisualPhase
+                ? `${phases.find(p => p.approach === sharedVisualPhase)?.greenSeconds ?? "-"}s`
+                : `${displayRec.recommendedGreenSeconds}s`}
             </div>
+
+            {!cyclePlan && (
+              <div className="mt-1 text-[10px] text-text-muted">
+                {approachLabel(displayRec.recommendedPhase)}
+              </div>
+            )}
           </div>
 
           <div className="rounded-md border border-border bg-surface-2 p-3">

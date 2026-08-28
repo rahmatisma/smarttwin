@@ -25,6 +25,7 @@ from app.api.routes.signal import router as signal_router
 from app.api.routes.recommendation import router as recommendation_router
 from app.api.routes.simulation import router as simulation_router
 from app.api.routes.health import router as health_router
+from app.api.routes.digital_twin import router as digital_twin_router
 from app.services.simulation_service import simulation_service
 
 
@@ -160,6 +161,9 @@ app.include_router(recommendation_router)
 
 # SUMO / Simulation
 app.include_router(simulation_router)
+
+# Scenario Generator / Digital Twin comparison
+app.include_router(digital_twin_router)
 
 
 # Health

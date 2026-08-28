@@ -32,7 +32,7 @@ traffic adalah:
 
 | Posisi | Makna | Normalisasi |
 |---:|---|---|
-| 0, 5, 10, 15 | volume/jumlah kendaraan | `min(volume / 60, 1)` |
+| 0, 5, 10, 15 | volume/flow yang crossing dalam window 5 detik | `min(volume / 60, 1)` |
 | 1, 6, 11, 16 | kendaraan mengantre | `min(queue / 30, 1)` |
 | 2, 7, 12, 17 | estimasi panjang antrean meter | `min(queue_m / 150, 1)` |
 | 3, 8, 13, 18 | density index | `min(density / 33, 1)` |
@@ -140,10 +140,13 @@ Kode utama berada di `decision_engine/ppo_env.py`.
 5. melakukan warm-up 20 detik;
 6. membaca traffic SUMO dan membentuk observation 25 fitur.
 
-Data `cv/output/smarttwin_traffic_data.csv` berisi baris per lajur. Loader
-mengagregasikan `vehicle_count` berdasarkan timestamp dan approach. Snapshot
-5 detik dikalikan 12 menjadi pendekatan kendaraan/menit. Minimum 3 kendaraan/
-menit diberikan agar episode dengan snapshot nol tidak sepenuhnya kosong.
+Loader membaca pasangan data yang sama dengan ingest produksi:
+`cv/output/crossing_simpang.csv` untuk flow dan
+`cv/output/snapshot_zona.csv` untuk memastikan window/lengan pengukuran
+kehadiran tersedia. Crossing 5 detik dikalikan 12 menjadi kendaraan/menit.
+Kehadiran zona tidak pernah dijumlahkan ke flow. Jika salah satu file belum
+dibuat oleh CV, training berhenti eksplisit dan tidak diam-diam kembali memakai
+CSV lama.
 Dataset dipisah deterministik: 80% awal untuk train, 20% akhir untuk evaluation.
 
 ### Step
@@ -169,9 +172,9 @@ queue_norm      = min(queue_vehicle / 40, 1)
 wait_norm       = min(total_wait / (vehicle_aktif × 120), 1)
 throughput_norm = min(vehicle_tiba_dalam_interval / 15, 1)
 
-reward = +0.20 × throughput_norm
-         -0.50 × queue_norm
-         -0.30 × wait_norm
+reward = +0.45 × throughput_norm
+         -0.35 × queue_norm
+         -0.20 × wait_norm
          -starvation_penalty
 ```
 
@@ -257,13 +260,47 @@ konfigurasi kecil ini untuk menghasilkan kandidat model.
 
 ## 8. Training kandidat
 
+### RunPod/Linux (disarankan untuk training panjang)
+
+Launcher `decision_engine/train_ppo_runpod.sh` memakai konfigurasi kandidat yang
+sama, memvalidasi dua CSV dan executable SUMO sebelum mulai, serta default ke
+CPU karena bottleneck utama adalah SUMO dan PPO memakai MLP kecil.
+
+```bash
+cd /workspace/smarttwin-runpod
+source .venv-ppo/bin/activate
+PPO_TIMESTEPS=100000 PPO_SEED=42 \
+  bash decision_engine/train_ppo_runpod.sh
+```
+
+Smoke test bisa memakai launcher yang sama tanpa mengubah file:
+
+```bash
+PPO_TIMESTEPS=2048 \
+PPO_OUTPUT=/workspace/smarttwin-runpod/decision_engine/models/smarttwin_ppo_smoke \
+  bash decision_engine/train_ppo_runpod.sh
+```
+
+Untuk melanjutkan checkpoint terakhir:
+
+```bash
+PPO_TIMESTEPS=50000 \
+PPO_RESUME=/workspace/smarttwin-runpod/decision_engine/models/checkpoints/smarttwin_ppo_10000_steps.zip \
+  bash decision_engine/train_ppo_runpod.sh
+```
+
+Selain model `.zip`, script Python menulis `.training.json` berisi waktu,
+device, parameter, versi library, dan SHA-256 kedua dataset. File metadata ini
+harus ikut diunduh agar training dapat diaudit dan direproduksi.
+
 Untuk kandidat awal deadline:
 
 ```powershell
 python -m decision_engine.train_ppo `
   --timesteps 100000 `
   --seed 42 `
-  --data cv/output/smarttwin_traffic_data.csv `
+  --data cv/output/crossing_simpang.csv `
+  --density-data cv/output/snapshot_zona.csv `
   --output decision_engine/models/smarttwin_ppo
 ```
 
@@ -273,7 +310,8 @@ Jika tetap berada di folder `decision_engine`, bentuk ekuivalennya:
 python -m train_ppo `
   --timesteps 100000 `
   --seed 42 `
-  --data ../cv/output/smarttwin_traffic_data.csv `
+  --data ../cv/output/crossing_simpang.csv `
+  --density-data ../cv/output/snapshot_zona.csv `
   --output models/smarttwin_ppo
 ```
 
@@ -335,14 +373,17 @@ python -m evaluate_ppo `
 ```
 
 Runner menjalankan PPO dan baseline pada jumlah episode serta seed awal yang
-sama. Ia melaporkan mean reward, mean queue, mean accumulated waiting, dan total
-throughput. `ppo_beats_rule_on_reward=true` hanya gerbang minimum, bukan bukti
-ilmiah lengkap. Untuk hasil lomba, ulangi minimal seed 1000, 2000, dan 3000;
+sama. Ia melaporkan mean reward, mean queue, mean accumulated waiting, total
+throughput, delta, dan persentase perubahan setiap metrik. Bagian `comparison`
+baru meluluskan `quality_gate_passed=true` jika queue, waiting, dan throughput
+semuanya minimal sama baiknya dengan baseline. Untuk hasil lomba, ulangi minimal
+seed 1000, 2000, dan 3000;
 simpan seluruh laporan, lalu laporkan mean/median dan variasinya.
 
-Catatan penting: `rule_based_action()` di environment adalah baseline demand
-queue yang dipetakan ke ruang action PPO, supaya perbandingan dilakukan melalui
-plant SUMO dan horizon sama. Endpoint tetap memakai `RuleBasedEngine` lengkap.
+`rule_based_action()` sekarang memanggil `RuleBasedEngine.recommend()` dan
+`RuleBasedEngine.recommend_cycle()` produksi dengan `TrafficState` simulasi yang
+sama persis dengan input PPO. Fase dan empat durasi hasil engine hanya dipetakan
+ke opsi action terdekat (15–60 detik, step 5) karena itulah ruang aksi PPO.
 
 Kriteria aktivasi yang disarankan:
 
@@ -418,16 +459,20 @@ evaluasi. **Semakin besar biasanya semakin baik.** Throughput tinggi tetap perlu
 dibaca bersama queue dan waiting; meloloskan banyak kendaraan tetapi menyisakan
 antrean yang jauh lebih buruk belum tentu merupakan kontrol terbaik.
 
-### `ppo_beats_rule_on_reward`
+### `comparison.quality_gate_passed`
 
 Nilai berikut:
 
 ```json
-"ppo_beats_rule_on_reward": true
+"traffic_metrics_won": 3,
+"traffic_metrics_total": 3,
+"quality_gate_passed": true,
+"recommended_for_activation": true
 ```
 
-hanya berarti `mean_reward PPO >= mean_reward rule-based`. Flag ini tidak berarti
-PPO mengalahkan rule-based pada queue, waiting, throughput, dan seluruh kondisi.
+berarti PPO tidak lebih buruk pada ketiga metrik operasional: queue, waiting,
+dan throughput. Reward tetap dilaporkan dalam `comparison.metrics.mean_reward`,
+tetapi kemenangan reward tidak dapat meluluskan quality gate sendirian.
 
 ### Cara menghitung peningkatan
 
@@ -478,7 +523,7 @@ Ringkasan arah metrik:
 | Mean queue | Semakin kecil |
 | Mean accumulated waiting | Semakin kecil |
 | Total throughput | Semakin besar |
-| `ppo_beats_rule_on_reward` | Hanya perbandingan reward gabungan |
+| `comparison.quality_gate_passed` | `true` hanya jika queue, waiting, dan throughput semuanya tidak lebih buruk |
 
 ## 11. Memasang model ke endpoint
 
@@ -592,6 +637,12 @@ Training dan inference harus memiliki kontrak yang identik:
 - action `MultiDiscrete([4,10,10,10,10])`;
 - mapping green index 15–60 step 5.
 
+Kontrak tersebut diimplementasikan satu kali di `ppo_features.py`. Environment
+training dan `PPOEngine` inference sama-sama memanggil fungsi itu. Di SUMO,
+`volume` dihitung dari kendaraan yang masuk selama window 5 detik terakhir,
+sedangkan `densityIndex` dihitung dari kendaraan yang sedang hadir di edge.
+Keduanya bukan lagi salinan besaran yang sama.
+
 Mengubah salah satu setelah training membuat checkpoint secara semantik salah,
 meskipun kadang masih dapat dimuat. Jika observation ditambah forecast sebagai
 20 fitur terpisah, misalnya, shape berubah dan model wajib dilatih ulang. Versi
@@ -599,8 +650,8 @@ sekarang memilih fusion 70/30 supaya shape inference tetap 25.
 
 ## 13. Keterbatasan yang harus dijelaskan jujur
 
-- Data CV adalah snapshot detection, bukan arrival rate terkalibrasi loop
-  detector; konversi ×12 adalah pendekatan awal.
+- Flow CV berasal dari crossing line, bukan jumlah kendaraan yang sedang hadir;
+  konversi ×12 dari window 5 detik tetap merupakan pendekatan arrival rate.
 - Semua kendaraan training sementara memakai tipe mobil; komposisi motor/bus/
   truk belum masuk reward dinamika.
 - Reward belum dikalibrasi terhadap survei waktu tempuh lapangan.

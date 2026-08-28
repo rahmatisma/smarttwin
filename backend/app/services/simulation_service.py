@@ -15,6 +15,7 @@ from app.simulation.sumo.traffic_state_adapter import (
     SumoTrafficStateAdapter,
 )
 from decision_engine.rule_based_engine import RuleBasedEngine, FIXED_CYCLE_ORDER
+from simulation.scenario_generator import generate_cycle_candidate_plans
 
 # Konstanta State String SUMO diambil dari spesifikasi scenario_generator
 _GREEN_STATE_BY_APPROACH = {
@@ -622,22 +623,25 @@ class SimulationService:
             if request.scenario != "Traffic Realtime" and traffic_state is not None:
                 try:
                     engine = RuleBasedEngine()
-                    # Hitung baseline duration untuk seluruh cycle
+                    # Scenario Generator adalah SATU-SATUNYA sumber rumus
+                    # Baseline/Aggressive/Balanced. Jangan hitung ulang di sini.
                     baseline_cycle = engine.recommend_cycle(traffic_state)
-                    
-                    # Convert ke dictionary for easier lookup
-                    baseline_green = {p.approach: p.greenSeconds for p in baseline_cycle.phases}
+                    candidates = {
+                        item["candidateId"]: item
+                        for item in generate_cycle_candidate_plans(baseline_cycle)
+                    }
+                    selected_candidate = candidates[request.scenario.lower()]
+                    phase_by_approach = {
+                        phase["approach"]: phase
+                        for phase in selected_candidate["phases"]
+                    }
                     
                     import traci
                     tls_phases = []
                     
                     for approach in FIXED_CYCLE_ORDER:
-                        green = baseline_green.get(approach, 30)
-                        
-                        if request.scenario == "Aggressive":
-                            green = min(60, round(green * 1.2))
-                        elif request.scenario == "Balanced":
-                            green = round((green + 15) / 2)
+                        phase = phase_by_approach[approach]
+                        green = int(phase["greenSeconds"])
                             
                         tls_phases.append(
                             traci.trafficlight.Phase(
@@ -652,7 +656,7 @@ class SimulationService:
 
                     controller.apply_scenario_logic(
                         logic_phases=tls_phases,
-                        scenario_id=request.scenario
+                        scenario_id=selected_candidate["candidateId"],
                     )
 
                 except Exception as exc:
