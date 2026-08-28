@@ -125,7 +125,9 @@ Sumber video dijadikan parameter `--sumber` (path file lain ATAU URL stream), me
 
 **Kalimat untuk laporan:** *"Arsitektur CV menerima file maupun stream RTSP secara identik (`cv2.VideoCapture` tidak membedakan keduanya); kami memakai rekaman karena tidak ada akses ke stream CCTV operasional Dishub, bukan karena keterbatasan sistem."*
 
-> ⚠️ **Insiden saat verifikasi, sudah dibereskan:** test RTSP pertama (tanpa backup) menimpa `cv/output/crossing_simpang.csv` dan `snapshot_zona.csv` jadi 0 baris — karena ketiga CSV dibuka mode `"w"` **di awal proses, sebelum** kamera sempat dicoba dibuka, jadi gagal-koneksi pun tetap menghapus data lama. Dipulihkan 100% dari salinan beku `forecasting/data/` (dipakai Yuli untuk training LSTM, kebetulan menyelamatkan kita). `percobaan_logic_simpang.csv` **tidak ada salinannya** dan tetap 0 baris — dikonfirmasi ke kode (`cv_csv_bridge.py:83`) file itu **tidak pernah dibaca `run_ingest.py`**, jadi dampak ke Supabase/dashboard/training = nol.
+> ⚠️ **Insiden saat verifikasi, sudah dibereskan sepenuhnya.** Test RTSP pertama (tanpa backup) menimpa ketiga CSV (`crossing_simpang.csv`, `snapshot_zona.csv`, `percobaan_logic_simpang.csv`) jadi 0 baris — karena semuanya dibuka mode `"w"` **di awal proses, sebelum** kamera sempat dicoba dibuka, jadi gagal-koneksi pun tetap menghapus data lama.
+>
+> `crossing_simpang.csv` dan `snapshot_zona.csv` dipulihkan 100% dari salinan beku `forecasting/data/` (dipakai Yuli untuk training LSTM, kebetulan menyelamatkan kita). `percobaan_logic_simpang.csv` tidak ada di situ, tapi **Rahmat punya backup sendiri** yang dipulihkan 29 Agustus — diverifikasi cocok persis (2.152 baris, 4 kamera CCTV_1–4, rentang waktu 16:30:10–17:19:15, sama dengan 2 file lainnya). **Ketiga file sekarang pulih 100%**, bukan cuma dampaknya nol seperti dugaan awal.
 >
 > **Perbaikan permanen ditambahkan supaya tidak terulang:** kalau `--sumber` dipakai, ketiga CSV sekarang ditulis ke `cv/output/_sumber_kustom/` (folder terpisah, di-gitignore), **bukan** menimpa CSV produksi sama sekali — diverifikasi ulang: CSV produksi tetap 2.152/10.452 baris setelah test kedua yang sengaja diulang.
 
