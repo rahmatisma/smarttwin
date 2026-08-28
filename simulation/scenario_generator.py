@@ -65,7 +65,7 @@ from decision_engine.rule_based_engine import (
 # ============================================================
 
 # Jendela simulasi singkat per kandidat -- di tengah rentang 60-120
-# detik yang diminta docs/pembagian-tugas-tahap-akhir.md item 1.5
+# detik yang disepakati saat Scenario Generator dirancang
 # (bukan 300 detik seperti run penuh di run_tls_simulation.py).
 SHORT_SIM_STEPS = 90
 
@@ -143,7 +143,7 @@ def generate_candidate_plans(
     paling butuh hijau berikutnya) -- yang dibandingkan di sini cuma
     DURASI-nya, bukan lengan mana yang dipilih.
 
-    Sesuai docs/pembagian-tugas-tahap-akhir.md item 1.5:
+    Tiga varian yang disepakati saat perancangan:
       (a) hasil RuleBasedEngine apa adanya
       (b) lebih agresif ke lengan tersibuk (+1 detik hasil kalibrasi SUMO)
       (c) lebih merata antar lengan (ditarik ke arah minimum)
@@ -387,8 +387,8 @@ def select_best_scenario(
     berkali-kali dengan input sama, hasilnya selalu sama.
 
     Ini pengganti kotak 10 (Adaptive Decision Engine / PPO di diagram
-    arsitektur) untuk sekarang -- lihat docs/pembagian-tugas-tahap-akhir.md
-    item 1.5 dan 1.6. Kalau PPOEngine (item 1.6) berhasil, fungsi ini
+    arsitektur) untuk sekarang -- lihat docs/STATUS-DAN-SISA-KERJA.md
+    item P-1. Kalau PPOEngine berhasil, fungsi ini
     dan seluruh alur generate-simulate-analisa di atasnya tidak lagi
     dipakai -- PPO langsung menghasilkan keputusan dari state, tidak
     lewat kandidat tetap seperti ini.
@@ -441,7 +441,7 @@ class ScenarioEngine:
     """
     Isian sementara buat kotak 10 (Adaptive Decision Engine) di
     diagram arsitektur, menggantikan PPO yang belum dikerjakan
-    (lihat item 1.6 di docs/pembagian-tugas-tahap-akhir.md).
+    (lihat item P-1 di docs/STATUS-DAN-SISA-KERJA.md).
 
     Method recommend() PERSIS bentuk RuleBasedEngine.recommend()
     supaya PPOEngine nanti tinggal ditukar tanpa mengubah

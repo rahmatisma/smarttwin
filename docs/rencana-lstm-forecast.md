@@ -1,5 +1,9 @@
 # Rencana LSTM Forecast — apa yang diprediksi, dari data apa, dan kenapa
 
+> 🔵 **Ini dokumen CARA KERJA (desain), bukan status.** Seluruh checklist di
+> bagian 10 sudah selesai per 28 Agustus. Untuk status terkini dan sisa kerja,
+> baca **`docs/STATUS-DAN-SISA-KERJA.md`** — itu satu-satunya dokumen status.
+
 > **Pembaruan implementasi 26 Agustus 2026:** `queueLengthVeh` dan
 > `queueLengthMEst` sekarang berisi estimasi CV yang bervariasi dan model sudah
 > dilatih dengan empat fitur. Sequence training yang melintasi gap observasi
@@ -43,7 +47,7 @@ Kalau desainnya tidak mengarah ke pertanyaan itu, dia tidak berguna buat sistem 
 Supaya Yuli tidak nunggu (waktu tersisa cuma H-6 ke 31 Agustus), disepakati jalan **2 fase paralel**, bukan satu jalur berurutan:
 
 - **Fase 1 — jalan SEKARANG (Yuli).** Latih LSTM cuma pakai 2 fitur yang datanya sudah asli: `vehicleCount` + `densityIndex`. Sekalian benerin granularitas (bagian 4) dan cari `SEQUENCE_LENGTH` yang pas (bagian 6) — kerjaan infrastruktur/pipeline ini tetap kepakai di Fase 2, tidak kebuang.
-- **Fase 2 — nanti setelah CSV antrean baru siap (Rahmat).** Rahmat yang jalanin logika perhitungan antrean (definisi ulang buat pendekatan zona + tracking kendaraan berhenti, lihat `docs/realtime-dashboard.md`) dan hasilnya jadi CSV baru dengan `queueLengthVeh`/`queueLengthMEst` yang isinya bukan nol lagi. Begitu CSV itu ada, Yuli **retrain ulang** pipeline yang sama dari Fase 1, sekarang pakai 4 fitur penuh.
+- **Fase 2 — nanti setelah CSV antrean baru siap (Rahmat).** Rahmat yang jalanin logika perhitungan antrean (definisi ulang buat pendekatan zona + tracking kendaraan berhenti, lihat `cv/vehicle_counter_pingit.py`) dan hasilnya jadi CSV baru dengan `queueLengthVeh`/`queueLengthMEst` yang isinya bukan nol lagi. Begitu CSV itu ada, Yuli **retrain ulang** pipeline yang sama dari Fase 1, sekarang pakai 4 fitur penuh.
 
 Jadi bukan "Yuli pegang kerjaan lain dulu sambil nunggu" — dia tetap di LSTM dari sekarang, cuma scope datanya yang bertahap.
 
@@ -135,7 +139,7 @@ Audit awal dokumen ini (ditulis siang 25 Agustus) menyimpulkan `realtime_forecas
 1. **`backend/app/services/forecast_service.py`** (`ForecastService`) — model agregat aktif dan fallback. Sudah PyTorch, 4 fitur, `INPUT_TIMESTEPS=12` / `OUTPUT_TIMESTEPS=12` pada skala 5 detik (60 detik histori → 60 detik forecast).
 2. **`backend/app/services/realtime_forecast_service.py`** (`RealtimeForecastService`) — **DIHAPUS 25 Agustus malam.** Tidak di-import siapa pun (dikonfirmasi lewat grep, nol hasil di luar dirinya sendiri dan satu baris komentar di `prepare_data.py`), dan tidak bisa jalan sama sekali kalau diinstansiasi (`load_model(...)` dipanggil tanpa pernah di-import — `NameError` instan). Menunjuk ke `.keras`/`backend/models/` yang direktorinya tidak ada. File ini adalah sisa desain lama (agregasi per-menit, masalah yang dibahas di bagian 4) yang tidak pernah disambungkan ke apa pun.
 3. **`backend/app/repositories/forecast_repository.py`** (`ForecastRepository`) — **DIHAPUS bersamaan**, karena satu-satunya pemakainya adalah `RealtimeForecastService` di atas. Sebagai catatan audit trail: query-nya sendiri sebenarnya tidak pernah bisa jalan — memfilter kolom `intersectionId`/`windowStart` yang tidak ada di tabel `trafficApproachStates` (kolom itu ada di `trafficStates`), jadi akan melempar `APIError 42703` kalau sempat dipanggil.
-4. **`backend/tests/test_forecast_realtime.py`** — **DIHAPUS bersamaan.** Bukan test pytest asli (`def main()`, nol `def test_*`), sama persis polanya dengan 4 file basi yang sudah dihapus di item 2.5 `pembagian-tugas-24-agustus.md`. Sebelum dihapus, file ini aktif MEMBUAT `pytest -q` gagal collection total (bukan cuma 1 test gagal) karena mengimpor dua kelas yang sudah dihapus. Regresi ini tidak tercatat di mana pun sebelum ditemukan malam ini.
+4. **`backend/tests/test_forecast_realtime.py`** — **DIHAPUS bersamaan.** Bukan test pytest asli (`def main()`, nol `def test_*`), sama persis polanya dengan 4 file basi yang sudah dihapus sebelumnya. Sebelum dihapus, file ini aktif MEMBUAT `pytest -q` gagal collection total (bukan cuma 1 test gagal) karena mengimpor dua kelas yang sudah dihapus. Regresi ini tidak tercatat di mana pun sebelum ditemukan malam ini.
 5. **`decision_engine/rule_based_engine.py`** — ini bukan model LSTM, tetapi sekarang menjadi konsumen forecast. `recommend()` dan `recommend_cycle()` menerima forecast opsional berbobot runtime 0,3 dengan fallback aman ke state aktual.
 
 **Pembaruan 26 Agustus:** modul ONNX legacy `backend/app/models/lstm_forecast.py` dan test pasangannya sudah dihapus setelah dipastikan tidak dipakai kode produksi. Serving aktif memakai `backend/app/services/forecast_service.py`; shared LSTM per-approach memiliki pipeline dan artefak terpisah di `forecasting/outputs/lstm/per_approach/`.
@@ -146,17 +150,17 @@ Audit awal dokumen ini (ditulis siang 25 Agustus) menyimpulkan `realtime_forecas
 
 ### Fase 1 — Yuli (hasil aktual)
 
-- [ ] Sumber training diputuskan: gabungan CSV beku yang reproducible; serving tetap dari `TrafficState` Supabase
-- [ ] Granularitas lima detik (window native)
-- [ ] Eksperimen `SEQUENCE_LENGTH`: 12 langkah terpilih berdasar validation MAE; kandidat lebih panjang tidak feasible karena gap
-- [ ] Fase dua fitur superseded; langsung empat fitur karena data antrean sudah siap
-- [ ] Model dan scaler tersimpan/ter-track dalam format keputusan tim: PyTorch `.pt` + JSON, bukan Keras `.keras` + pickle
-- [ ] `forecast_service.py` dipertahankan sebagai model agregat/fallback; shared model per-approach menjadi jalur utama
-- [ ] Forecast tersambung ke `RuleBasedEngine.recommend()`/`recommend_cycle()`, jalur live, ScenarioEngine, dan cache dashboard
+- [x] Sumber training diputuskan: gabungan CSV beku yang reproducible; serving tetap dari `TrafficState` Supabase
+- [x] Granularitas lima detik (window native)
+- [x] Eksperimen `SEQUENCE_LENGTH`: 12 langkah terpilih berdasar validation MAE; kandidat lebih panjang tidak feasible karena gap
+- [x] Fase dua fitur superseded; langsung empat fitur karena data antrean sudah siap
+- [x] Model dan scaler tersimpan/ter-track dalam format keputusan tim: PyTorch `.pt` + JSON, bukan Keras `.keras` + pickle
+- [x] `forecast_service.py` dipertahankan sebagai model agregat/fallback; shared model per-approach menjadi jalur utama
+- [x] Forecast tersambung ke `RuleBasedEngine.recommend()`/`recommend_cycle()`, jalur live, ScenarioEngine, dan cache dashboard
 
 ### Fase 2 — Rahmat, jalankan logika antrean → Yuli retrain 4 fitur
 
-- [ ] Rahmat: desain ulang definisi "antrean" buat pendekatan zona + logika kendaraan berhenti
-- [ ] Rahmat: jalankan ke rekaman; CSV antrean berisi nilai bervariasi dan sudah di-ingest
+- [x] Rahmat: desain ulang definisi "antrean" buat pendekatan zona + logika kendaraan berhenti
+- [x] Rahmat: jalankan ke rekaman; CSV antrean berisi nilai bervariasi dan sudah di-ingest
 - [x] Yuli: retrain ulang pipeline dari Fase 1, sekarang 4 fitur penuh (`vehicleCount`, `densityIndex`, `queueLengthVeh`, `queueLengthMEst`)
 - [x] Update tabel di bagian 2 dokumen ini — status `queueLengthVeh`/`queueLengthMEst` sudah diperbarui menjadi data estimasi CV asli

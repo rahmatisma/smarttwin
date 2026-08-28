@@ -1,6 +1,6 @@
 # Hasil Run CV Antrean + Kesiapan Data LSTM — 25 Agustus 2026
 
-Laporan run penuh `cv/vehicle_counter_pingit.py` ke seluruh rekaman 43 menit, dijalankan malam 25 Agustus dengan CUDA. Menutup item **1.2** di `pembagian-tugas-tahap-akhir.md` (Fase 2 LSTM: logika antrean CV) dan menyiapkan Fase 2 untuk Yuli.
+Laporan run penuh `cv/vehicle_counter_pingit.py` ke seluruh rekaman 43 menit, dijalankan malam 25 Agustus dengan CUDA. Menutup pekerjaan logika antrean CV (Fase 2 LSTM) dan menyiapkan data 4 fitur untuk training LSTM.
 
 **Ringkas: berhasil. Keempat fitur LSTM sekarang berisi data asli — `queueLengthVeh`/`queueLengthMEst` tidak lagi konstan nol.**
 

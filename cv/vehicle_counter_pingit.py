@@ -365,7 +365,7 @@ KELAS_KE_KOLOM = {
 # dipakai jalur upload video manual) -- BUKAN disalin mentah, karena
 # file itu kerja di piksel mentah + titik tengah bbox, sedangkan file
 # ini kerja di rasio 0.0-1.0 + titik acuan roda (y2). Lihat diskusi
-# 25 Agustus di docs/pembagian-tugas-tahap-akhir.md.
+# 25 Agustus, lihat docs/hasil-run-antrean-25-agustus.md.
 #
 # Kendaraan dianggap "sedang antre" kalau SEMUA syarat ini benar:
 #   1. Titik acuannya ada di dalam zona lengan ini (sudah dicek oleh

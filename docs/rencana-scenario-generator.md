@@ -1,6 +1,11 @@
 # Rencana Serah Terima — Scenario Generator + Traffic Simulator + Performance Analysis
 
-**Status per 27 Agustus 2026:** bagian ini (kotak 7-9 di diagram arsitektur — lihat `docs/data-contract.md`) sebelumnya dipegang Rahmat sendiri sebagai bagian dari item 1.5 di `pembagian-tugas-tahap-akhir.md`, **sudah selesai dan terverifikasi jalan** untuk versi dasarnya. Rahmat sekarang tidak bisa lanjut pegang bagian ini, jadi ditulis ulang di sini sebagai dokumen serah terima — supaya tim yang mengambil alih tidak perlu reverse-engineer dari kode dari nol, dan tahu persis batas antara "sudah beres" vs "belum, dan ini rencananya".
+> 🔵 **Ini dokumen CARA KERJA (arsitektur & serah terima), bukan status.**
+> Rancangan di bagian 4.1 sudah diimplementasikan (`scenario_worker.py` +
+> `liveScenarioCache`). Untuk status terkini dan sisa kerja, baca
+> **`docs/STATUS-DAN-SISA-KERJA.md`**.
+
+**Status per 27 Agustus 2026:** bagian ini (kotak 7-9 di diagram arsitektur — lihat `docs/data-contract.md`) sebelumnya dipegang Rahmat sendiri **sudah selesai dan terverifikasi jalan** untuk versi dasarnya. Rahmat sekarang tidak bisa lanjut pegang bagian ini, jadi ditulis ulang di sini sebagai dokumen serah terima — supaya tim yang mengambil alih tidak perlu reverse-engineer dari kode dari nol, dan tahu persis batas antara "sudah beres" vs "belum, dan ini rencananya".
 
 > **Pembaruan implementasi 27 Agustus:** bagian 4.1 sudah diwujudkan. `scenario_worker.py` menjalankan ScenarioEngine di background, `liveScenarioCache` menyimpan pemenang terbaru, dan `/recommendation` memakai cache segar dengan fallback rule-based. Verifikasi end-to-end menghasilkan `source="scenario-generator"`, kandidat `balanced` 22 detik, delay 13,37 detik, antrean 35 m, throughput 9, LOS B. Narasi rancangan lama di bagian 4.1 dipertahankan sebagai audit trail, tetapi bukan lagi daftar pekerjaan terbuka.
 
@@ -107,7 +112,7 @@ Bukan program *actuated* bawaan network file lagi — sekarang ada program ekspl
 
 ### 2.4 Sudah tersambung ke forecast (dikerjakan Yuli, 26 Agustus malam)
 
-`ScenarioEngine.recommend()` sekarang terima parameter opsional `forecast`/`forecastWeight`, diteruskan ke `RuleBasedEngine` internalnya sebelum generate 3 kandidat — jadi baseline yang dibandingkan sudah mempertimbangkan prediksi 60 detik ke depan, bukan cuma kondisi sesaat. Detail penuh ada di `pembagian-tugas-tahap-akhir.md` item 2.4. Tim baru **tidak perlu mengerjakan ulang bagian ini** — sudah selesai, tinggal dipakai.
+`ScenarioEngine.recommend()` sekarang terima parameter opsional `forecast`/`forecastWeight`, diteruskan ke `RuleBasedEngine` internalnya sebelum generate 3 kandidat — jadi baseline yang dibandingkan sudah mempertimbangkan prediksi 60 detik ke depan, bukan cuma kondisi sesaat. Tim baru **tidak perlu mengerjakan ulang bagian ini** — sudah selesai, tinggal dipakai.
 
 ### 2.5 Verifikasi yang sudah ada
 
@@ -158,7 +163,7 @@ sleep ~40-60 detik, ulangi                          kalau cache masih SEGAR (umu
 ```
 
 **Prinsip desain yang WAJIB dipegang (supaya tidak mengulang masalah lama):**
-1. **Satu tabel cache baru yang jelas fungsinya**, JANGAN pakai ulang `simulations`/`simulationMetrics` (itu untuk histori run manual/demo, beda semantik) — dan JANGAN buat tabel ambigu seperti `recommendations` yang akhirnya ditinggalkan tanpa penjelasan (lihat item 1.4/3.2 di `pembagian-tugas-tahap-akhir.md`, ini persis kesalahan yang harus dihindari lagi). Tulis di docstring tabel baru ini: siapa yang menulis, siapa yang baca, dan apa artinya kalau baris-nya basi.
+1. **Satu tabel cache baru yang jelas fungsinya**, JANGAN pakai ulang `simulations`/`simulationMetrics` (itu untuk histori run manual/demo, beda semantik) — dan JANGAN buat tabel ambigu seperti `recommendations` yang akhirnya ditinggalkan tanpa penjelasan (tabel `recommendations` lama adalah persis kesalahan yang harus dihindari lagi). Tulis di docstring tabel baru ini: siapa yang menulis, siapa yang baca, dan apa artinya kalau baris-nya basi.
 2. **Fallback WAJIB ada dan aman** — pola yang sudah dipakai konsisten di seluruh proyek ini (forecast gagal → fallback, TrafficState gagal → fallback). Kalau worker mati/belum pernah jalan/cache basi, endpoint live harus tetap jalan dengan `RuleBasedEngine` seperti sekarang, BUKAN error atau macet.
 3. **Worker dijalankan MANUAL untuk sekarang** (`python simulation/scenario_worker.py` di terminal terpisah, sama seperti `run_ingest.py` sekarang) — JANGAN over-engineer dengan infrastruktur deployment (systemd/docker/scheduler OS) untuk demo 4 hari ke depan. Itu di luar scope.
 
@@ -223,4 +228,4 @@ Kesimpulan ini sengaja dibatasi sebagai kalibrasi empiris untuk snapshot yang te
 | Sambungkan ke dashboard live | Sudah selesai; lihat `simulation/scenario_worker.py` dan `backend/app/services/live_scenario_cache_service.py` |
 | Ganti metrik yang diukur dari SUMO | `simulation/run_tls_simulation.py::runSimulation()` |
 | Cek kontrak resmi `ScenarioResult` | `docs/data-contract.md` bagian 4 |
-| Status tugas tim lengkap (semua orang, bukan cuma bagian ini) | `docs/pembagian-tugas-tahap-akhir.md` item 1.5, 1.7, dan bagian 6 |
+| Status tugas tim lengkap (semua orang, bukan cuma bagian ini) | `docs/STATUS-DAN-SISA-KERJA.md` |

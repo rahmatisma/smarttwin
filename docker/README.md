@@ -1,6 +1,6 @@
 # Docker Compose — belum aktif, dan itu memang sengaja
 
-Sesuai `docs/roadmap.md`, Docker Compose baru disentuh di Fase 4 (Hari 15–16, 29–31 Agustus) dan statusnya "kalau sempat". Di rencana kontingensi dia bahkan jadi item nomor 4 yang boleh dilepas kalau waktu mepet — native run satu laptop tetap sah buat demo.
+Docker Compose statusnya "kalau sempat" dan boleh dilepas kalau waktu mepet — native run satu laptop tetap sah buat demo. Lihat `docs/STATUS-DAN-SISA-KERJA.md` bagian 5 (yang TIDAK dikerjakan).
 
 Sampai saat itu, tiap modul jalan native (Python venv per folder + `npm run dev` buat frontend). Alasannya:
 
@@ -17,4 +17,4 @@ Checklist sebelum mulai nulis Dockerfile beneran:
 - [ ] Cek dulu Melpi butuh GPU passthrough atau nggak — kalau ya, alokasikan waktu ekstra buat setup WSL2 + NVIDIA Container Toolkit, jangan diasumsikan otomatis jalan
 - [ ] Docker Desktop terinstall di semua laptop tim yang bakal jalanin compose-nya
 
-Catatan: `simulation/requirements-rl.txt` tidak masuk hitungan — PPO di luar scope, lihat `docs/roadmap.md`.
+Catatan: PPO belum dikerjakan (nol kode RL) — lihat `docs/STATUS-DAN-SISA-KERJA.md` item P-1.

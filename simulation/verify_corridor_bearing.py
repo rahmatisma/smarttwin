@@ -22,7 +22,7 @@ Jalankan:
     python simulation/verify_corridor_bearing.py
 
 Hasil run 24 Agustus 2026 (dicatat di
-docs/pembagian-tugas-24-agustus.md dan docs/audit-24-agustus.md):
+temuan audit 24 Agustus):
     Jalan Diponegoro -> timur   (74.5-93.0 derajat)
     Jalan Magelang   -> utara   (351.8-6.3 derajat)
     Jalan Tentara Pelajar -> selatan (168.7-187.9 derajat)
