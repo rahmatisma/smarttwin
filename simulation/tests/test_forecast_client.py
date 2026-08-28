@@ -188,9 +188,10 @@ def test_runner_passes_forecast_and_weight_to_scenario_engine(monkeypatch):
     class ScenarioEngineStub:
         def __init__(self, **kwargs):
             captured["constructor"] = kwargs
+            self.last_cycle_plan = None
 
-        def recommend(self, **kwargs):
-            captured["recommend"] = kwargs
+        def recommend_full_cycle(self, **kwargs):
+            captured["recommend_full_cycle"] = kwargs
             return recommendation
 
     monkeypatch.setattr(runner, "ScenarioEngine", ScenarioEngineStub)
@@ -204,9 +205,9 @@ def test_runner_passes_forecast_and_weight_to_scenario_engine(monkeypatch):
     )
 
     assert result is recommendation
-    assert captured["recommend"]["state"] is traffic_state
-    assert captured["recommend"]["forecast"] is forecast
-    assert captured["recommend"]["forecastWeight"] == 0.3
+    assert captured["recommend_full_cycle"]["state"] is traffic_state
+    assert captured["recommend_full_cycle"]["forecast"] is forecast
+    assert captured["recommend_full_cycle"]["forecastWeight"] == 0.3
     assert phase_plan["source"] == "rule-based+forecast"
     assert phase_plan["forecastApplied"] is True
     assert phase_plan["forecastWeight"] == 0.3

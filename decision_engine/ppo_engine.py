@@ -17,6 +17,7 @@ from .rule_based_engine import (
     RuleBasedEngine,
     YELLOW_SECONDS,
 )
+from .ppo_features import build_ppo_observation
 
 logger = logging.getLogger(__name__)
 
@@ -80,13 +81,6 @@ class PPOEngine:
             logger.warning("PPO tidak tersedia, memakai rule-based: %s", self.load_error)
             return None
 
-    @staticmethod
-    def _safe_float(value: Any) -> float:
-        try:
-            return float(value or 0.0)
-        except (TypeError, ValueError):
-            return 0.0
-
     def build_observation(
         self,
         state: TrafficState,
@@ -106,28 +100,11 @@ class PPOEngine:
         projected = self.fallback.apply_forecast(
             state, forecast, forecastWeight=forecast_weight
         )
-        by_name = {
-            str(getattr(item.approach, "value", item.approach)).lower(): item
-            for item in projected.approaches
-        }
-
-        observation: list[float] = []
-        for approach in FIXED_CYCLE_ORDER:
-            item = by_name.get(approach)
-            observation.extend([
-                min(1.0, self._safe_float(getattr(item, "volume", 0)) / 60.0),
-                min(1.0, self._safe_float(getattr(item, "queueLengthVeh", 0)) / 30.0),
-                min(1.0, self._safe_float(getattr(item, "queueLengthMEst", 0)) / 150.0),
-                min(1.0, self._safe_float(getattr(item, "densityIndex", 0)) / 33.0),
-                min(1.0, self._safe_float(getattr(item, "avgSpeedKmh", 0)) / 60.0),
-            ])
-
-        observation.extend(
-            1.0 if current_phase == approach else 0.0
-            for approach in FIXED_CYCLE_ORDER
+        return build_ppo_observation(
+            projected,
+            current_phase=current_phase,
+            current_green_seconds=current_green_seconds,
         )
-        observation.append(min(1.0, max(0.0, current_green_seconds / 60.0)))
-        return observation
 
     @staticmethod
     def _flatten_action(raw_action: Any) -> list[int]:

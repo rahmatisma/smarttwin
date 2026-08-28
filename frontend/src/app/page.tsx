@@ -36,6 +36,15 @@ import type {
 
 import { useScenario } from "@/context/ScenarioContext";
 
+async function fetchOptional<T>(label: string, request: Promise<T>): Promise<T | null> {
+  try {
+    return await request;
+  } catch (error) {
+    console.warn(`${label} tidak tersedia:`, error);
+    return null;
+  }
+}
+
 /*
  * =========================================================
  * DASHBOARD SKELETON
@@ -348,15 +357,22 @@ export default function DashboardPage() {
                   forecast,
                   coords,
                 ] = await Promise.all([
-                  fetchTrafficState(inter.databaseId, videoTimeRef.current),
-                  hasLiveBackend ? fetchSignalStatus(inter.databaseId) : null,
+                  fetchOptional(
+                    `Traffic ${inter.name}`,
+                    fetchTrafficState(inter.databaseId, videoTimeRef.current)
+                  ),
+                  hasLiveBackend
+                    ? fetchOptional(`Status sinyal ${inter.name}`, fetchSignalStatus(inter.databaseId))
+                    : null,
                   hasLiveBackend
                     ? (scenario === "Traffic Realtime"
-                        ? fetchRecommendation(inter.databaseId)
-                        : fetchDigitalTwinScenarios(inter.databaseId).then(data => data?.scenarios?.[scenario] ?? null))
+                        ? fetchOptional(`Rekomendasi ${inter.name}`, fetchRecommendation(inter.databaseId))
+                        : fetchOptional(`Digital Twin Scenario ${inter.name}`, fetchDigitalTwinScenarios(inter.databaseId).then(data => data?.scenarios?.[scenario] ?? null)))
                     : null,
-                  hasLiveBackend ? fetchForecast(inter.databaseId) : null,
-                  fetchIntersectionCoords(inter.databaseId),
+                  hasLiveBackend
+                    ? fetchOptional(`Forecast ${inter.name}`, fetchForecast(inter.databaseId))
+                    : null,
+                  fetchOptional(`Koordinat ${inter.name}`, fetchIntersectionCoords(inter.databaseId)),
                 ]);
                 return {
                   id: inter.id,
@@ -443,14 +459,21 @@ export default function DashboardPage() {
                 recommendation,
                 forecast,
               ] = await Promise.all([
-                fetchTrafficState(inter.databaseId, videoTimeRef.current),
-                hasLiveBackend ? fetchSignalStatus(inter.databaseId) : null,
+                fetchOptional(
+                  `Traffic ${inter.name}`,
+                  fetchTrafficState(inter.databaseId, videoTimeRef.current)
+                ),
+                hasLiveBackend
+                  ? fetchOptional(`Status sinyal ${inter.name}`, fetchSignalStatus(inter.databaseId))
+                  : null,
                 hasLiveBackend
                   ? (scenario === "Traffic Realtime"
-                      ? fetchRecommendation(inter.databaseId)
-                      : fetchDigitalTwinScenarios(inter.databaseId).then(data => data?.scenarios?.[scenario] ?? null))
+                      ? fetchOptional(`Rekomendasi ${inter.name}`, fetchRecommendation(inter.databaseId))
+                      : fetchOptional(`Digital Twin Scenario ${inter.name}`, fetchDigitalTwinScenarios(inter.databaseId).then(data => data?.scenarios?.[scenario] ?? null)))
                   : null,
-                hasLiveBackend ? fetchForecast(inter.databaseId) : null,
+                hasLiveBackend
+                  ? fetchOptional(`Forecast ${inter.name}`, fetchForecast(inter.databaseId))
+                  : null,
               ]);
               return {
                 id: inter.id,
@@ -694,7 +717,11 @@ export default function DashboardPage() {
    * =========================================================
    */
 
-  const hasLoadedAnyData = Object.values(allTrafficStates).some((state) => state !== null);
+  const hasLoadedAnyData =
+    Object.values(allTrafficStates).some((state) => state !== null) ||
+    Object.values(allSignalStatuses).some((state) => state !== null) ||
+    Object.values(allRecommendations).some((state) => state !== null) ||
+    Object.values(allForecasts).some((state) => state !== null);
 
   if (error || !hasLoadedAnyData) {
 

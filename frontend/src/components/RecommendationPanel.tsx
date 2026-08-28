@@ -339,25 +339,43 @@ export default function RecommendationPanel({
               </div>
             </div>
 
-            <div className="text-right">
-              <div className="text-[10px] font-semibold uppercase tracking-wider text-text-muted">
-                Source
+            <div className="flex flex-col items-end gap-2 text-right">
+              <div>
+                <div className="text-[10px] font-semibold uppercase tracking-wider text-text-muted">
+                  Source
+                </div>
+                <div className="mt-1">
+                  <span
+                    className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-medium ${
+                      displayRec.source === "scenario-generator"
+                        ? "border-signal-green/20 bg-signal-green/10 text-signal-green"
+                        : "border-signal-amber/20 bg-signal-amber/10 text-signal-amber"
+                    }`}
+                  >
+                    {displayRec.source === "scenario-generator"
+                      ? "Diuji simulasi SUMO"
+                      : "Estimasi langsung"}
+                    <span className="ml-1 opacity-70">({displayRec.source})</span>
+                  </span>
+                </div>
               </div>
-              <div className="mt-1">
-                <span
-                  className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-medium ${
-                    displayRec.source === "scenario-generator"
-                      ? "border-signal-green/20 bg-signal-green/10 text-signal-green"
-                      : "border-signal-amber/20 bg-signal-amber/10 text-signal-amber"
-                  }`}
-                >
-                  {displayRec.source === "scenario-generator"
-                    ? "Diuji simulasi SUMO"
-                    : "Estimasi langsung"}
-                  <span className="ml-1 opacity-70">({displayRec.source})</span>
-                </span>
+              <div>
+                <div className="text-[10px] font-semibold uppercase tracking-wider text-text-muted">
+                  Green Time
+                </div>
+                <div className="mt-1 font-mono text-sm font-semibold text-text">
+                  {phases.length && sharedVisualPhase
+                    ? `${phases.find(p => p.approach === sharedVisualPhase)?.greenSeconds ?? "-"}s`
+                    : `${displayRec.recommendedGreenSeconds}s`}
+                </div>
               </div>
             </div>
+
+            {!cyclePlan && (
+              <div className="mt-1 text-[10px] text-text-muted">
+                {approachLabel(displayRec.recommendedPhase)}
+              </div>
+            )}
           </div>
 
           {typeof displayRec.avgDelaySeconds === "number" && (

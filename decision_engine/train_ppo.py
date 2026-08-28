@@ -11,14 +11,14 @@ from stable_baselines3.common.env_checker import check_env
 from stable_baselines3.common.monitor import Monitor
 
 if __package__:
-    from .ppo_env import DEFAULT_DATA, SmartTwinSumoEnv
+    from .ppo_env import DEFAULT_DATA, DEFAULT_DENSITY_DATA, SmartTwinSumoEnv
 else:
     # Mendukung: cd decision_engine; python -m train_ppo / python train_ppo.py
     root = Path(__file__).resolve().parents[1]
     for import_dir in (root, root / "backend"):
         if str(import_dir) not in sys.path:
             sys.path.insert(0, str(import_dir))
-    from decision_engine.ppo_env import DEFAULT_DATA, SmartTwinSumoEnv
+    from decision_engine.ppo_env import DEFAULT_DATA, DEFAULT_DENSITY_DATA, SmartTwinSumoEnv
 
 
 def main() -> None:
@@ -26,6 +26,7 @@ def main() -> None:
     parser.add_argument("--timesteps", type=int, default=100_000)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--data", default=str(DEFAULT_DATA))
+    parser.add_argument("--density-data", default=str(DEFAULT_DENSITY_DATA))
     parser.add_argument("--output", default="decision_engine/models/smarttwin_ppo")
     parser.add_argument("--episode-steps", type=int, default=12)
     parser.add_argument("--decision-seconds", type=int, default=30)
@@ -34,7 +35,8 @@ def main() -> None:
     args = parser.parse_args()
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
-    make_env = lambda: SmartTwinSumoEnv(data_path=args.data, episode_steps=args.episode_steps,
+    make_env = lambda: SmartTwinSumoEnv(data_path=args.data, density_data_path=args.density_data,
+                                        episode_steps=args.episode_steps,
                                         decision_seconds=args.decision_seconds, split="train")
     if args.check_env:
         probe = make_env()

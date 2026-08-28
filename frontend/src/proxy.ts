@@ -14,6 +14,16 @@ const PUBLIC_ONLY_ROUTES = ["/login", "/register"];
 
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
+
+  // Khusus verifikasi browser lokal/CI. Tidak pernah aktif di production dan
+  // default-nya tetap false, sehingga gerbang autentikasi normal tidak berubah.
+  if (
+    process.env.NODE_ENV !== "production" &&
+    process.env.SMARTTWIN_E2E_BYPASS_AUTH === "1"
+  ) {
+    return NextResponse.next();
+  }
+
   const { supabase, getResponse } = createMiddlewareClient(request);
 
   const {
