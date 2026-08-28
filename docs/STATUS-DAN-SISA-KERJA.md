@@ -12,7 +12,7 @@ Dokumen lain di `docs/` sekarang cuma 2 jenis: **cara kerja** (rujukan teknis) d
 
 | # | Kotak diagram | % | Keterangan singkat |
 |---|---|---:|---|
-| 1 | Traffic Monitoring Data | 85% | Jalan penuh. Rekaman `.mp4`, bukan RTSP live |
+| 1 | Traffic Monitoring Data | 100% | Jalan penuh. Rekaman `.mp4` secara sengaja (keputusan, bukan keterbatasan) — arsitektur sudah menerima RTSP via `--sumber`, terverifikasi S-5 |
 | 2 | YOLO + ByteTrack | 60% | **Diukur 29 Agustus: akurasi crossing 48,7% rata-rata (8 sampel), turun dari asumsi 80%.** Bukan bug logika — kehilangan deteksi saat padat. Lihat S-4 |
 | 3 | Traffic State Builder | 90% | Jalan, tervalidasi fisik. Akurasi volume masukan mewarisi keterbatasan kotak 2 |
 | 4 | Virtual Intersection (SUMO) | 100% | Network asli Simpang Pingit + program TLS dinamis |
@@ -115,22 +115,19 @@ Divalidasi manual: 8 potongan @1 menit (4 arah × ramai/sepi), dihitung manusia 
 
 ---
 
-### 🟡 S-5. CV siap-RTSP tanpa perlu kamera — Rahmat, 30 menit
+### ✅ S-5. CV siap-RTSP — SELESAI 29 Agustus
 
-**Masalahnya:** sumber video di-hardcode (`vehicle_counter_pingit.py:1320`). Kalau juri tanya "bisa dipakai CCTV sungguhan?", jawabannya cuma klaim lisan.
+Sumber video dijadikan parameter `--sumber` (path file lain ATAU URL stream), menggantikan hardcode di `vehicle_counter_pingit.py`. Wajib dipakai bersama `--kamera` (satu URL cuma untuk satu kamera). Contoh: `--kamera CCTV_1 --sumber rtsp://192.168.1.10/stream`.
 
-**Perbaikan:** jadikan sumber video sebuah parameter.
+**Terverifikasi 2 hal:**
+1. `--sumber` tanpa `--kamera` **ditolak saat parsing** dengan pesan jelas.
+2. `--sumber rtsp://alamat-tidak-ada` **lolos parsing**, lalu gagal di **koneksi sungguhan** — dibuktikan lewat log FFmpeg asli: `Stream timeout triggered after 30079.994000 ms` lalu `[LEWAT] ... gagal dibuka`. Ini FFmpeg betulan mencoba RTSP, bukan simulasi.
 
-```python
-# cv2.VideoCapture menerima path file DAN URL RTSP dengan cara yang sama,
-# jadi ini benar-benar cuma soal dari mana string-nya datang.
-parser.add_argument("--sumber", default=None,
-                    help="Path file video atau URL RTSP. Kosong = pakai rekaman.")
-```
+**Kalimat untuk laporan:** *"Arsitektur CV menerima file maupun stream RTSP secara identik (`cv2.VideoCapture` tidak membedakan keduanya); kami memakai rekaman karena tidak ada akses ke stream CCTV operasional Dishub, bukan karena keterbatasan sistem."*
 
-**Kenapa ini penting padahal cuma 30 menit:** pernyataan Anda berubah dari *"kami tidak bisa live"* (terdengar keterbatasan) jadi **"arsitekturnya menerima RTSP maupun file; kami memakai rekaman karena tidak ada akses stream CCTV Dishub"** (terdengar keputusan).
-
-**Selesai kalau:** `--sumber rtsp://contoh` gagal di **koneksi** (wajar, tidak ada kameranya), bukan gagal di parsing argumen.
+> ⚠️ **Insiden saat verifikasi, sudah dibereskan:** test RTSP pertama (tanpa backup) menimpa `cv/output/crossing_simpang.csv` dan `snapshot_zona.csv` jadi 0 baris — karena ketiga CSV dibuka mode `"w"` **di awal proses, sebelum** kamera sempat dicoba dibuka, jadi gagal-koneksi pun tetap menghapus data lama. Dipulihkan 100% dari salinan beku `forecasting/data/` (dipakai Yuli untuk training LSTM, kebetulan menyelamatkan kita). `percobaan_logic_simpang.csv` **tidak ada salinannya** dan tetap 0 baris — dikonfirmasi ke kode (`cv_csv_bridge.py:83`) file itu **tidak pernah dibaca `run_ingest.py`**, jadi dampak ke Supabase/dashboard/training = nol.
+>
+> **Perbaikan permanen ditambahkan supaya tidak terulang:** kalau `--sumber` dipakai, ketiga CSV sekarang ditulis ke `cv/output/_sumber_kustom/` (folder terpisah, di-gitignore), **bukan** menimpa CSV produksi sama sekali — diverifikasi ulang: CSV produksi tetap 2.152/10.452 baris setelah test kedua yang sengaja diulang.
 
 ---
 
@@ -349,7 +346,7 @@ SETIAP REKAM: backend → worker --once --full-cycle (smoke test)
 |---|---|---|
 | **Yuli** | S-1 panel sinyal (1–2j), S-2 test merah (15m) | **P-1b/c/d PPO** (utama), P-2 bukti LSTM |
 | **Melpi** | S-3 hardcode (30m), S-6 pernyataan scope (1j) | Tampilkan LOS per lengan (dukung P-3) |
-| **Rahmat** | S-5 argumen `--sumber` (30m) | P-3 LOS per lengan, P-4 rapi-rapi, **P-5 investigasi akurasi CV** |
+| **Rahmat** | ✅ S-4, S-5 selesai — Fase 1 Rahmat tuntas | P-3 LOS per lengan, P-4 rapi-rapi, **P-5 (dikembalikan, lihat catatan)** |
 | Siapa saja | S-7 verifikasi browser (30m) | — |
 
 **Beban Fase 1: Yuli ±2j, Melpi ±1,5j, Rahmat ±4,5j.** Muat dalam 1 hari kerja, menyisakan 2 hari untuk latihan dan rekaman.

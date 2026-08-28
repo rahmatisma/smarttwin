@@ -56,6 +56,12 @@ cv/output/*.json
 !cv/output/sync_report.csv
 !cv/output/sync_report.json
 
+# Output --sumber (vehicle_counter_pingit.py, lihat argumen --sumber)
+# -- CSV eksperimen/pengetesan sengaja dipisah dari cv/output/*.csv
+# produksi supaya tidak pernah tertimpa lagi (kejadian nyata 29
+# Agustus, lihat docs/STATUS-DAN-SISA-KERJA.md item S-5).
+cv/output/_sumber_kustom/
+
 # Peta jam per video — dibuat ulang tiap `sync_videos.py --dry-run`
 cv/output/clockmap/
 

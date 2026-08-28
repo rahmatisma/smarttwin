@@ -82,6 +82,7 @@ import concurrent.futures
 import csv
 import os
 import sys
+from datetime import datetime, timedelta
 
 import cv2
 import imageio_ffmpeg
@@ -1282,17 +1283,55 @@ def upload_dan_update(nama_kamera, path_mp4):
         print(f"[{nama_kamera}] Gagal upload/update Supabase: {exc}")
 
 
+class PetaJamLive:
+    """Pengganti PetaJamVideo (muat_peta_jam()) untuk sumber LIVE
+    (--sumber RTSP/URL), bukan rekaman kamera yang sudah tercatat di
+    sync_report.json.
+
+    muat_peta_jam() sengaja GAGAL KERAS kalau videonya tidak ada di
+    sync_report.json -- itu benar untuk rekaman (jam laptop yang
+    menyamar jadi jam rekaman adalah bug), tapi TIDAK berlaku untuk
+    feed live: di situ jam dinding SEKARANG justru satu-satunya jam
+    yang benar, karena tidak ada "rekaman" buat dipetakan frame-nya.
+    Kelas ini menyediakan interface yang sama (detik_dinding(),
+    waktu()) supaya kode pemanggil (tulis_baris_csv dkk.) tidak perlu
+    tahu bedanya.
+    """
+
+    def __init__(self):
+        self.tengah_malam = datetime.now().replace(
+            hour=0, minute=0, second=0, microsecond=0
+        )
+
+    def detik_dinding(self, frame_idx):
+        # frame_idx sengaja diabaikan -- live tidak punya peta
+        # frame->jam seperti rekaman, jam dindingnya SELALU sekarang.
+        return (datetime.now() - self.tengah_malam).total_seconds()
+
+    def waktu(self, detik_dinding):
+        return self.tengah_malam + timedelta(seconds=detik_dinding)
+
+
 class KameraState:
     """Menampung semua state yang dulu jadi variabel lokal di
     proses_kamera(): posisi baca video, jendela CSV yang lagi
     diakumulasi, model YOLO/ByteTrack milik kamera ini sendiri, dan
     frame terakhir yang siap ditampilkan di window kamera ini."""
 
-    def __init__(self, nama_kamera, zona, durasi_detik, imgsz):
+    def __init__(self, nama_kamera, zona, durasi_detik, imgsz, sumber=None):
         self.nama_kamera = nama_kamera
         self.poligon = zona["polygon"]
         self.lengan = zona["nama_lengan"]
         self.imgsz = imgsz
+
+        # --sumber cuma untuk eksperimen/pengetesan (buktikan RTSP
+        # bisa diterima, atau proses file lain) -- BUKAN rekaman
+        # produksi kamera ini. Video hasilnya jangan otomatis menimpa
+        # anotasi produksi di HuggingFace (lihat tutup() di bawah).
+        # Kejadian nyata: video produksi CCTV_1/CCTV_2 sempat tertimpa
+        # tanpa sengaja oleh run eksperimen 29 Agustus (dipulihkan
+        # manual, lihat docs/STATUS-DAN-SISA-KERJA.md item P-5).
+        self.sumber_kustom = bool(sumber)
 
         self.tersedia = False
         self.selesai = False
@@ -1317,9 +1356,23 @@ class KameraState:
         )
         self.writer = None
 
-        video_path = os.path.join(VIDEO_DIR, f"{nama_kamera}.mp4")
+        # --sumber (opsional): path file ATAU URL stream (RTSP/HTTP/dst)
+        # menggantikan rekaman kamera bawaan. cv2.VideoCapture menerima
+        # keduanya dengan cara yang sama -- ini murni soal dari mana
+        # string sumbernya datang, bukan perubahan arsitektur. Dicatat
+        # sebagai keputusan desain (bukan keterbatasan) di
+        # docs/STATUS-DAN-SISA-KERJA.md item S-5: kami memakai rekaman
+        # karena tidak ada akses ke stream CCTV operasional, bukan
+        # karena sistemnya tidak bisa menerima live feed.
+        video_path = sumber or os.path.join(VIDEO_DIR, f"{nama_kamera}.mp4")
 
-        if not os.path.exists(video_path):
+        # URL stream (rtsp://, http://, dst) bukan path filesystem --
+        # os.path.exists() akan SELALU False untuk itu walau streamnya
+        # valid, jadi pengecekan keberadaan file cuma masuk akal untuk
+        # path lokal (baik default maupun --sumber path lokal lain).
+        sumber_live = bool(sumber) and "://" in sumber
+
+        if not sumber_live and not os.path.exists(video_path):
             print(f"[LEWAT] {video_path} tidak ada.")
             self.selesai = True
             return
@@ -1336,10 +1389,18 @@ class KameraState:
         self.width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         self.height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 
-        # Jam dinding dari posisi frame. GAGAL KERAS kalau videonya
-        # tidak tercatat di sync_report.json — supaya jam laptop
-        # tidak pernah menyamar jadi jam rekaman.
-        self.peta = muat_peta_jam(video_path, self.fps)
+        if sumber:
+            # --sumber (live ATAU file lokal lain) tidak akan pernah
+            # tercatat di sync_report.json (itu cuma untuk rekaman
+            # kamera bawaan) -- muat_peta_jam() akan GAGAL KERAS untuk
+            # sumber manapun di luar itu. Jam dinding SEKARANG (bukan
+            # posisi frame) adalah jam yang benar untuk kasus ini.
+            self.peta = PetaJamLive()
+        else:
+            # Jam dinding dari posisi frame. GAGAL KERAS kalau videonya
+            # tidak tercatat di sync_report.json — supaya jam laptop
+            # tidak pernah menyamar jadi jam rekaman.
+            self.peta = muat_peta_jam(video_path, self.fps)
 
         # Model per kamera sendiri-sendiri: state ByteTrack tidak
         # boleh bocor antar-video.
@@ -1415,10 +1476,17 @@ class KameraState:
             self.writer = None
             print(f"[{self.nama_kamera}] Video anotasi selesai disimpan.")
 
-            future = _UPLOAD_EXECUTOR.submit(
-                upload_dan_update, self.nama_kamera, self.video_anotasi_path
-            )
-            _UPLOAD_FUTURES.append(future)
+            if self.sumber_kustom:
+                print(
+                    f"[{self.nama_kamera}] --sumber dipakai (eksperimen/"
+                    f"non-produksi) -- upload ke HuggingFace/Supabase "
+                    f"DILEWATI supaya tidak menimpa anotasi produksi."
+                )
+            else:
+                future = _UPLOAD_EXECUTOR.submit(
+                    upload_dan_update, self.nama_kamera, self.video_anotasi_path
+                )
+                _UPLOAD_FUTURES.append(future)
 
 
 def tulis_baris_csv(state, penulis_csv):
@@ -1706,7 +1774,7 @@ def proses_tick(
 
 
 def jalankan_gabungan(
-    dipilih, durasi_detik, langkah, frame_visual, imgsz,
+    dipilih, durasi_detik, langkah, frame_visual, imgsz, sumber,
     penulis_csv, penulis_csv_crossing, penulis_csv_snapshot, tampilkan_live,
 ):
     """
@@ -1730,7 +1798,7 @@ def jalankan_gabungan(
     tersendiri -- isinya memang dimaksudkan dibaca mentah per baris.
     """
     states = [
-        KameraState(nama_kamera, zona, durasi_detik, imgsz)
+        KameraState(nama_kamera, zona, durasi_detik, imgsz, sumber)
         for nama_kamera, zona in dipilih.items()
     ]
 
@@ -1971,12 +2039,30 @@ def main():
             "tanpa display). Default: popup nyala."
         ),
     )
+    parser.add_argument(
+        "--sumber", default=None,
+        help=(
+            "Ganti sumber video kamera terpilih: path file lain ATAU "
+            "URL stream (mis. rtsp://... atau http://...). Kosong = "
+            "pakai rekaman bawaan kamera (VIDEO_DIR). cv2.VideoCapture "
+            "menerima file maupun stream dengan cara yang sama -- ini "
+            "cuma soal dari mana string sumbernya datang, bukan "
+            "perubahan arsitektur. Wajib dipakai bersama --kamera "
+            "(satu URL cuma masuk akal untuk satu kamera)."
+        ),
+    )
     args = parser.parse_args()
 
     if args.kamera is not None and args.kamera not in ZONA_KEPADATAN:
         parser.error(
             f"kamera '{args.kamera}' tidak punya zona. "
             f"Pilihan: {', '.join(ZONA_KEPADATAN)}"
+        )
+
+    if args.sumber is not None and args.kamera is None:
+        parser.error(
+            "--sumber wajib dipakai bersama --kamera (satu sumber "
+            "cuma bisa dipasangkan ke satu kamera)."
         )
 
     dipilih = {
@@ -2007,9 +2093,33 @@ def main():
     print(f"Langkah  : tiap frame ke-{args.langkah}")
     print(f"Jendela  : {WINDOW_DETIK} detik (rata-rata, bukan jumlah)")
     print(f"Kamera   : {', '.join(dipilih)}")
-    print(f"CSV zona    : {CSV_PATH}")
-    print(f"CSV cross   : {CROSSING_CSV_PATH}")
-    print(f"CSV snapshot: {SNAPSHOT_CSV_PATH}")
+
+    # --sumber HARUS menulis ke path terpisah, bukan CSV produksi --
+    # kejadian nyata 29 Agustus: run --sumber gagal konek (RTSP tidak
+    # ada), tapi CSV produksi (crossing_simpang.csv dkk.) SUDAH
+    # ditimpa jadi 0 baris duluan sebelum kegagalannya ketahuan, gara-
+    # gara ketiganya dibuka mode "w" di awal proses -- SEBELUM kamera
+    # manapun sempat dicoba dibuka, jadi gagal-konek pun tetap
+    # menghapus data lama. Dipulihkan manual dari salinan beku
+    # forecasting/data/ (lihat docs/STATUS-DAN-SISA-KERJA.md item S-5).
+    if args.sumber:
+        sumber_dir = os.path.join(OUTPUT_DIR, "_sumber_kustom")
+        os.makedirs(sumber_dir, exist_ok=True)
+        csv_path = os.path.join(sumber_dir, "percobaan_logic_simpang.csv")
+        crossing_csv_path = os.path.join(sumber_dir, "crossing_simpang.csv")
+        snapshot_csv_path = os.path.join(sumber_dir, "snapshot_zona.csv")
+        print(
+            f"⚠️  --sumber aktif -- CSV ditulis ke {sumber_dir}, "
+            f"BUKAN cv/output/ produksi."
+        )
+    else:
+        csv_path = CSV_PATH
+        crossing_csv_path = CROSSING_CSV_PATH
+        snapshot_csv_path = SNAPSHOT_CSV_PATH
+
+    print(f"CSV zona    : {csv_path}")
+    print(f"CSV cross   : {crossing_csv_path}")
+    print(f"CSV snapshot: {snapshot_csv_path}")
 
     # Kredensial HF/Supabase disuntik SEKALI di sini, sebelum kamera
     # manapun sempat selesai merekam dan memicu upload_dan_update()
@@ -2025,9 +2135,9 @@ def main():
         # jalan, jadi baris yang sudah ditulis tidak hilang. Tiga CSV
         # (zona + crossing + snapshot) dibuka bersarang supaya
         # sama-sama dijamin ter-flush lewat context manager yang sama.
-        with open(CSV_PATH, "w", encoding="utf-8", newline="") as f, \
-                open(CROSSING_CSV_PATH, "w", encoding="utf-8", newline="") as f_crossing, \
-                open(SNAPSHOT_CSV_PATH, "w", encoding="utf-8", newline="") as f_snapshot:
+        with open(csv_path, "w", encoding="utf-8", newline="") as f, \
+                open(crossing_csv_path, "w", encoding="utf-8", newline="") as f_crossing, \
+                open(snapshot_csv_path, "w", encoding="utf-8", newline="") as f_snapshot:
             penulis = csv.DictWriter(f, fieldnames=KOLOM)
             penulis.writeheader()
 
@@ -2048,6 +2158,7 @@ def main():
                 args.langkah,
                 args.frame_visual,
                 args.imgsz,
+                args.sumber,
                 penulis,
                 penulis_crossing,
                 penulis_snapshot,
@@ -2060,9 +2171,9 @@ def main():
         if tampilkan_live:
             cv2.destroyAllWindows()
 
-    cetak_cuplikan_csv(20, CSV_PATH)
-    cetak_cuplikan_csv(20, CROSSING_CSV_PATH)
-    cetak_cuplikan_csv(20, SNAPSHOT_CSV_PATH)
+    cetak_cuplikan_csv(20, csv_path)
+    cetak_cuplikan_csv(20, crossing_csv_path)
+    cetak_cuplikan_csv(20, snapshot_csv_path)
     cetak_statistik(statistik)
 
     print()
