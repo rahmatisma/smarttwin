@@ -260,6 +260,39 @@ konfigurasi kecil ini untuk menghasilkan kandidat model.
 
 ## 8. Training kandidat
 
+### RunPod/Linux (disarankan untuk training panjang)
+
+Launcher `decision_engine/train_ppo_runpod.sh` memakai konfigurasi kandidat yang
+sama, memvalidasi dua CSV dan executable SUMO sebelum mulai, serta default ke
+CPU karena bottleneck utama adalah SUMO dan PPO memakai MLP kecil.
+
+```bash
+cd /workspace/smarttwin-runpod
+source .venv-ppo/bin/activate
+PPO_TIMESTEPS=100000 PPO_SEED=42 \
+  bash decision_engine/train_ppo_runpod.sh
+```
+
+Smoke test bisa memakai launcher yang sama tanpa mengubah file:
+
+```bash
+PPO_TIMESTEPS=2048 \
+PPO_OUTPUT=/workspace/smarttwin-runpod/decision_engine/models/smarttwin_ppo_smoke \
+  bash decision_engine/train_ppo_runpod.sh
+```
+
+Untuk melanjutkan checkpoint terakhir:
+
+```bash
+PPO_TIMESTEPS=50000 \
+PPO_RESUME=/workspace/smarttwin-runpod/decision_engine/models/checkpoints/smarttwin_ppo_10000_steps.zip \
+  bash decision_engine/train_ppo_runpod.sh
+```
+
+Selain model `.zip`, script Python menulis `.training.json` berisi waktu,
+device, parameter, versi library, dan SHA-256 kedua dataset. File metadata ini
+harus ikut diunduh agar training dapat diaudit dan direproduksi.
+
 Untuk kandidat awal deadline:
 
 ```powershell
