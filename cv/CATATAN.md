@@ -11,6 +11,31 @@ bagian konfigurasi dan penamaan kolom. Logika deteksinya nggak aku utak-atik.
 
 ---
 
+## ⚠️ PENTING sebelum jalanin ulang `vehicle_counter_pingit.py`
+
+Ketauan 29 Agustus pas nyoba `--conf`: `cv/output/crossing_simpang.csv`,
+`percobaan_logic_simpang.csv`, dan `snapshot_zona.csv` itu **DITULIS ULANG DARI
+NOL** tiap run (mode `"w"`, bukan nambah) — dan ketiganya **TIDAK ter-track
+git** (`.gitignore` baris `cv/output/*.csv`, sengaja karena dianggap bisa
+dibuat ulang). Kalau kamu jalanin skrip ini buat eksperimen (coba parameter
+beda, tes 1 kamera doang, dst), `git checkout` **TIDAK BISA** memulihkan data
+lama yang ketimpa — itu bakal hilang beneran.
+
+**Sebelum jalanin apa pun yang bukan run produksi penuh (4 kamera, durasi
+penuh):** copy manual dulu ke folder lain.
+
+```powershell
+cd cv\output
+mkdir _backup_sebelum_tes
+copy crossing_simpang.csv _backup_sebelum_tes\
+copy percobaan_logic_simpang.csv _backup_sebelum_tes\
+copy snapshot_zona.csv _backup_sebelum_tes\
+```
+
+Detail lengkap kejadiannya ada di `docs/STATUS-DAN-SISA-KERJA.md` item P-5.
+
+---
+
 ## 1. Path nggak lagi nunjuk ke `D:\smarttwin\`
 
 **Dulu:**

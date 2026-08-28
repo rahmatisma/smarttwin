@@ -259,14 +259,18 @@ Bonus: demo jadi lebih meyakinkan — bisa menunjuk satu lengan dan bilang "yang
 
 1. ✅ **SELESAI — Kendaraan terhitung ganda di garis salah** (CCTV_2, sampel #6). `sisi_garis()` dulu pakai garis tak terbatas, bukan segmen. **Diperbaiki:** fungsi baru `segmen_berpotongan()` di [`vehicle_counter_pingit.py:465-508`](../cv/vehicle_counter_pingit.py#L465-L508) — syarat interseksi segmen standar (2 kondisi, bukan cuma 1), dipakai di `hitung_crossing()` menggantikan pengecekan `sisi_garis()` langsung. **Terverifikasi lewat simulasi titik** (tidak butuh proses ulang video, karena ini bug logika murni): kasus kontaminasi lama (kendaraan dekat ujung DIPONEGORO memicu MAGELANG juga) sekarang **tidak lagi terpicu di keduanya**, sementara 3 kasus crossing sah (tengah segmen DIPONEGORO, tengah MAGELANG, tengah selatan CCTV_1) **tetap terdeteksi identik** seperti sebelumnya — tidak ada regresi.
 
-2. ⏳ **KODE SIAP, BELUM DIUJI — Kendaraan hilang** (penyebab dominan, CCTV_1/CCTV_3 dempet + CCTV_2 kamera jauh). Kendaraan baru dapat `track_id` SETELAH lewat garis, jadi `prev_pos` kosong dan lintasnya tak tercatat. **Sudah ditambahkan** parameter `--conf` di CLI (default tetap 0.35, perilaku lama tidak berubah kalau tidak dipakai) — lihat `python vehicle_counter_pingit.py --help`. **Yang perlu ANDA jalankan di komputer GPU:**
-   ```powershell
-   cd cv
-   # proses ulang CCTV_1 & CCTV_2 dengan confidence lebih rendah,
-   # cukup 1 kamera dulu buat tes cepat sebelum proses semua
-   .venv\Scripts\python.exe vehicle_counter_pingit.py --kamera CCTV_1 --conf 0.25 --durasi 600 --tanpa-tampilan
-   ```
-   Lalu cek `cv/output/crossing_simpang.csv` untuk `jumlah_crossing` di jendela waktu sampel #1 (7:31–8:31) dan #2 (24:16–25:11) — **hitungan manual Anda sudah ada** (65 dan 36), tinggal bandingkan angka barunya, tidak perlu nonton ulang. Kalau `--conf 0.25` membantu, naikkan cakupan ke semua kamera + durasi penuh dan update `hasil-validasi-akurasi-cv.md` (tambahkan sebagai "setelah perbaikan", jangan timpa angka lama). **Perbaikan oklusi murni (motor dempet) kemungkinan tidak bisa dikejar dalam sisa waktu** — itu butuh model/resolusi lebih baik, cukup didokumentasikan sebagai keterbatasan.
+2. ❌ **DICOBA 29 Agustus, HIPOTESIS DITOLAK — jangan pakai `--conf` rendah.** Parameter `--conf` sudah ditambahkan di CLI dan diuji Rahmat di GPU-nya sendiri (`--kamera CCTV_1 --conf 0.25 --durasi 600`). Hasilnya **kebalikan dari dugaan**: `jumlah_crossing` justru turun, bukan naik.
+
+   | | conf=0.35 (default) | conf=0.25 (dicoba) |
+   |---|---:|---:|
+   | Sampel #1 (manual=65) | 33 (50,8%) | **24 (36,9%)** — lebih buruk |
+   | Total 600 detik pertama, selatan | 131 | **83** — lebih buruk |
+
+   **Dugaan penyebab** (belum diverifikasi lebih jauh, sekadar hipotesis kerja): confidence lebih rendah membuat lebih banyak kotak deteksi tidak stabil muncul, yang kemungkinan mengacaukan pencocokan ByteTrack antar-frame alih-alih membantunya — track_id yang sah malah lebih sering putus tepat di momen kritis. Kalau benar, akar masalahnya ada di tracker, bukan di ambang confidence.
+
+   **Keputusan: `CONFIDENCE` default (0.35) DIPERTAHANKAN.** Parameter `--conf` tetap ada di CLI (berguna untuk eksperimen lanjutan), tapi jangan dipakai untuk produksi. File `cv/output/*.csv` sudah dipulihkan ke kondisi semula dari backup manual — **PENTING:** file-file ini (`crossing_simpang.csv`, `percobaan_logic_simpang.csv`, `snapshot_zona.csv`) ternyata **tidak ter-track git** (`.gitignore:53`, `cv/output/*.csv`), jadi `git checkout` TIDAK BISA memulihkannya kalau tertimpa — cadangan fisik (copy manual) adalah **satu-satunya** jalan pulih. Selalu backup manual dulu sebelum menjalankan ulang skrip CV ini.
+
+   **Perbaikan oklusi murni (motor dempet) tetap belum terjawab** — kemungkinan butuh model/resolusi lebih baik atau perbaikan di sisi tracker (bukan confidence), di luar scope waktu 16 hari. Cukup didokumentasikan sebagai keterbatasan yang diketahui, dengan bukti bahwa satu percobaan perbaikan sudah dicoba dan hasilnya jujur dilaporkan.
 
 **Bukan blocker demo** — nomor akurasi sudah ada dan jujur dilaporkan (S-4), ini pekerjaan penguatan kalau ada waktu.
 
