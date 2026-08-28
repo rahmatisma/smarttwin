@@ -1,5 +1,11 @@
 # Hasil Studi Forecast vs Tanpa Forecast
 
+> **Catatan versi:** tabel eksperimen di bawah dijalankan ketika kandidat
+> `aggressive` masih memakai rumus lama `baseline x 1,2`. Implementasi aktif
+> sekarang memakai `baseline + 1 detik` setelah sweep 28–34 detik. Hasil
+> kalibrasi aktif ada di `hasil-kalibrasi-kandidat-agresif.md`; tabel lama ini
+> dipertahankan sebagai audit trail, bukan sebagai hasil kode terbaru.
+
 **Dihasilkan:** 2026-08-27T03:07:10.387619+00:00
 
 ## Metode pengujian
@@ -21,6 +27,33 @@ Pemenang adalah kandidat dengan skor terendah:
 score = 0,5 × (delay / delay maksimum dalam kelompok)
       + 0,5 × (antrean / antrean maksimum dalam kelompok)
 ```
+
+## Mengapa memakai baseline, aggressive, dan balanced?
+
+Tiga nama ini **bukan keluaran LSTM**. LSTM hanya memprediksi kondisi traffic.
+Ketiganya adalah desain eksperimen Scenario Generator:
+
+1. **Baseline:** keputusan asli RuleBasedEngine sebagai kontrol.
+2. **Aggressive:** menambah pelayanan lengan tersibuk. Kode aktif memakai
+   `min(60, baseline + 1)`; +1 detik adalah alternatif lebih panjang dengan
+   degradasi terkecil pada sweep awal.
+3. **Balanced:** `round((baseline + 15) / 2)`, yaitu menguji durasi yang lebih
+   dekat ke minimum green 15 detik.
+
+Literatur mendukung **prinsip umumnya**, bukan tiga nama dan rumus persis ini.
+Pedoman FHWA menjelaskan green interval melalui minimum/maximum green dan
+perpanjangan berdasarkan demand. Studi adaptive signal control menilai perubahan
+timing melalui delay, stops, waiting time, dan ukuran efisiensi. Karena itu,
+mengeksplorasi beberapa durasi di sekitar baseline dan mengujinya di SUMO masuk
+akal; tetapi rumus `+1`, balanced, dan bobot seleksi 50:50 tetap heuristik
+SmartTwin yang perlu validasi lebih luas, bukan formula universal.
+
+Rujukan:
+
+- [FHWA Traffic Signal Timing Manual, Chapter 5](https://ops.fhwa.dot.gov/publications/fhwahop08024/chapter5.htm)
+- [FHWA Traffic Signal Timing and Operations Strategies](https://ops.fhwa.dot.gov/arterial_mgmt/tst_ops.htm)
+- [SUMO-RL reward documentation](https://lucasalegre.github.io/sumo-rl/mdp/reward/)
+- [Deep Reinforcement Learning for Traffic Light Control](https://arxiv.org/abs/1803.11115)
 
 ## Hasil seluruh kandidat
 

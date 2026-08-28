@@ -25,8 +25,8 @@ from decision_engine.rule_based_engine import (
     ApproachPhase,
     CyclePlan,
     FIXED_CYCLE_ORDER,
-    RuleBasedEngine,
 )
+from decision_engine.engine_factory import create_decision_engine
 
 logger = logging.getLogger("uvicorn.error")
 
@@ -79,7 +79,7 @@ class SignalService:
             else TrafficService()
         )
 
-        self.engine = RuleBasedEngine()
+        self.engine = create_decision_engine()
         self.forecast_service = forecast_service or per_approach_forecast_service
 
         self._lock = threading.Lock()

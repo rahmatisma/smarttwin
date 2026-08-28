@@ -25,7 +25,7 @@ project_root = str(Path(__file__).resolve().parents[3])
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
-from decision_engine.rule_based_engine import RuleBasedEngine
+from decision_engine.engine_factory import create_decision_engine
 
 from app.services.signal_service import signal_service
 
@@ -37,7 +37,9 @@ class RecommendationService:
         self.cache_service: LiveScenarioCacheService = (
             cache_service or live_scenario_cache_service
         )
-        self.engine = RuleBasedEngine()
+        # Default tetap rule-based. PPO hanya aktif lewat env dan memiliki
+        # fallback internal bila checkpoint/dependency belum siap.
+        self.engine = create_decision_engine()
 
     def get_recommendation(
         self,

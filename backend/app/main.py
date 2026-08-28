@@ -1,4 +1,11 @@
 import logging
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+# Harus dilakukan sebelum import routes/services karena singleton decision
+# engine dibuat ketika modul service di-import.
+load_dotenv(Path(__file__).resolve().parents[1] / ".env", override=False)
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware

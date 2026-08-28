@@ -1,0 +1,17 @@
+{
+  "episodes": 10,
+  "seed_start": 1000,
+  "ppo": {
+    "mean_reward": -0.20429461411268662,
+    "mean_queue_veh": 22.25,
+    "mean_accumulated_wait_s": 974.9333333333333,
+    "total_throughput_veh": 1950.0
+  },
+  "rule_based": {
+    "mean_reward": -0.3244798177841989,
+    "mean_queue_veh": 24.35,
+    "mean_accumulated_wait_s": 1059.075,
+    "total_throughput_veh": 2172.0
+  },
+  "ppo_beats_rule_on_reward": true
+}

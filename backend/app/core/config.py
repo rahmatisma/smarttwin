@@ -3,7 +3,7 @@ from __future__ import annotations
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -36,6 +36,18 @@ class Settings(BaseSettings):
     app_version: str = "0.1.0"
 
     debug: bool = True
+
+    @field_validator("debug", mode="before")
+    @classmethod
+    def parse_debug_mode(cls, value):
+        """Toleransi DEBUG=release/production dari environment Windows/runner."""
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized in {"release", "production", "prod"}:
+                return False
+            if normalized in {"development", "develop", "dev"}:
+                return True
+        return value
 
     cors_origins: str = (
         "http://localhost:3000,"
