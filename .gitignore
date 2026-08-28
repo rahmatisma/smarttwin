@@ -33,6 +33,16 @@ cv/models/
 # Hugging Face, tidak pernah perlu di-commit.
 backend/cache/
 
+# Cache runtime di ROOT repo -- beda folder dari backend/cache/ di atas.
+# Isinya cache/simulation/frame.jpg: screenshot SUMO yang ditimpa ulang
+# tiap 0,25 detik selama simulasi GUI berjalan (sumo_controller.py).
+# Kalau ikut di-track, working tree SELALU terlihat kotor dan tiap orang
+# yang menjalankan simulasi menghasilkan konflik palsu di file biner ini.
+# Aman diabaikan: penulisnya bikin foldernya sendiri lewat
+# mkdir(parents=True, exist_ok=True), stream_simulation() menunggu sampai
+# filenya ada, dan GET /simulation/frame balas 404 yang jelas kalau belum.
+cache/
+
 # Output CV di-ignore secara umum (regenerated tiap run). Dua jenis
 # berkas dikecualikan secara sadar:
 #   1. dataset hasil run Melpi 14 Agustus 2026 — baseline/bukti laporan.

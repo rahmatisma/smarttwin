@@ -14,13 +14,7 @@ Dirapikan **28 Agustus 2026**. Sebelumnya ada 20 dokumen yang saling bertentanga
 
 ### **[`STATUS-DAN-SISA-KERJA.md`](STATUS-DAN-SISA-KERJA.md)** ← baca ini duluan
 
-<<<<<<< Updated upstream
 **Kalau cuma boleh baca satu dokumen, baca ini.** Isinya: persentase tiap kotak diagram, daftar yang **sudah selesai** (biar tidak dikerjakan ulang), daftar **sisa kerja** dengan pemilik & estimasi waktu, dan contoh jawaban untuk juri.
-=======
-5. **`README-PROGRES-SUBSISTEM.md`** — ringkasan progres terbaru per subsistem, kekurangan, alasan batas pengembangan, prioritas lanjutan, serta lokasi pemakaian Rule-Based Decision Engine.
-
-## 2. Baca sesuai bagianmu
->>>>>>> Stashed changes
 
 > ⚠️ **Jangan bikin dokumen status baru.** Kalau ada item selesai, pindahkan ke bagian "Sudah Selesai" di dokumen itu. Kebiasaan bikin dokumen status baru tiap audit itu yang bikin repo ini punya 20 file `.md` yang saling bertentangan.
 
@@ -54,6 +48,10 @@ Dirapikan **28 Agustus 2026**. Sebelumnya ada 20 dokumen yang saling bertentanga
 **Simulasi / SUMO:**
 - [`rencana-scenario-generator.md`](rencana-scenario-generator.md) — arsitektur kotak 7-9, batasan yang sengaja ada. **Dokumen desain, bukan status**
 - [`../simulation/README.md`](../simulation/README.md) — cara jalanin skrip simulasi
+
+**Decision Engine / PPO:**
+- [`../decision_engine/README-PPO.md`](../decision_engine/README-PPO.md) — penjelasan konseptual: beda LSTM vs PPO vs Rule-Based vs Scenario Generator. Baca ini dulu kalau belum pernah menyentuh reinforcement learning
+- [`../decision_engine/README-PPO-UNTUK-TIM.md`](../decision_engine/README-PPO-UNTUK-TIM.md) — panduan operasional: instalasi, smoke test, training, evaluasi, pemasangan endpoint. ⚠️ Perintah di dalamnya memakai path `D:\LOMBA\kmipn\smarttwin`, sesuaikan dengan lokasi repo Anda
 
 **CV:**
 - [`../cv/CATATAN.md`](../cv/CATATAN.md) — catatan serah terima CV

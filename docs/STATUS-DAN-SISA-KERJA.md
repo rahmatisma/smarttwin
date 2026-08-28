@@ -21,15 +21,15 @@ Dokumen lain di `docs/` sekarang cuma 2 jenis: **cara kerja** (rujukan teknis) d
 | 7 | Scenario Generator | 90% | **Sudah live** lewat cache |
 | 8 | Traffic Simulation | 92% | **Sudah live**, sudah divalidasi multi-seed |
 | 9 | Performance Analysis (LOS) | 90% | 4 metrik nyata, tampil di dashboard |
-| 10 | Adaptive Decision Engine | 10% / 90% | PPO nol kode / peran terisi Scenario Generator |
+| 10 | Adaptive Decision Engine | 55% / 90% | **PPO sudah dilatih & terintegrasi** (naik dari 10%), tapi model belum di-commit. Peran tetap diisi Scenario Generator |
 | 11 | Signal Timing Recommendation | 88% | Live. `/signal/status` belum baca cache skenario |
 | 12 | Dashboard | 92% | Build hijau, badge `source` + LOS ada |
 
-**Keseluruhan: ≈84% harfiah / ≈90% fungsional.**
-Selisihnya seluruhnya dari kotak 10 (PPO). Lihat bagian 4.
+**Keseluruhan: ≈88% harfiah / ≈90% fungsional.**
+Naik dari ≈84% karena PPO (kotak 10) sudah dilatih dan terintegrasi — lihat P-1.
 
-**Bukti eksekusi 28 Agustus:**
-- `backend/` → `pytest -q` = **69 passed, 0 failed**
+**Bukti eksekusi 29 Agustus:**
+- `backend/` → `pytest -q` = **76 passed, 1 failed** (gagal: `test_real_checkpoint_reaches_recommendation_endpoint`, lihat P-1a)
 - `simulation/` → `pytest tests/ -q` = **11 passed, 1 failed** (lihat item S-2)
 - `frontend/` → `npm run build` = **sukses, 13/13 route**
 
@@ -51,6 +51,8 @@ Bagian ini ada supaya tidak ada yang mengerjakan hal yang sudah beres. Beberapa 
 | Badge `source` & LOS di dashboard | ✅ **Selesai** | `RecommendationPanel.tsx:336-353` |
 | Regresi jam simulasi client-side di panel sinyal | ✅ **Selesai** | Commit `861141e` |
 | Kalibrasi `north`, identitas koridor `east` | ✅ **Selesai** | Commit `5b2c18e`, `700140c` |
+| PPO "nol baris kode RL" | ✅ **Sudah tidak berlaku** | Commit `f921ce9` — env Gymnasium, training, evaluasi, integrasi backend, 7 test. Lihat P-1 |
+| PPO tidak pernah menunjukkan tanda belajar | ✅ **Sudah terbukti belajar** | `training_monitor.csv` — reward naik monoton −3,38 → −1,80 selama 8.362 episode |
 
 ---
 
@@ -151,26 +153,89 @@ Perbaikan terakhir baru diuji lewat `npm run build`, **belum lewat browser sungg
 
 ## 4. SISA KERJA — Fase 2 (1–7 September)
 
-### P-1. PPO — kotak 10, Yuli (pekerjaan terbesar)
+### P-1. PPO — kotak 10, Yuli
 
-**Kondisi sekarang: nol baris kode RL.** Pencarian `PPO|stable_baselines|gymnasium` di seluruh repo cuma menemukan 3 komentar. `simulation/requirements-rl.txt` bahkan sudah tidak ada.
+> **Berubah total 29 Agustus.** Dokumen ini sebelumnya menulis "nol baris kode RL". **Itu sudah tidak berlaku** — commit `f921ce9` (28 Agustus, 10.410 baris) membawa environment Gymnasium, training, evaluasi, integrasi backend, dan 7 test baru. Bagian di bawah adalah hasil review menyeluruh terhadap commit itu.
 
-Butuh 4 hal yang belum ada satu pun:
-1. **Environment wrapper** — membungkus SUMO agar terlihat seperti lingkungan RL (`reset()`, `step()`, observation space, action space)
-2. **Reward function** — mendefinisikan "bagus" secara angka. Ini yang **paling menentukan** dan paling sering salah. Mulai sesederhana mungkin: `reward = -(delay + antrean)`
-3. **Loop pelatihan** — berjam-jam. SUMO jalan di CPU; GPU cuma bantu bagian jaringan sarafnya
-4. **Validasi** — buktikan PPO mengalahkan rule-based pada metrik yang sama
+#### Yang sudah benar — jangan diulang
 
-| Hari | Target | Kalau gagal |
+**1. PPO-nya benar-benar belajar.** Dianalisis dari `decision_engine/models/training_monitor.csv` (8.362 episode, 3,45 jam):
+
+| Episode | Reward rata-rata |
+|---|---:|
+| 0–836 | −3,38 |
+| 4.180–5.016 | −1,89 |
+| 7.524–8.360 | **−1,80** |
+
+Naik **monoton di setiap desil**, total **+1,58**. Ini kurva belajar sungguhan, bukan noise atau garis datar — bagian tersulit dari PPO sudah lewat.
+
+**2. Integrasinya aman.** `decision_engine/engine_factory.py` membuat default tetap `rule-based`; PPO hanya aktif lewat env `SMARTTWIN_DECISION_ENGINE=ppo`, dan `PPOEngine` punya fallback internal ke rule-based di `recommend()` maupun `recommend_cycle()` (`source="ppo-fallback-rule-based"`). **Sistem tidak bisa rusak karena PPO.**
+
+**3. Environment-nya proper.** Gymnasium `SmartTwinSumoEnv`, ada `check_env`, split train/eval 80/20, seed terkontrol, `traci` pakai `label` unik jadi tidak bentrok antar sesi.
+
+#### 🔴 P-1a. Model hasil training tidak ada di repo — Yuli, 5 menit
+
+`decision_engine/models/` hanya berisi `evaluation*.json` + `training_monitor.csv`. File **`smarttwin_ppo.zip` yang dicari `ppo_engine.py:24` tidak ada** — ter-gitignore oleh `.gitignore:20` (`*.zip`).
+
+Akibatnya di komputer selain milik Yuli, PPO **selalu** jatuh ke `ppo-fallback-rule-based`, 100% kasus. Ini juga yang membuat `pytest` backend jadi **1 failed** (`test_real_checkpoint_reaches_recommendation_endpoint` gagal di `assert MODEL.exists()`).
+
+Ini **kesalahan yang sama persis** seperti model LSTM dulu — `CLAUDE.md` sudah mencatat pola `git add -f` untuk artefak ter-gitignore.
+
+```powershell
+git add -f decision_engine/models/smarttwin_ppo.zip
+```
+
+Catatan: `stable_baselines3` juga belum terpasang di `backend/.venv` (`pip install -r decision_engine/requirements-rl.txt`).
+
+**Selesai kalau:** `pytest -q` di `backend/` → **77 passed, 0 failed**.
+
+#### 🔴 P-1b. Klaim "PPO mengalahkan rule-based" belum sahih — Yuli, 2–3 jam
+
+`evaluation.json` menulis `"ppo_beats_rule_on_reward": true` sebagai **satu-satunya flag**. Sangat mudah dibaca sebagai "PPO lebih baik". Perbandingan ketiga seed pada metrik sebenarnya:
+
+| Metrik | Seed 1000 | Seed 2000 | Seed 3000 | Skor |
+|---|---|---|---|---:|
+| **Reward** | ✅ PPO | ✅ PPO | ✅ PPO | **3/3** |
+| **Antrean** | ✅ −8,6% | ❌ +0,7% | ❌ +2,4% | **1/3** |
+| **Waktu tunggu** | ✅ −7,9% | ✅ −3,1% | ❌ **+10,1%** | **2/3** |
+| **Throughput** | ❌ **−10,2%** | ❌ −2,6% | ➖ +1 kend. | **0/3** |
+
+Dua hal yang harus dipahami sebelum angka ini dipakai di laporan:
+
+- **Menang di reward itu hampir tautologi.** Reward adalah fungsi yang PPO dilatih untuk memaksimalkan. Yang menentukan untuk laporan adalah **delay, antrean, throughput** — persis 3 metrik di kotak 9. Di situ PPO menang **4 dari 9** perbandingan.
+- **Throughput PPO tidak pernah menang.** Penyebabnya terbaca di `ppo_env.py:166` — bobot reward `0,20 × throughput − 0,50 × antrean − 0,30 × tunggu`. Throughput diberi bobot terkecil, jadi agent belajar **mengorbankan jumlah kendaraan yang lewat** demi antrean pendek. Untuk sistem lalu lintas itu trade-off serius: antrean pendek karena lebih sedikit kendaraan dilayani bukan perbaikan.
+
+**Yang dikerjakan:** naikkan bobot throughput di reward, latih ulang, lalu laporkan ketiga metrik lalu lintas — bukan cuma reward.
+
+#### 🟡 P-1c. Baseline pembanding bukan RuleBasedEngine asli — Yuli, 1–2 jam
+
+`ppo_env.py:192` `rule_based_action()` hanya `argmax(antrean)` lalu `round(nilai × 9)` untuk durasi. Sedangkan `RuleBasedEngine` produksi memakai demand score + alokasi proporsional + largest-remainder rounding ke siklus tetap.
+
+Jadi PPO dibandingkan dengan **tiruan sederhana**, bukan lawan sebenarnya. Klaim "mengalahkan rule-based" belum teruji terhadap engine yang benar-benar jalan di dashboard.
+
+**Yang dikerjakan:** panggil `RuleBasedEngine` asli di jalur evaluasi, terjemahkan hasilnya ke aksi environment.
+
+#### 🟡 P-1d. Fitur saat training ≠ fitur saat inference — Yuli, 1–2 jam
+
+Ini masalah paling halus dan paling mudah terlewat:
+
+| Slot | Saat training (`ppo_env.py:186`) | Saat inference (`ppo_engine.py:117`) |
 |---|---|---|
-| 1–2 Sept | Wrapper jalan: `reset()`/`step()` bisa dipanggil, SUMO merespons | Stop di sini |
-| 3–4 Sept | Pelatihan jalan & **reward naik** (bukan datar/acak) | **Kalau akhir hari ke-4 reward masih datar, STOP** |
-| 5–6 Sept | Bandingkan PPO vs rule-based pada snapshot sama | — |
-| 7 Sept | Tukar `RuleBasedEngine()` → `PPOEngine()` kalau menang | — |
+| 0 | `volume/60` — kendaraan **yang sedang ada** di edge | `volume/60` — kendaraan **yang melintas** dalam window |
+| 3 | `volume/33` — **volume yang sama** | `densityIndex/33` — besaran **berbeda** |
 
-**Sudah disiapkan:** `PPOEngine` cukup punya `.recommend(state, currentGreenSeconds, currentPhase, forecast, forecastWeight)` dengan bentuk **persis sama** seperti `RuleBasedEngine`. Kalau itu dipenuhi, penukarannya **satu baris**. Ini dirancang sejak awal, bukan kebetulan.
+Dua konsekuensi: (a) `volume` saat training itu kehadiran sesaat (`getLastStepVehicleNumber`), sedangkan `TrafficState.volume` itu hitungan crossing — besaran berbeda; (b) di training slot 0 dan slot 3 **selalu berkorelasi sempurna** (angka sama, dibagi 60 vs 33), sedangkan saat inference keduanya sinyal independen. **Model belajar di dunia yang tidak sama dengan dunia tempat ia dipakai.**
 
-**Aturan berhenti:** kalau 4 September belum ada tanda belajar, berhenti. Kotak 10 tetap 90% fungsional dengan Scenario Generator. **PPO setengah jadi lebih buruk daripada rule-based yang bekerja.**
+Tambahan: `ppo_env.py:20` melatih dari `cv/output/smarttwin_traffic_data.csv` (21 Agustus), bukan `crossing_simpang.csv`/`snapshot_zona.csv` yang dipakai ingest sekarang.
+
+#### Urutan kerja 1–7 September
+
+1. **P-1a** commit model (5 menit) — tanpa ini semuanya tidak bisa diverifikasi orang lain
+2. **P-1c** ganti baseline ke `RuleBasedEngine` asli
+3. **P-1d** samakan fitur training dengan inference
+4. **P-1b** naikkan bobot throughput, latih ulang, evaluasi ulang
+
+**Aturan berhenti:** kalau setelah semua ini PPO tetap kalah pada throughput, **jangan dipaksakan aktif**. Kotak 10 tetap 90% fungsional dengan Scenario Generator, dan PPO tetap layak dilaporkan sebagai pengembangan yang berhasil dilatih. **PPO yang menurunkan throughput lebih buruk daripada rule-based yang bekerja.**
 
 ### P-2. Perkuat bukti LSTM — Yuli, 2–3 jam
 
@@ -230,7 +295,12 @@ SETIAP REKAM: backend → worker --once --full-cycle (smoke test)
 ## 7. Cara menjawab juri
 
 **"Apakah semua kotak di diagram sudah ada?"**
-> "Ke-12 kotak terimplementasi. Sebelas berjalan penuh dan terverifikasi. Kotak Adaptive Decision Engine saat ini diisi Scenario Generator berbasis simulasi SUMO — keputusannya diuji lewat tiga kandidat simulasi nyata sebelum dipakai. PPO sedang dalam pelatihan sebagai pengembangan lanjutan, dan antarmukanya sudah disiapkan agar bisa langsung ditukar."
+> "Ke-12 kotak terimplementasi. Sebelas berjalan penuh dan terverifikasi. Kotak Adaptive Decision Engine saat ini dijalankan Scenario Generator berbasis simulasi SUMO — keputusannya diuji lewat tiga kandidat simulasi nyata sebelum dipakai."
+
+**"Bagaimana dengan PPO?"** — pertanyaan ini kemungkinan besar muncul karena PPO tertulis eksplisit di diagram
+> "PPO sudah dilatih 8.362 episode di lingkungan SUMO dengan kurva reward yang menunjukkan pembelajaran nyata, dan sudah terintegrasi ke backend lewat feature flag dengan fallback otomatis ke rule-based. Untuk demo ini kami menjalankan Scenario Generator karena validasi bahwa PPO mengungguli baseline pada metrik lalu lintas — terutama throughput — masih berjalan."
+
+*Ini jawaban yang kuat DAN jujur: menunjukkan PPO nyata dikerjakan, sekaligus menjelaskan kenapa belum dipakai tanpa terdengar seperti kegagalan.*
 
 **"Apakah ini realtime?"**
 > "Pemrosesan berjalan realtime terhadap masukan video. Kami memakai rekaman CCTV Simpang Pingit karena tidak ada akses ke stream operasional Dishub — antarmuka masukannya sendiri menerima RTSP maupun file."
@@ -243,7 +313,8 @@ SETIAP REKAM: backend → worker --once --full-cycle (smoke test)
 
 ### JANGAN dikatakan
 
-- ❌ "PPO sudah jadi" — nol kode
+- ❌ **"PPO mengalahkan rule-based"** — yang menang cuma reward (fungsi yang PPO dilatih untuk maksimalkan). Pada throughput PPO **tidak pernah** menang, dan baselinenya bukan `RuleBasedEngine` asli. Lihat P-1b/P-1c
+- ❌ **"PPO sudah dipakai di sistem"** — default tetap rule-based, dan model belum di-commit (P-1a)
 - ❌ "Realtime CCTV" — rekaman
 - ❌ "Akurasi 95%" sebelum S-4 selesai — belum diukur
 - ❌ "Forecast terbukti menurunkan delay 14%" — sebelum P-2, itu 1 percobaan
@@ -255,7 +326,7 @@ SETIAP REKAM: backend → worker --once --full-cycle (smoke test)
 
 | Siapa | Fase 1 (sebelum 31 Agt) | Fase 2 (1–7 Sept) |
 |---|---|---|
-| **Yuli** | S-1 panel sinyal (1–2j), S-2 test merah (15m) | **P-1 PPO** (utama), P-2 bukti LSTM |
+| **Yuli** | **P-1a commit model PPO (5m)**, S-1 panel sinyal (1–2j), S-2 test merah (15m) | **P-1b/c/d PPO** (utama), P-2 bukti LSTM |
 | **Melpi** | S-3 hardcode (30m), S-6 pernyataan scope (1j) | Tampilkan LOS per lengan (dukung P-3) |
 | **Rahmat** | S-4 validasi CV (3–4j), S-5 argumen `--sumber` (30m) | P-3 LOS per lengan, P-4 rapi-rapi |
 | Siapa saja | S-7 verifikasi browser (30m) | — |

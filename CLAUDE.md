@@ -26,7 +26,12 @@ When changing a model in `docs/data-contract.md`, treat it as a cross-module con
 
 The two are **not** in the same state — don't collapse them into one "future work" bucket.
 
-**PPO** — out of scope and never started. The only trace in the repo is `simulation/requirements-rl.txt`, which lists two package names. No environment wrapper, no training script, no RL code.
+**PPO** — **built and trained as of 28 August** (commit `f921ce9`); the older "never started" note is obsolete, and `simulation/requirements-rl.txt` no longer exists (it moved to `decision_engine/requirements-rl.txt`). What exists now: `decision_engine/ppo_env.py` (Gymnasium env over SUMO), `train_ppo.py`, `evaluate_ppo.py`, `ppo_engine.py`, and `engine_factory.py`. Training genuinely converged — `decision_engine/models/training_monitor.csv` shows reward rising monotonically from −3.38 to −1.80 over 8,362 episodes.
+
+Three caveats that matter before quoting any PPO result:
+- **The trained checkpoint is NOT in the repo.** `.gitignore` line 20 (`*.zip`) excludes `decision_engine/models/smarttwin_ppo.zip`, so `PPOEngine` always falls back to rule-based on any machine but the trainer's. Commit it with `git add -f`, the same pattern the LSTM artifacts needed. This is also why `pytest` in `backend/` currently reports 1 failure.
+- **PPO is opt-in and defaults off.** `create_decision_engine()` returns `RuleBasedEngine` unless `SMARTTWIN_DECISION_ENGINE=ppo`; `PPOEngine` falls back internally (`source="ppo-fallback-rule-based"`) whenever the checkpoint or dependency is missing. PPO cannot break the demo.
+- **"PPO beats rule-based" is not yet a supportable claim.** It wins on reward in all 3 evaluation seeds, but reward is its own training objective. On the traffic metrics it wins 4 of 9 comparisons and **never** wins on throughput. The baseline it is compared against (`ppo_env.py::rule_based_action()`) is a simplified proxy, not the real `RuleBasedEngine`. See `docs/STATUS-DAN-SISA-KERJA.md` items P-1a–P-1d.
 
 **LSTM (`forecasting/`)** — three separate experiments with three different statuses. Work stopped 15 August 2026 to fit the 16-day scope, but the results are real and committed:
 
