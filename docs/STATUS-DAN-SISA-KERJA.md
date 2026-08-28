@@ -253,31 +253,23 @@ Bonus: demo jadi lebih meyakinkan — bisa menunjuk satu lengan dan bilang "yang
 - `CLAUDE.md` masih menyebut `simulation/requirements-rl.txt` yang sudah hilang → perbarui
 - `simulation/.venv` tidak punya `supabase` → untuk test forecast client pakai `backend/.venv`
 
-### P-5. Perbaiki akar penyebab akurasi CV rendah — Rahmat
+### P-5. Perbaiki akar penyebab akurasi CV rendah — DICOBA, DIKEMBALIKAN 29 Agustus
 
-> **Update 29 Agustus (sore):** kedua perbaikan sudah **dikodekan**. #2 sudah **selesai + terverifikasi**. #1 kodenya siap, tapi **butuh dijalankan di komputer ber-GPU Anda** — sesi ini cuma punya CPU (`torch.cuda.is_available() == False`), tidak realistis memproses ulang video YOLO 1280px di sini.
+> **Keputusan final: kode dikembalikan ke versi sebelum P-5. Angka akurasi resmi tetap 48,7%** (rata-rata 8 sampel, lihat S-4 / `hasil-validasi-akurasi-cv.md`). Ringkasan di bawah dipertahankan sebagai catatan investigasi — bukan instruksi untuk dikerjakan lagi.
 
-1. ✅ **SELESAI — Kendaraan terhitung ganda di garis salah** (CCTV_2, sampel #6). `sisi_garis()` dulu pakai garis tak terbatas, bukan segmen. **Diperbaiki:** fungsi baru `segmen_berpotongan()` di [`vehicle_counter_pingit.py:465-508`](../cv/vehicle_counter_pingit.py#L465-L508) — syarat interseksi segmen standar (2 kondisi, bukan cuma 1), dipakai di `hitung_crossing()` menggantikan pengecekan `sisi_garis()` langsung. **Terverifikasi lewat simulasi titik** (tidak butuh proses ulang video, karena ini bug logika murni): kasus kontaminasi lama (kendaraan dekat ujung DIPONEGORO memicu MAGELANG juga) sekarang **tidak lagi terpicu di keduanya**, sementara 3 kasus crossing sah (tengah segmen DIPONEGORO, tengah MAGELANG, tengah selatan CCTV_1) **tetap terdeteksi identik** seperti sebelumnya — tidak ada regresi.
+**Yang dicoba, singkatnya:**
 
-2. ❌ **DICOBA 29 Agustus, HIPOTESIS DITOLAK (dengan catatan metodologi) — jangan pakai `--conf` rendah.** Parameter `--conf` sudah ditambahkan di CLI dan diuji Rahmat di GPU-nya sendiri (`--kamera CCTV_1 --conf 0.25 --durasi 600`, cuma memproses 10 menit pertama video).
+1. **Bug kontaminasi antar-garis** (CCTV_2 MAGELANG↔DIPONEGORO, dugaan penyebab sampel #6). Diperbaiki dengan `segmen_berpotongan()` — matematisnya benar dan terverifikasi lewat simulasi titik. **Tapi saat diuji di video sungguhan** (CCTV_2, menit 8–20, dibandingkan 4 sampel yang punya hitungan manual): sampel #6 (DIPONEGORO) membaik drastis (41,7%→83,3%) persis sesuai dugaan, sampel #5 (DIPONEGORO) sedikit membaik — **tapi sampel #3 dan #4 (MAGELANG) malah memburuk parah** (39,2%→14,0% dan 63,3%→26,7%). Rata-rata 4 sampel: 44,9%→40,8%, **sedikit lebih buruk secara agregat**. Dugaan penyebab regresi MAGELANG (belum dibuktikan): pengecekan segmen yang lebih ketat mungkin menolak crossing sah yang lintasannya miring/dekat ujung garis — trade-off presisi vs recall yang belum sepenuhnya dipahami.
 
-   **Bukti yang benar-benar valid cuma 1 titik** — koreksi dari klaim awal yang sempat menyertakan "total 600 detik pertama" sebagai bukti tambahan. Itu salah: dari 600 detik yang diproses, cuma jendela sampel #1 (60 detik) yang punya hitungan manual sebagai pembanding. Membandingkan total agregat CV lawan CV tanpa hitungan manusia tidak membuktikan apa-apa (diam-diam berasumsi "angka lebih besar = lebih akurat", padahal belum tentu).
+2. **Turunkan `CONFIDENCE`** ke 0.25 — diuji di 1 jendela (sampel #1, CCTV_1): hasilnya memburuk (50,8%→36,9%). Hipotesis ditolak berdasar 1 titik data.
 
-   | | conf=0.35 (default) | conf=0.25 (dicoba) |
-   |---|---:|---:|
-   | Sampel #1 — 7:31–8:31 (manual=65, **satu-satunya bukti valid**) | 33 (50,8%) | **24 (36,9%)** — lebih buruk |
+**Kenapa dikembalikan, bukan diperdalam lebih jauh:** hasil campur/negatif pada bukti yang ada, dan investigasi lanjutan (kenapa MAGELANG regresi) akan makan waktu GPU + analisis lagi tanpa jaminan hasil, sementara tenggat 31 Agustus masih punya item wajib lain (S-5, latihan, rekaman). Keputusan sadar: **kode dikembalikan ke `git show 9387c13:cv/vehicle_counter_pingit.py`** (versi sebelum commit `82f63f1`), angka 48,7% dari S-4 tetap jadi laporan resmi.
 
-   Sampel #2 (24:16–25:11) **tidak ikut ter-uji** — di luar cakupan 10 menit yang diproses, butuh `--durasi` lebih panjang (~1520 detik) kalau mau divalidasi.
+**Efek samping yang harus dibereskan:** dua kali proses ulang video (CCTV_1 & CCTV_2) otomatis meng-upload video anotasi ke HuggingFace **dengan path tetap** (`videos/simpang4-pingit/annotated/anotasi_CCTV_X.mp4`, lihat `hf_writer.py:58`) — artinya **menimpa video produksi asli**, bukan cuma menambah baris baru. Ini pola yang **sudah pernah terjadi 2× sebelumnya** (lihat riwayat commit HF: "Restore anotasi_CCTV_1.mp4 (accidentally overwritten by ...)", 23 & 25 Agustus). Dipulihkan dengan pola yang sama: download versi baik dari commit HF sebelumnya (`8cb05f945a...` untuk CCTV_1, `4005778a5...` untuk CCTV_2), upload ulang sebagai commit "Restore". 2 baris orphan di tabel Supabase `cameraVideos` (id yang dibuat proses test) juga dihapus.
 
-   **Dugaan penyebab** (belum diverifikasi lebih jauh, sekadar hipotesis kerja): confidence lebih rendah membuat lebih banyak kotak deteksi tidak stabil muncul, yang kemungkinan mengacaukan pencocokan ByteTrack antar-frame alih-alih membantunya — track_id yang sah malah lebih sering putus tepat di momen kritis. Kalau benar, akar masalahnya ada di tracker, bukan di ambang confidence.
+**⚠️ Untuk siapa pun yang menjalankan `vehicle_counter_pingit.py` untuk eksperimen ke depannya:** proses ini SELALU upload ke HuggingFace di akhir (bukan cuma tulis CSV lokal) kecuali kamera itu tidak terdaftar di `CAMERA_ID_MAP`. Backup lokal CSV **tidak cukup** — pertimbangkan juga risiko ke Supabase/HuggingFace. Lihat `cv/CATATAN.md`.
 
-   **Keputusan: `CONFIDENCE` default (0.35) DIPERTAHANKAN** — berdasar 1 titik data yang valid, arahnya konsisten memburuk, tapi ini bukti tipis (n=1). Kalau ada waktu, uji ulang di jendela lain (mis. sampel #3/#5 yang paling jelek) sebelum menganggap kesimpulan ini final. Parameter `--conf` tetap ada di CLI untuk eksperimen lanjutan, tidak dipakai produksi.
-
-   File `cv/output/*.csv` sudah dipulihkan ke kondisi semula dari backup manual — **PENTING:** file-file ini (`crossing_simpang.csv`, `percobaan_logic_simpang.csv`, `snapshot_zona.csv`) ternyata **tidak ter-track git** (`.gitignore:53`, `cv/output/*.csv`), jadi `git checkout` TIDAK BISA memulihkannya kalau tertimpa — cadangan fisik (copy manual) adalah **satu-satunya** jalan pulih. Selalu backup manual dulu sebelum menjalankan ulang skrip CV ini.
-
-   **Perbaikan oklusi murni (motor dempet) tetap belum terjawab** — kemungkinan butuh model/resolusi lebih baik atau perbaikan di sisi tracker (bukan confidence), di luar scope waktu 16 hari. Cukup didokumentasikan sebagai keterbatasan yang diketahui, dengan bukti bahwa satu percobaan perbaikan sudah dicoba dan hasilnya jujur dilaporkan.
-
-**Bukan blocker demo** — nomor akurasi sudah ada dan jujur dilaporkan (S-4), ini pekerjaan penguatan kalau ada waktu.
+**Bukan blocker demo** — nomor akurasi (48,7%) sudah ada dan jujur dilaporkan di S-4. Kalau nanti ada waktu setelah 31 Agustus untuk investigasi ulang, mulai dari pertanyaan "kenapa MAGELANG regresi" sebelum mencoba perbaikan lain.
 
 ---
 

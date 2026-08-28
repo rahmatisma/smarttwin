@@ -61,7 +61,9 @@ vs garis DIPONEGORO: LEWAT (dihitung)
 ```
 Satu kendaraan fisik yang sama bisa tercatat sebagai lewat Utara **dan** Timur. Ini **bug nyata dan reproducible**, bukan dugaan — kemungkinan besar penjelas sampel #6 (CV 19 vs manual 12).
 
-**✅ Sudah diperbaiki (29 Agustus, sore).** `segmen_berpotongan()` baru di [`vehicle_counter_pingit.py:465-508`](../cv/vehicle_counter_pingit.py#L465-L508) membatasi pengecekan lintas ke SEGMEN garis (syarat interseksi 2-segmen standar), bukan garis tak terbatas. Dipakai menggantikan pengecekan `sisi_garis()` langsung di `hitung_crossing()`. Terverifikasi lewat simulasi titik: kasus kontaminasi (dekat ujung DIPONEGORO memicu MAGELANG) sudah tidak terpicu lagi di keduanya, sementara 3 kasus crossing sah yang diuji tetap terdeteksi identik — tidak ada regresi. Ini cuma menyentuh CCTV_2 (satu-satunya kamera dengan >1 garis dalam satu frame); CCTV_1 dan CCTV_3 tidak terpengaruh sama sekali.
+**⚠️ Dicoba 29 Agustus, DIKEMBALIKAN — bukan perbaikan bersih.** Sempat dibuat `segmen_berpotongan()` yang membatasi pengecekan lintas ke SEGMEN garis (bukan garis tak terbatas), dan itu **terbukti benar secara matematis** lewat simulasi titik. Tapi saat diuji di video sungguhan (CCTV_2, 4 sampel yang punya hitungan manual): sampel #6/#5 (DIPONEGORO) membaik — sampel #6 melonjak dari 41,7% ke 83,3% — **tapi sampel #3/#4 (MAGELANG) memburuk parah** (39,2%→14,0% dan 63,3%→26,7%). Rata-rata ke-4 sampel itu turun (44,9%→40,8%), jadi secara agregat **bukan perbaikan bersih**. Dugaan penyebab regresi MAGELANG belum dibuktikan (kemungkinan pengecekan ketat menolak crossing sah yang lintasannya miring/dekat ujung garis).
+
+Kode **dikembalikan** ke versi sebelum perbaikan ini (`git show 9387c13:cv/vehicle_counter_pingit.py`) — angka 48,7% di atas tetap yang resmi dilaporkan. Detail investigasi lengkap ada di `STATUS-DAN-SISA-KERJA.md` item P-5, disimpan sebagai catatan kalau ada waktu untuk melanjutkan investigasi setelah 31 Agustus.
 
 ### Yang belum diverifikasi (di luar scope validasi ini)
 
