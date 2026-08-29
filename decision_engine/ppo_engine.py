@@ -35,7 +35,10 @@ class PPOModel(Protocol):
 class PPOEngine:
     """PPO opt-in dengan RuleBasedEngine sebagai fallback wajib.
 
-    Action space yang diharapkan: ``MultiDiscrete([4, 10, 10, 10, 10])``.
+    Action space yang diharapkan: ``MultiDiscrete([10, 10, 10, 10])`` --
+    empat durasi hijau (utara, timur, selatan, barat) sesuai urutan
+    FIXED_CYCLE_ORDER. PPO TIDAK memilih urutan/fase awal; rotasi sudah
+    ditetapkan sistem dan selalu mulai dari fase 0, sama seperti produksi.
     Item pertama memilih approach prioritas; empat item berikutnya memilih
     green-time north/east/south/west dari GREEN_OPTIONS (15..60, step 5).
 
@@ -125,18 +128,24 @@ class PPOEngine:
         action = self._flatten_action(
             self.model.predict(observation, deterministic=True)
         )
-        if len(action) != 5:
-            raise ValueError(f"action PPO wajib 5 item, diterima {len(action)}")
-        if not 0 <= action[0] < len(FIXED_CYCLE_ORDER):
-            raise ValueError("index approach PPO di luar rentang")
-        if any(not 0 <= value < len(GREEN_OPTIONS) for value in action[1:]):
+        if len(action) != len(FIXED_CYCLE_ORDER):
+            raise ValueError(
+                f"action PPO wajib {len(FIXED_CYCLE_ORDER)} item, diterima {len(action)}"
+            )
+        if any(not 0 <= value < len(GREEN_OPTIONS) for value in action):
             raise ValueError("index green-time PPO di luar rentang")
 
-        selected = FIXED_CYCLE_ORDER[action[0]]
         green_by_approach = {
-            approach: GREEN_OPTIONS[action[index + 1]]
+            approach: GREEN_OPTIONS[action[index]]
             for index, approach in enumerate(FIXED_CYCLE_ORDER)
         }
+        # PPO tidak lagi memilih urutan fase (rotasi sudah tetap
+        # FIXED_CYCLE_ORDER, sama seperti produksi -- lihat ppo_env
+        # _set_action). recommendedPhase diturunkan dari keluaran PPO
+        # sendiri: lengan yang DIBERI hijau paling panjang, yaitu lengan
+        # yang menurut model paling butuh. Kalau seri, urutan rotasi jadi
+        # pemecahnya supaya hasilnya deterministik.
+        selected = max(FIXED_CYCLE_ORDER, key=lambda a: (green_by_approach[a], -FIXED_CYCLE_ORDER.index(a)))
         return selected, green_by_approach
 
     @staticmethod

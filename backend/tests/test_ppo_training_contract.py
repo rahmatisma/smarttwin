@@ -60,12 +60,14 @@ def test_evaluation_baseline_maps_real_rule_based_engine_to_action_space():
     env._traffic_state = lambda: state
 
     action = SmartTwinSumoEnv.rule_based_action(env)
-    recommendation = engine.recommend(state, currentGreenSeconds=30, currentPhase="north")
     cycle = engine.recommend_cycle(state, currentPhase="north")
 
-    assert action[0] == FIXED_CYCLE_ORDER.index(recommendation.recommendedPhase)
+    # Action = 4 durasi hijau saja. Sejak 29 Agustus PPO maupun baseline
+    # tidak lagi memilih fase awal (rotasi tetap FIXED_CYCLE_ORDER, sama
+    # seperti produksi) -- lihat docs/STATUS-DAN-SISA-KERJA.md item P-1.
+    assert len(action) == len(FIXED_CYCLE_ORDER)
     for index, phase in enumerate(cycle.phases):
-        mapped_green = GREEN_OPTIONS[action[index + 1]]
+        mapped_green = GREEN_OPTIONS[action[index]]
         assert abs(mapped_green - phase.greenSeconds) == min(
             abs(option - phase.greenSeconds) for option in GREEN_OPTIONS
         )

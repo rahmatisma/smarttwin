@@ -193,6 +193,16 @@ def test_phases_dict_only_marks_active_approach_green():
 
     active = FIXED_CYCLE_ORDER[0]
 
+    # Semua lengan hijau 30 detik + kuning 4 detik = 34 detik per giliran.
+    # Lengan aktif (index 0) sisa 34 detik; lengan berikutnya menunggu
+    # giliran-giliran sebelumnya selesai -- lihat _calculate_wait_time().
+    expected_remaining = {
+        FIXED_CYCLE_ORDER[0]: 34,   # aktif sekarang
+        FIXED_CYCLE_ORDER[1]: 34,   # nunggu lengan aktif selesai
+        FIXED_CYCLE_ORDER[2]: 68,   # + giliran lengan ke-2
+        FIXED_CYCLE_ORDER[3]: 102,  # + giliran lengan ke-3
+    }
+
     for approach_name, phase in status.phases.items():
         if approach_name == active:
             assert phase.state == "green"
@@ -204,7 +214,12 @@ def test_phases_dict_only_marks_active_approach_green():
             # sama persis lewat get_cycle_plan().
             assert phase.state == "red"
             assert phase.durationSeconds == 30
-            assert phase.remainingSeconds == 0
+        # remainingSeconds untuk lengan non-aktif dulu selalu 0. Sejak
+        # _calculate_wait_time() ditambahkan, isinya berapa detik lagi
+        # lengan itu dapat giliran hijau -- assertion lama sudah usang dan
+        # membuat suite merah. Sekaligus jadi cakupan test pertama untuk
+        # fungsi itu, yang sebelumnya belum diuji sama sekali.
+        assert phase.remainingSeconds == expected_remaining[approach_name]
 
 
 def test_next_phase_points_to_following_approach_in_order():

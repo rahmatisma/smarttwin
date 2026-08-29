@@ -56,10 +56,20 @@ YELLOW_STATE = {
 
 # Reward v2: throughput menjadi tujuan utama. Bobot ketiga komponen berjumlah
 # 1,0 agar skala reward tetap mudah dibaca dan dibandingkan antar-training.
-# Starvation tetap menjadi penalti keselamatan yang terpisah.
 THROUGHPUT_REWARD_WEIGHT = 0.45
 QUEUE_REWARD_WEIGHT = 0.35
 WAIT_REWARD_WEIGHT = 0.20
+
+# Ambang saturasi throughput. Investigasi 29 Agustus (lihat
+# docs/STATUS-DAN-SISA-KERJA.md item P-1 Temuan C) menemukan nilai lama 15,0
+# membuat reward BUTA terhadap throughput: kedatangan nyata 18-26 kendaraan
+# per langkah keputusan, sehingga PPO saturasi di 81% langkah dan baseline
+# 97% -- selisih throughput_reward cuma 0,0258 dari maksimum 0,45. Akibatnya
+# menaikkan throughput di atas ambang tidak memberi reward tambahan sama
+# sekali, sementara antrean/tunggu masih terus memberi gradien. Ambang 30,0
+# berada di atas maksimum yang teramati (26) supaya perbedaan 18 vs 20
+# kendaraan benar-benar terbaca oleh reward.
+THROUGHPUT_SATURATION_VEH = 30.0
 
 
 def _floor_five_seconds(timestamp: str) -> str:
@@ -148,16 +158,18 @@ class SmartTwinSumoEnv(gym.Env[np.ndarray, np.ndarray]):
         self.sumo_binary = resolve_sumo_binary(sumo_binary)
         self.episode_steps, self.decision_seconds = int(episode_steps), int(decision_seconds)
         self.observation_space = spaces.Box(0.0, 1.0, shape=(25,), dtype=np.float32)
-        self.action_space = spaces.MultiDiscrete([4, len(GREEN_OPTIONS), len(GREEN_OPTIONS), len(GREEN_OPTIONS), len(GREEN_OPTIONS)])
+        # Empat durasi hijau saja (utara, timur, selatan, barat). Urutan rotasi
+        # bukan keputusan PPO -- lihat _set_action().
+        self.action_space = spaces.MultiDiscrete([len(GREEN_OPTIONS)] * len(FIXED_CYCLE_ORDER))
         self.connection: Any = None
         self.rule_based_engine = RuleBasedEngine()
         self.label = f"smarttwin-ppo-{uuid.uuid4().hex}"
         self.rng = random.Random()
         self.step_count = self.vehicle_counter = 0
         self.profile: dict[str, float] = self.profiles[0]
-        self.current_phase = "north"
+        self.current_phase = FIXED_CYCLE_ORDER[0]
         self.current_green = 30
-        self.starvation = {a: 0 for a in FIXED_CYCLE_ORDER}
+        self.current_greens: dict[str, int] = {a: 30 for a in FIXED_CYCLE_ORDER}
         self.recent_crossings = {a: 0 for a in FIXED_CYCLE_ORDER}
 
     def reset(self, *, seed: int | None = None, options: dict[str, Any] | None = None):
@@ -172,8 +184,8 @@ class SmartTwinSumoEnv(gym.Env[np.ndarray, np.ndarray]):
         self.connection = traci.getConnection(self.label)
         self._add_vehicle_types()
         self.step_count = self.vehicle_counter = 0
-        self.current_phase, self.current_green = "north", 30
-        self.starvation = {a: 0 for a in FIXED_CYCLE_ORDER}
+        self.current_phase, self.current_green = FIXED_CYCLE_ORDER[0], 30
+        self.current_greens = {a: 30 for a in FIXED_CYCLE_ORDER}
         self.recent_crossings = {a: 0 for a in FIXED_CYCLE_ORDER}
         for _ in range(20):
             self._inject_one_second()
@@ -206,8 +218,20 @@ class SmartTwinSumoEnv(gym.Env[np.ndarray, np.ndarray]):
                 pass
 
     def _set_action(self, action: np.ndarray) -> None:
-        selected_index = int(action[0])
-        greens = {a: GREEN_OPTIONS[int(action[i + 1])] for i, a in enumerate(FIXED_CYCLE_ORDER)}
+        """Pasang program TLS dari 4 durasi hijau -- PERSIS seperti produksi.
+
+        Action HANYA berisi durasi hijau per lengan; urutan rotasi sudah
+        ditetapkan FIXED_CYCLE_ORDER (utara-timur-selatan-barat) dan tidak
+        boleh diputuskan PPO. Sebelum 29 Agustus action[0] memilih fase awal
+        lalu dipasang lewat setPhase(selected*2) -- itu tuas kendali yang
+        TIDAK ADA di produksi (sumo_controller.apply_cycle_plan dan
+        scenario_generator sama-sama memakai setPhase(tls_id, 0) tetap).
+        Ketidakcocokan itu membuat baseline dihukum penalti starvation atas
+        perilaku yang produksi tidak pernah lakukan, dan menyumbang 80,5%
+        keunggulan reward PPO. Lihat docs/STATUS-DAN-SISA-KERJA.md item P-1
+        Temuan D.
+        """
+        greens = {a: GREEN_OPTIONS[int(action[i])] for i, a in enumerate(FIXED_CYCLE_ORDER)}
         phases = []
         for approach in FIXED_CYCLE_ORDER:
             phases.extend([self.connection.trafficlight.Phase(greens[approach], GREEN_STATE[approach]),
@@ -216,11 +240,27 @@ class SmartTwinSumoEnv(gym.Env[np.ndarray, np.ndarray]):
         logic = self.connection.trafficlight.Logic("smarttwin-ppo", 0, 0, phases=phases)
         self.connection.trafficlight.setProgramLogic(tls_id, logic)
         self.connection.trafficlight.setProgram(tls_id, logic.programID)
-        self.connection.trafficlight.setPhase(tls_id, selected_index * 2)
-        self.current_phase = FIXED_CYCLE_ORDER[selected_index]
-        self.current_green = greens[self.current_phase]
-        for approach in FIXED_CYCLE_ORDER:
-            self.starvation[approach] = 0 if approach == self.current_phase else self.starvation[approach] + 1
+        self.connection.trafficlight.setPhase(tls_id, 0)
+        self.current_greens = greens
+
+    def _sync_active_phase(self) -> None:
+        """Selaraskan current_phase dengan fase yang BENAR-BENAR aktif di SUMO.
+
+        Dulu current_phase diisi dari action[0] (fase yang dipilih PPO).
+        Sekarang rotasi berjalan sendiri, jadi fase aktif harus dibaca dari
+        simulasi -- ini juga lebih cocok dengan inference, karena di produksi
+        SignalService meneruskan fase yang sedang hijau sungguhan.
+        Program kita berpola [hijau, kuning] x 4, jadi index // 2 memetakan
+        balik ke lengan di FIXED_CYCLE_ORDER.
+        """
+        try:
+            tls_id = self.connection.trafficlight.getIDList()[0]
+            index = int(self.connection.trafficlight.getPhase(tls_id))
+        except Exception:
+            return
+        approach = FIXED_CYCLE_ORDER[(index // 2) % len(FIXED_CYCLE_ORDER)]
+        self.current_phase = approach
+        self.current_green = self.current_greens.get(approach, self.current_green)
 
     def step(self, action: np.ndarray):
         self._set_action(action)
@@ -232,17 +272,21 @@ class SmartTwinSumoEnv(gym.Env[np.ndarray, np.ndarray]):
             self.connection.simulationStep()
             arrived += int(self.connection.simulation.getArrivedNumber())
         self.step_count += 1
+        self._sync_active_phase()
         metrics = self._metrics()
         queue_norm = min(1.0, metrics["queue"] / 40.0)
         wait_norm = min(1.0, metrics["waiting"] / max(1.0, metrics["vehicles"] * 120.0))
-        throughput_norm = min(1.0, arrived / 15.0)
-        starvation_penalty = 0.05 * sum(max(0, value - 3) for value in self.starvation.values())
+        throughput_norm = min(1.0, arrived / THROUGHPUT_SATURATION_VEH)
         throughput_reward = THROUGHPUT_REWARD_WEIGHT * throughput_norm
         queue_penalty = QUEUE_REWARD_WEIGHT * queue_norm
         wait_penalty = WAIT_REWARD_WEIGHT * wait_norm
-        reward = float(throughput_reward - queue_penalty - wait_penalty - starvation_penalty)
+        # Penalti starvation DIHAPUS 29 Agustus: program TLS sekarang selalu
+        # dipasang sebagai rotasi penuh 4 lengan dan selalu mulai dari fase 0,
+        # sama seperti produksi -- tidak ada lengan yang bisa tidak kebagian
+        # hijau, jadi penalti itu tidak punya kondisi pemicu yang sah lagi.
+        reward = float(throughput_reward - queue_penalty - wait_penalty)
         metrics.update({"reward": reward, "throughput_interval": float(arrived), "queue_norm": queue_norm,
-                        "wait_norm": wait_norm, "starvation_penalty": starvation_penalty,
+                        "wait_norm": wait_norm,
                         "throughput_reward": throughput_reward, "queue_penalty": queue_penalty,
                         "wait_penalty": wait_penalty})
         return self._observation(), reward, False, self.step_count >= self.episode_steps, metrics
@@ -290,21 +334,23 @@ class SmartTwinSumoEnv(gym.Env[np.ndarray, np.ndarray]):
         )
 
     def rule_based_action(self) -> np.ndarray:
-        engine = self.rule_based_engine
-        state = self._traffic_state()
-        recommendation = engine.recommend(
-            state,
-            currentGreenSeconds=self.current_green,
-            currentPhase=self.current_phase,
+        """Baseline pembanding: durasi hijau dari RuleBasedEngine asli.
+
+        Memakai recommend_cycle() saja -- itu yang benar-benar dipakai
+        produksi (SignalService) untuk menentukan durasi keempat lengan.
+        recommend() (pemilihan satu lengan pemenang) sengaja TIDAK dipakai
+        lagi di sini sejak 29 Agustus, karena env tidak lagi memberi PPO
+        maupun baseline kendali atas urutan fase.
+        """
+        cycle = self.rule_based_engine.recommend_cycle(
+            self._traffic_state(), currentPhase=self.current_phase
         )
-        cycle = engine.recommend_cycle(state, currentPhase=self.current_phase)
-        selected = FIXED_CYCLE_ORDER.index(recommendation.recommendedPhase)
         green_by_approach = {phase.approach: phase.greenSeconds for phase in cycle.phases}
         green_indexes = [
             min(range(len(GREEN_OPTIONS)), key=lambda index: abs(GREEN_OPTIONS[index] - green_by_approach[approach]))
             for approach in FIXED_CYCLE_ORDER
         ]
-        return np.asarray([selected, *green_indexes], dtype=np.int64)
+        return np.asarray(green_indexes, dtype=np.int64)
 
     def close(self) -> None:
         if self.connection is not None:

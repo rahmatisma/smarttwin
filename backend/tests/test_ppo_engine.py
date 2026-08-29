@@ -51,16 +51,18 @@ def test_observation_has_stable_25_features():
 
 
 def test_ppo_recommends_phase_and_four_green_times():
-    # east dipilih; durasi N/E/S/W = 15/20/25/30 detik.
-    model = FakeModel([1, 0, 1, 2, 3])
+    # Action = 4 durasi hijau saja (N/E/S/W = 15/20/25/30 detik). PPO tidak
+    # lagi memilih fase awal -- rotasi tetap FIXED_CYCLE_ORDER, sama seperti
+    # produksi. recommendedPhase diturunkan dari hijau TERPANJANG (west, 30s).
+    model = FakeModel([0, 1, 2, 3])
     engine = PPOEngine(model=model)
 
     recommendation = engine.recommend(make_state())
     cycle = engine.recommend_cycle(make_state())
 
     assert recommendation.source == "ppo"
-    assert recommendation.recommendedPhase == "east"
-    assert recommendation.recommendedGreenSeconds == 20
+    assert recommendation.recommendedPhase == "west"
+    assert recommendation.recommendedGreenSeconds == 30
     assert cycle.source == "ppo"
     assert [phase.approach for phase in cycle.phases] == FIXED_CYCLE_ORDER
     assert [phase.greenSeconds for phase in cycle.phases] == [15, 20, 25, 30]
