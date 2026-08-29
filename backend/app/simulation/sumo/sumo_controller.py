@@ -47,15 +47,12 @@ class SumoController:
     SIMULATION_DIR = PROJECT_ROOT / "simulation"
     SIMULATION_VENV_DIR = SIMULATION_DIR / ".venv"
 
-    # SENGAJA pakai sys.prefix (root venv Python yang lagi jalan),
-    # BUKAN simulation/.venv -- backend/requirements.txt sudah
-    # mendeklarasikan traci/sumolib/eclipse-sumo sebagai dependency
-    # backend sendiri (dipasang 25 Agustus 2026), dan simulation/.venv
-    # tidak selalu ada di tiap mesin dev (CLAUDE.md: venv itu dibuat
-    # terpisah, khusus buat script simulation/, bukan backend). Hardcode
-    # ke simulation/.venv sebelumnya bikin SumoController gagal cari
-    # binary SUMO di mesin mana pun yang venv simulation/-nya belum
-    # dibuat, walau backend/.venv sendiri sudah punya SUMO lengkap.
+    # SENGAJA pakai sys.prefix (venv Python yang lagi jalan), bukan
+    # hardcode ke simulation/.venv -- sejak backend, simulation, dan
+    # decision_engine digabung jadi satu venv di root repo (30 Agustus
+    # 2026), requirements.txt root sudah mendeklarasikan
+    # traci/sumolib/eclipse-sumo, jadi sys.prefix selalu benar tidak
+    # peduli dari venv mana proses ini dijalankan.
     SUMO_VENV_DIR = Path(sys.prefix)
 
     SUMO_SCRIPTS_DIR = SUMO_VENV_DIR / "Scripts"
@@ -84,7 +81,7 @@ class SumoController:
     STREAM_FRAME_HEIGHT = 720
 
     # Area kamera cukup lebar agar antrean pada keempat ruas pendekat terlihat.
-    # Format override: xmin,ymin,xmax,ymax, contoh di backend/.env.example.
+    # Format override: xmin,ymin,xmax,ymax, contoh di .env.example (root repo).
     DEFAULT_STREAM_VIEW_BOUNDARY = (240.63, 479.635, 380.63, 558.385)
 
     @classmethod

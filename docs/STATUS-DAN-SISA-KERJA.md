@@ -32,7 +32,7 @@ Kembali ke level sebelum audit — build frontend yang sempat rusak (S-8) sudah 
 
 **Bukti eksekusi 29 Agustus (malam, setelah perbaikan S-8):**
 - `backend/` → `pytest -q` = **86 passed, 1 failed** (`test_real_checkpoint_reaches_recommendation_endpoint` — checkpoint lama 5-dim vs kode baru 4-dim, self-resolve setelah checkpoint v4 di-commit)
-- `simulation/` → **harus dijalankan dari root repo**: `backend/.venv/Scripts/python.exe -m pytest simulation/tests/` = **15 passed, 0 failed**. (Dijalankan dari dalam folder `simulation/` akan gagal collect di kedua venv — lihat P-4 diperbarui)
+- `simulation/` → `.venv/Scripts/python.exe -m pytest simulation/tests/` dari root repo (venv gabungan, bukan lagi `backend/.venv`) = **15 passed, 0 failed**
 - `frontend/` → `npm run build` = ✅ **sukses, 13/13 route, 0 error TypeScript**
 
 ---
@@ -318,8 +318,7 @@ Bonus: demo jadi lebih meyakinkan — bisa menunjuk satu lengan dan bilang "yang
 - `METERS_PER_QUEUED_VEHICLE = 7.0` estimasi → tulis di laporan sebagai asumsi, atau kalibrasi
 - Bobot 50/50 di `select_best_scenario()` → tulis alasannya, atau uji sensitivitas
 - Dua jalur Traffic State Builder paralel → gabungkan atau beri komentar kapan pakai yang mana
-- `CLAUDE.md` masih menyebut `simulation/requirements-rl.txt` yang sudah hilang → perbarui
-- `simulation/.venv` tidak punya `supabase`/`postgrest` → pakai `backend/.venv`, **tapi harus dijalankan dari root repo** (`backend/.venv/Scripts/python.exe -m pytest simulation/tests/`), bukan dari dalam folder `simulation/` — dari sana `simulation` tidak bisa di-resolve sebagai package meski venv-nya benar
+- ✅ **Selesai 30 Agustus** — `backend`, `simulation`, `decision_engine` digabung jadi **satu venv di root** (`.venv/`), `requirements.txt` juga digabung ke root. Masalah `ModuleNotFoundError: supabase`/`postgrest` yang bikin `simulation/pytest` gagal collect (dan bikin `scenario_worker.py` gak bisa dijalankan langsung) **hilang total**, bukan lagi sekadar workaround "pakai backend/.venv dari root". `cv/.venv` dan `forecasting/.venv` tetap terpisah sengaja (CUDA torch, stack ML beda) — lihat CLAUDE.md bagian "Single root venv". `.env` juga dipindah dari `backend/.env` ke `.env` di root, dipakai bersama oleh semua modul termasuk `cv/`. **Catatan: `backend/.venv` lama belum dihapus** karena masih dipakai training PPO v4 yang sedang berjalan — dihapus setelah training selesai.
 
 ### P-5. Perbaiki akar penyebab akurasi CV rendah — DICOBA, DIKEMBALIKAN 29 Agustus
 

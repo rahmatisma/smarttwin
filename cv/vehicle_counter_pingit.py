@@ -1189,7 +1189,7 @@ _UPLOAD_FUTURES = []
 def _muat_kredensial_backend():
     """
     Suntik SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY/HF_TOKEN/HF_REPO_ID
-    dari backend/.env ke os.environ, SEKALI di awal main().
+    dari .env root repo ke os.environ, SEKALI di awal main().
 
     hf_writer.py dan supabase_writer.py didesain baca kredensial dari
     os.environ yang di-inject cv_trigger_service.py saat men-spawn
@@ -1197,13 +1197,13 @@ def _muat_kredensial_backend():
     Karena vehicle_counter_copy.py dijalankan manual/standalone
     (bukan subprocess backend), env itu tidak pernah ke-set otomatis,
     jadi disuntik manual di sini dari file yang SAMA yang dipakai
-    backend (backend/.env), bukan file .env baru di cv/.
+    backend (.env di root repo), bukan file .env baru di cv/.
 
     Tidak pakai python-dotenv (tidak ada di requirements cv/) --
     parsing manual KEY=VALUE apa adanya sudah cukup buat 4 baris yang
     dibutuhkan.
     """
-    env_path = os.path.join(BASE_DIR, "..", "backend", ".env")
+    env_path = os.path.join(BASE_DIR, "..", ".env")
 
     if not os.path.exists(env_path):
         print(

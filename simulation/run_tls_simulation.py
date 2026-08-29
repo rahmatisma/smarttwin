@@ -35,7 +35,7 @@ decisionEngineRoot = (
 )
 
 envFile = (
-    backendRoot
+    projectRoot
     / ".env"
 )
 

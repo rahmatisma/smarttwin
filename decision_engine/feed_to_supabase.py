@@ -18,12 +18,12 @@ except ImportError:
     print("        Jalankan: pip install python-dotenv")
     sys.exit(1)
 
-# Pakai satu sumber .env yang sama dengan backend/ -- supaya key cuma
-# didefinisikan sekali di satu tempat, tidak diduplikasi/di-hardcode ulang
-# di sini. load_dotenv() tanpa argumen tidak akan menemukan
-# backend/.env karena decision_engine/ bukan ancestor-nya.
-_BACKEND_ENV = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "backend", ".env")
-load_dotenv(_BACKEND_ENV)
+# Pakai satu sumber .env di root repo -- supaya key cuma didefinisikan
+# sekali di satu tempat, tidak diduplikasi/di-hardcode ulang di sini.
+# load_dotenv() tanpa argumen tidak akan menemukan .env karena
+# decision_engine/ bukan ancestor-nya.
+_ROOT_ENV = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".env")
+load_dotenv(_ROOT_ENV)
 
 # ─── Konfigurasi Supabase ──────────────────────────────────────────────────
 # WAJIB dari .env / environment -- TIDAK ADA fallback hardcode. Key lama yang

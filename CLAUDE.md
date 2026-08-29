@@ -49,12 +49,17 @@ When quoting these numbers: PeMS04 MAE/RMSE are in **scaled units**, not vehicle
 
 `forecasting/README.md` below its status header still describes a full LSTM → SUMO → PPO pipeline as the intended design. That plan is superseded; the header note is the current status.
 
+## Single root venv (30 August 2026)
+
+`backend/`, `simulation/`, and `decision_engine/` used to each have their own `.venv`, which caused constant `ModuleNotFoundError`s (a script from one module missing a dependency that only another module's venv had installed). They now share **one venv at the repo root** (`.venv/`), installed from the root `requirements.txt` — that file was already a superset of the three modules' old requirement files before the merge, so nothing was version-reconciled, just consolidated. `cv/.venv` and `forecasting/.venv` stay **separate on purpose** — `cv/` needs a CUDA build of `torch` (GPU-specific, would bloat/conflict with the shared env), and `forecasting/`'s ML stack doesn't overlap with the live-system cluster.
+
+Run everything (backend, simulation scripts, decision_engine training) from the repo root using `.venv\Scripts\python.exe`, not module-local venvs.
+
 ## SUMO / TraCI setup
 
-SUMO is installed **as a pip package inside the simulation venv** (`eclipse_sumo`, `traci`, `sumolib` 1.27.1), not as a system install. The scripts hard-fail if `SUMO_HOME` is unset, so it must be exported to the venv's SUMO directory before running anything:
+SUMO is installed **as a pip package inside the root venv** (`eclipse_sumo`, `traci`, `sumolib` 1.27.1), not as a system install. The scripts hard-fail if `SUMO_HOME` is unset, so it must be exported to the venv's SUMO directory before running anything:
 
 ```powershell
-cd simulation
 .\.venv\Scripts\Activate.ps1
 $env:SUMO_HOME = "$PWD\.venv\Lib\site-packages\sumo"
 ```
@@ -63,7 +68,7 @@ Both scripts do `sys.path.append($SUMO_HOME/tools)` before `import traci` — ke
 
 ## Simulation commands
 
-Run from the `simulation/` directory (paths in the scripts are relative):
+Run from the `simulation/` directory (paths in the scripts are relative), using the root venv (`..\.venv\Scripts\python.exe`, or activate it first):
 
 ```powershell
 python test_traci.py          # smoke test against SUMO's bundled cross.net.xml
