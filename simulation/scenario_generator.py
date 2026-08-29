@@ -72,10 +72,12 @@ SHORT_SIM_STEPS = 90
 # Estimasi meter per kendaraan buat mengubah queueLengthVeh (jumlah
 # kendaraan, dari runSimulation()) jadi avg_queue_length_m (meter)
 # seperti diminta schema ScenarioResult di docs/data-contract.md.
-# Ini ESTIMASI kasar (panjang kendaraan + jarak antar-kendaraan
-# rata-rata), bukan pengukuran -- sama seperti pola "_est" lain yang
-# sudah dipakai di project ini untuk metrik turunan serupa.
+# Ini ESTIMASI kasar panjang efektif satu kendaraan dalam antrean: panjang
+# kendaraan campuran + headway antarkendaraan. Nilai 7 m bukan hasil kalibrasi
+# lapangan Simpang Pingit; jangan melaporkan avgQueueLengthM sebagai pengukuran.
 METERS_PER_QUEUED_VEHICLE = 7.0
+DELAY_SCORE_WEIGHT = 0.5
+QUEUE_SCORE_WEIGHT = 0.5
 YELLOW_SECONDS = 4
 
 # Kalibrasi SUMO 27 Agustus 2026 pada snapshot trafficState 13784
@@ -383,8 +385,11 @@ def select_best_scenario(
 
     Dinormalisasi ke nilai TERBURUK di batch ini (bukan ke skala
     absolut) supaya delay (detik) dan antrean (meter) -- dua satuan
-    berbeda -- bisa digabung secara adil. Deterministik: dipanggil
-    berkali-kali dengan input sama, hasilnya selalu sama.
+    berbeda -- bisa digabung secara adil. Bobot 50/50 adalah kompromi netral:
+    tidak ada bukti lokal yang membenarkan mendahulukan salah satu metrik, dan
+    keduanya sama-sama indikator utama kinerja kandidat. Ini heuristik proyek,
+    bukan bobot baku HCM. Deterministik: dipanggil berkali-kali dengan input
+    sama, hasilnya selalu sama.
 
     Ini pengganti kotak 10 (Adaptive Decision Engine / PPO di diagram
     arsitektur) untuk sekarang -- lihat docs/STATUS-DAN-SISA-KERJA.md
@@ -423,8 +428,8 @@ def select_best_scenario(
         )
 
         return (
-            0.5 * delayNorm
-            + 0.5 * queueNorm
+            DELAY_SCORE_WEIGHT * delayNorm
+            + QUEUE_SCORE_WEIGHT * queueNorm
         )
 
     return min(

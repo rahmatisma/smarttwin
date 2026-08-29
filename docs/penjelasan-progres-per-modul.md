@@ -65,7 +65,7 @@ Ini jawaban singkat "modul ini kelihatan di mana":
 | "Ada testingnya?" | `cd backend && pytest -q` → 86 passed |
 | "Datanya asli?" | `cv/output/crossing_simpang.csv` (2.152 baris), rentang 16:30–17:19 |
 | "Simulasinya jalan?" | Terminal worker mencetak 3 kandidat + LOS |
-| "Forecastnya terbukti?" | [`hasil-studi-forecast-multi-snapshot.md`](hasil-studi-forecast-multi-snapshot.md) — 10/10 delay membaik |
+| "Forecastnya terbukti?" | [`hasil-studi-forecast-multi-snapshot.md`](hasil-studi-forecast-multi-snapshot.md) — delay 20/20 dan ketiga metrik 17/20 membaik dalam satu sesi |
 
 ---
 
@@ -220,7 +220,7 @@ Buktinya pola ini nyata: sampel dengan kendaraan renggang mencapai **96,1%**, sa
 
 **Buktinya — dua tingkat:**
 1. **Model mengalahkan tebakan naif** (MAE **1,65** vs **2,30**) — "tebakan naif" = asumsi kondisi berikutnya sama dengan sekarang.
-2. **Dampaknya diuji, bukan diasumsikan:** pada 10 snapshot berbeda, dengan forecast vs tanpa forecast — delay membaik **10 dari 10**, antrean **9 dari 10**, throughput **10 dari 10**. Dokumen: [`hasil-studi-forecast-multi-snapshot.md`](hasil-studi-forecast-multi-snapshot.md).
+2. **Dampaknya diuji, bukan diasumsikan:** pada 20 snapshot dari sesi rekaman yang sama, dengan forecast vs tanpa forecast dan horizon SUMO identik — delay membaik **20 dari 20**, antrean **17 dari 20**, throughput **19 dari 20**, dan ketiganya membaik bersamaan pada **17 dari 20** pengujian. Ini bukti konsistensi dalam satu sesi, bukan generalisasi lintas hari. Dokumen: [`hasil-studi-forecast-multi-snapshot.md`](hasil-studi-forecast-multi-snapshot.md).
 
 **Yang perlu dijelaskan jujur:** data uji model masih kecil (16 sequence), dan data latih baru dari 1 sesi rekaman 45 menit. Karena itu bobot forecast sengaja dibuat **konservatif 30%** — sistem tetap 70% berpegang pada kondisi aktual. Itu keputusan sadar, bukan kelalaian.
 
@@ -317,7 +317,7 @@ Buktinya pola ini nyata: sampel dengan kendaraan renggang mencapai **96,1%**, sa
 - Rantai penuh CCTV → deteksi → data → simulasi → keputusan → dashboard, semuanya tersambung
 - Simpang asli, bukan simulasi generik
 - Keputusan diuji simulasi sebelum dipakai, dengan LOS standar HCM 2000
-- Forecast LSTM terbukti membantu di 10 dari 10 pengujian
+- Forecast LSTM menurunkan delay di 20/20 pengujian; ketiga metrik membaik bersama di 17/20 pengujian dalam satu sesi rekaman
 
 **Yang jujur kami sampaikan sebagai keterbatasan:**
 - Akurasi deteksi CV 48,7% — sudah diinvestigasi sampai akar penyebabnya

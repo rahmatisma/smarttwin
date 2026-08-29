@@ -16,6 +16,12 @@ if str(BACKEND_ROOT) not in sys.path:
 
 from app.services.supabase_client import get_supabase
 
+# JALUR RUNTIME AKTIF.
+# Builder ini membaca trafficLaneMetrics di Supabase dan menulis agregasi
+# trafficApproachStates. Untuk ingest awal dari CSV gunakan cv_csv_bridge.py.
+# simulation/traffic_state_builder.py adalah alat offline/legacy CSV -> JSON dan
+# tidak dipakai oleh backend, API, atau scenario worker produksi.
+
 
 # ============================================================
 # CONFIGURATION

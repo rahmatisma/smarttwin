@@ -26,7 +26,7 @@ When changing a model in `docs/data-contract.md`, treat it as a cross-module con
 
 The two are **not** in the same state — don't collapse them into one "future work" bucket.
 
-**PPO** — **built and trained as of 28 August** (commit `f921ce9`); the older "never started" note is obsolete, and `simulation/requirements-rl.txt` no longer exists (it moved to `decision_engine/requirements-rl.txt`). What exists now: `decision_engine/ppo_env.py` (Gymnasium env over SUMO), `train_ppo.py`, `evaluate_ppo.py`, `ppo_engine.py`, and `engine_factory.py`. Training genuinely converged — `decision_engine/models/training_monitor.csv` shows reward rising monotonically from −3.38 to −1.80 over 8,362 episodes.
+**PPO** — **built and trained as of 28 August** (commit `f921ce9`). The only active RL dependency file is `decision_engine/requirements-rl.txt`; do not use or recreate the removed `simulation/requirements-rl.txt`. What exists now: `decision_engine/ppo_env.py` (Gymnasium env over SUMO), `train_ppo.py`, `evaluate_ppo.py`, `ppo_engine.py`, and `engine_factory.py`. Training genuinely converged — `decision_engine/models/training_monitor.csv` shows reward rising monotonically from −3.38 to −1.80 over 8,362 episodes.
 
 Three caveats that matter before quoting any PPO result:
 - **The trained checkpoint is NOT in the repo.** `.gitignore` line 20 (`*.zip`) excludes `decision_engine/models/smarttwin_ppo.zip`, so `PPOEngine` always falls back to rule-based on any machine but the trainer's. Commit it with `git add -f`, the same pattern the LSTM artifacts needed. This is also why `pytest` in `backend/` currently reports 1 failure.

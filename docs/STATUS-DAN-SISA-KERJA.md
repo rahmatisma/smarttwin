@@ -293,6 +293,20 @@ Dua klaim masih bertumpu sampel kecil:
 
 Perbaikan: bagi ulang data supaya test set lebih besar; ulang `scenario_worker.py --compare-forecast` di 10–20 snapshot. Target kalimat: *"konsisten membaik di 17 dari 20 pengujian"*.
 
+> **Catatan Yuli, 30 Agustus:** retraining dengan split kronologis 60/15/25
+> sudah dicoba; test independen naik dari 16 menjadi 96 sequence, tetapi MAE
+> LSTM turun kualitasnya menjadi 2,0440 dan hanya unggul tipis dari naive
+> 2,0720. Tim memutuskan kembali memakai checkpoint lama (split 70/15/15,
+> MAE 1,6528 vs naive 2,2973). Hasil lama tetap disebut proof of concept karena
+> test efektif hanya 16 sequence dan datanya berasal dari satu sesi rekaman.
+>
+> Uji dampak operasional checkpoint lama kemudian diperluas menjadi **20
+> snapshot** dalam sesi data yang sama: delay membaik 20/20, antrean 17/20,
+> throughput 19/20, dan ketiga metrik membaik bersamaan pada **17/20** pengujian.
+> Hasil ini memperkuat konsistensi pada rekaman tersebut, tetapi bukan bukti
+> generalisasi lintas hari/lokasi. Rincian reproduksinya ada di
+> `docs/hasil-studi-forecast-multi-snapshot.md`.
+
 ### P-3. LOS per lengan — Rahmat, 2–3 jam
 
 `calculate_los()` menghitung dari delay **rata-rata seluruh simpang**. HCM aslinya per lengan. Akibatnya kalau selatan macet parah (LOS E) tapi 3 lengan lain lancar (LOS A), sistem melaporkan LOS B — **masalah di selatan tidak terlihat**.

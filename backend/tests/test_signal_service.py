@@ -279,7 +279,9 @@ def test_recompute_cycle_plan_passes_forecast_to_decision_engine():
     assert plan.source == "rule-based+forecast"
 
 
-def test_recompute_cycle_plan_falls_back_when_forecast_fails():
+def test_recompute_cycle_plan_falls_back_when_forecast_fails(monkeypatch):
+    # Isolasi kontrak fallback dari SMARTTWIN_DECISION_ENGINE di .env lokal.
+    monkeypatch.setenv("SMARTTWIN_DECISION_ENGINE", "rule-based")
     now = datetime(2026, 8, 26, 8, 0, 0, tzinfo=timezone.utc)
     record = {
         "trafficState": {"windowStart": now, "windowEnd": now},

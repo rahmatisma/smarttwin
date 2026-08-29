@@ -1,13 +1,20 @@
 """
 TRAFFIC STATE BUILDER
 
+JALUR OFFLINE/LEGACY, BUKAN RUNTIME PRODUKSI
+--------------------------------------------
+Script ini dipertahankan untuk replay CSV lama dan pembuatan snapshot JSON
+lokal. Jalur aktif adalah cv_csv_bridge.py (CSV -> Supabase), lalu
+backend/app/pipeline/traffic_state_builder.py (Supabase -> TrafficState).
+Scenario worker dan API tidak membaca output JSON script ini.
+
 Mengubah CSV per-detik per-lajur dari modul CV menjadi TrafficState
 per jendela waktu, sesuai docs/data-contract.md.
 
     cv/output/smarttwin_traffic_data.csv        (per detik, per lajur)
                     |
                     v
-    TrafficState per window                     (per 5 menit, per lengan)
+    TrafficState per window                     (per 5 detik, per lengan)
                     |
                     v
     simulation/outputs/traffic_state_snapshot.json

@@ -48,8 +48,14 @@ endpoint kembali ke Rule-Based Engine. Validasi ini berada di
 - `avgDelaySeconds` berasal dari rata-rata accumulated waiting time kendaraan
   aktif selama simulasi pendek. Ini proxy delay simulasi, bukan pengukuran
   control delay lapangan yang sudah dikalibrasi.
-- `avgQueueLengthM` dihitung dari `queueLengthVeh x 7 meter`; karena itu harus
-  disebut estimasi panjang antrean.
+- `avgQueueLengthM` dihitung dari `queueLengthVeh x 7 meter`. Angka 7 meter
+  adalah asumsi panjang efektif kendaraan campuran beserta headway, bukan hasil
+  kalibrasi lapangan Simpang Pingit; karena itu harus disebut estimasi panjang
+  antrean.
+- Pemilihan kandidat memberi bobot 50% pada delay dan 50% pada antrean setelah
+  keduanya dinormalisasi terhadap nilai terburuk dalam batch. Bobot setara
+  dipakai sebagai kompromi netral karena belum ada bukti lokal untuk
+  memprioritaskan salah satunya; ini heuristik SmartTwin, bukan formula HCM.
 - `throughputVeh` adalah kendaraan yang tiba selama horizon simulasi.
 - LOS dipetakan dari delay menggunakan ambang HCM yang dipakai proyek.
 

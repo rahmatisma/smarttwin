@@ -479,7 +479,7 @@ export default function DigitalTwinPanel({
           SVG INTERSECTION OR LIVE STREAM
           ===================================================== */}
 
-      <div className="relative aspect-video w-full overflow-hidden rounded-md bg-[var(--color-canvas)]">
+      <div className="relative min-h-[320px] w-full flex-1 overflow-hidden rounded-md bg-[var(--color-canvas)]">
         {simRunning ? (
           <>
             <img

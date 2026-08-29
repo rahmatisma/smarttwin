@@ -77,6 +77,41 @@ class SumoController:
         / "simpang4_pingit.sumocfg"
     )
 
+    # Screenshot harus dibuat langsung pada rasio card dashboard. Mengandalkan
+    # ukuran window SUMO-GUI menghasilkan viewport sekitar 950x278 di Windows;
+    # ketika di-stretch oleh browser hasilnya terlihat pecah.
+    STREAM_FRAME_WIDTH = 1280
+    STREAM_FRAME_HEIGHT = 720
+
+    # Area kamera cukup lebar agar antrean pada keempat ruas pendekat terlihat.
+    # Format override: xmin,ymin,xmax,ymax, contoh di backend/.env.example.
+    DEFAULT_STREAM_VIEW_BOUNDARY = (240.63, 479.635, 380.63, 558.385)
+
+    @classmethod
+    def _stream_view_boundary(cls) -> tuple[float, float, float, float]:
+        raw_boundary = os.getenv("SMARTTWIN_SUMO_VIEW_BOUNDARY", "").strip()
+        if not raw_boundary:
+            return cls.DEFAULT_STREAM_VIEW_BOUNDARY
+
+        try:
+            boundary = tuple(float(value.strip()) for value in raw_boundary.split(","))
+        except ValueError:
+            logger.warning(
+                "SMARTTWIN_SUMO_VIEW_BOUNDARY tidak valid; memakai default %s",
+                cls.DEFAULT_STREAM_VIEW_BOUNDARY,
+            )
+            return cls.DEFAULT_STREAM_VIEW_BOUNDARY
+
+        if len(boundary) != 4 or boundary[0] >= boundary[2] or boundary[1] >= boundary[3]:
+            logger.warning(
+                "SMARTTWIN_SUMO_VIEW_BOUNDARY harus xmin,ymin,xmax,ymax; "
+                "memakai default %s",
+                cls.DEFAULT_STREAM_VIEW_BOUNDARY,
+            )
+            return cls.DEFAULT_STREAM_VIEW_BOUNDARY
+
+        return boundary
+
     # ============================================================
     # EDGE CONFIGURATION
     # ============================================================
@@ -619,9 +654,9 @@ class SumoController:
             logger.info("STEP 4: Simulation step successful")
 
             if gui:
-                # Rasio 16:9 dan crop lebih dekat agar memenuhi card web tanpa
-                # letterbox, tetapi keempat mulut simpang tetap terlihat.
-                traci.gui.setBoundary("View #0", 240.63, 479.635, 380.63, 558.385)
+                # Crop dilakukan oleh kamera SUMO, bukan CSS browser, sehingga
+                # area yang dipilih tetap dirender tajam pada resolusi stream.
+                traci.gui.setBoundary("View #0", *self._stream_view_boundary())
                 connection = traci.getConnection()
                 process = getattr(connection, "_process", None)
                 if process is not None:
@@ -1356,7 +1391,12 @@ class SumoController:
                         try:
                             frame_path = self.PROJECT_ROOT / "cache" / "simulation" / "frame.jpg"
                             frame_path.parent.mkdir(parents=True, exist_ok=True)
-                            self.traci.gui.screenshot("View #0", str(frame_path))
+                            self.traci.gui.screenshot(
+                                "View #0",
+                                str(frame_path),
+                                width=self.STREAM_FRAME_WIDTH,
+                                height=self.STREAM_FRAME_HEIGHT,
+                            )
                             self._last_screenshot_at = time.monotonic()
                         except Exception:
                             pass
