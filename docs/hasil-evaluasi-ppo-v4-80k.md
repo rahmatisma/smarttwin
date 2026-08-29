@@ -20,12 +20,18 @@ checkpoint lama yang namanya kebetulan sama.
 | **Validitas gerbang kualitas itu sendiri** | 🔴 **Tidak sahih — lihat Bug F** |
 | Bug baru ditemukan | 🔴 **2 (Bug E dan Bug F), keduanya terukur, bukan dugaan** |
 
-**Kesimpulan terpenting:** klaim "PPO selalu kalah pada throughput" — yang selama
-ini jadi alasan utama PPO tidak diaktifkan — **tidak terbukti**. Angka itu
-artefak dari membandingkan dua kebijakan pada **durasi simulasi yang berbeda**.
-Setelah dinormalkan per detik, defisitnya hilang sepenuhnya di ketiga seed.
+> 🔴 **BACA BAGIAN 11 DULU.** Kesimpulan di bawah ini (dan bagian 4) ditulis
+> sebelum Bug F benar-benar diperbaiki, dan **terlalu optimis**. Setelah
+> `evaluate_ppo.py` diperbaiki dan diukur ulang di 3 seed, hasilnya berbeda:
+> PPO **menang 3, kalah 4, seri 2** dari 9 perbandingan. Koreksi lengkap di
+> **bagian 11** di bawah.
 
-Ini **bukan** berarti "PPO mengalahkan rule-based". Yang benar: **seri**.
+**Kesimpulan terpenting:** klaim "PPO selalu kalah pada throughput" — yang selama
+ini jadi alasan utama PPO tidak diaktifkan — **melebih-lebihkan**. Angka −15,9%
+itu sebagian artefak dari membandingkan dua kebijakan pada **durasi simulasi
+yang berbeda**; selisih sebenarnya jauh lebih kecil (−3,6% s/d +0,8%).
+
+Ini **bukan** berarti "PPO mengalahkan rule-based" — lihat bagian 11.
 
 ---
 
@@ -225,3 +231,48 @@ perbandingan antar-checkpoint).
 **bukan** throughput per langkah — itu `getArrivedNumber()` sesaat (1 detik
 terakhir, nilainya ~0,2). Yang dipakai reward adalah **`throughput_interval`**.
 Saya sempat salah membaca key ini dan hampir melaporkan bug palsu.
+
+---
+
+## 11. ⚠️ KOREKSI (30 Agustus, setelah Bug F diperbaiki)
+
+**Kesimpulan di bagian 4 di atas terlalu optimis dan harus dikoreksi.**
+
+Angka "+1,0% / +0,0% / +2,2%" di bagian 4 berasal dari script diagnostik
+sederhana: 12 langkah, lalu throughput mentah dibagi total detik. Setelah Bug F
+benar-benar diperbaiki (`evaluate_ppo.py` memakai anggaran waktu simulasi setara
+per episode, 3 episode per seed), pengukuran yang lebih ketat memberi hasil
+**berbeda**:
+
+| Seed | Skew durasi | Throughput/jam | Antrean | Tunggu/kendaraan | Menang/Seri |
+|---|---:|---|---|---|---:|
+| 1000 | 3,45% | 2196 vs 2179 **+0,80% SERI** | 35,1 vs 38,7 **−9,25% menang** | 57,2 vs 61,3 **−6,75% menang** | 2/1 |
+| 2000 | 1,91% | 2189 vs 2271 **−3,63% KALAH** | 52,9 vs 57,8 **−8,51% menang** | 63,0 vs 57,3 **+10,05% KALAH** | 1/0 |
+| 3000 | 4,67% | 1566 vs 1587 **−1,35% SERI** | 11,5 vs 10,5 **+9,26% KALAH** | 27,5 vs 22,0 **+24,77% KALAH** | 0/1 |
+
+**Yang tetap benar:** Bug F nyata dan perbaikannya terverifikasi — skew durasi
+turun dari 18–20% menjadi 1,9–4,7% (`comparable: true` di ketiga seed). Klaim
+lama "PPO kalah throughput 15,9%" memang **melebih-lebihkan**; selisih
+sebenarnya −3,6% s/d +0,8%.
+
+**Yang TIDAK benar dan saya koreksi:** kalimat *"defisit throughput hilang
+sepenuhnya di ketiga seed"* **terlalu kuat**. Dengan pengukuran yang benar, PPO
+**tidak pernah menang** pada throughput — dua kali seri, satu kali kalah.
+
+**Rekapitulasi jujur seluruh 9 perbandingan (3 metrik × 3 seed):**
+PPO **menang 3, kalah 4, seri 2**. Itu bukan "lebih baik dari rule-based".
+
+### Temuan baru dari variasi antar-seed
+
+Seed 3000 punya lalu lintas jauh lebih sepi (throughput 1.566/jam vs 2.196;
+antrean 11,5 vs 35,1) — dan justru di situ PPO **paling buruk** (waktu tunggu
++24,77%). Pola ini konsisten dengan **Bug K**: lingkungan training 3–5× lebih
+macet daripada data nyata, sehingga model belajar untuk kondisi padat dan
+kurang bisa menangani kondisi lengang.
+
+Ini memperkuat urutan kerja di `audit-bug-ppo-sebelum-training-ke-5.md`:
+perbaiki Bug I (profil beku) dan H (cap injeksi) supaya distribusi kondisi
+training mendekati kenyataan, sebelum menilai PPO lagi.
+
+**Kesimpulan operasional tidak berubah: PPO tetap belum boleh diaktifkan.**
+Bedanya, sekarang alasannya sahih — bukan lagi karena artefak pengukuran.

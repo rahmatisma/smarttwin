@@ -176,13 +176,13 @@ Perbaikan Bug A/B/D **bertahan** (0/24 saturasi antrean & throughput, ketiga kom
 
 **Konsekuensinya besar: klaim "throughput PPO selalu kalah" TIDAK TERBUKTI.** Setelah dinormalkan per detik, defisitnya hilang di ketiga seed:
 
-| Seed | Throughput mentah | Throughput per detik |
+| Seed | Throughput mentah (lama) | Throughput/jam (setelah Bug F diperbaiki) |
 |---|---:|---:|
-| 1000 | −14,8% | **+1,0%** |
-| 2000 | −9,7% | **+0,0%** |
-| 3000 | −11,7% | **+2,2%** |
+| 1000 | −14,8% | **+0,80% (seri)** |
+| 2000 | −9,7% | **−3,63% (kalah)** |
+| 3000 | −11,7% | **−1,35% (seri)** |
 
-**Tapi ini BUKAN berarti PPO menang.** Ketiga metrik lalu lintas kena cacat yang sama — "kemenangan" PPO di antrean (−12,8%) dan tunggu (−6,4%) juga tidak sahih, karena keduanya kebetulan menguntungkan kebijakan bersiklus pendek. Yang benar: **satu-satunya metrik yang sudah dinormalkan (throughput) hasilnya SERI**, sisanya belum bisa dipakai.
+**⚠️ Diperbarui 30 Agustus setelah Bug F BENAR-BENAR diperbaiki dan diukur ulang:** klaim awal "defisit throughput hilang sepenuhnya" **terlalu optimis** — itu dari script diagnostik kasar. Dengan `evaluate_ppo.py` yang sudah diperbaiki (anggaran waktu setara, 3 episode/seed), rekapitulasi jujur 9 perbandingan (3 metrik × 3 seed): **PPO menang 3, kalah 4, seri 2**. PPO **tidak pernah menang** pada throughput. Verdict gerbang kualitas (`false`) sekarang **sahih**, bukan lagi artefak. Detail: `docs/hasil-evaluasi-ppo-v4-80k.md` bagian 11.
 
 **Juga terukur: training plateau sejak ~40k langkah.** Desil 5–9 reward: −0,241 / −0,232 / −0,209 / −0,227 / −0,208 — praktis datar. Separuh training terakhir tidak memberi perbaikan berarti. Ini pengulangan kedua dari Temuan A (v2). **Jangan tambah timestep lagi.**
 
@@ -452,7 +452,8 @@ SETIAP REKAM: backend → worker --once --full-cycle (smoke test)
 ### JANGAN dikatakan
 
 - ❌ **"PPO mengalahkan rule-based"** — belum ada perbandingan sahih yang mendukungnya. Gerbang kualitas otomatis menolaknya, **tapi verdict itu sendiri juga tidak sahih** (Bug F, 30 Agustus). Yang bisa dikatakan: satu-satunya metrik yang sudah dinormalkan per satuan waktu (throughput) hasilnya **seri**
-- ❌ **"PPO kalah pada throughput"** — ini juga **JANGAN dikatakan lagi** sejak 30 Agustus. Angka −15% itu artefak durasi simulasi tidak setara (Bug F); setelah dinormalkan per detik, selisihnya +1,0% / +0,0% / +2,2% di 3 seed. Lihat `hasil-evaluasi-ppo-v4-80k.md`
+- ❌ **"PPO kalah throughput 15%"** — angka itu melebih-lebihkan; sebagian artefak durasi simulasi tidak setara (Bug F). Setelah diperbaiki: −3,63% s/d +0,80% di 3 seed. Yang jujur: **PPO tidak pernah menang di throughput, tapi juga tidak kalah telak** — dua kali seri, sekali kalah tipis
+- ❌ **"PPO sebenarnya sudah setara, cuma salah ukur"** — sempat saya simpulkan begitu 30 Agustus pagi lalu **dikoreksi sendiri** siang itu setelah diukur ulang dengan benar di 3 seed: PPO menang 3, kalah 4, seri 2 dari 9 perbandingan
 - ❌ **"PPO sudah dipakai di sistem"** — default tetap rule-based; model sudah bisa dimuat (P-1a selesai) tapi belum diaktifkan sebagai default
 - ❌ "Realtime CCTV" — rekaman
 - ❌ **"Akurasi deteksi tinggi/95%"** — terukur 48,7% rata-rata (8 sampel), jangan digeneralisir dari sampel terbaik (#7, 96,1%) saja
