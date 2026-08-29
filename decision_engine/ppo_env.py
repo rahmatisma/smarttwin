@@ -386,8 +386,16 @@ class SmartTwinSumoEnv(gym.Env[np.ndarray, np.ndarray]):
         # sama seperti produksi -- tidak ada lengan yang bisa tidak kebagian
         # hijau, jadi penalti itu tidak punya kondisi pemicu yang sah lagi.
         reward = float(throughput_reward - queue_penalty - wait_penalty)
+        # window_seconds WAJIB ikut dilaporkan: panjang satu langkah keputusan
+        # ditentukan aksi agent sendiri (76-256 detik), jadi metrik apa pun yang
+        # menumpuk sepanjang langkah (throughput, waktu tunggu) TIDAK bisa
+        # dibandingkan antar-kebijakan tanpa tahu berapa detik yang dijalankan.
+        # Tanpa ini, evaluate_ppo.py sempat membandingkan PPO vs rule-based pada
+        # durasi simulasi berbeda (18-20%) dan menyimpulkan PPO kalah throughput
+        # 15% -- padahal per detik justru seri. Lihat Bug F di
+        # docs/audit-bug-ppo-sebelum-training-ke-5.md.
         metrics.update({"reward": reward, "throughput_interval": float(arrived), "queue_norm": queue_norm,
-                        "wait_norm": wait_norm,
+                        "wait_norm": wait_norm, "window_seconds": float(window_seconds),
                         "throughput_reward": throughput_reward, "queue_penalty": queue_penalty,
                         "wait_penalty": wait_penalty})
         return self._observation(), reward, False, self.step_count >= self.episode_steps, metrics

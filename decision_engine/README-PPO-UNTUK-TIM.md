@@ -372,11 +372,27 @@ python -m evaluate_ppo `
   --output models/evaluation.json
 ```
 
-Runner menjalankan PPO dan baseline pada jumlah episode serta seed awal yang
-sama. Ia melaporkan mean reward, mean queue, mean accumulated waiting, total
-throughput, delta, dan persentase perubahan setiap metrik. Bagian `comparison`
-baru meluluskan `quality_gate_passed=true` jika queue, waiting, dan throughput
-semuanya minimal sama baiknya dengan baseline. Untuk hasil lomba, ulangi minimal
+Runner menjalankan PPO dan baseline pada **anggaran waktu simulasi yang sama**
+(`--seconds-per-episode`, default 1.800 detik = 30 menit simulasi per episode),
+bukan jumlah langkah yang sama.
+
+> ⚠️ **Kenapa waktu, bukan langkah?** Satu langkah keputusan = satu rotasi penuh
+> yang panjangnya dipilih agent sendiri (76-256 detik). Versi lama berhenti
+> setelah 12 langkah, sehingga PPO dan rule-based bisa mensimulasikan jumlah
+> detik yang berbeda 18-20% -- lalu total throughput-nya dibandingkan seolah
+> setara. Itu bikin PPO terlihat kalah throughput ~15% padahal per detik justru
+> seri. Lihat Bug F di `docs/audit-bug-ppo-sebelum-training-ke-5.md`.
+
+Metrik lalu lintas dilaporkan sebagai **laju / rata-rata per kendaraan**, bukan
+total mentah: `throughput_veh_per_hour`, `mean_queue_veh`,
+`mean_wait_per_vehicle_s`. Blok `fairness` di keluaran JSON menunjukkan berapa
+detik simulasi yang benar-benar dijalankan tiap kebijakan plus `skew_percent` --
+**periksa nilai ini**; kalau >= 5% perbandingannya belum setara.
+
+Selisih di bawah `TIE_THRESHOLD_PERCENT` (2%) dicatat sebagai **seri**, bukan
+kemenangan, supaya gerbang kualitas tidak lolos karena noise. Bagian
+`comparison` meluluskan `quality_gate_passed=true` hanya jika queue, waiting,
+dan throughput **ketiganya menang di atas ambang** itu. Untuk hasil lomba, ulangi minimal
 seed 1000, 2000, dan 3000;
 simpan seluruh laporan, lalu laporkan mean/median dan variasinya.
 
