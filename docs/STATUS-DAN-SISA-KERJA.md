@@ -25,7 +25,7 @@ Dokumen lain di `docs/` sekarang cuma 2 jenis: **cara kerja** (rujukan teknis) d
 | 11 | Signal Timing Recommendation | 88% | Live. `/signal/status` belum baca cache skenario |
 | 12 | Dashboard | 92% | Build hijau, badge `source` + LOS ada |
 
-**Keseluruhan: ≈86% harfiah / ≈88% fungsional.**
+**Keseluruhan: ≈87% harfiah / ≈90% fungsional.**
 PPO (kotak 10) naik, tapi validasi akurasi CV (kotak 2, S-4) menurunkan angka lebih banyak — 48,7% terukur, bukan lagi asumsi 80%. Turun tipis dari ≈88%/≈90% sebelumnya meski dua pekerjaan besar (PPO, validasi CV) sama-sama selesai — itu tandanya audit ini mengukur bukti nyata, bukan menaikkan angka tiap kali ada progres.
 
 **Bukti eksekusi 29 Agustus:**

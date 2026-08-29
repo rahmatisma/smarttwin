@@ -18,6 +18,10 @@ Dirapikan **28 Agustus 2026**. Sebelumnya ada 20 dokumen yang saling bertentanga
 
 > ⚠️ **Jangan bikin dokumen status baru.** Kalau ada item selesai, pindahkan ke bagian "Sudah Selesai" di dokumen itu. Kebiasaan bikin dokumen status baru tiap audit itu yang bikin repo ini punya 20 file `.md` yang saling bertentangan.
 
+### **[`penjelasan-progres-per-modul.md`](penjelasan-progres-per-modul.md)** — bahan demo/presentasi
+
+Penjelasan tiap kotak diagram untuk **dijelaskan ke orang lain** (dosen pembimbing, juri): apa fungsinya, sudah sejauh mana, buktinya apa, batasannya apa — plus kalimat siap-pakai untuk pertanyaan sulit. **Bukan pelacak status** — angkanya bersumber dari `STATUS-DAN-SISA-KERJA.md` di atas; kalau berbeda, yang di atas yang benar.
+
 ---
 
 ## 🔵 CARA KERJA — rujukan teknis
@@ -38,7 +42,7 @@ Dirapikan **28 Agustus 2026**. Sebelumnya ada 20 dokumen yang saling bertentanga
 - [`database.md`](database.md) — skema database. ⚠️ Ini draft awal dan **sebagian sudah terbukti salah** (lihat banner di atas filenya). Kalau butuh skema pasti, cek langsung ke Supabase
 
 **Frontend:**
-- [`KONTRAK-DIGITAL-TWIN-SCENARIOS.md`](KONTRAK-DIGITAL-TWIN-SCENARIOS.md) — endpoint tiga kandidat, mapping nama skenario, state UI, dan cara menjalankan kandidat terpilih di SUMO
+- `KONTRAK-DIGITAL-TWIN-SCENARIOS.md` — ⚠️ **BELUM ADA.** Entri ini masuk lewat commit `40feb8c` (Yuli) tapi filenya tidak pernah dibuat — tidak ada di disk maupun riwayat git. Isinya direncanakan: endpoint tiga kandidat, mapping nama skenario, state UI, dan cara menjalankan kandidat terpilih di SUMO. Sementara belum ada, rujuk `kontrak-rekomendasi-scenario-generator.md` di bawah + kode `backend/app/api/routes/digital_twin.py`.
 - [`kontrak-rekomendasi-scenario-generator.md`](kontrak-rekomendasi-scenario-generator.md) — arti tiap nilai `recommendation.source` dan kapan boleh menampilkan badge/metrik SUMO
 - [`audit-kontrak-scenario-result.md`](audit-kontrak-scenario-result.md) — pemetaan field kontrak vs payload runtime
 
