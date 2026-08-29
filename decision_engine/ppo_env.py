@@ -60,16 +60,21 @@ THROUGHPUT_REWARD_WEIGHT = 0.45
 QUEUE_REWARD_WEIGHT = 0.35
 WAIT_REWARD_WEIGHT = 0.20
 
-# Ambang saturasi throughput. Investigasi 29 Agustus (lihat
-# docs/STATUS-DAN-SISA-KERJA.md item P-1 Temuan C) menemukan nilai lama 15,0
-# membuat reward BUTA terhadap throughput: kedatangan nyata 18-26 kendaraan
-# per langkah keputusan, sehingga PPO saturasi di 81% langkah dan baseline
-# 97% -- selisih throughput_reward cuma 0,0258 dari maksimum 0,45. Akibatnya
-# menaikkan throughput di atas ambang tidak memberi reward tambahan sama
-# sekali, sementara antrean/tunggu masih terus memberi gradien. Ambang 30,0
-# berada di atas maksimum yang teramati (26) supaya perbedaan 18 vs 20
-# kendaraan benar-benar terbaca oleh reward.
-THROUGHPUT_SATURATION_VEH = 30.0
+# Ambang saturasi. KEDUANYA ditetapkan dari PENGUKURAN, bukan tebakan --
+# lihat docs/STATUS-DAN-SISA-KERJA.md item P-1.
+#
+# Riwayat: nilai throughput lama 15,0 membuat reward buta (saturasi 81-97%
+# langkah). Dinaikkan ke 30,0 -- tapi itu diukur saat jendela keputusan masih
+# 30 detik. Setelah Bug A diperbaiki (jendela = satu rotasi penuh, ~76-256
+# detik), kedatangan per langkah melonjak ke 96-170 (rata-rata 154), sehingga
+# ambang 30 saturasi 10/10 langkah. Diukur ulang 29 Agustus dengan simulasi
+# yang sudah benar:
+#   antrean : min 34, maks 75, rata-rata 50  -> ambang 40 saturasi 7/10
+#   arrived : min 96, maks 170, rata-rata 154 -> ambang 30 saturasi 10/10
+# Ambang di bawah diberi kepala ruang di atas maksimum teramati supaya reward
+# tetap punya gradien saat kondisi memburuk melebihi yang pernah terlihat.
+THROUGHPUT_SATURATION_VEH = 200.0
+QUEUE_SATURATION_VEH = 100.0
 
 
 def _floor_five_seconds(timestamp: str) -> str:
@@ -156,7 +161,14 @@ class SmartTwinSumoEnv(gym.Env[np.ndarray, np.ndarray]):
             self.profiles = load_demand_profiles(data_path, density_data_path)
         self.config_path = Path(config_path).resolve()
         self.sumo_binary = resolve_sumo_binary(sumo_binary)
-        self.episode_steps, self.decision_seconds = int(episode_steps), int(decision_seconds)
+        self.episode_steps = int(episode_steps)
+        # PERHATIAN: decision_seconds SUDAH TIDAK MENENTUKAN APA-APA sejak
+        # Bug A diperbaiki 29 Agustus. Panjang jendela keputusan kini dihitung
+        # dari durasi rotasi yang dipilih (_cycle_seconds()), bukan angka
+        # tetap. Parameter dipertahankan agar --decision-seconds di
+        # train_ppo.py tidak error dan metadata training lama tetap terbaca,
+        # tapi mengubahnya TIDAK berpengaruh pada simulasi.
+        self.decision_seconds = int(decision_seconds)
         self.observation_space = spaces.Box(0.0, 1.0, shape=(25,), dtype=np.float32)
         # Empat durasi hijau saja (utara, timur, selatan, barat). Urutan rotasi
         # bukan keputusan PPO -- lihat _set_action().
@@ -171,6 +183,7 @@ class SmartTwinSumoEnv(gym.Env[np.ndarray, np.ndarray]):
         self.current_green = 30
         self.current_greens: dict[str, int] = {a: 30 for a in FIXED_CYCLE_ORDER}
         self.recent_crossings = {a: 0 for a in FIXED_CYCLE_ORDER}
+        self._arrived_total = 0
 
     def reset(self, *, seed: int | None = None, options: dict[str, Any] | None = None):
         super().reset(seed=seed)
@@ -187,14 +200,16 @@ class SmartTwinSumoEnv(gym.Env[np.ndarray, np.ndarray]):
         self.current_phase, self.current_green = FIXED_CYCLE_ORDER[0], 30
         self.current_greens = {a: 30 for a in FIXED_CYCLE_ORDER}
         self.recent_crossings = {a: 0 for a in FIXED_CYCLE_ORDER}
+        self._arrived_total = 0
         for _ in range(20):
             self._inject_one_second()
             self.connection.simulationStep()
-        # Observation awal mewakili window flow 5 detik, bukan seluruh warm-up.
-        self.recent_crossings = {
-            approach: max(0, round(self.profile[approach] * FEATURE_WINDOW_SECONDS / 60.0))
-            for approach in FIXED_CYCLE_ORDER
-        }
+        # Observasi awal memakai crossing SUNGGUHAN, bukan taksiran dari
+        # profil permintaan (dulu: profile * 5/60). Taksiran itu semantik lama
+        # "volume = permintaan" yang sudah diperbaiki -- memakainya di sini
+        # akan membuat observasi pertama tiap episode bersatuan berbeda dari
+        # observasi selanjutnya.
+        self.recent_crossings = self._hitung_crossing(FEATURE_WINDOW_SECONDS)
         return self._observation(), self._metrics()
 
     def _add_vehicle_types(self) -> None:
@@ -213,7 +228,9 @@ class SmartTwinSumoEnv(gym.Env[np.ndarray, np.ndarray]):
             try:
                 self.connection.route.add(route_id, [EDGE_HULU[approach], EDGE_MASUK[approach], EDGE_KELUAR[destination]])
                 self.connection.vehicle.add(vehicle_id, route_id, typeID="smart_car", depart="now")
-                self.recent_crossings[approach] += 1
+                # recent_crossings TIDAK dinaikkan di sini -- lihat
+                # _tally_crossings(). Memunculkan kendaraan itu PERMINTAAN,
+                # bukan aliran yang terlayani.
             except Exception:
                 pass
 
@@ -243,38 +260,115 @@ class SmartTwinSumoEnv(gym.Env[np.ndarray, np.ndarray]):
         self.connection.trafficlight.setPhase(tls_id, 0)
         self.current_greens = greens
 
-    def _sync_active_phase(self) -> None:
-        """Selaraskan current_phase dengan fase yang BENAR-BENAR aktif di SUMO.
+    def _cycle_seconds(self) -> int:
+        """Durasi satu rotasi penuh: 4 hijau yang dipilih + 4 kuning."""
+        return sum(self.current_greens.values()) + YELLOW_SECONDS * len(FIXED_CYCLE_ORDER)
 
-        Dulu current_phase diisi dari action[0] (fase yang dipilih PPO).
-        Sekarang rotasi berjalan sendiri, jadi fase aktif harus dibaca dari
-        simulasi -- ini juga lebih cocok dengan inference, karena di produksi
-        SignalService meneruskan fase yang sedang hijau sungguhan.
-        Program kita berpola [hijau, kuning] x 4, jadi index // 2 memetakan
-        balik ke lengan di FIXED_CYCLE_ORDER.
+    def _vehicles_on_entry(self) -> dict[str, set]:
+        """Kendaraan yang sedang berada di ruas masuk tiap lengan."""
+        return {
+            approach: set(self.connection.edge.getLastStepVehicleIDs(EDGE_MASUK[approach]))
+            for approach in FIXED_CYCLE_ORDER
+        }
+
+    def _hitung_crossing(self, jendela_detik: int) -> dict[str, int]:
+        """Jalankan simulasi `jendela_detik` sambil mencacah kendaraan yang
+        BENAR-BENAR melewati garis henti tiap lengan.
+
+        BUG D (diperbaiki 29 Agustus): dulu `recent_crossings` dinaikkan di
+        _inject_one_second(), yaitu saat kendaraan DIMUNCULKAN di ruas hulu --
+        itu ukuran PERMINTAAN (datang dari jauh), bukan ALIRAN TERLAYANI, dan
+        nilainya sama saja lampu merah atau hijau.
+
+        Produksi mengisi `volume` dari `crossing_simpang.csv`, yaitu kendaraan
+        yang memotong garis hitung -- bernilai 0 kalau lampunya merah.
+        Ketidakcocokan ini berbahaya: saat inference, lengan ber-lampu merah
+        terbaca volume=0, dan model yang dilatih dengan semantik "volume =
+        permintaan" akan menyimpulkan lengan itu sepi lalu terus membiarkannya
+        merah.
+
+        Kendaraan yang HILANG dari ruas masuk berarti sudah masuk simpang
+        (melintasi garis henti) -- ruas masuk bukan tujuan akhir siapa pun,
+        jadi satu-satunya cara keluar dari situ adalah melintas.
         """
-        try:
-            tls_id = self.connection.trafficlight.getIDList()[0]
-            index = int(self.connection.trafficlight.getPhase(tls_id))
-        except Exception:
-            return
-        approach = FIXED_CYCLE_ORDER[(index // 2) % len(FIXED_CYCLE_ORDER)]
-        self.current_phase = approach
-        self.current_green = self.current_greens.get(approach, self.current_green)
+        crossings = {a: 0 for a in FIXED_CYCLE_ORDER}
+        sebelumnya = self._vehicles_on_entry()
+        for _ in range(jendela_detik):
+            self._inject_one_second()
+            self.connection.simulationStep()
+            self._arrived_total += int(self.connection.simulation.getArrivedNumber())
+            sekarang = self._vehicles_on_entry()
+            for approach in FIXED_CYCLE_ORDER:
+                crossings[approach] += len(sebelumnya[approach] - sekarang[approach])
+            sebelumnya = sekarang
+        return crossings
+
+    def _sync_active_phase(self) -> None:
+        """Tetapkan current_phase = fase yang akan MEMULAI siklus berikutnya.
+
+        Satu langkah keputusan sekarang mencakup SATU ROTASI PENUH (Bug A),
+        dan _set_action() selalu memasang program mulai dari fase 0. Jadi pada
+        saat keputusan berikutnya diambil, fase yang akan berjalan adalah
+        FIXED_CYCLE_ORDER[0].
+
+        Versi sebelumnya membaca getPhase() dari SUMO di AKHIR langkah, dan
+        karena akhir langkah selalu jatuh di penghujung rotasi, hasilnya
+        SELALU "west" -- terukur 10/10 langkah, membuat fitur one-hot fase
+        praktis konstan dan tidak memberi informasi.
+
+        KETERBATASAN YANG DIKETAHUI (bukan bug, tapi jangan dilupakan): di
+        produksi, SignalService memanggil engine pada SETIAP transisi fase,
+        sehingga currentPhase yang dilihat inference bisa keempat-empatnya --
+        sementara training selalu melihat FIXED_CYCLE_ORDER[0]. Fitur one-hot
+        fase karena itu praktis konstan saat training, jadi bobotnya akan
+        mengecil sendiri dan variasinya saat inference berdampak kecil. Kalau
+        nanti mau benar-benar setara, satu langkah training harus dipersempit
+        jadi satu FASE (bukan satu rotasi) -- perubahan desain yang lebih
+        besar dan belum dikerjakan.
+        """
+        self.current_phase = FIXED_CYCLE_ORDER[0]
+        self.current_green = self.current_greens.get(
+            self.current_phase, self.current_green
+        )
 
     def step(self, action: np.ndarray):
         self._set_action(action)
-        arrived = 0
-        for second in range(self.decision_seconds):
-            if second == self.decision_seconds - FEATURE_WINDOW_SECONDS:
-                self.recent_crossings = {a: 0 for a in FIXED_CYCLE_ORDER}
-            self._inject_one_second()
-            self.connection.simulationStep()
-            arrived += int(self.connection.simulation.getArrivedNumber())
+
+        # BUG A (diperbaiki 29 Agustus): dulu jendela keputusan SELALU
+        # decision_seconds (30 detik) padahal satu rotasi penuh 4 lengan bisa
+        # 76-256 detik (hijau 15-60 per lengan + 4 detik kuning x 4). Akibatnya
+        # _set_action() memaksa setPhase(0) lagi SEBELUM rotasi sempat sampai
+        # timur/selatan/barat -- diukur langsung: 8 dari 8 langkah HANYA utara
+        # yang pernah hijau, dan onehot.south/onehot.west SELALU 0 di seluruh
+        # observasi. Antrean lengan lain menumpuk tanpa pernah dilayani.
+        #
+        # Sekarang jendela = durasi rotasi yang BENAR-BENAR dipilih, jadi satu
+        # langkah keputusan = satu siklus penuh. Ini juga yang dilakukan
+        # produksi: sumo_controller memasang program lalu membiarkannya jalan,
+        # bukan menimpanya di tengah siklus.
+        window_seconds = self._cycle_seconds()
+
+        # Crossing diakumulasi SEPANJANG rotasi, lalu diskalakan ke laju
+        # per-5-detik supaya satuannya sama dengan produksi.
+        #
+        # Versi pertama perbaikan Bug D cuma mengukur 5 detik TERAKHIR rotasi.
+        # Terukur cacat: pada detik-detik itu hanya lengan terakhir (barat)
+        # yang hijau, sehingga utara/timur/selatan SELALU bernilai 0 -- bias
+        # sistematis, bukan cerminan lalu lintas. Mengukur sepanjang rotasi
+        # membuat tiap lengan terwakili sesuai jatah hijaunya masing-masing.
+        arrived_sebelum = self._arrived_total
+        crossings = self._hitung_crossing(window_seconds)
+        arrived = self._arrived_total - arrived_sebelum
+
+        skala = FEATURE_WINDOW_SECONDS / max(1, window_seconds)
+        self.recent_crossings = {
+            approach: int(round(crossings[approach] * skala))
+            for approach in FIXED_CYCLE_ORDER
+        }
         self.step_count += 1
         self._sync_active_phase()
         metrics = self._metrics()
-        queue_norm = min(1.0, metrics["queue"] / 40.0)
+        queue_norm = min(1.0, metrics["queue"] / QUEUE_SATURATION_VEH)
         wait_norm = min(1.0, metrics["waiting"] / max(1.0, metrics["vehicles"] * 120.0))
         throughput_norm = min(1.0, arrived / THROUGHPUT_SATURATION_VEH)
         throughput_reward = THROUGHPUT_REWARD_WEIGHT * throughput_norm
