@@ -24,17 +24,6 @@ const SIGNAL_COLOR = {
   green: "#2ecc71",
 } as const;
 
-// Kalibrasi khusus SUMO live dari observasi durasi merah CCTV:
-// Selatan 177 dtk, Barat 180 dtk, Timur 163 dtk. Dengan kuning 4 dtk
-// dan siklus 227 dtk diperoleh hijau U/T/S/B = 62/60/46/43 dtk.
-// Nilai ini sengaja TIDAK dipakai oleh card rekomendasi/status sinyal.
-const LIVE_SUMO_PHASES = [
-  { approach: "north", greenSeconds: 62, yellowSeconds: 4 },
-  { approach: "east", greenSeconds: 60, yellowSeconds: 4 },
-  { approach: "south", greenSeconds: 46, yellowSeconds: 4 },
-  { approach: "west", greenSeconds: 43, yellowSeconds: 4 },
-] as const;
-
 /*
  * =========================================================
  * QUEUE DOT
@@ -290,7 +279,6 @@ export default function DigitalTwinPanel({
   const [vehiclesCount, setVehiclesCount] = useState(0);
   const [detectedVehicles, setDetectedVehicles] = useState(0);
   const [liveSignal, setLiveSignal] = useState<LiveSumoSignal | null>(null);
-  const [frameVersion, setFrameVersion] = useState(0);
 
   const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
 
@@ -315,65 +303,19 @@ export default function DigitalTwinPanel({
     return () => clearInterval(interval);
   }, [API_BASE_URL]);
 
-  useEffect(() => {
-    if (!simRunning) return;
-    const interval = window.setInterval(
-      () => setFrameVersion((version) => version + 1),
-      500
-    );
-    return () => window.clearInterval(interval);
-  }, [simRunning]);
-
-  const livePayloadSignature = JSON.stringify({
-    trafficTimestamp,
-    approaches: approaches.map((approach) => ({
-      approach: approach.approach,
-      targetVehicleCount: Math.max(0, Math.round(approach.densityIndex)),
-      motorcycleCount: approach.motorcycleCount,
-      carCount: approach.carCount,
-      busCount: approach.busCount,
-      truckCount: approach.truckCount,
-    })),
-    cyclePlan,
-    candidateId,
-  });
-  const canStartSimulation = approaches.length === 4 && Boolean(cyclePlan?.phases?.length);
-
-  useEffect(() => {
-    if (!canStartSimulation) return;
-
-    const payload = JSON.parse(livePayloadSignature);
-    let cancelled = false;
-    void fetch(`${API_BASE_URL}/api/v1/simulation/run`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        intersectionId: "simpang4-pingit",
-        durationSeconds: 86400,
-        gui: true,
-        guiDelayMs: 0,
-        seed: 42,
-        trafficTimestamp: payload.trafficTimestamp,
-        approaches: payload.approaches,
-        cyclePlan: {
-          phases: LIVE_SUMO_PHASES,
-          candidateId: "observed-cctv-live",
-          source: "observed-cctv",
-          totalCycleSeconds: 227,
-        },
-      }),
-    })
-      .then((response) => {
-        if (!cancelled && response.ok) setSimRunning(true);
-      })
-      .catch(() => {
-        // Polling state menampilkan denah fallback jika backend/SUMO mati.
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [API_BASE_URL, canStartSimulation, livePayloadSignature]);
+  // SENGAJA TIDAK auto-start simulasi dari sini lagi (30 Agustus 2026).
+  // Backend cuma punya 1 slot simulasi aktif (SimulationService singleton),
+  // jadi begitu dashboard ini auto-panggil /api/v1/simulation/run, halaman
+  // /digitaltwin ikut "mewarisi" simulasi yang sama tanpa user pernah
+  // pencet Start di sana -- dropdown skenario di /digitaltwin jadi
+  // kelihatan sudah "Running" padahal user belum ngapa-ngapain.
+  //
+  // Sekarang panel ini PASIF: cuma polling /api/v1/simulation/state
+  // (useEffect di atas) dan nampilin apa pun yang lagi jalan. Kalau tidak
+  // ada simulasi jalan, simRunning tetap false dan fallback SVG statis di
+  // bawah yang tampil. Begitu user di /digitaltwin pilih "Traffic Realtime"
+  // dan klik Start, simulasi yang SAMA (backend shared) otomatis kelihatan
+  // di sini juga -- tanpa panel ini perlu menyalakan apa pun sendiri.
   /*
    * Mapping approach berdasarkan arah.
    */
@@ -482,8 +424,12 @@ export default function DigitalTwinPanel({
       <div className="relative aspect-[16/11] w-full overflow-hidden rounded-md bg-[var(--color-canvas)]">
         {simRunning ? (
           <>
+            {/* MJPEG asli (10fps, push dari server), bukan polling
+                screenshot statis tiap 500ms -- src sengaja stabil, jangan
+                ditambah query param yang berubah-ubah, itu bakal
+                mutus-nyambungin koneksi stream-nya berulang. */}
             <img
-              src={`${API_BASE_URL}/api/v1/simulation/frame?v=${frameVersion}`}
+              src={`${API_BASE_URL}/api/v1/simulation/stream`}
               alt="Live SUMO Simpang Pingit"
               className="absolute inset-0 h-full w-full object-cover object-center"
             />
