@@ -37,6 +37,12 @@ import type {
 
 import { useScenario } from "@/context/ScenarioContext";
 
+// Database produksi saat ini hanya memiliki satu simpang nyata. Jangan tahan
+// initial render untuk tiga ID konfigurasi kamera lama yang tidak punya data.
+const DASHBOARD_INTERSECTIONS = ALL_INTERSECTIONS.filter(
+  (intersection) => intersection.databaseId === DEFAULT_INTERSECTION_ID
+);
+
 async function fetchOptional<T>(label: string, request: Promise<T>): Promise<T | null> {
   try {
     return await request;
@@ -386,7 +392,7 @@ export default function DashboardPage() {
         setError(null);
 
         const results = await Promise.all(
-          ALL_INTERSECTIONS.map(async (inter) => {
+          DASHBOARD_INTERSECTIONS.map(async (inter) => {
             try {
                 const hasLiveBackend =
                   inter.databaseId === DEFAULT_INTERSECTION_ID;
@@ -394,7 +400,6 @@ export default function DashboardPage() {
                   trafficState,
                   signalStatus,
                   recommendation,
-                  forecast,
                   coords,
                 ] = await Promise.all([
                   fetchOptional(
@@ -412,9 +417,6 @@ export default function DashboardPage() {
                         return candidate ? candidateToRecommendation(candidate, data?.updatedAt ?? null) : null;
                       })))
                     : null,
-                  hasLiveBackend
-                    ? fetchOptional(`Forecast ${inter.name}`, fetchForecast(inter.databaseId))
-                    : null,
                   fetchOptional(`Koordinat ${inter.name}`, fetchIntersectionCoords(inter.databaseId)),
                 ]);
                 return {
@@ -422,7 +424,7 @@ export default function DashboardPage() {
                   trafficState,
                   signalStatus,
                   recommendation,
-                  forecast,
+                  forecast: null,
                   coords,
                 };
             } catch (err) {
@@ -459,6 +461,21 @@ export default function DashboardPage() {
         setAllForecasts(newForecasts);
         setAllCoords(newCoords);
 
+        // Forecast bukan syarat untuk menampilkan dashboard utama. Inferensi
+        // LSTM dimuat setelah traffic/sinyal/rekomendasi tampil agar request
+        // forecast yang lambat tidak menahan seluruh halaman di skeleton.
+        void fetchOptional(
+          "Forecast Simpang Pingit",
+          fetchForecast(DEFAULT_INTERSECTION_ID)
+        ).then((forecast) => {
+          if (forecast) {
+            setAllForecasts((previous) => ({
+              ...previous,
+              intersection4: forecast,
+            }));
+          }
+        });
+
       } catch (err) {
 
         console.error(
@@ -492,7 +509,7 @@ export default function DashboardPage() {
       
       try {
         const results = await Promise.all(
-          ALL_INTERSECTIONS.map(async (inter) => {
+          DASHBOARD_INTERSECTIONS.map(async (inter) => {
             try {
               const hasLiveBackend =
                 inter.databaseId === DEFAULT_INTERSECTION_ID;

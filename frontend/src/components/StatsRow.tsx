@@ -1,6 +1,5 @@
 import {
   Car,
-  Gauge,
   Milestone,
   PieChart,
   CloudSun,
@@ -175,8 +174,6 @@ function StatCard({
  * queueLengthVeh
  * queueLengthMEst
  * densityIndex
- * avgSpeedKmh
- *
  * Tidak menggunakan mock data.
  * Tidak membutuhkan occupancyPct dari page.tsx.
  */
@@ -215,31 +212,6 @@ export default function StatsRow({
       0
     )
   );
-
-  /*
-   * =========================================================
-   * AVERAGE SPEED
-   * =========================================================
-   *
-   * avgSpeedKmh boleh null berdasarkan contract.
-   *
-   * Karena itu hanya nilai speed yang tersedia
-   * yang ikut dihitung.
-   */
-
-  const speedValues = approaches
-    .map((approach) => approach.avgSpeedKmh)
-    .filter(
-      (speed): speed is number => speed !== null
-    );
-
-  const avgSpeed =
-    speedValues.length > 0
-      ? speedValues.reduce(
-        (sum, speed) => sum + speed,
-        0
-      ) / speedValues.length
-      : null;
 
   /*
    * =========================================================
@@ -316,7 +288,7 @@ export default function StatsRow({
   ) : 0;
 
   return (
-    <div className="grid grid-cols-2 gap-3 px-6 py-4 md:grid-cols-3 xl:grid-cols-6">
+    <div className="grid grid-cols-2 gap-3 px-6 py-4 md:grid-cols-3 xl:grid-cols-5">
 
       {/* =====================================================
           TOTAL VEHICLES
@@ -326,25 +298,6 @@ export default function StatsRow({
         icon={<Car className="h-4 w-4" />}
         label="Total Kendaraan"
         value={hasData ? totalVolume.toLocaleString("id-ID") : "No data"}
-      />
-
-      {/* =====================================================
-          AVERAGE SPEED
-          ===================================================== */}
-
-      <StatCard
-        icon={<Gauge className="h-4 w-4" />}
-        label="Kecepatan Rata-rata"
-        value={
-          !hasData || avgSpeed === null
-            ? "N/A"
-            : avgSpeed.toFixed(0)
-        }
-        unit={
-          !hasData || avgSpeed === null
-            ? undefined
-            : "km/jam"
-        }
       />
 
       {/* =====================================================

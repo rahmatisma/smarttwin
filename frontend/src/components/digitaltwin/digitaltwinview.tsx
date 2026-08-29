@@ -7,7 +7,6 @@ import {
     RotateCcw,
     Zap,
     Car,
-    Gauge,
     List,
     Clock3,
     Activity,
@@ -640,13 +639,6 @@ export default function DigitalTwinView() {
                             />
 
                             <StatCard
-                                label="Average Speed"
-                                value="-"
-                                change="Data belum tersedia"
-                                icon={<Gauge size={18} />}
-                            />
-
-                            <StatCard
                                 label="Queue Length"
                                 value="-"
                                 change="Data belum tersedia"
@@ -936,4 +928,4 @@ function SignalRow({
         </div>
     );
 }
-
+

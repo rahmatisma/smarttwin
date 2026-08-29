@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { usePathname } from "next/navigation";
 
 const STORAGE_KEY = "smarttwin.appearance.settings";
 const LANGUAGE_EVENT = "smarttwin-language-updated";
@@ -460,6 +461,7 @@ export default function LanguageProvider({
     children: React.ReactNode;
 }) {
     const [language, setLanguage] = useState<Language>("id");
+    const pathname = usePathname();
 
     useEffect(() => {
         const updateAppearance = () => {
@@ -484,13 +486,11 @@ export default function LanguageProvider({
         document.documentElement.lang = language;
         translateDocument(language);
 
-        const observer = new MutationObserver(() => {
-            translateDocument(language);
-        });
-        observer.observe(document.body, { childList: true, subtree: true });
-
-        return () => observer.disconnect();
-    }, [language]);
+        // Jangan menerjemahkan setiap mutasi DOM. Pada navigasi App Router,
+        // MutationObserver dapat mengubah markup halaman baru ketika React
+        // masih melakukan hydration dan memicu text mismatch. Effect ini baru
+        // berjalan setelah commit untuk bahasa atau rute yang aktif.
+    }, [language, pathname]);
 
     return children;
 }
