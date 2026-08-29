@@ -190,6 +190,25 @@ Perbaikan Bug A/B/D **bertahan** (0/24 saturasi antrean & throughput, ketiga kom
 
 ---
 
+#### 🔬 AUDIT MENYELURUH SEBELUM TRAINING KE-5 (30 Agustus, Rahmat)
+
+Diminta eksplisit supaya training ke-5 tidak jadi yang kelima yang terbuang. **Laporan lengkap: `docs/audit-bug-ppo-sebelum-training-ke-5.md`.** Total **6 bug baru terukur** (E–L), plus 2 hipotesis yang diuji dan ternyata BUKAN masalah (teleport SUMO, injeksi gagal).
+
+| Bug | Inti masalah | Wajib sebelum training? |
+|---|---|---|
+| **E** | Reward throughput tidak dinormalkan waktu (korelasi durasi↔reward +0,978) | ✅ YA |
+| **F** | Evaluasi bandingkan durasi simulasi tidak setara | ✅ YA — **kerjakan paling dulu**, tidak perlu training |
+| **G** | Skala `volume` 14× kebesaran di PPO **dan** rule-based; 94,2% nilai produksi <0,1. Akibatnya **hasil pengukuran CV praktis tidak memengaruhi keputusan hijau** | ✅ YA |
+| **H** | Cap injeksi 48 kend/menit memotong 9,9% permintaan; puncak nyata 108 kend/menit | ✅ YA |
+| **I** | Profil permintaan dibekukan sepanjang episode — sampel 5 detik direntangkan jadi 15–50 menit simulasi | ✅ YA |
+| **J** | 4 dari 25 fitur observasi (one-hot fase) konstan — 16% masukan tanpa informasi | 🟡 Sebaiknya |
+| **K** | Lingkungan training ±3–5× lebih macet dari data nyata (antrean 13–14 vs 2,7) | 🟡 Mungkin ikut beres kalau I dibetulkan |
+| **L** | Nama checkpoint di-hardcode, bentrok antar-run | 🟡 Kebersihan |
+
+⚠️ **Bug G menyentuh produksi, bukan cuma PPO** — `REFERENCE_VOLUME` dipakai `RuleBasedEngine` yang sekarang jalan di demo. Uji regresi dulu, jangan diubah mendadak menjelang rekaman.
+
+---
+
 #### 🔬 HASIL TRAINING 200k + INVESTIGASI AKAR MASALAH (29 Agustus, Rahmat)
 
 **Keputusan operasional: PPO TIDAK diaktifkan. Sistem tetap memakai rule-based / Scenario Generator.** Alasannya di bawah — bukan karena PPO gagal belajar, tapi karena evaluasinya belum bisa dipercaya sebagai bukti.
