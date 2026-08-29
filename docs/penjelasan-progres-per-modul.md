@@ -8,6 +8,67 @@ Tiap modul di bawah punya pola sama: **apa fungsinya → sudah sejauh mana → b
 
 ---
 
+## 🖥️ PERSIAPAN SEBELUM DEMO — baca ini dulu
+
+### ⚠️ Aplikasi WAJIB login — siapkan akun sebelum demo
+
+Membuka `localhost:3000` akan **langsung dialihkan ke `/login`**. Semua halaman dilindungi (`frontend/src/proxy.ts`). Kalau tidak bisa masuk, demo tidak bisa dimulai sama sekali.
+
+Akun yang terdaftar di Supabase per 29 Agustus:
+
+| Akun | Terkonfirmasi |
+|---|---|
+| `yuli@gmail.com` | ✅ |
+| `admin1@gmail.com` | ✅ |
+| `admin@gmail.com` | ✅ |
+| `rahmat@gmail.com` | ❌ **belum dikonfirmasi** |
+
+**Uji login minimal 1 jam sebelum demo**, jangan pas di depan dosen. Kalau akun Rahmat tidak bisa masuk karena belum terkonfirmasi, pakai salah satu yang sudah ✅, atau konfirmasi dulu lewat dashboard Supabase (Authentication → Users → konfirmasi manual).
+
+### Yang harus dinyalakan
+
+```
+1. Backend    : cd backend && uvicorn app.main:app --reload
+2. Frontend   : cd frontend && npm run dev
+3. (opsional) Scenario Worker : cd simulation && python scenario_worker.py --full-cycle
+```
+
+**Soal Scenario Worker (langkah 3):** ini yang membuat badge berubah jadi **"Diuji simulasi SUMO"** (kotak 7/8/9 masuk alur). Tanpa itu, sistem tetap jalan penuh tapi badge-nya **"Estimasi langsung"** — keputusan dari rule-based + forecast saja.
+
+> Kalau sedang ada training PPO berjalan, worker akan berebut CPU dengannya. Untuk demo ke dosen pembimbing, tidak apa-apa demo tanpa worker — cukup jelaskan bahwa Scenario Generator dijalankan sebagai proses terpisah. Jangan korbankan training.
+
+### Peta modul → tampilan di layar
+
+Ini jawaban singkat "modul ini kelihatan di mana":
+
+| Kotak | Ada tampilannya? | Di mana | Yang ditunjuk |
+|---|---|---|---|
+| 1. Sumber video | ✅ | Panel CCTV di dashboard, atau halaman `/cctv` | Video 4 kamera berjalan |
+| 2. YOLO + ByteTrack | ✅ | Panel CCTV (video anotasi) | Kotak deteksi mengikuti kendaraan |
+| 3. Traffic State Builder | ✅ | `StatsRow` di atas dashboard | Angka volume/antrean/kepadatan per lengan |
+| 4. Virtual Intersection | ✅ | Panel Digital Twin, atau halaman `/digitaltwin` | Peta SUMO Simpang Pingit + kendaraan bergerak |
+| 5. Realtime Traffic State | ✅ | `StatsRow` (angkanya berubah sendiri) | Nilai berubah tiap 5 detik |
+| 6. Forecast LSTM | ✅ | **`ForecastChart`** di dashboard | Grafik prediksi 60 detik ke depan |
+| 7. Scenario Generator | ⚠️ tidak langsung | Badge di panel Rekomendasi | "Diuji simulasi SUMO" + `candidateId` |
+| 8. Traffic Simulation | ⚠️ tidak langsung | Badge yang sama | Bukti kandidat lewat SUMO |
+| 9. Performance Analysis | ✅ | Panel Rekomendasi | Badge **LOS** + angka delay |
+| 10. Decision Engine | ⚠️ tidak langsung | Field `source` di panel | `rule-based+forecast` / `scenario-generator` |
+| 11. Signal Recommendation | ✅ | `SharedSignalPanels` | Lampu berputar + hitung mundur + durasi 4 lengan |
+| 12. Dashboard | ✅ | Seluruh halaman | — |
+
+**Kotak 7, 8, 10 tidak punya tampilan sendiri** — itu proses di belakang layar. Cara menunjukkannya: lewat **badge sumber keputusan** di panel Rekomendasi. Kalau dosen ingin bukti lebih dalam, tunjukkan terminal `scenario_worker.py` yang mencetak ketiga kandidat beserta delay/antrean/LOS masing-masing — itu bukti paling meyakinkan bahwa simulasi benar-benar berjalan.
+
+### Kalau dosen minta bukti yang bukan tampilan
+
+| Permintaan | Tunjukkan |
+|---|---|
+| "Ada testingnya?" | `cd backend && pytest -q` → 86 passed |
+| "Datanya asli?" | `cv/output/crossing_simpang.csv` (2.152 baris), rentang 16:30–17:19 |
+| "Simulasinya jalan?" | Terminal worker mencetak 3 kandidat + LOS |
+| "Forecastnya terbukti?" | [`hasil-studi-forecast-multi-snapshot.md`](hasil-studi-forecast-multi-snapshot.md) — 10/10 delay membaik |
+
+---
+
 ## Kotak 1 — Traffic Monitoring Data (Sumber Video) — 100%
 
 **Fungsinya:** menyediakan rekaman lalu lintas sebagai masukan sistem.
