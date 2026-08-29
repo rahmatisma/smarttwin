@@ -1,0 +1,57 @@
+{
+  "episodes": 10,
+  "seed_start": 1000,
+  "ppo": {
+    "mean_reward": 0.11277182406548354,
+    "mean_queue_veh": 27.533333333333335,
+    "mean_accumulated_wait_s": 1233.6083333333333,
+    "total_throughput_veh": 2184.0
+  },
+  "rule_based": {
+    "mean_reward": -0.20868165931352498,
+    "mean_queue_veh": 60.45,
+    "mean_accumulated_wait_s": 4045.375,
+    "total_throughput_veh": 2341.0
+  },
+  "comparison": {
+    "metrics": {
+      "mean_reward": {
+        "ppo": 0.11277182406548354,
+        "rule_based": -0.20868165931352498,
+        "direction": "higher",
+        "delta": 0.32145348337900853,
+        "delta_percent": null,
+        "ppo_better_or_equal": true
+      },
+      "mean_queue_veh": {
+        "ppo": 27.533333333333335,
+        "rule_based": 60.45,
+        "direction": "lower",
+        "delta": -32.91666666666667,
+        "delta_percent": -54.452715743038326,
+        "ppo_better_or_equal": true
+      },
+      "mean_accumulated_wait_s": {
+        "ppo": 1233.6083333333333,
+        "rule_based": 4045.375,
+        "direction": "lower",
+        "delta": -2811.7666666666664,
+        "delta_percent": -69.50571125462204,
+        "ppo_better_or_equal": true
+      },
+      "total_throughput_veh": {
+        "ppo": 2184.0,
+        "rule_based": 2341.0,
+        "direction": "higher",
+        "delta": -157.0,
+        "delta_percent": -6.706535668517727,
+        "ppo_better_or_equal": false
+      }
+    },
+    "traffic_metrics_won": 2,
+    "traffic_metrics_total": 3,
+    "quality_gate_passed": false,
+    "recommended_for_activation": false,
+    "verdict": "PPO belum boleh diaktifkan; gunakan rule-based fallback."
+  }
+}

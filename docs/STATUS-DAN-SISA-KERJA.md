@@ -21,7 +21,7 @@ Dokumen lain di `docs/` sekarang cuma 2 jenis: **cara kerja** (rujukan teknis) d
 | 7 | Scenario Generator | 90% | **Sudah live** lewat cache |
 | 8 | Traffic Simulation | 92% | **Sudah live**, sudah divalidasi multi-seed |
 | 9 | Performance Analysis (LOS) | 90% | 4 metrik nyata, tampil di dashboard |
-| 10 | Adaptive Decision Engine | 65% / 90% | PPO dilatih, terintegrasi, model bisa dimuat & lolos test (naik dari 10%). Belum unggul di throughput, jadi peran tetap diisi Scenario Generator |
+| 10 | Adaptive Decision Engine | 65% / 90% | PPO dilatih penuh (200k) & terintegrasi, tapi **gerbang kualitas menolak aktivasi** — throughput selalu kalah, dan akar masalahnya sudah diinvestigasi (lihat P-1). Peran tetap diisi Scenario Generator |
 | 11 | Signal Timing Recommendation | 88% | Live. `/signal/status` belum baca cache skenario |
 | 12 | Dashboard | 92% | Build hijau, badge `source` + LOS ada |
 
@@ -156,6 +156,67 @@ Perbaikan terakhir baru diuji lewat `npm run build`, **belum lewat browser sungg
 ### P-1. PPO — kotak 10, Yuli
 
 > **Berubah total 29 Agustus.** Dokumen ini sebelumnya menulis "nol baris kode RL". **Itu sudah tidak berlaku** — commit `f921ce9` (28 Agustus, 10.410 baris) membawa environment Gymnasium, training, evaluasi, integrasi backend, dan 7 test baru. Bagian di bawah adalah hasil review menyeluruh terhadap commit itu.
+
+---
+
+#### 🔬 HASIL TRAINING 200k + INVESTIGASI AKAR MASALAH (29 Agustus, Rahmat)
+
+**Keputusan operasional: PPO TIDAK diaktifkan. Sistem tetap memakai rule-based / Scenario Generator.** Alasannya di bawah — bukan karena PPO gagal belajar, tapi karena evaluasinya belum bisa dipercaya sebagai bukti.
+
+**Training (`smarttwin_ppo_v2.zip`, 200.192 timestep, 4 jam 27 menit, CPU):** berjalan bersih tanpa crash, 20 checkpoint tersimpan (10k–200k). Kurva reward naik **monoton di semua 10 desil**: −0,40 → +1,16 (Δ +1,56). Proses belajarnya sehat.
+
+**Temuan A — training lebih lama TIDAK membantu.** Checkpoint 100k vs model final 200k praktis identik (selisih dalam rentang noise):
+
+| | 100k | 200k |
+|---|---:|---:|
+| Antrean vs rule-based | −52,6% | −54,5% |
+| Waktu tunggu vs rule-based | −69,7% | −69,5% |
+| Throughput vs rule-based | −6,4% | −6,7% |
+
+4,5 jam tambahan tidak memberi perbaikan berarti. **Jangan naikkan timestep lagi** untuk mengejar hasil — bottleneck-nya bukan lama training.
+
+**Temuan B — konsisten menang 2 dari 3 metrik di 3 seed, throughput selalu kalah.** `quality_gate_passed: false` di ketiga seed (gate mensyaratkan menang **ketiga** metrik). Verdict otomatis: *"PPO belum boleh diaktifkan; gunakan rule-based fallback."*
+
+**Temuan C (PENTING) — reward hampir BUTA terhadap throughput.** Diukur langsung dengan instrumentasi komponen reward (3 episode, 36 langkah keputusan, PPO vs baseline):
+
+`ppo_env.py:238` → `throughput_norm = min(1.0, arrived / 15.0)` — **saturasi di 15 kendaraan/langkah.**
+
+| | PPO v2 | Baseline rule-based |
+|---|---:|---:|
+| Kedatangan per langkah | 17,8 | 20,0 |
+| Langkah yang **saturasi** (≥15) | **81%** | **97%** |
+| `throughput_reward` rata-rata | +0,4225 | +0,4483 |
+
+Karena keduanya hampir selalu di atas ambang 15, komponen throughput cuma berbeda **0,0258** dari maksimum 0,45 yang mungkin. **Menambah throughput di atas 15/langkah tidak memberi reward tambahan sama sekali** — jadi PPO tidak punya insentif menaikkannya, sementara antrean/tunggu masih terus memberi gradien. PPO mengoptimalkan persis apa yang diukur; fungsi reward-nya yang tidak bisa membedakan.
+
+**Temuan D (PALING PENTING) — 80% keunggulan reward PPO datang dari `starvation`, bukan dari kualitas lalu lintas.** Rincian selisih reward PPO (+0,1375) vs baseline (−0,3284), total gap **+0,4659**:
+
+| Komponen | Kontribusi ke gap | Porsi |
+|---|---:|---:|
+| **Starvation** (lengan tidak kebagian hijau) | **+0,3750** | **+80,5%** |
+| Antrean | +0,0809 | +17,4% |
+| Waktu tunggu | +0,0358 | +7,7% |
+| Throughput | −0,0258 | −5,5% |
+
+Baseline kena penalti starvation **0,375**, PPO **0,000**.
+
+**Kenapa ini masalah:** action space environment memaksa "pilih SATU lengan per langkah", dan baseline memakai `RuleBasedEngine.recommend()` (yang memang mengembalikan satu lengan pemenang). Kalau satu lengan konsisten paling padat, lengan lain tidak kebagian → kena penalti starvation, dan antreannya menumpuk (itu juga menjelaskan antrean baseline 72,2 vs PPO 27,7).
+
+**Tapi produksi tidak pernah berperilaku begitu.** `SignalService` memakai `recommend_cycle()` dengan rotasi tetap `FIXED_CYCLE_ORDER` (utara→timur→selatan→barat) — **keempat lengan dijamin dapat hijau bergantian, starvation mustahil terjadi secara struktural.**
+
+Artinya: **PPO diadu melawan skenario yang tidak pernah terjadi di sistem sungguhan.** Keunggulan 52–69% di antrean/tunggu itu kemungkinan besar **melebih-lebihkan**, karena sebagian besar berasal dari baseline yang "dihukum" atas perilaku yang produksi tidak lakukan.
+
+> Catatan koreksi: item P-1c lama ("baseline cuma proxy `argmax` sederhana") **sudah diperbaiki Yuli** — `rule_based_action()` sekarang benar memanggil `RuleBasedEngine` asli. Masalah yang tersisa bukan lagi proxy-nya, melainkan **ketidakcocokan semantik**: env memodelkan "pilih 1 lengan per langkah" (`recommend()`), sedangkan produksi menjalankan rotasi tetap (`recommend_cycle()`).
+
+#### Kalau mau dilanjutkan setelah 31 Agustus
+
+Urutan yang masuk akal berdasar temuan di atas — **jangan** mulai dengan menambah timestep:
+
+1. **Naikkan/hilangkan ambang saturasi throughput** (Temuan C) — mis. `arrived / 30.0` atau normalisasi relatif terhadap demand, supaya reward bisa membedakan 18 vs 20 kendaraan.
+2. **Samakan semantik baseline dengan produksi** (Temuan D) — bandingkan PPO melawan rotasi `recommend_cycle()`, bukan pemilihan satu lengan. Ini yang menentukan apakah keunggulan PPO nyata atau artefak.
+3. Baru latih ulang dan evaluasi ulang.
+
+**Untuk laporan/juri, kalimat yang jujur dan kuat:** *"PPO berhasil dilatih dan menunjukkan pembelajaran yang konsisten. Evaluasi otomatis kami menolaknya untuk aktivasi karena belum unggul di seluruh metrik, dan investigasi lanjutan menemukan dua kelemahan pada fungsi reward dan metodologi pembandingnya. Kami memilih tetap memakai rule-based yang terverifikasi daripada mengaktifkan model yang buktinya belum kuat."*
 
 #### Yang sudah benar — jangan diulang
 
@@ -333,7 +394,7 @@ SETIAP REKAM: backend → worker --once --full-cycle (smoke test)
 
 ### JANGAN dikatakan
 
-- ❌ **"PPO mengalahkan rule-based"** — yang menang cuma reward (fungsi yang PPO dilatih untuk maksimalkan). Pada throughput PPO **tidak pernah** menang, dan baselinenya bukan `RuleBasedEngine` asli. Lihat P-1b/P-1c
+- ❌ **"PPO mengalahkan rule-based"** — gerbang kualitas otomatis **menolaknya** di 3 seed (menang 2 dari 3 metrik; throughput selalu kalah). Investigasi 29 Agustus juga menemukan reward hampir buta terhadap throughput (saturasi di 15/langkah) dan 80% keunggulan reward-nya berasal dari penalti starvation yang tidak pernah terjadi di produksi. Lihat P-1 Temuan C & D
 - ❌ **"PPO sudah dipakai di sistem"** — default tetap rule-based; model sudah bisa dimuat (P-1a selesai) tapi belum diaktifkan sebagai default
 - ❌ "Realtime CCTV" — rekaman
 - ❌ **"Akurasi deteksi tinggi/95%"** — terukur 48,7% rata-rata (8 sampel), jangan digeneralisir dari sampel terbaik (#7, 96,1%) saja
