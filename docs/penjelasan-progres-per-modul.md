@@ -69,6 +69,81 @@ Ini jawaban singkat "modul ini kelihatan di mana":
 
 ---
 
+## 💻 PERINTAH SIAP-TUNJUK — sudah diuji, bukan teori
+
+Ini untuk momen "coba buktikan" — dijalankan **live** di terminal depan dosen. Tiap perintah sudah saya coba sekarang, saya tuliskan output aslinya supaya Anda tahu bentuk yang normal.
+
+> ⚠️ **Kalau training PPO masih berjalan saat demo, JANGAN jalankan perintah bertanda 🔴** — itu memakai SUMO dan akan berebut CPU, bisa memperlambat/menghentikan training. Perintah bertanda 🟢 aman kapan saja (cuma memanggil API, ringan).
+
+### 🟢 1. Buktikan Decision Engine (kotak 10) benar-benar hidup
+
+```bash
+curl -s http://127.0.0.1:8000/recommendation/engine-status
+```
+
+**Output nyata barusan:**
+```json
+{"configuredMode":"rule-based","activeEngine":"RuleBasedEngine","ppoAvailable":false,"fallbackEnabled":false,"modelFile":null,"loadError":null}
+```
+
+**Cara menjelaskannya:** "`activeEngine` menunjukkan mesin keputusan yang aktif sekarang. `ppoAvailable: false` itu jujur — PPO memang belum diaktifkan, sesuai yang tadi saya jelaskan soal gerbang kualitas." Ini justru bukti sistem tidak menyembunyikan statusnya.
+
+### 🟢 2. Buktikan siklus lampu hidup di server, bukan animasi statis
+
+```bash
+curl -s http://127.0.0.1:8000/signal/status
+```
+
+**Output nyata barusan** (perhatikan `remainingSeconds` — jalankan 2 kali berselang beberapa detik, angkanya akan turun):
+```json
+{"currentPhase":"north","phaseName":"Utara (Jl. Magelang)","remainingSeconds":24,
+ "phases":{"north":{"state":"green","durationSeconds":20,"remainingSeconds":24}, ...}
+```
+
+**Cara menjelaskannya:** "Ini bukan animasi di browser — hitung mundurnya dihitung di server. Kalau saya jalankan perintah ini lagi dalam 10 detik, angkanya akan turun beneran." (lalu jalankan lagi untuk buktikan)
+
+### 🟢 3. Buktikan model LSTM benar-benar ada dan terpasang
+
+```bash
+curl -s http://127.0.0.1:8000/api/forecast/health
+```
+
+**Output nyata barusan:**
+```json
+{"loaded":false,"device":"cpu","modelExists":true,"scalerExists":true,"metadataExists":true,
+ "modelPath":"...\\forecasting\\outputs\\lstm\\traffic_lstm.pt", ...}
+```
+
+**Catatan penting:** `"loaded":false` itu **normal**, bukan error — modelnya dimuat ke memori pas dipakai pertama kali (lazy loading), bukan langsung saat server nyala. Yang membuktikan modelnya nyata adalah `modelExists/scalerExists/metadataExists` semuanya `true`. Kalau mau tunjukkan `loaded:true`, buka dulu dashboard (yang otomatis memicu forecast), baru jalankan perintah ini lagi.
+
+### 🟢 4. Buktikan data lalu lintas berasal dari CV asli, bukan angka karangan
+
+```bash
+curl -s "http://127.0.0.1:8000/api/v1/traffic/simpang4-pingit?limit=1"
+```
+
+**Output nyata barusan:** data sungguhan dengan `windowStart: "2026-08-15T17:19:15Z"` dan hitungan kendaraan per kelas (`carCount`, `motorcycleCount`, dst) — cocok dengan tanggal rekaman asli (15 Agustus).
+
+### 🔴 5. Buktikan Scenario Generator + SUMO benar-benar jalan (JANGAN saat training)
+
+```bash
+cd simulation
+python scenario_worker.py --once --full-cycle
+```
+
+**Yang akan tercetak:** 3 kandidat (`baseline`/`aggressive`/`balanced`) lengkap dengan delay, antrean, throughput, dan LOS masing-masing, lalu kandidat pemenang. **Ini bukti paling kuat** kotak 7-8-9 — tunjukkan tabel angkanya, bukan cuma bilang "sudah diuji".
+
+### 🔴 6. Jalankan test suite penuh (JANGAN saat training — CPU berat)
+
+```bash
+cd backend
+python -m pytest -q
+```
+
+**Hasil terakhir terverifikasi:** `86 passed, 1 failed` (1 kegagalan itu memang diharapkan — checkpoint PPO lama belum kompatibel dengan format baru, akan hijau lagi setelah training 300k selesai).
+
+---
+
 ## Kotak 1 — Traffic Monitoring Data (Sumber Video) — 100%
 
 **Fungsinya:** menyediakan rekaman lalu lintas sebagai masukan sistem.
