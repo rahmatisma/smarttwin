@@ -356,12 +356,22 @@ class SimulationService:
 
         with self._lock:
 
-            # Bila mode berubah (misalnya sesi lama masih memakai SUMO-GUI),
-            # restart sekali agar permintaan headless benar-benar diterapkan.
+            # Bila mode GUI berubah (misalnya sesi lama masih memakai
+            # SUMO-GUI) ATAU skenario berubah (Baseline/Aggressive/
+            # Balanced), restart sekali agar permintaan baru benar-benar
+            # diterapkan. Tanpa cek scenario di sini, controller lama
+            # dipakai ulang apa adanya (lihat blok "SUMO SUDAH RUNNING"
+            # di bawah) dan request.scenario yang baru tidak pernah
+            # sampai ke SumoController baru -- ganti dropdown skenario
+            # di frontend jadi tidak berefek sama sekali selama simulasi
+            # masih berjalan.
             if (
                 self.controller is not None
                 and self.controller.is_running()
-                and self.controller.is_gui != request.gui
+                and (
+                    self.controller.is_gui != request.gui
+                    or self.controller.scenario != request.scenario
+                )
             ):
                 self.controller.close()
                 self.controller = None
