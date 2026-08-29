@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import os
 import random
 import shutil
 import uuid
@@ -132,10 +133,16 @@ def load_demand_profiles(
 
 
 def resolve_sumo_binary(explicit: str | Path | None = None) -> Path:
+    # Sejak backend/simulation/decision_engine digabung jadi satu venv di
+    # root repo (30 Agustus 2026), SUMO cuma ada di situ -- bukan lagi
+    # simulation/.venv yang sudah dihapus. SUMO_HOME dicek duluan supaya
+    # tetap benar kalau seseorang jalankan dari venv non-standar.
+    sumo_home = os.environ.get("SUMO_HOME")
     candidates = [
         Path(explicit) if explicit else None,
         Path(found) if (found := shutil.which("sumo")) else None,
-        ROOT / "simulation/.venv/Lib/site-packages/sumo/bin/sumo.exe",
+        Path(sumo_home) / "bin" / "sumo.exe" if sumo_home else None,
+        ROOT / ".venv/Lib/site-packages/sumo/bin/sumo.exe",
     ]
     for candidate in candidates:
         if candidate and candidate.exists():

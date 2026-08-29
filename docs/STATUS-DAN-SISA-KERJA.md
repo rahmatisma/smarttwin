@@ -285,6 +285,12 @@ P-1a, P-1c, P-1d ✅ selesai. Sisanya:
 
 **Aturan berhenti tetap sama:** kalau setelah v4 PPO tetap kalah pada throughput, **jangan dipaksakan aktif**. Kotak 10 tetap fungsional dengan Scenario Generator, dan PPO tetap layak dilaporkan sebagai pengembangan yang berhasil dilatih plus 3 bug metodologi yang ditemukan dan diperbaiki lewat investigasi sendiri — itu cerita yang kuat untuk juri, menang atau tidak. **PPO yang menurunkan throughput lebih buruk daripada rule-based yang bekerja.**
 
+### P-1e. Skenario di halaman Digital Twin tidak berefek + 3 kartu statistik kosong — Rahmat (diambil alih dari Melpi), ±3 jam
+
+Ganti dropdown skenario (Baseline/Aggressive/Balanced) di `/digitaltwin` sambil simulasi jalan **tidak mengubah simulasi sama sekali** — akar masalahnya di backend (`simulation_service.py::_ensure_sumo()` reuse controller lama tanpa cek `request.scenario` berubah), bukan cuma bug frontend seperti kelihatannya. Panel Rekomendasi jadi nyangkut "Loading..." selamanya, dan 3 kartu statistik (Average Speed/Queue Length/Traffic Flow) ternyata memang belum pernah disambungkan ke data apa pun (hardcode `"-"`).
+
+Rencana perbaikan detail (akar masalah + rancangan per-file) ada di **`docs/rencana-perbaikan-digital-twin-scenario.md`** — 3 masalah terpisah, urutan pengerjaan, dan cara verifikasi.
+
 ### P-2. Perkuat bukti LSTM — Yuli, 2–3 jam
 
 Dua klaim masih bertumpu sampel kecil:
@@ -418,7 +424,7 @@ SETIAP REKAM: backend → worker --once --full-cycle (smoke test)
 |---|---|---|
 | **Yuli** | ✅ S-1, S-2 selesai | Setelah training v4 selesai: jalankan `evaluate_ppo.py` di 3 seed, dan kalau lulus gerbang kualitas, commit checkpoint v4 (memperbaiki test integrasi yang sekarang gagal). P-2 bukti LSTM (2–3j) masih terbuka |
 | **Melpi** | ✅ S-3, S-6 selesai | Refactor signal-recommendation-nya (commit `2d2d08d`) sudah diperbaiki Rahmat supaya build hijau lagi (S-8) — kalau ada niat/konteks lanjutan dari refactor itu yang belum kesampaikan, cek diff S-8 dulu sebelum lanjut. Setelah itu: LOS per lengan (dukung P-3) |
-| **Rahmat** | ✅ S-4, S-5, S-8 selesai | Memantau training v4 (checkpoint 50k berikutnya), lalu P-3 LOS per lengan, P-4 rapi-rapi. **P-5 tetap dikembalikan** (lihat catatan) |
+| **Rahmat** | ✅ S-4, S-5, S-8 selesai | Memantau training v4 (checkpoint selanjutnya), **P-1e skenario Digital Twin** (diambil alih dari Melpi, lihat `rencana-perbaikan-digital-twin-scenario.md`), P-3 LOS per lengan, P-4 rapi-rapi. **P-5 tetap dikembalikan** (lihat catatan) |
 | Siapa saja | — | S-7 verifikasi browser (30m) — **sudah bisa dikerjakan** |
 
 **Prioritas sekarang, dalam urutan:** (1) S-7 verifikasi browser (build sudah hijau), (2) training v4 selesai + dievaluasi, (3) P-2/P-3 kalau masih ada waktu sebelum tanggal 6–7 September.
