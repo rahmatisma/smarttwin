@@ -1,0 +1,57 @@
+{
+  "episodes": 10,
+  "seed_start": 1000,
+  "ppo": {
+    "mean_reward": -0.19280307740519156,
+    "mean_queue_veh": 80.78333333333333,
+    "mean_accumulated_wait_s": 6439.258333333333,
+    "total_throughput_veh": 1698.0
+  },
+  "rule_based": {
+    "mean_reward": -0.2739511682524695,
+    "mean_queue_veh": 84.68333333333334,
+    "mean_accumulated_wait_s": 7026.191666666667,
+    "total_throughput_veh": 1178.0
+  },
+  "comparison": {
+    "metrics": {
+      "mean_reward": {
+        "ppo": -0.19280307740519156,
+        "rule_based": -0.2739511682524695,
+        "direction": "higher",
+        "delta": 0.08114809084727795,
+        "delta_percent": null,
+        "ppo_better_or_equal": true
+      },
+      "mean_queue_veh": {
+        "ppo": 80.78333333333333,
+        "rule_based": 84.68333333333334,
+        "direction": "lower",
+        "delta": -3.9000000000000057,
+        "delta_percent": -4.60539263924425,
+        "ppo_better_or_equal": true
+      },
+      "mean_accumulated_wait_s": {
+        "ppo": 6439.258333333333,
+        "rule_based": 7026.191666666667,
+        "direction": "lower",
+        "delta": -586.9333333333334,
+        "delta_percent": -8.35350587029721,
+        "ppo_better_or_equal": true
+      },
+      "total_throughput_veh": {
+        "ppo": 1698.0,
+        "rule_based": 1178.0,
+        "direction": "higher",
+        "delta": 520.0,
+        "delta_percent": 44.14261460101868,
+        "ppo_better_or_equal": true
+      }
+    },
+    "traffic_metrics_won": 3,
+    "traffic_metrics_total": 3,
+    "quality_gate_passed": true,
+    "recommended_for_activation": true,
+    "verdict": "PPO memenuhi seluruh metrik lalu lintas."
+  }
+}

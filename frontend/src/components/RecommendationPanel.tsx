@@ -6,6 +6,11 @@ const YELLOW_SECONDS = 4;
 
 const CYCLE_ORDER = ["north", "east", "south", "west"];
 
+function approachLabel(approach: string): string {
+  const option = APPROACH_OPTIONS.find((opt) => opt.id === approach);
+  return option ? option.name : approach;
+}
+
 const APPROACH_NAMES = APPROACH_OPTIONS.reduce((acc, opt) => {
   if (opt.id === "all") return acc;
   const match = opt.name.match(/^(.*?)\s*\((.*?)\)$/);

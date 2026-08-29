@@ -149,7 +149,7 @@ export default function DigitalTwinView() {
                         const isGreen = (slice: string) => slice.includes('G') || slice.includes('g');
                         const isYellow = (slice: string) => slice.includes('y') || slice.includes('Y');
 
-                        const getState = (slice: string) => {
+                        const getState = (slice: string): "GREEN" | "YELLOW" | "RED" => {
                             if (isGreen(slice)) return "GREEN";
                             if (isYellow(slice)) return "YELLOW";
                             return "RED";
@@ -794,7 +794,7 @@ export default function DigitalTwinView() {
                                 recommendation={mappedRec}
                                 signal={dbSignalRaw}
                                 sharedVisualPhase={mappedPhase}
-                                sharedVisualPhaseState={mappedState}
+                                sharedVisualPhaseState={mappedState === "RED" ? "GREEN" : mappedState}
                                 sharedVisualRemaining={mappedRemaining}
                                 layout="cross"
                             />

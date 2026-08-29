@@ -1,6 +1,8 @@
 # STATUS & SISA KERJA — SmartTwin
 
-**Diperbarui: 28 Agustus 2026.** Ini **satu-satunya dokumen status** di repo ini. Kalau mau tahu "sudah sampai mana" atau "apa yang belum", baca ini — jangan cari di dokumen lain.
+**Diperbarui: 29 Agustus 2026 (malam) — audit ulang terhadap kerja Yuli & Melpi, dijalankan langsung (pytest + build), bukan dari klaim dokumen lama.** Ini **satu-satunya dokumen status** di repo ini. Kalau mau tahu "sudah sampai mana" atau "apa yang belum", baca ini — jangan cari di dokumen lain.
+
+> **Deadline berubah:** video presentasi diperpanjang sampai **7 September**, kemungkinan presentasi tim **6 September** sebelum lomba. Tetap perlakukan item 🔴 di bagian 3 sebagai prioritas — terutama S-8 di bawah, karena build yang rusak menghalangi rekaman video kapan pun jadwalnya.
 
 Dokumen lain di `docs/` sekarang cuma 2 jenis: **cara kerja** (rujukan teknis) dan **hasil pengujian** (bukti untuk laporan). Tidak ada lagi dokumen "pembagian tugas" atau "audit" terpisah yang saling bertentangan.
 
@@ -21,17 +23,17 @@ Dokumen lain di `docs/` sekarang cuma 2 jenis: **cara kerja** (rujukan teknis) d
 | 7 | Scenario Generator | 90% | **Sudah live** lewat cache |
 | 8 | Traffic Simulation | 92% | **Sudah live**, sudah divalidasi multi-seed |
 | 9 | Performance Analysis (LOS) | 90% | 4 metrik nyata, tampil di dashboard |
-| 10 | Adaptive Decision Engine | 65% / 90% | PPO dilatih penuh (200k) & terintegrasi, tapi **gerbang kualitas menolak aktivasi** — throughput selalu kalah, dan akar masalahnya sudah diinvestigasi (lihat P-1). Peran tetap diisi Scenario Generator |
-| 11 | Signal Timing Recommendation | 88% | Live. `/signal/status` belum baca cache skenario |
-| 12 | Dashboard | 92% | Build hijau, badge `source` + LOS ada |
+| 10 | Adaptive Decision Engine | 65% / 90% | **Berubah 29 Agustus malam:** training v3 (300k) ternyata tidak valid — 3 bug baru ditemukan & diperbaiki di environment (lihat P-1, "Bug A/B/D"). Training ulang v4 (100k) sedang berjalan (dijalankan Rahmat). Peran tetap diisi Scenario Generator sampai v4 lulus gerbang kualitas |
+| 11 | Signal Timing Recommendation | 90% | S-1 selesai — `/signal/status` sekarang baca cache skenario. Tapi lihat kotak 12: panel yang menampilkannya sedang tidak ter-build |
+| 12 | Dashboard | 92% | ✅ Build hijau lagi (S-8 diperbaiki 29 Agustus malam), badge `source` + LOS ada |
 
 **Keseluruhan: ≈87% harfiah / ≈90% fungsional.**
-PPO (kotak 10) naik, tapi validasi akurasi CV (kotak 2, S-4) menurunkan angka lebih banyak — 48,7% terukur, bukan lagi asumsi 80%. Turun tipis dari ≈88%/≈90% sebelumnya meski dua pekerjaan besar (PPO, validasi CV) sama-sama selesai — itu tandanya audit ini mengukur bukti nyata, bukan menaikkan angka tiap kali ada progres.
+Kembali ke level sebelum audit — build frontend yang sempat rusak (S-8) sudah diperbaiki malam ini. S-1, S-2, S-3, S-6, S-8 semuanya terverifikasi selesai; PPO (kotak 10) masih dalam proses pelatihan ulang v4 setelah 3 bug baru ditemukan & diperbaiki.
 
-**Bukti eksekusi 29 Agustus:**
-- `backend/` → `pytest -q` = **77 passed, 0 failed**
-- `simulation/` → `pytest tests/ -q` = **11 passed, 1 failed** (lihat item S-2)
-- `frontend/` → `npm run build` = **sukses, 13/13 route**
+**Bukti eksekusi 29 Agustus (malam, setelah perbaikan S-8):**
+- `backend/` → `pytest -q` = **86 passed, 1 failed** (`test_real_checkpoint_reaches_recommendation_endpoint` — checkpoint lama 5-dim vs kode baru 4-dim, self-resolve setelah checkpoint v4 di-commit)
+- `simulation/` → **harus dijalankan dari root repo**: `backend/.venv/Scripts/python.exe -m pytest simulation/tests/` = **15 passed, 0 failed**. (Dijalankan dari dalam folder `simulation/` akan gagal collect di kedua venv — lihat P-4 diperbarui)
+- `frontend/` → `npm run build` = ✅ **sukses, 13/13 route, 0 error TypeScript**
 
 ---
 
@@ -53,50 +55,46 @@ Bagian ini ada supaya tidak ada yang mengerjakan hal yang sudah beres. Beberapa 
 | Kalibrasi `north`, identitas koridor `east` | ✅ **Selesai** | Commit `5b2c18e`, `700140c` |
 | PPO "nol baris kode RL" | ✅ **Sudah tidak berlaku** | Commit `f921ce9` — env Gymnasium, training, evaluasi, integrasi backend, 7 test. Lihat P-1 |
 | PPO tidak pernah menunjukkan tanda belajar | ✅ **Sudah terbukti belajar** | `training_monitor.csv` — reward naik monoton −3,38 → −1,80 selama 8.362 episode |
-| Checkpoint PPO tidak ter-commit, `pytest` backend 1 gagal | ✅ **Selesai 29 Agustus** | Yuli commit model (`f62b7ac`); `stable-baselines3`/`gymnasium` ditambahkan ke `backend/requirements.txt`. `pytest` → 77 passed, 0 failed |
+| Checkpoint PPO tidak ter-commit, `pytest` backend 1 gagal | ⚠️ **Gagal lagi 29 Agustus malam** | Yuli sempat commit model (`f62b7ac`) dan test sempat hijau, tapi action space PPO diubah 5→4 dim sore ini (Bug A/B/D) sehingga checkpoint lama basi lagi. `pytest` backend sekarang **86 passed, 1 failed**. Self-resolve setelah checkpoint v4 di-commit — lihat P-1a-v2 |
+| S-1: Panel Status Sinyal belum ikut sumber simulasi | ✅ **Selesai** (Yuli, commit `74c946c`) | `signal_service.py:214` panggil `cache_service.get_fresh()`, `source="scenario-generator"` saat cache segar |
+| S-2: 1 test merah di `simulation/` | ✅ **Selesai** (Yuli) | `test_forecast_client.py` stub sudah punya `recommend_full_cycle()`. **15 passed, 0 failed** kalau dijalankan dari root repo (lihat P-4) |
+| S-3: Angka palsu "32 detik" di Digital Twin | ✅ **Selesai** (Melpi) | `digitaltwinview.tsx` sekarang tampil "Memuat status simulasi..." sebelum data asli masuk |
+| S-6: 3 kalimat scope untuk laporan | ✅ **Selesai** (Melpi) | Sudah ada di `docs/penjelasan-progres-per-modul.md` |
+| P-1c: baseline pembanding PPO bukan RuleBasedEngine asli | ✅ **Selesai** | `ppo_env.py:177,439` — `rule_based_action()` panggil `RuleBasedEngine().recommend_cycle()` yang asli |
 
 ---
 
-## 3. SISA KERJA — Fase 1 (sebelum 31 Agustus, video presentasi)
+## 3. SISA KERJA — Fase 1 (sebelum video presentasi)
 
-Total **±6 jam**, dibagi 3 orang. Semuanya rendah risiko, tidak ada eksperimen.
+Item asli (S-1, S-2, S-3, S-6, S-4, S-5) semuanya **sudah selesai** — dipertahankan di bawah sebagai bukti, bukan tugas terbuka lagi. Satu-satunya yang benar-benar tersisa di Fase 1 sekarang adalah **S-8** (build rusak, urgent) dan **S-7** (blocked oleh S-8).
 
-### 🔴 S-1. Panel Status Sinyal belum ikut sumber simulasi — Yuli, 1–2 jam
+### ✅ S-1. Panel Status Sinyal belum ikut sumber simulasi — SELESAI (Yuli)
 
-**Masalahnya:** di dashboard ada 2 panel bersebelahan. Panel "Rekomendasi" menampilkan angka **hasil simulasi SUMO**. Panel "Status Sinyal" menampilkan angka **rumus rule-based**. Dua panel, dua sumber, angkanya bisa tidak cocok.
-
-Panel Status Sinyal bahkan punya badge "Diuji simulasi SUMO" di `SignalStatusPanel.tsx:242`, tapi badge itu **tidak akan pernah muncul** — `signal_service.py` cuma bisa menghasilkan `source` bernilai `"backend"`, `"demo"`, atau `"rule-based"` (baris 120, 164, 267, 411). Kode UI-nya ada tapi mati.
-
-**Perbaikannya cuma di 1 tempat.** `_recompute_cycle_plan()` (`signal_service.py:207`) adalah **satu-satunya** fungsi yang membuat `CyclePlan`; kedua panel mengambil dari situ.
-
-1. Di awal fungsi itu, panggil `live_scenario_cache_service.get_fresh(...)` — pola persis sama seperti `recommendation_service.py:107`
-2. Kalau cache segar **dan** memuat `cyclePlan`, pakai itu, set `source = "scenario-generator"`
-3. Kalau tidak, jalankan `recommend_cycle()` seperti sekarang — **jangan hapus jalur lama**, itu fallback-nya
-4. Hapus penimpaan `cyclePlan` di `recommendation_service.py:181-187` karena sudah ditangani di hulu
-
-**Selesai kalau:** worker `--full-cycle` jalan → **kedua** panel menampilkan "Diuji simulasi SUMO". Worker dimatikan >2 menit → keduanya balik "Estimasi langsung", tanpa error. Tambah 2 unit test (cache segar & cache basi).
+`_recompute_cycle_plan()` (`signal_service.py:214`) sekarang panggil `live_scenario_cache_service.get_fresh(...)` di awal fungsi, pakai `cyclePlan` dari cache kalau segar dan set `source="scenario-generator"`, fallback ke `recommend_cycle()` kalau tidak. Commit `74c946c`. **Belum diverifikasi lewat browser sungguhan** — gabung ke S-7.
 
 ---
 
-### 🔴 S-2. Satu test merah — Yuli, 15 menit
+### ✅ S-2. Satu test merah — SELESAI (Yuli)
 
-**Masalahnya:** `pytest` di `simulation/` menghasilkan **1 failed**. `run_tls_simulation.py:769` sudah dipindah memanggil `recommend_full_cycle()`, tapi `ScenarioEngineStub` di `tests/test_forecast_client.py:188` masih cuma punya `recommend()`.
-
-**Kenapa penting:** test itu tugasnya menjaga agar data forecast benar-benar diteruskan di tiap tahap. Selama merah, penjagaan itu mati. Dan kalau juri minta lihat test, merah = pertanyaan yang tidak perlu.
-
-**Perbaikan:** tambahkan `recommend_full_cycle()` ke stub, sesuaikan assertion.
-
-**Selesai kalau:** `pytest tests/ -q` di `simulation/` → **12 passed, 0 failed**.
+`ScenarioEngineStub` di `tests/test_forecast_client.py` sudah punya `recommend_full_cycle()`. `pytest tests/` di `simulation/` → **15 passed, 0 failed** (dijalankan dari root repo — lihat P-4).
 
 ---
 
-### 🔴 S-3. Angka palsu "32 detik" di Digital Twin — Melpi, 30 menit
+### ✅ S-3. Angka palsu "32 detik" di Digital Twin — SELESAI (Melpi)
 
-**Masalahnya:** `digitaltwinview.tsx:46,48` berisi `{ direction: "North", state: "GREEN", time: 32 }`. Sebelum data asli masuk, layar menampilkan angka yang **diketik manual**, bukan hasil sistem. Risikonya juri melihat itu di awal video dan mengira itu keluaran sistem.
+`digitaltwinview.tsx` sekarang tampil "Memuat status simulasi..." sebelum data asli masuk, bukan angka yang diketik manual.
 
-**Perbaikan:** ganti jadi "memuat…" sampai data pertama masuk. Polanya sudah ada di `page.tsx:674`.
+---
 
-**Selesai kalau:** buka dashboard dengan backend mati — tidak ada satu pun angka yang tampil seolah data asli.
+### ✅ S-8. Build frontend rusak — SELESAI (Rahmat, 29 Agustus malam)
+
+Regresi dari refactor signal-recommendation Melpi (commit `2d2d08d`) yang belum selesai. 3 perbaikan:
+
+1. `RecommendationPanel.tsx` — `approachLabel` hilang saat rewrite, dipulihkan persis versi sebelum commit `2d2d08d` (lookup nama dari `APPROACH_OPTIONS`).
+2. `page.tsx` (2 tempat) — field API yang benar itu `candidates` (array), bukan `scenarios`. Ditambahkan `candidateToRecommendation()`, disalin dari helper yang sudah benar & teruji di `digitaltwinview.tsx:319-357`, dipakai di kedua tempat supaya `DigitalTwinCandidate` terpetakan jadi bentuk `Recommendation` yang benar, bukan cuma diselipkan mentah-mentah.
+3. `digitaltwinview.tsx` — `getState()` diberi anotasi tipe balik eksplisit `"GREEN"|"YELLOW"|"RED"`; prop `sharedVisualPhaseState` (yang cuma terima `GREEN|YELLOW`, RED memang tidak relevan buat panel ini) diberi fallback `mappedState === "RED" ? "GREEN" : mappedState`.
+
+**Terverifikasi:** `npm run build` → sukses, 13/13 route, 0 error TypeScript. Tidak menyentuh backend — `_calculate_wait_time()` di `signal_service.py` (bagian aman dari commit yang sama) dibiarkan apa adanya.
 
 ---
 
@@ -133,29 +131,37 @@ Sumber video dijadikan parameter `--sumber` (path file lain ATAU URL stream), me
 
 ---
 
-### 🟡 S-6. Tiga pernyataan scope untuk laporan — Melpi, 1 jam
+### ✅ S-6. Tiga pernyataan scope untuk laporan — SELESAI (Melpi)
 
-Tiga hal ini **sudah benar apa adanya**, tidak perlu dikoding. Yang kurang cuma kalimatnya di laporan teknis:
-
-| Hal | Kalimat yang dipakai |
-|---|---|
-| CV pakai rekaman | "Sistem memproses rekaman CCTV Simpang Pingit (43 menit, 4 kamera). Antarmuka masukan menerima file maupun stream RTSP; rekaman dipilih karena tidak tersedia akses ke stream CCTV operasional." |
-| `north` pakai zona tengah | "Lengan utara diwakili zona badan simpang (`simpang_tengah`) sebagai proxy, karena sudut CCTV_2 menangkap badan simpang alih-alih lengan utara terpisah. Tercatat sebagai `northDataNote` di `metadata.json`." |
-| Hanya 3 kandidat skenario | "Scenario Generator menguji 3 kandidat durasi per siklus, dipilih agar total waktu simulasi tetap di bawah interval keputusan 60 detik." |
+Sudah ada di `docs/penjelasan-progres-per-modul.md`: kalimat CV pakai rekaman, `north` pakai zona tengah (`northDataNote`), dan 3 kandidat skenario.
 
 ---
 
-### ⚠️ S-7. Verifikasi browser hidup — siapa saja, 30 menit
+### 🟡 S-7. Verifikasi browser hidup — siapa saja, 30 menit — **tidak lagi blocked, S-8 selesai**
 
-Perbaikan terakhir baru diuji lewat `npm run build`, **belum lewat browser sungguhan**. Buka dashboard, bandingkan angka di layar dengan hasil `POST /recommendation` dan `GET /signal/status` langsung. Pastikan cocok.
+Buka dashboard, bandingkan angka di layar dengan hasil `POST /recommendation` dan `GET /signal/status` langsung. Pastikan cocok, dan pastikan badge "Diuji simulasi SUMO" di kedua panel (S-1) benar-benar muncul saat worker `--full-cycle` jalan.
 
 ---
 
 ## 4. SISA KERJA — Fase 2 (1–7 September)
 
-### P-1. PPO — kotak 10, Yuli
+### P-1. PPO — kotak 10, Rahmat (diambil alih dari Yuli 29 Agustus malam)
 
-> **Berubah total 29 Agustus.** Dokumen ini sebelumnya menulis "nol baris kode RL". **Itu sudah tidak berlaku** — commit `f921ce9` (28 Agustus, 10.410 baris) membawa environment Gymnasium, training, evaluasi, integrasi backend, dan 7 test baru. Bagian di bawah adalah hasil review menyeluruh terhadap commit itu.
+> **Berubah lagi 29 Agustus malam.** Semua temuan A–D di bawah (dari training v2/200k) sudah **diperbaiki melalui rute berbeda** dari yang direncanakan semula — bukan oleh Yuli lewat P-1b/c/d seperti pembagian tugas awal, tapi lewat audit ulang Rahmat setelah training v3 (300k) ternyata tidak valid. Riwayat lengkap: v2 (200k) → temuan reward buta & starvation di bawah → v3 (300k, resume dari 180k) dilatih untuk memperbaiki itu → evaluasi v3 sempat terlihat lulus gerbang kualitas 3/3, **tapi itu artefak pengukuran**, bukan perbaikan asli.
+
+---
+
+#### 🔬 BUG A/B/D DITEMUKAN & DIPERBAIKI (29 Agustus malam, Rahmat) — v3 tidak valid, v4 sedang dilatih
+
+Diminta audit ulang setelah v3 "lulus gerbang kualitas" terasa mencurigakan (4 training berturut-turut sebelumnya semua gagal). Ditemukan 3 bug baru lewat instrumentasi langsung (bukan dugaan), semuanya di `decision_engine/ppo_env.py`, commit `a87f48f`:
+
+- **Bug A (paling parah):** jendela keputusan training selalu tetap 30 detik, padahal satu rotasi 4-lengan penuh (durasi hijau pilihan + 4×4 detik kuning) butuh 76–256 detik. Akibatnya **lengan selatan dan barat tidak pernah benar-benar dapat waktu hijau simulasi** — dibuktikan 8/8 jendela uji cuma "utara" yang aktif. Diperbaiki: jendela sekarang dihitung dari durasi rotasi yang benar-benar dipilih.
+- **Bug B:** ambang saturasi reward antrean (`queue_norm`) di-hardcode 40, padahal antrean nyata terukur 34–75 setelah Bug A diperbaiki → saturasi di 7/10 langkah uji. Dinaikkan ke 100 berdasar pengukuran ulang (0/10 saturasi).
+- **Bug D:** `volume` saat training dihitung dari kendaraan **muncul** (permintaan), sedangkan `TrafficState.volume` produksi dihitung dari kendaraan **melintasi garis henti** (throughput terlayani) — dua besaran berbeda yang bisa bernilai sama sekali berbeda saat lampu merah. Diperbaiki: training sekarang menghitung crossing sungguhan lewat `_hitung_crossing()`, sama semantiknya dengan produksi.
+
+**Efek:** `smarttwin_ppo_v3.zip` dan hasil evaluasinya **tidak lagi dipakai sebagai bukti** — 4,5+ jam training itu diinvestigasi, bukan sia-sia, tapi hasilnya bukan angka final. `pytest` backend & `simulation` tetap hijau setelah perbaikan (lihat bagian 1).
+
+**Status malam ini:** training ulang **v4** (100.000 timestep, seed 42, `decision_engine/models/smarttwin_ppo_v4`) sedang berjalan — dijalankan langsung oleh Rahmat, dipantau otomatis untuk checkpoint 10k sebagai titik evaluasi dini (menghindari pola "training berjam-jam baru ketahuan ada bug" yang terjadi 4 kali sebelumnya). Belum ada hasil evaluasi final v4 — **jangan kutip angka menang/kalah apa pun dari v3 atau lebih lama untuk laporan**, tunggu evaluasi v4.
 
 ---
 
@@ -234,15 +240,15 @@ Naik **monoton di setiap desil**, total **+1,58**. Ini kurva belajar sungguhan, 
 
 **3. Environment-nya proper.** Gymnasium `SmartTwinSumoEnv`, ada `check_env`, split train/eval 80/20, seed terkontrol, `traci` pakai `label` unik jadi tidak bentrok antar sesi.
 
-#### ✅ P-1a. Model hasil training tidak ada di repo — SELESAI 29 Agustus
+#### ⚠️ P-1a. Model hasil training tidak ada di repo — sempat selesai, basi lagi malam ini
 
-Yuli sudah commit checkpoint-nya (`f62b7ac "add model"`, `aa9d06d "add smoke train ppo"`) — `decision_engine/models/smarttwin_ppo.zip` dan `smarttwin_ppo_smoke.zip` sekarang ada di repo.
+Yuli sudah commit checkpoint-nya (`f62b7ac "add model"`, `aa9d06d "add smoke train ppo"`) dan `stable-baselines3`/`gymnasium` sudah terpasang di `backend/.venv` — masalah aslinya (dependency hilang) tetap beres.
 
-**Sub-masalah yang baru ketemu saat verifikasi:** checkpoint-nya ada, tapi `pytest` backend tetap gagal dengan `ModuleNotFoundError: No module named 'stable_baselines3'` — library pembacanya belum terpasang di `backend/.venv` (beda dari `decision_engine/`'s venv tempat training jalan). **Sudah diperbaiki** hari ini: `stable-baselines3==2.9.0` + `gymnasium==1.3.0` ditambahkan ke `backend/requirements.txt` dan dipasang.
+**Tapi:** action space PPO diubah dari 5 dimensi ke 4 dimensi sore ini (bagian dari perbaikan Bug A/B/D), dan checkpoint yang ter-commit masih 5 dimensi. `test_real_checkpoint_reaches_recommendation_endpoint` sekarang gagal lagi — endpoint jatuh ke `ppo-fallback-rule-based`. **Ini otomatis beres** begitu training v4 (sedang berjalan) selesai dan checkpointnya di-commit menggantikan yang lama. `pytest -q` backend sekarang: **86 passed, 1 failed**.
 
-**Terverifikasi:** `pytest -q` di `backend/` → **77 passed, 0 failed**.
+#### ✅→🔵 P-1b. Klaim "PPO mengalahkan rule-based" belum sahih — bobot sudah diperbaiki, tunggu evaluasi v4
 
-#### 🔴 P-1b. Klaim "PPO mengalahkan rule-based" belum sahih — Yuli, 2–3 jam
+Angka di bawah ini **dari training v2 (200k), sudah usang** — dipertahankan sebagai riwayat kenapa bobot diubah. Bobot throughput sudah dinaikkan dari 0,20 jadi 0,45 (`THROUGHPUT_REWARD_WEIGHT` di `ppo_env.py:59`, bagian dari perbaikan Bug A/B/D) sebagai reaksi langsung atas temuan di bawah. **Belum ada evaluasi baru** untuk membuktikan ini benar-benar memperbaiki throughput di v4 — itu langkah berikutnya setelah training v4 selesai, bukan lagi tugas terbuka menaikkan bobot.
 
 `evaluation.json` menulis `"ppo_beats_rule_on_reward": true` sebagai **satu-satunya flag**. Sangat mudah dibaca sebagai "PPO lebih baik". Perbandingan ketiga seed pada metrik sebenarnya:
 
@@ -258,38 +264,26 @@ Dua hal yang harus dipahami sebelum angka ini dipakai di laporan:
 - **Menang di reward itu hampir tautologi.** Reward adalah fungsi yang PPO dilatih untuk memaksimalkan. Yang menentukan untuk laporan adalah **delay, antrean, throughput** — persis 3 metrik di kotak 9. Di situ PPO menang **4 dari 9** perbandingan.
 - **Throughput PPO tidak pernah menang.** Penyebabnya terbaca di `ppo_env.py:166` — bobot reward `0,20 × throughput − 0,50 × antrean − 0,30 × tunggu`. Throughput diberi bobot terkecil, jadi agent belajar **mengorbankan jumlah kendaraan yang lewat** demi antrean pendek. Untuk sistem lalu lintas itu trade-off serius: antrean pendek karena lebih sedikit kendaraan dilayani bukan perbaikan.
 
-**Yang dikerjakan:** naikkan bobot throughput di reward, latih ulang, lalu laporkan ketiga metrik lalu lintas — bukan cuma reward.
+**Status:** bobot sudah dinaikkan (lihat P-1b di atas) dan training v4 sedang jalan. Yang tersisa cuma menunggu evaluasi v4 dan melaporkan ketiga metrik lalu lintas — bukan cuma reward.
 
-#### 🟡 P-1c. Baseline pembanding bukan RuleBasedEngine asli — Yuli, 1–2 jam
+#### ✅ P-1c. Baseline pembanding bukan RuleBasedEngine asli — SELESAI
 
-`ppo_env.py:192` `rule_based_action()` hanya `argmax(antrean)` lalu `round(nilai × 9)` untuk durasi. Sedangkan `RuleBasedEngine` produksi memakai demand score + alokasi proporsional + largest-remainder rounding ke siklus tetap.
+`rule_based_action()` (`ppo_env.py:430`) sekarang panggil `RuleBasedEngine().recommend_cycle()` yang asli lewat `self.rule_based_engine` (`ppo_env.py:177`), bukan lagi tiruan `argmax`. PPO diadu melawan engine yang benar-benar jalan di dashboard.
 
-Jadi PPO dibandingkan dengan **tiruan sederhana**, bukan lawan sebenarnya. Klaim "mengalahkan rule-based" belum teruji terhadap engine yang benar-benar jalan di dashboard.
+#### ✅ P-1d. Fitur saat training ≠ fitur saat inference — SELESAI
 
-**Yang dikerjakan:** panggil `RuleBasedEngine` asli di jalur evaluasi, terjemahkan hasilnya ke aksi environment.
-
-#### 🟡 P-1d. Fitur saat training ≠ fitur saat inference — Yuli, 1–2 jam
-
-Ini masalah paling halus dan paling mudah terlewat:
-
-| Slot | Saat training (`ppo_env.py:186`) | Saat inference (`ppo_engine.py:117`) |
-|---|---|---|
-| 0 | `volume/60` — kendaraan **yang sedang ada** di edge | `volume/60` — kendaraan **yang melintas** dalam window |
-| 3 | `volume/33` — **volume yang sama** | `densityIndex/33` — besaran **berbeda** |
-
-Dua konsekuensi: (a) `volume` saat training itu kehadiran sesaat (`getLastStepVehicleNumber`), sedangkan `TrafficState.volume` itu hitungan crossing — besaran berbeda; (b) di training slot 0 dan slot 3 **selalu berkorelasi sempurna** (angka sama, dibagi 60 vs 33), sedangkan saat inference keduanya sinyal independen. **Model belajar di dunia yang tidak sama dengan dunia tempat ia dipakai.**
-
-Tambahan: `ppo_env.py:20` melatih dari `cv/output/smarttwin_traffic_data.csv` (21 Agustus), bukan `crossing_simpang.csv`/`snapshot_zona.csv` yang dipakai ingest sekarang.
+Dulu slot 0 dan slot 3 observasi selalu berkorelasi sempurna (volume dibagi 60 vs 33), sedangkan saat inference keduanya sinyal independen. Diperbaiki dengan modul bersama `decision_engine/ppo_features.py` yang dipakai training **dan** inference — `densityIndex` sekarang besaran nyata yang berbeda dari `volume`, bukan angka yang sama dibagi ulang. Sekaligus bagian dari perbaikan Bug D (P-1 di atas): `volume` saat training sekarang dihitung dari crossing sungguhan, sama semantiknya dengan `TrafficState.volume` produksi.
 
 #### Urutan kerja 1–7 September
 
-P-1a ✅ selesai. Sisanya:
+P-1a, P-1c, P-1d ✅ selesai. Sisanya:
 
-1. **P-1c** ganti baseline ke `RuleBasedEngine` asli
-2. **P-1d** samakan fitur training dengan inference
-3. **P-1b** naikkan bobot throughput, latih ulang, evaluasi ulang
+1. **Tunggu training v4 selesai** (sedang berjalan, dipantau otomatis untuk checkpoint 10k)
+2. **Evaluasi v4** vs `RuleBasedEngine` di 3 seed, pakai `evaluate_ppo.py` — ini yang membuktikan apakah Bug A/B/D + bobot baru benar-benar memperbaiki throughput, bukan cuma dugaan
+3. **Commit checkpoint v4** kalau lulus gerbang kualitas — ini juga otomatis memperbaiki P-1a (test integrasi yang sekarang gagal karena checkpoint basi)
+4. Kalau lulus: aktifkan lewat `SMARTTWIN_DECISION_ENGINE=ppo` dan update dokumen ini + kalimat "Cara menjawab juri" di bagian 7
 
-**Aturan berhenti:** kalau setelah semua ini PPO tetap kalah pada throughput, **jangan dipaksakan aktif**. Kotak 10 tetap 90% fungsional dengan Scenario Generator, dan PPO tetap layak dilaporkan sebagai pengembangan yang berhasil dilatih. **PPO yang menurunkan throughput lebih buruk daripada rule-based yang bekerja.**
+**Aturan berhenti tetap sama:** kalau setelah v4 PPO tetap kalah pada throughput, **jangan dipaksakan aktif**. Kotak 10 tetap fungsional dengan Scenario Generator, dan PPO tetap layak dilaporkan sebagai pengembangan yang berhasil dilatih plus 3 bug metodologi yang ditemukan dan diperbaiki lewat investigasi sendiri — itu cerita yang kuat untuk juri, menang atau tidak. **PPO yang menurunkan throughput lebih buruk daripada rule-based yang bekerja.**
 
 ### P-2. Perkuat bukti LSTM — Yuli, 2–3 jam
 
@@ -311,7 +305,7 @@ Bonus: demo jadi lebih meyakinkan — bisa menunjuk satu lengan dan bilang "yang
 - Bobot 50/50 di `select_best_scenario()` → tulis alasannya, atau uji sensitivitas
 - Dua jalur Traffic State Builder paralel → gabungkan atau beri komentar kapan pakai yang mana
 - `CLAUDE.md` masih menyebut `simulation/requirements-rl.txt` yang sudah hilang → perbarui
-- `simulation/.venv` tidak punya `supabase` → untuk test forecast client pakai `backend/.venv`
+- `simulation/.venv` tidak punya `supabase`/`postgrest` → pakai `backend/.venv`, **tapi harus dijalankan dari root repo** (`backend/.venv/Scripts/python.exe -m pytest simulation/tests/`), bukan dari dalam folder `simulation/` — dari sana `simulation` tidak bisa di-resolve sebagai package meski venv-nya benar
 
 ### P-5. Perbaiki akar penyebab akurasi CV rendah — DICOBA, DIKEMBALIKAN 29 Agustus
 
@@ -405,14 +399,16 @@ SETIAP REKAM: backend → worker --once --full-cycle (smoke test)
 
 ## 8. Pembagian tugas
 
-| Siapa | Fase 1 (sebelum 31 Agt) | Fase 2 (1–7 Sept) |
-|---|---|---|
-| **Yuli** | S-1 panel sinyal (1–2j), S-2 test merah (15m) | **P-1b/c/d PPO** (utama), P-2 bukti LSTM |
-| **Melpi** | S-3 hardcode (30m), S-6 pernyataan scope (1j) | Tampilkan LOS per lengan (dukung P-3) |
-| **Rahmat** | ✅ S-4, S-5 selesai — Fase 1 Rahmat tuntas | P-3 LOS per lengan, P-4 rapi-rapi, **P-5 (dikembalikan, lihat catatan)** |
-| Siapa saja | S-7 verifikasi browser (30m) | — |
+**Diperbarui 29 Agustus malam.** Semua tugas Fase 1 sekarang selesai, termasuk S-8 (dikerjakan Rahmat, bukan Melpi — lihat catatan di S-8). Yang tersisa: S-7 (siapa saja, sekarang unblocked) dan kelanjutan PPO v4.
 
-**Beban Fase 1: Yuli ±2j, Melpi ±1,5j, Rahmat ±4,5j.** Muat dalam 1 hari kerja, menyisakan 2 hari untuk latihan dan rekaman.
+| Siapa | Status Fase 1 | Sisa kerja sekarang |
+|---|---|---|
+| **Yuli** | ✅ S-1, S-2 selesai | Setelah training v4 selesai: jalankan `evaluate_ppo.py` di 3 seed, dan kalau lulus gerbang kualitas, commit checkpoint v4 (memperbaiki test integrasi yang sekarang gagal). P-2 bukti LSTM (2–3j) masih terbuka |
+| **Melpi** | ✅ S-3, S-6 selesai | Refactor signal-recommendation-nya (commit `2d2d08d`) sudah diperbaiki Rahmat supaya build hijau lagi (S-8) — kalau ada niat/konteks lanjutan dari refactor itu yang belum kesampaikan, cek diff S-8 dulu sebelum lanjut. Setelah itu: LOS per lengan (dukung P-3) |
+| **Rahmat** | ✅ S-4, S-5, S-8 selesai | Memantau training v4 (checkpoint 50k berikutnya), lalu P-3 LOS per lengan, P-4 rapi-rapi. **P-5 tetap dikembalikan** (lihat catatan) |
+| Siapa saja | — | S-7 verifikasi browser (30m) — **sudah bisa dikerjakan** |
+
+**Prioritas sekarang, dalam urutan:** (1) S-7 verifikasi browser (build sudah hijau), (2) training v4 selesai + dievaluasi, (3) P-2/P-3 kalau masih ada waktu sebelum tanggal 6–7 September.
 
 ---
 

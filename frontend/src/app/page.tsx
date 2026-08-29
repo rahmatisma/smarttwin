@@ -18,6 +18,7 @@ import {
   fetchForecast,
   fetchIntersectionCoords,
   DEFAULT_INTERSECTION_ID,
+  type DigitalTwinCandidate,
 } from "@/lib/supabaseData";
 
 import {
@@ -43,6 +44,45 @@ async function fetchOptional<T>(label: string, request: Promise<T>): Promise<T |
     console.warn(`${label} tidak tersedia:`, error);
     return null;
   }
+}
+
+function candidateToRecommendation(
+  candidate: DigitalTwinCandidate,
+  updatedAt: string | null
+): Recommendation {
+  return {
+    intersectionId: "simpang4-pingit",
+    timestamp: updatedAt || new Date().toISOString(),
+    recommendedPhase: candidate.phases[0]?.approach || "north",
+    recommendedGreenSeconds: candidate.phases[0]?.greenSeconds || 0,
+    currentGreenSeconds: 0,
+    expectedDelayReductionPercent: 0,
+    confidence: 1,
+    reason: "Scenario Generated",
+    metrics: {
+      queueLength: candidate.queueLengthVeh,
+      vehicleCount: candidate.throughputVeh,
+      averageSpeedKmh: 0,
+    },
+    source: "scenario-generator",
+    cyclePlan: {
+      phases: candidate.phases.map((p) => ({
+        approach: p.approach,
+        greenSeconds: p.greenSeconds,
+        demandScore: p.demandScore,
+        yellowSeconds: p.yellowSeconds,
+        redSeconds: p.redSeconds,
+      })),
+      cycleLengthSeconds: candidate.cycleLengthSeconds,
+      currentPhase: candidate.phases[0]?.approach || "north",
+      source: "scenario-generator",
+      totalCycleSeconds: candidate.totalCycleSeconds,
+    },
+    avgDelaySeconds: candidate.avgDelaySeconds,
+    avgQueueLengthM: candidate.avgQueueLengthM,
+    los: candidate.los,
+    candidateId: candidate.candidateId,
+  } as Recommendation;
 }
 
 /*
@@ -367,7 +407,10 @@ export default function DashboardPage() {
                   hasLiveBackend
                     ? (scenario === "Traffic Realtime"
                         ? fetchOptional(`Rekomendasi ${inter.name}`, fetchRecommendation(inter.databaseId))
-                        : fetchOptional(`Digital Twin Scenario ${inter.name}`, fetchDigitalTwinScenarios(inter.databaseId).then(data => data?.scenarios?.[scenario] ?? null)))
+                        : fetchOptional(`Digital Twin Scenario ${inter.name}`, fetchDigitalTwinScenarios(inter.databaseId).then(data => {
+                        const candidate = data?.candidates?.find((c) => c.candidateId === scenario.toLowerCase());
+                        return candidate ? candidateToRecommendation(candidate, data?.updatedAt ?? null) : null;
+                      })))
                     : null,
                   hasLiveBackend
                     ? fetchOptional(`Forecast ${inter.name}`, fetchForecast(inter.databaseId))
@@ -469,7 +512,10 @@ export default function DashboardPage() {
                 hasLiveBackend
                   ? (scenario === "Traffic Realtime"
                       ? fetchOptional(`Rekomendasi ${inter.name}`, fetchRecommendation(inter.databaseId))
-                      : fetchOptional(`Digital Twin Scenario ${inter.name}`, fetchDigitalTwinScenarios(inter.databaseId).then(data => data?.scenarios?.[scenario] ?? null)))
+                      : fetchOptional(`Digital Twin Scenario ${inter.name}`, fetchDigitalTwinScenarios(inter.databaseId).then(data => {
+                        const candidate = data?.candidates?.find((c) => c.candidateId === scenario.toLowerCase());
+                        return candidate ? candidateToRecommendation(candidate, data?.updatedAt ?? null) : null;
+                      })))
                   : null,
                 hasLiveBackend
                   ? fetchOptional(`Forecast ${inter.name}`, fetchForecast(inter.databaseId))
