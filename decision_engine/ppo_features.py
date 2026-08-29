@@ -14,8 +14,29 @@ FEATURE_NAMES_PER_APPROACH = (
     "densityIndex",
     "avgSpeedKmh",
 )
+# Skala normalisasi tiap fitur ke rentang 0-1.
+#
+# BUG G (diperbaiki 30 Agustus): `volume` dulu memakai skala 60,0 -- nilai yang
+# masuk akal kalau satuannya kendaraan/MENIT. Tapi `TrafficState.volume` yang
+# benar-benar diisi adalah crossing per JENDELA 5 DETIK. Diukur pada
+# cv/output/crossing_simpang.csv (2.152 jendela): maks 9, p95 6, rata-rata 2,07.
+# Dengan skala 60, 94,2% nilai jatuh di bawah 0,1 -- fitur terjepit di 3% bawah
+# rentangnya dan praktis tidak membawa informasi. Skala 10 memberi rata-rata
+# 0,207 dan maksimum 0,900, memakai rentang dengan wajar.
+#
+# Ini juga sejalan dengan REFERENCE_VOLUME di rule_based_engine.py yang punya
+# ketidakcocokan satuan yang sama persis.
+#
+# Skala lain SENGAJA BELUM diubah meski agak kurang terpakai (queueLengthVeh
+# rata-rata 0,091 maks 0,567; densityIndex 0,145/0,576; queueLengthMEst
+# 0,128/0,793). Ketiganya masih memakai 57-79% rentang, jadi tidak rusak seperti
+# volume -- dan distribusinya akan BERUBAH begitu Bug I & H diperbaiki
+# (lingkungan training sekarang 3-5x lebih macet daripada data nyata, lihat Bug
+# K). Menyetel ulang sekarang berarti menyetel ke distribusi yang sebentar lagi
+# tidak berlaku. Ukur ulang setelah Bug I & H beres.
+VOLUME_SCALE_PER_WINDOW = 10.0
 FEATURE_SCALES = {
-    "volume": 60.0,
+    "volume": VOLUME_SCALE_PER_WINDOW,
     "queueLengthVeh": 30.0,
     "queueLengthMEst": 150.0,
     "densityIndex": 33.0,
