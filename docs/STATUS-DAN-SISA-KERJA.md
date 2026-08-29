@@ -165,6 +165,31 @@ Diminta audit ulang setelah v3 "lulus gerbang kualitas" terasa mencurigakan (4 t
 
 ---
 
+#### 🔬 BUG E & F DITEMUKAN DARI EVALUASI CHECKPOINT 80k (30 Agustus pagi, Rahmat)
+
+Laporan lengkap + angka mentah: **`docs/hasil-evaluasi-ppo-v4-80k.md`**.
+
+Perbaikan Bug A/B/D **bertahan** (0/24 saturasi antrean & throughput, ketiga komponen reward hidup). Tapi ditemukan 2 cacat baru, keduanya terukur langsung:
+
+- **Bug E — reward throughput tidak dinormalkan terhadap waktu.** `arrived` diakumulasi sepanjang jendela rotasi yang panjangnya dipilih agent sendiri (76–256 detik), sedangkan antrean/tunggu cuma snapshot di akhir. Terukur: korelasi durasi-rotasi ↔ reward **+0,978**, sementara throughput **per detik** praktis datar (0,615 / 0,671 / 0,654). Memperpanjang siklus menaikkan reward 3,6× tanpa memperbaiki efisiensi apa pun.
+- **Bug F (PALING PENTING) — evaluasi membandingkan durasi simulasi yang tidak setara.** `evaluate_ppo.py` menjalankan jumlah LANGKAH tetap, bukan DURASI tetap. Rule-based memilih siklus lebih panjang (245 dtk vs 207 dtk) sehingga mensimulasikan 18–20% lebih banyak detik — lalu totalnya dibandingkan seolah setara.
+
+**Konsekuensinya besar: klaim "throughput PPO selalu kalah" TIDAK TERBUKTI.** Setelah dinormalkan per detik, defisitnya hilang di ketiga seed:
+
+| Seed | Throughput mentah | Throughput per detik |
+|---|---:|---:|
+| 1000 | −14,8% | **+1,0%** |
+| 2000 | −9,7% | **+0,0%** |
+| 3000 | −11,7% | **+2,2%** |
+
+**Tapi ini BUKAN berarti PPO menang.** Ketiga metrik lalu lintas kena cacat yang sama — "kemenangan" PPO di antrean (−12,8%) dan tunggu (−6,4%) juga tidak sahih, karena keduanya kebetulan menguntungkan kebijakan bersiklus pendek. Yang benar: **satu-satunya metrik yang sudah dinormalkan (throughput) hasilnya SERI**, sisanya belum bisa dipakai.
+
+**Juga terukur: training plateau sejak ~40k langkah.** Desil 5–9 reward: −0,241 / −0,232 / −0,209 / −0,227 / −0,208 — praktis datar. Separuh training terakhir tidak memberi perbaikan berarti. Ini pengulangan kedua dari Temuan A (v2). **Jangan tambah timestep lagi.**
+
+**Urutan perbaikan:** Bug F dulu (murni metodologi, tidak perlu training ulang — checkpoint yang ada bisa langsung dievaluasi ulang), baru Bug E (mengubah fungsi reward, wajib training ulang).
+
+---
+
 #### 🔬 HASIL TRAINING 200k + INVESTIGASI AKAR MASALAH (29 Agustus, Rahmat)
 
 **Keputusan operasional: PPO TIDAK diaktifkan. Sistem tetap memakai rule-based / Scenario Generator.** Alasannya di bawah — bukan karena PPO gagal belajar, tapi karena evaluasinya belum bisa dipercaya sebagai bukti.
@@ -407,7 +432,8 @@ SETIAP REKAM: backend → worker --once --full-cycle (smoke test)
 
 ### JANGAN dikatakan
 
-- ❌ **"PPO mengalahkan rule-based"** — gerbang kualitas otomatis **menolaknya** di 3 seed (menang 2 dari 3 metrik; throughput selalu kalah). Investigasi 29 Agustus juga menemukan reward hampir buta terhadap throughput (saturasi di 15/langkah) dan 80% keunggulan reward-nya berasal dari penalti starvation yang tidak pernah terjadi di produksi. Lihat P-1 Temuan C & D
+- ❌ **"PPO mengalahkan rule-based"** — belum ada perbandingan sahih yang mendukungnya. Gerbang kualitas otomatis menolaknya, **tapi verdict itu sendiri juga tidak sahih** (Bug F, 30 Agustus). Yang bisa dikatakan: satu-satunya metrik yang sudah dinormalkan per satuan waktu (throughput) hasilnya **seri**
+- ❌ **"PPO kalah pada throughput"** — ini juga **JANGAN dikatakan lagi** sejak 30 Agustus. Angka −15% itu artefak durasi simulasi tidak setara (Bug F); setelah dinormalkan per detik, selisihnya +1,0% / +0,0% / +2,2% di 3 seed. Lihat `hasil-evaluasi-ppo-v4-80k.md`
 - ❌ **"PPO sudah dipakai di sistem"** — default tetap rule-based; model sudah bisa dimuat (P-1a selesai) tapi belum diaktifkan sebagai default
 - ❌ "Realtime CCTV" — rekaman
 - ❌ **"Akurasi deteksi tinggi/95%"** — terukur 48,7% rata-rata (8 sampel), jangan digeneralisir dari sampel terbaik (#7, 96,1%) saja

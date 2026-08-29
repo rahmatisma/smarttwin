@@ -78,6 +78,7 @@ Jangan diubah. Ini yang dikutip di laporan dan dipakai menjawab juri.
 | [`hasil-kalibrasi-kandidat-agresif.md`](hasil-kalibrasi-kandidat-agresif.md) | Kenapa kandidat agresif jadi +1 detik, bukan +20% (sweep 28–34 detik) |
 | [`hasil-run-antrean-25-agustus.md`](hasil-run-antrean-25-agustus.md) | Run CV 4 kamera × 43 menit, 538 jendela, data antrean asli |
 | [`hasil-validasi-akurasi-cv.md`](hasil-validasi-akurasi-cv.md) | Akurasi deteksi CV vs hitung manual: 48,7% rata-rata (8 sampel) — dilaporkan apa adanya, bukan dipoles |
+| [`hasil-evaluasi-ppo-v4-80k.md`](hasil-evaluasi-ppo-v4-80k.md) | Evaluasi checkpoint PPO v4 80k: perbaikan Bug A/B/D bertahan, tapi 2 bug baru (E & F). Klaim "throughput PPO kalah" terbukti artefak durasi simulasi tidak setara — per detik hasilnya seri |
 
 ---
 
