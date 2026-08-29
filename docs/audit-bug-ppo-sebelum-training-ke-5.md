@@ -19,7 +19,7 @@ tidak jadi yang kelima yang terbuang.
 |---|---|---|---|
 | **E** | Reward throughput tidak dinormalkan terhadap waktu | Agent diberi insentif memperpanjang siklus tanpa memperbaiki apa pun | ✅ **YA** |
 | **F** | Evaluasi membandingkan durasi simulasi tidak setara | Kita tidak bisa tahu training berhasil atau tidak | ✅ **YA** (perbaiki duluan — tidak perlu training) |
-| **G** | Skala fitur `volume` 14× kebesaran (di PPO **dan** rule-based) | Hasil pengukuran CV praktis tidak memengaruhi keputusan | ✅ **YA** |
+| **G** | Skala fitur `volume` 14× kebesaran | ⚠️ **Sisi PPO: diperbaiki.** Sisi rule-based: divalidasi lewat SUMO, ternyata memperbaikinya justru **memperburuk** delay +3,9% & antrean +6,5% — TIDAK diubah | ✅ PPO saja |
 | **H** | Cap probabilitas injeksi memotong 9,9% permintaan | Kondisi puncak — yang paling penting — tidak pernah dialami agent | ✅ **YA** |
 | **I** | Profil permintaan dibekukan sepanjang episode | Sampel 5 detik direntangkan jadi 30–40 menit simulasi | ✅ **YA** |
 | **J** | 4 dari 25 fitur observasi konstan (one-hot fase) | 16% masukan model tidak berisi informasi apa pun | 🟡 Sebaiknya |
@@ -114,6 +114,55 @@ terapkan di kedua tempat** (PPO dan rule-based), jangan cuma salah satu.
 yang sekarang dipakai produksi & demo. Uji ulang `pytest` dan bandingkan
 keluaran Scenario Generator sebelum/sesudah — jangan diubah mendadak menjelang
 rekaman.
+
+### ✅ HASIL VALIDASI SUMO (30 Agustus) — JANGAN ubah `REFERENCE_VOLUME`
+
+Peringatan di atas dijalankan: Scenario Generator **sungguhan lewat SUMO** pada
+6 snapshot tersebar (ramai s/d sepi), masing-masing dievaluasi dua kali dengan
+`REFERENCE_VOLUME` 30 (sekarang) vs 10 (usulan perbaikan).
+
+| Metrik | Sekarang (30) | Usulan (10) | Perubahan | Menang di |
+|---|---:|---:|---:|---|
+| Delay | 23,71 s | 24,64 s | **+3,9% LEBIH BURUK** | 0 dari 6 |
+| Antrean | 72,33 m | 77,00 m | **+6,5% LEBIH BURUK** | 0 dari 6 |
+| Throughput | 27,67 | 28,33 | +2,4% lebih baik | 2 dari 6 |
+
+**Keputusan: `REFERENCE_VOLUME` TETAP 30. Jangan diubah.**
+
+### Kenapa "memperbaiki" satuannya justru memperburuk
+
+Ketidakcocokan satuannya nyata, tapi konsekuensi memperbaikinya tidak seperti
+dugaan. Penyebabnya ada pada arti `volume` itu sendiri:
+
+**`volume` = crossing = kendaraan yang SUDAH LEWAT, bukan yang sedang MENUNGGU.**
+Lengan dengan crossing tinggi justru lengan yang sedang **lancar**; lengan yang
+butuh hijau adalah yang **antreannya panjang**. Karena
+`demand_score = max(volume_score, queue_score, density_score)`, menaikkan bobot
+volume membuat lengan yang sudah lancar merebut hijau dari lengan yang macet —
+persis kebalikan dari yang diinginkan.
+
+Jadi perilaku sekarang (volume praktis diabaikan, keputusan ditentukan antrean &
+kepadatan) **kebetulan sudah benar**, meski dicapai lewat konstanta yang salah
+satuan. Ini "bug yang menyelamatkan", bukan bug yang harus diperbaiki.
+
+**Yang harus dicatat di laporan teknis:** pengukuran CV (crossing) **memang
+tidak memengaruhi keputusan durasi hijau** — dan itu **disengaja secara
+fungsional**, karena crossing bukan indikator permintaan yang tepat. Antrean dan
+kepadatan (`total_di_zona`) yang menentukan. Jangan tulis "volume ikut
+menentukan durasi hijau" di laporan, karena tidak benar.
+
+### Sisi PPO tetap diperbaiki (skala 60 → 10), dengan alasan berbeda
+
+`FEATURE_SCALES["volume"]` **tetap diubah** ke 10 karena situasinya berbeda:
+di PPO, volume adalah **masukan jaringan saraf**, bukan komponen `max()`.
+Jaringan bebas memberi bobot berapa pun — termasuk mendekati nol — asalkan
+fiturnya **bervariasi** dan bisa dipelajari. Dengan skala 60 fitur itu terjepit
+di 3% bawah rentang dan praktis tidak bisa dipelajari sama sekali; dengan skala
+10 jaringan punya kesempatan memutuskan sendiri seberapa penting volume.
+
+⚠️ **Ini argumen, bukan hasil pengukuran.** Belum diuji apakah PPO dengan skala
+baru benar-benar lebih baik — itu baru terjawab setelah training ke-5.
+
 
 ---
 
