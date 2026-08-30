@@ -52,6 +52,20 @@ async function fetchOptional<T>(label: string, request: Promise<T>): Promise<T |
   }
 }
 
+async function fetchOptionalWithin<T>(
+  label: string,
+  request: Promise<T>,
+  timeoutMs = 1500
+): Promise<T | null> {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<null>((resolve) => {
+    timeoutId = setTimeout(() => resolve(null), timeoutMs);
+  });
+  const result = await Promise.race([fetchOptional(label, request), timeout]);
+  if (timeoutId) clearTimeout(timeoutId);
+  return result;
+}
+
 function candidateToRecommendation(
   candidate: DigitalTwinCandidate,
   updatedAt: string | null
@@ -330,6 +344,8 @@ export default function DashboardPage() {
   const [allCoords, setAllCoords] =
     useState<Record<string, { latitude: number | null; longitude: number | null } | null>>({});
 
+  const [liveSumoSignal, setLiveSumoSignal] = useState<SignalStatus | null>(null);
+
   const [loading, setLoading] =
     useState(true);
 
@@ -371,6 +387,47 @@ export default function DashboardPage() {
     return () => clearInterval(intervalId);
   }, []);
 
+  // Ketika SUMO hidup, jadikan TLS SUMO sumber status lampu dashboard.
+  // Ini menyatukan warna/arah/countdown pada gambar SUMO dan Signal Status.
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadLiveSumoSignal() {
+      try {
+        const response = await fetch(
+          `${process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000"}/api/v1/simulation/state`
+        );
+        if (!response.ok || cancelled) return;
+        const state = await response.json();
+        const signal = state.running ? state.signals?.[0] : null;
+        if (!signal?.activeApproach) {
+          setLiveSumoSignal(null);
+          return;
+        }
+
+        setLiveSumoSignal({
+          intersectionId: "simpang4-pingit",
+          timestamp: new Date().toISOString(),
+          currentPhase: signal.activeApproach,
+          phaseName: `${signal.activeApproach} ${signal.state}`,
+          state: signal.state === "YELLOW" ? "YELLOW" : "GREEN",
+          remainingSeconds: Math.max(0, Math.ceil(signal.remainingSeconds ?? 0)),
+          cycleTimeSeconds: state.cyclePlan?.totalCycleSeconds ?? 0,
+          source: "scenario-generator",
+        });
+      } catch {
+        if (!cancelled) setLiveSumoSignal(null);
+      }
+    }
+
+    void loadLiveSumoSignal();
+    const interval = window.setInterval(loadLiveSumoSignal, 500);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, []);
+
   /*
    * =========================================================
    * AUTO START SUMO
@@ -407,17 +464,17 @@ export default function DashboardPage() {
                     fetchTrafficState(inter.databaseId, videoTimeRef.current)
                   ),
                   hasLiveBackend
-                    ? fetchOptional(`Status sinyal ${inter.name}`, fetchSignalStatus(inter.databaseId))
+                    ? fetchOptionalWithin(`Status sinyal ${inter.name}`, fetchSignalStatus(inter.databaseId))
                     : null,
                   hasLiveBackend
                     ? (scenario === "Traffic Realtime"
-                        ? fetchOptional(`Rekomendasi ${inter.name}`, fetchRecommendation(inter.databaseId))
-                        : fetchOptional(`Digital Twin Scenario ${inter.name}`, fetchDigitalTwinScenarios(inter.databaseId).then(data => {
+                        ? fetchOptionalWithin(`Rekomendasi ${inter.name}`, fetchRecommendation(inter.databaseId))
+                        : fetchOptionalWithin(`Digital Twin Scenario ${inter.name}`, fetchDigitalTwinScenarios(inter.databaseId).then(data => {
                         const candidate = data?.candidates?.find((c) => c.candidateId === scenario.toLowerCase());
                         return candidate ? candidateToRecommendation(candidate, data?.updatedAt ?? null) : null;
                       })))
                     : null,
-                  fetchOptional(`Koordinat ${inter.name}`, fetchIntersectionCoords(inter.databaseId)),
+                  fetchOptionalWithin(`Koordinat ${inter.name}`, fetchIntersectionCoords(inter.databaseId)),
                 ]);
                 return {
                   id: inter.id,
@@ -685,6 +742,8 @@ export default function DashboardPage() {
     //    ambil dari situ, tidak lewat selectedIntersection (konsep lama)
     //    atau agregasi lintas-simpang (getAggregatedSignal dulu selalu
     //    menampilkan "Semua Fase"/"ALL" walau datanya sendiri live).
+    if (liveSumoSignal) return liveSumoSignal;
+
     const dbSignal = allSignalStatuses["intersection4"];
     if (dbSignal) return dbSignal;
 
@@ -698,7 +757,7 @@ export default function DashboardPage() {
       cycleTimeSeconds: 0,
       source: "mock",
     } as SignalStatus;
-  }, [allSignalStatuses]);
+  }, [allSignalStatuses, liveSumoSignal]);
 
   // simpang4-pingit adalah satu-satunya intersection nyata (lihat
   // catatan di lib/intersections.ts) -- sama seperti

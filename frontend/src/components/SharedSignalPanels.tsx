@@ -33,8 +33,8 @@ export default function SharedSignalPanels({
   const elapsedSeconds = Math.max(0, Math.floor((now - new Date(activeSignal.timestamp).getTime()) / 1000));
   const visualRemaining = Math.max(0, activeSignal.remainingSeconds - elapsedSeconds);
 
-  const visualPhaseState: "GREEN" | "YELLOW" =
-    visualRemaining <= YELLOW_SECONDS ? "YELLOW" : "GREEN";
+  const visualPhaseState: "GREEN" | "YELLOW" = activeSignal.state ??
+    (visualRemaining <= YELLOW_SECONDS ? "YELLOW" : "GREEN");
 
   return (
     <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">

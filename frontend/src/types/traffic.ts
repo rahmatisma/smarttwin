@@ -130,6 +130,9 @@ export interface SignalStatus {
 
   currentPhase: string;
 
+  // Diisi oleh live SUMO agar UI tidak menebak kuning dari countdown.
+  state?: "GREEN" | "YELLOW";
+
   phaseName: string;
 
   remainingSeconds: number;

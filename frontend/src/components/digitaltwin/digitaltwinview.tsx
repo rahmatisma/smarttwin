@@ -155,9 +155,10 @@ export default function DigitalTwinView() {
                         };
 
                         const slices = [
-                            { approach: "north", state: getState(rawState.substring(0, 5)) },
+                            // Urutan link TLS SUMO: south, east, north, west.
+                            { approach: "south", state: getState(rawState.substring(0, 5)) },
                             { approach: "east", state: getState(rawState.substring(5, 10)) },
-                            { approach: "south", state: getState(rawState.substring(10, 15)) },
+                            { approach: "north", state: getState(rawState.substring(10, 15)) },
                             { approach: "west", state: getState(rawState.substring(15, 20)) }
                         ];
                         const active = slices.find(s => s.state !== "RED") || slices[0];
