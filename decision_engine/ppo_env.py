@@ -15,7 +15,7 @@ import numpy as np
 from gymnasium import spaces
 
 from .ppo_engine import GREEN_OPTIONS
-from .ppo_features import build_ppo_observation
+from .ppo_features import OBSERVATION_SIZE, build_ppo_observation
 from .rule_based_engine import FIXED_CYCLE_ORDER, RuleBasedEngine, YELLOW_SECONDS
 from app.schemas.traffic import ApproachState, TrafficState
 
@@ -119,6 +119,34 @@ QUEUE_SATURATION_VEH = 100.0
 # saja. Itu mengubah keluaran CV produksi, jadi belum dikerjakan di sini.
 BAGI_ARUS_DUA_ARAH = 2.0
 
+# KALIBRASI PERMINTAAN (30 Agustus) -- ini KEPUTUSAN PEMODELAN, bukan perbaikan
+# bug. Wajib disebut terang-terangan di laporan teknis, jangan disembunyikan.
+#
+# Alasannya: jaringan hasil impor OpenStreetMap memodelkan simpang lebih kecil
+# daripada aslinya -- 2 lajur per lengan (kapasitas ~1,00 kend/detik) dan ruas
+# pendekat sangat pendek (north cuma 62 m, tanpa ruas apa pun di belakangnya).
+# Akibatnya permintaan lapangan apa adanya menghasilkan JENUH PERMANEN: 227
+# kendaraan tidak bisa masuk simulasi sama sekali, dan setiap pilihan durasi
+# lampu menghasilkan kemacetan yang sama.
+#
+# Itu bukan sekadar "kurang mirip lapangan" -- dalam kondisi jenuh permanen
+# PPO TIDAK PUNYA APA PUN UNTUK DIPELAJARI, karena semua aksi berakhir sama.
+#
+# Faktor di bawah DIUKUR, bukan ditebak. Disapu 4 nilai, 3 seed, 3 panjang
+# rotasi, menilai seberapa besar reward BERBEDA antar-aksi (makin besar =
+# makin bisa dipelajari):
+#   skala 1,00 -> antrean 32,4 | 227 nyangkut | beda reward 0,0888
+#   skala 0,60 -> antrean 22,6 |  33 nyangkut | beda reward 0,1186
+#   skala 0,40 -> antrean 16,6 |   4 nyangkut | beda reward 0,1296  <- dipilih
+#   skala 0,25 -> antrean 11,6 |   0 nyangkut | beda reward 0,1041
+# 0,40 adalah puncaknya: di bawah itu lalu lintas terlalu sepi sehingga
+# pengaturan lampu kembali kurang berpengaruh.
+#
+# Catatan kejujuran: antrean simulasi pada skala ini (16,6) masih di atas
+# antrean nyata di lapangan (2,7 kendaraan, dari snapshot_zona.csv). Kalibrasi
+# ini mengejar lingkungan yang BISA DIPELAJARI, bukan replika lapangan.
+SKALA_PERMINTAAN = 0.40
+
 
 def _floor_five_seconds(timestamp: str) -> str:
     parsed = datetime.fromisoformat(str(timestamp).strip().replace("Z", "+00:00"))
@@ -165,6 +193,7 @@ def load_demand_profiles(
         {
             approach: grouped[timestamp].get(approach, 0.0)
             / BAGI_ARUS_DUA_ARAH
+            * SKALA_PERMINTAAN
             * (60.0 / FEATURE_WINDOW_SECONDS)
             for approach in FIXED_CYCLE_ORDER
         }
@@ -220,7 +249,7 @@ class SmartTwinSumoEnv(gym.Env[np.ndarray, np.ndarray]):
         # train_ppo.py tidak error dan metadata training lama tetap terbaca,
         # tapi mengubahnya TIDAK berpengaruh pada simulasi.
         self.decision_seconds = int(decision_seconds)
-        self.observation_space = spaces.Box(0.0, 1.0, shape=(25,), dtype=np.float32)
+        self.observation_space = spaces.Box(0.0, 1.0, shape=(OBSERVATION_SIZE,), dtype=np.float32)
         # Empat durasi hijau saja (utara, timur, selatan, barat). Urutan rotasi
         # bukan keputusan PPO -- lihat _set_action().
         self.action_space = spaces.MultiDiscrete([len(GREEN_OPTIONS)] * len(FIXED_CYCLE_ORDER))

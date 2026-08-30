@@ -93,7 +93,7 @@ class PPOEngine:
         forecast: dict[str, Any] | None = None,
         forecast_weight: float = 0.3,
     ) -> list[float]:
-        """Bentuk 25 fitur ternormalisasi dengan urutan yang stabil.
+        """Bentuk 21 fitur ternormalisasi dengan urutan yang stabil.
 
         20 fitur traffic = 4 approach x (volume, queue kendaraan, queue meter,
         density, speed), ditambah one-hot fase aktif (4) dan green saat ini (1).

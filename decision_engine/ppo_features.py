@@ -42,7 +42,22 @@ FEATURE_SCALES = {
     "densityIndex": 33.0,
     "avgSpeedKmh": 60.0,
 }
-OBSERVATION_SIZE = 25
+# BUG J (diperbaiki 30 Agustus): dulu 25 fitur, 4 di antaranya one-hot fase
+# aktif. Fitur itu KONSTAN sepanjang training -- terukur `[1,0,0,0]` di seluruh
+# observasi -- karena sejak Bug A diperbaiki, satu langkah = satu rotasi penuh
+# yang selalu dimulai dari FIXED_CYCLE_ORDER[0].
+#
+# Itu bukan sekadar 16% masukan yang mubazir. Saat inference, `signal_service`
+# memanggil engine dengan `currentPhase=active_approach` yang BERPUTAR keempat
+# lengan, sehingga bobot untuk 3 lengan lain -- yang selama training inputnya
+# selalu nol dan karena itu tidak pernah mendapat gradien bermakna -- ikut
+# aktif dengan nilai yang praktis masih acak. Model diberi derau, bukan
+# informasi.
+#
+# Dihapus daripada dipaksakan: menyamakannya secara benar berarti mengubah satu
+# langkah training menjadi satu FASE (bukan satu rotasi), yaitu perubahan
+# desain besar yang belum dikerjakan.
+OBSERVATION_SIZE = 21
 
 
 def _safe_float(value: Any) -> float:
@@ -75,11 +90,8 @@ def build_ppo_observation(
             value = _safe_float(getattr(item, feature_name, 0))
             observation.append(min(1.0, value / FEATURE_SCALES[feature_name]))
 
-    normalized_phase = str(current_phase).lower()
-    observation.extend(
-        1.0 if normalized_phase == approach else 0.0
-        for approach in FIXED_CYCLE_ORDER
-    )
+    # One-hot fase aktif DIHAPUS -- lihat catatan di OBSERVATION_SIZE.
+    # Parameter current_phase dipertahankan agar pemanggil lama tidak error.
     observation.append(min(1.0, max(0.0, float(current_green_seconds) / 60.0)))
     if len(observation) != OBSERVATION_SIZE:
         raise RuntimeError(f"Observation PPO harus {OBSERVATION_SIZE} fitur")

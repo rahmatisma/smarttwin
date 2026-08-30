@@ -597,3 +597,54 @@ Setelah Bug O diperbaiki, antrean simulasi masih **42,2 kendaraan** vs
 masuk. Jadi Bug N-1 (kurang lajur) dan N-2 (ruas terlalu pendek) **tetap
 berlaku** dan masih perlu verifikasi jumlah lajur asli.
 
+---
+
+## 📋 STATUS AKHIR — siap untuk training ke-5 (30 Agustus)
+
+Arahan pembimbing: *"simulasikan saja, tidak harus sempurna dan sesuai sekali."*
+Itu menyederhanakan keputusan — **jaringan SUMO tidak dibangun ulang**, cukup
+permintaannya dikalibrasi. Yang tetap wajib dibereskan adalah **kejenuhan
+permanen**, karena itu bukan soal kemiripan dengan lapangan melainkan soal
+PPO punya sesuatu untuk dipelajari atau tidak.
+
+| Bug | Status |
+|---|---|
+| **E** reward throughput tidak dinormalkan waktu | ✅ Diperbaiki — korelasi durasi↔reward +0,978 → −0,983 |
+| **F** evaluasi durasi tidak setara | ✅ Diperbaiki — skew 18–20% → 1,9–4,7% |
+| **G** skala `volume` salah satuan | ✅ Sisi PPO diperbaiki (60→10). Sisi produksi **sengaja tidak diubah** — divalidasi SUMO, memperbaikinya justru memperburuk delay +3,9% |
+| **H** cap injeksi memotong permintaan | ✅ **Hilang sendiri** setelah kalibrasi — yang kena cap 11,6% → **0,00%** |
+| **I** profil permintaan dibekukan | ✅ Diperbaiki — throughput +48%, antrean maksimum −30% |
+| **J** 4 fitur observasi konstan | ✅ Dihapus, observasi 25 → 21 fitur (+1 test regresi) |
+| **K/N** lingkungan jenuh permanen | ✅ Ditangani lewat kalibrasi `SKALA_PERMINTAAN = 0,40` (diukur, bukan ditebak) |
+| **L** nama checkpoint bentrok antar-run | ✅ Diperbaiki — diturunkan dari `--output` + subfolder per-run |
+| **O** permintaan terhitung 2× (garis CV dua arah) | ✅ Diperbaiki — nyangkut tak bisa masuk 622 → 176 |
+
+**Verifikasi:** `pytest backend/` = **91 passed**, 1 gagal (checkpoint lama
+tidak kompatibel — memang begitu, observasi berubah 25→21; beres sendiri
+setelah training ulang). Smoke test training 600 langkah berjalan penuh dan
+menghasilkan model `Box(21,)` + `MultiDiscrete([10 10 10 10])` yang benar.
+
+### Yang TIDAK diperbaiki, dan alasannya
+
+- **N-1 (kurang lajur) & N-2 (ruas pendekat pendek)** — akar masalahnya ada di
+  jaringan hasil impor OSM. Tidak dibangun ulang sesuai arahan pembimbing;
+  dampaknya ditangani lewat kalibrasi permintaan.
+- **Antrean simulasi (16,6) masih di atas antrean lapangan (2,7)** —
+  disadari dan diterima. Kalibrasi mengejar lingkungan yang bisa dipelajari,
+  bukan replika lapangan.
+- **Arah crossing belum difilter di CV** — pembagi 2 masih taksiran. Perbaikan
+  benar-nya mengubah keluaran CV produksi, jadi ditunda.
+
+### Kalimat untuk laporan teknis
+
+> "Permintaan lalu lintas pada lingkungan pelatihan dikalibrasi agar tingkat
+> kejenuhan simpang simulasi berada pada rentang operasional yang wajar.
+> Kalibrasi diperlukan karena jaringan hasil impor OpenStreetMap memodelkan
+> lebih sedikit lajur dan ruas pendekat yang lebih pendek daripada simpang
+> sebenarnya, sehingga permintaan lapangan apa adanya menghasilkan kondisi
+> jenuh permanen yang justru tidak merepresentasikan kondisi nyata — antrean
+> terukur di lapangan rata-rata hanya 2,7 kendaraan."
+
+**Jangan** menulis "simulasi merepresentasikan Simpang Pingit secara akurat".
+Tulis: "simulasi berbasis geometri Simpang Pingit dengan permintaan
+terkalibrasi".

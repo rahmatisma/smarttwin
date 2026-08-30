@@ -81,10 +81,20 @@ def main() -> None:
         filename=str(output.parent / "training_monitor.csv"),
         override_existing=resume_path is None,
     )
+    # BUG L (diperbaiki 30 Agustus): name_prefix dulu di-hardcode
+    # "smarttwin_ppo" TANPA memedulikan --output, sehingga run yang berbeda
+    # (v3, v4, ...) menulis checkpoint dengan nama file yang SAMA PERSIS di
+    # folder yang sama dan saling menimpa. Itu pernah menyulitkan memastikan
+    # checkpoint mana milik run mana -- harus dibuktikan lewat
+    # `action_space.nvec` dan `num_timesteps`, bukan nama filenya.
+    #
+    # Sekarang diturunkan dari --output, dan tiap run punya subfolder sendiri
+    # supaya tidak ada lagi tabrakan nama antar-run.
+    nama_run = output.name
     callback = CheckpointCallback(
         save_freq=args.checkpoint_freq,
-        save_path=str(output.parent / "checkpoints"),
-        name_prefix="smarttwin_ppo",
+        save_path=str(output.parent / "checkpoints" / nama_run),
+        name_prefix=nama_run,
     )
     tensorboard_log = str(output.parent / "tensorboard") if importlib.util.find_spec("tensorboard") else None
     batch_size = min(64, args.n_steps)
