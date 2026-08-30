@@ -9,6 +9,7 @@ forecasting/.venv/
 .env
 .env.*
 !.env.example
+.tmp-chrome-*/
 
 # pip cache — jangan pernah di-commit, ini cache lokal
 pip-cache/
