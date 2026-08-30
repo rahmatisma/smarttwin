@@ -276,3 +276,51 @@ training mendekati kenyataan, sebelum menilai PPO lagi.
 
 **Kesimpulan operasional tidak berubah: PPO tetap belum boleh diaktifkan.**
 Bedanya, sekarang alasannya sahih — bukan lagi karena artefak pengukuran.
+
+---
+
+## 12. Training v4 SELESAI (30 Agustus 07:28) — koreksi klaim plateau
+
+Training tuntas: **100.352 langkah, 8.362 episode, 9,28 jam.**
+
+| Desil | Episode | Reward | | Desil | Episode | Reward |
+|---|---|---:|---|---|---|---:|
+| 0 | 0–836 | −1,0774 | | 5 | 4.180–5.016 | −0,2202 |
+| 1 | 836–1.672 | −0,5490 | | 6 | 5.016–5.852 | −0,2346 |
+| 2 | 1.672–2.508 | −0,3910 | | 7 | 5.852–6.688 | −0,1780 |
+| 3 | 2.508–3.344 | −0,2818 | | 8 | 6.688–7.524 | −0,1733 |
+| 4 | 3.344–4.180 | −0,2418 | | 9 | 7.524–8.362 | **−0,1492** |
+
+200 episode pertama −1,3950 → 200 terakhir −0,1391.
+
+### ⚠️ Koreksi: klaim "plateau sejak 40k" terlalu kuat
+
+Di bagian 2 saya menulis *"perbaikan berhenti sekitar 40.000 langkah"* dan
+*"menyelesaikan sisa 80k→100k kemungkinan besar tidak akan mengubah apa pun"*.
+Itu **ditulis berdasarkan data yang baru sampai 80k**, dan ternyata **tidak
+tepat**.
+
+Data lengkap menunjukkan reward **terus membaik** sampai akhir:
+desil 5 → 9 bergerak −0,220 → −0,149 (**membaik ~32%**), bukan datar.
+
+Yang benar: **laju perbaikannya melambat drastis**, bukan berhenti. Desil 0→4
+memperbaiki reward sebesar 0,84; desil 5→9 hanya 0,07 — sekitar 12× lebih
+lambat. Jadi kesimpulan praktis "jangan naikkan timestep jauh di atas 100k"
+tetap masuk akal, tapi alasannya **imbal hasil yang mengecil**, bukan plateau.
+
+### v4 tidak dievaluasi — dan itu disengaja
+
+`smarttwin_ppo_v4.zip` **sudah usang sebelum sempat dievaluasi**, karena
+`FEATURE_SCALES["volume"]` diubah 60 → 10 (Bug G) setelah training ini mulai.
+Model dilatih dengan skala 60; kalau dievaluasi sekarang, environment akan
+menyuguhkan observasi berskala 10 — **nilai fitur volume jadi 6× lebih besar
+daripada yang pernah dilihat model saat belajar**. Hasilnya tidak akan
+mencerminkan kemampuan model.
+
+Mengevaluasinya butuh mengembalikan skala ke 60 sementara — bisa dilakukan,
+tapi nilainya kecil: v4 masih mengandung Bug E, H, I, J, dan K yang belum
+diperbaiki. Angkanya tidak akan dipakai untuk keputusan apa pun.
+
+**v4 diperlakukan sebagai training terakhir sebelum perbaikan**, dan
+`training_monitor.csv`-nya tetap disimpan sebagai bukti bahwa proses belajarnya
+sehat.
