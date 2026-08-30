@@ -30,6 +30,7 @@ Penjelasan tiap kotak diagram untuk **dijelaskan ke orang lain** (dosen pembimbi
 
 | Dokumen | Isinya |
 |---|---|
+| [`alur-kerja-sistem-non-teknis.md`](alur-kerja-sistem-non-teknis.md) | Alur kerja sistem dari kamera sampai rekomendasi lampu, dengan flowchart, **tanpa istilah pemrograman** — buat dibaca siapa saja (termasuk dosen pembimbing) yang mau paham cara kerja sistem tanpa harus baca kode |
 | [`../CLAUDE.md`](../CLAUDE.md) | Konteks proyek, konvensi, ringkasan arsitektur. Paling singkat, buat orientasi awal |
 | [`data-contract.md`](data-contract.md) | Kontrak **semantik** antar modul — field apa saja yang ada dan artinya apa (gaya Pydantic, snake_case). Kalau ubah field yang menyeberang modul, sepakati di sini dulu |
 | [`sop-demo-end-to-end.md`](sop-demo-end-to-end.md) | **Urutan nyalakan sistem sebelum demo/rekaman.** Wajib diikuti — kalau worker tidak jalan, dashboard diam-diam melewati kotak 7/8/9 tanpa error |
