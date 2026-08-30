@@ -18,18 +18,8 @@ export default function SharedSignalPanels({
   selectedApproach?: ApproachSelection;
 }) {
   const { scenario } = useScenario();
-  const [loadingGraceElapsed, setLoadingGraceElapsed] = useState(false);
 
-  useEffect(() => {
-    const timer = window.setTimeout(() => setLoadingGraceElapsed(true), 2500);
-    return () => window.clearTimeout(timer);
-  }, []);
-
-  const isInitialLoading =
-    !loadingGraceElapsed &&
-    activeSignal.source === "mock" &&
-    scenario === "Traffic Realtime" &&
-    !activeRecommendation;
+  const isInitialLoading = activeSignal.source === "mock" && scenario === "Traffic Realtime" && !activeRecommendation;
 
   const visualPhase = activeSignal.currentPhase || null;
   const [now, setNow] = useState(Date.now());

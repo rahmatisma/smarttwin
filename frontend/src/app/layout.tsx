@@ -34,13 +34,9 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="id" translate="no" className="notranslate">
-      <head>
-        <meta name="google" content="notranslate" />
-      </head>
+    <html lang="id">
       <body
-        translate="no"
-        className={`${inter.variable} ${spaceGrotesk.variable} ${jetbrainsMono.variable} notranslate font-sans antialiased bg-bg text-text`}
+        className={`${inter.variable} ${spaceGrotesk.variable} ${jetbrainsMono.variable} font-sans antialiased bg-bg text-text`}
       >
         <ScenarioProvider>
           <LanguageProvider>{children}</LanguageProvider>

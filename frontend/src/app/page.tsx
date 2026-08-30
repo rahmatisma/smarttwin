@@ -43,25 +43,6 @@ const DASHBOARD_INTERSECTIONS = ALL_INTERSECTIONS.filter(
   (intersection) => intersection.databaseId === DEFAULT_INTERSECTION_ID
 );
 
-// Cache sesi di level module bertahan saat Next.js meng-unmount halaman karena
-// navigasi sidebar. Backend/SUMO memang tetap hidup; state tampilan juga harus
-// langsung melanjutkan nilai terakhir, bukan kembali ke skeleton/null.
-const dashboardSessionCache: {
-  initialized: boolean;
-  trafficStates: Record<string, TrafficState | null>;
-  signalStatuses: Record<string, SignalStatus | null>;
-  recommendations: Record<string, Recommendation | null>;
-  forecasts: Record<string, ForecastResponse | null>;
-  coords: Record<string, { latitude: number | null; longitude: number | null } | null>;
-} = {
-  initialized: false,
-  trafficStates: {},
-  signalStatuses: {},
-  recommendations: {},
-  forecasts: {},
-  coords: {},
-};
-
 async function fetchOptional<T>(label: string, request: Promise<T>): Promise<T | null> {
   try {
     return await request;
@@ -338,7 +319,6 @@ export default function DashboardPage() {
   
   const videoTimeRef = useRef<number>(0);
   const requestIdRef = useRef<number>(0);
-  const initialDashboardLoadDoneRef = useRef(dashboardSessionCache.initialized);
 
   /*
    * simpang4-pingit adalah SATU simpang 4 lengan, bukan 4 simpang
@@ -350,27 +330,24 @@ export default function DashboardPage() {
     useState<ApproachSelection>("all");
 
   const [allTrafficStates, setAllTrafficStates] =
-    useState<Record<string, TrafficState | null>>(() => dashboardSessionCache.trafficStates);
+    useState<Record<string, TrafficState | null>>({});
 
   const [allSignalStatuses, setAllSignalStatuses] =
-    useState<Record<string, SignalStatus | null>>(() => dashboardSessionCache.signalStatuses);
+    useState<Record<string, SignalStatus | null>>({});
 
   const [allRecommendations, setAllRecommendations] =
-    useState<Record<string, Recommendation | null>>(() => dashboardSessionCache.recommendations);
+    useState<Record<string, Recommendation | null>>({});
 
   const [allForecasts, setAllForecasts] =
-    useState<Record<string, ForecastResponse | null>>(() => dashboardSessionCache.forecasts);
+    useState<Record<string, ForecastResponse | null>>({});
 
   const [allCoords, setAllCoords] =
-    useState<Record<string, { latitude: number | null; longitude: number | null } | null>>(
-      () => dashboardSessionCache.coords
-    );
+    useState<Record<string, { latitude: number | null; longitude: number | null } | null>>({});
 
   const [liveSumoSignal, setLiveSumoSignal] = useState<SignalStatus | null>(null);
-  const [cctvPlaying, setCctvPlaying] = useState(false);
 
   const [loading, setLoading] =
-    useState(!dashboardSessionCache.initialized);
+    useState(true);
 
   const [error, setError] =
     useState<string | null>(null);
@@ -382,14 +359,6 @@ export default function DashboardPage() {
     condition: "Data tidak tersedia",
     tempC: null,
   });
-
-  useEffect(() => {
-    dashboardSessionCache.trafficStates = allTrafficStates;
-    dashboardSessionCache.signalStatuses = allSignalStatuses;
-    dashboardSessionCache.recommendations = allRecommendations;
-    dashboardSessionCache.forecasts = allForecasts;
-    dashboardSessionCache.coords = allCoords;
-  }, [allCoords, allForecasts, allRecommendations, allSignalStatuses, allTrafficStates]);
 
   useEffect(() => {
     async function fetchWeather() {
@@ -476,49 +445,14 @@ export default function DashboardPage() {
 
       try {
 
-        // CCTV `playing/paused` dan pergantian scenario memang memicu refresh
-        // data, tetapi tidak boleh mengembalikan seluruh halaman ke skeleton.
-        // Skeleton hanya untuk load pertama sejak page dibuka.
-        if (!initialDashboardLoadDoneRef.current) setLoading(true);
+        setLoading(true);
         setError(null);
 
         const results = await Promise.all(
           DASHBOARD_INTERSECTIONS.map(async (inter) => {
             try {
                 const hasLiveBackend =
-                  inter.databaseId === DEFAULT_INTERSECTION_ID && cctvPlaying;
-                const signalRequest = hasLiveBackend
-                  ? fetchOptional(`Status sinyal ${inter.name}`, fetchSignalStatus(inter.databaseId))
-                  : Promise.resolve(null);
-                const recommendationRequest = hasLiveBackend
-                  ? (scenario === "Traffic Realtime"
-                      ? fetchOptional(`Rekomendasi ${inter.name}`, fetchRecommendation(inter.databaseId))
-                      : fetchOptional(`Digital Twin Scenario ${inter.name}`, fetchDigitalTwinScenarios(inter.databaseId).then(data => {
-                          const candidate = data?.candidates?.find((c) => c.candidateId === scenario.toLowerCase());
-                          return candidate ? candidateToRecommendation(candidate, data?.updatedAt ?? null) : null;
-                        })))
-                  : Promise.resolve(null);
-
-                // Render awal tidak menunggu endpoint live lebih dari 1,5 detik,
-                // tetapi hasil yang datang sesudah batas itu tetap langsung
-                // dipasang. Sebelumnya hasil terlambat dibuang dan card harus
-                // menunggu polling berikutnya.
-                void signalRequest.then((value) => {
-                  if (value) {
-                    setAllSignalStatuses((previous) => ({
-                      ...previous,
-                      [inter.id]: value,
-                    }));
-                  }
-                });
-                void recommendationRequest.then((value) => {
-                  if (value) {
-                    setAllRecommendations((previous) => ({
-                      ...previous,
-                      [inter.id]: value,
-                    }));
-                  }
-                });
+                  inter.databaseId === DEFAULT_INTERSECTION_ID;
                 const [
                   trafficState,
                   signalStatus,
@@ -530,10 +464,15 @@ export default function DashboardPage() {
                     fetchTrafficState(inter.databaseId, videoTimeRef.current)
                   ),
                   hasLiveBackend
-                    ? fetchOptionalWithin(`Status sinyal ${inter.name}`, signalRequest)
+                    ? fetchOptionalWithin(`Status sinyal ${inter.name}`, fetchSignalStatus(inter.databaseId))
                     : null,
                   hasLiveBackend
-                    ? fetchOptionalWithin(`Rekomendasi ${inter.name}`, recommendationRequest)
+                    ? (scenario === "Traffic Realtime"
+                        ? fetchOptionalWithin(`Rekomendasi ${inter.name}`, fetchRecommendation(inter.databaseId))
+                        : fetchOptionalWithin(`Digital Twin Scenario ${inter.name}`, fetchDigitalTwinScenarios(inter.databaseId).then(data => {
+                        const candidate = data?.candidates?.find((c) => c.candidateId === scenario.toLowerCase());
+                        return candidate ? candidateToRecommendation(candidate, data?.updatedAt ?? null) : null;
+                      })))
                     : null,
                   fetchOptionalWithin(`Koordinat ${inter.name}`, fetchIntersectionCoords(inter.databaseId)),
                 ]);
@@ -582,19 +521,17 @@ export default function DashboardPage() {
         // Forecast bukan syarat untuk menampilkan dashboard utama. Inferensi
         // LSTM dimuat setelah traffic/sinyal/rekomendasi tampil agar request
         // forecast yang lambat tidak menahan seluruh halaman di skeleton.
-        if (cctvPlaying) {
-          void fetchOptional(
-            "Forecast Simpang Pingit",
-            fetchForecast(DEFAULT_INTERSECTION_ID)
-          ).then((forecast) => {
-            if (forecast) {
-              setAllForecasts((previous) => ({
-                ...previous,
-                intersection4: forecast,
-              }));
-            }
-          });
-        }
+        void fetchOptional(
+          "Forecast Simpang Pingit",
+          fetchForecast(DEFAULT_INTERSECTION_ID)
+        ).then((forecast) => {
+          if (forecast) {
+            setAllForecasts((previous) => ({
+              ...previous,
+              intersection4: forecast,
+            }));
+          }
+        });
 
       } catch (err) {
 
@@ -610,8 +547,7 @@ export default function DashboardPage() {
         );
 
       } finally {
-        initialDashboardLoadDoneRef.current = true;
-        dashboardSessionCache.initialized = true;
+
         setLoading(false);
 
       }
@@ -633,7 +569,7 @@ export default function DashboardPage() {
           DASHBOARD_INTERSECTIONS.map(async (inter) => {
             try {
               const hasLiveBackend =
-                inter.databaseId === DEFAULT_INTERSECTION_ID && cctvPlaying;
+                inter.databaseId === DEFAULT_INTERSECTION_ID;
               const [
                 trafficState,
                 signalStatus,
@@ -757,7 +693,7 @@ export default function DashboardPage() {
       }
     };
 
-  }, [scenario, cctvPlaying]);
+  }, [scenario]);
 
   /*
    * =========================================================
@@ -806,18 +742,6 @@ export default function DashboardPage() {
     //    ambil dari situ, tidak lewat selectedIntersection (konsep lama)
     //    atau agregasi lintas-simpang (getAggregatedSignal dulu selalu
     //    menampilkan "Semua Fase"/"ALL" walau datanya sendiri live).
-    if (!cctvPlaying) {
-      return {
-        intersectionId: "simpang4-pingit",
-        timestamp: new Date().toISOString(),
-        currentPhase: "WAITING_CCTV",
-        phaseName: "Menunggu CCTV berjalan",
-        remainingSeconds: 0,
-        cycleTimeSeconds: 0,
-        source: "mock",
-      } as SignalStatus;
-    }
-
     if (liveSumoSignal) return liveSumoSignal;
 
     const dbSignal = allSignalStatuses["intersection4"];
@@ -833,7 +757,7 @@ export default function DashboardPage() {
       cycleTimeSeconds: 0,
       source: "mock",
     } as SignalStatus;
-  }, [allSignalStatuses, cctvPlaying, liveSumoSignal]);
+  }, [allSignalStatuses, liveSumoSignal]);
 
   // simpang4-pingit adalah satu-satunya intersection nyata (lihat
   // catatan di lib/intersections.ts) -- sama seperti
@@ -1103,7 +1027,6 @@ export default function DashboardPage() {
                 onTimeUpdate={(time) => {
                   videoTimeRef.current = time;
                 }}
-                onPlaybackChange={setCctvPlaying}
               />
             </div>
 

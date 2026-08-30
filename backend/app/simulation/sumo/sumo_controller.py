@@ -652,16 +652,7 @@ class SumoController:
                     startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
                     startupinfo.wShowWindow = subprocess.SW_HIDE
                     kwargs["startupinfo"] = startupinfo
-                    process = original_popen(*args, **kwargs)
-                    # Jangan menunggu traci.start() selesai tersambung untuk
-                    # menyembunyikan renderer. Loading network dapat memakan
-                    # beberapa detik dan selama itu window SUMO-GUI sempat
-                    # berkedip di desktop. Tangkap sejak Popen mengembalikan
-                    # PID; thread tetap mengulang karena FOX dapat membuat
-                    # ulang top-level window sesudah startup.
-                    self._hide_windows_for_process(process.pid)
-                    self._keep_renderer_window_hidden(process.pid)
-                    return process
+                    return original_popen(*args, **kwargs)
 
                 traci_main.subprocess.Popen = hidden_popen
                 try:

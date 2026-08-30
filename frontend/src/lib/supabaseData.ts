@@ -25,7 +25,6 @@ const API_BASE_URL =
 const FORECAST_ZONE_CAPACITY = 33;
 const FORECAST_REFRESH_INTERVAL_MS = 15_000;
 const FORECAST_FAILURE_COOLDOWN_MS = 60_000;
-const LIVE_API_TIMEOUT_MS = 5_000;
 
 let forecastCache: ForecastResponse | null = null;
 let forecastCacheTime = 0;
@@ -37,20 +36,6 @@ let recommendationCache: Recommendation | null = null;
 let recommendationRequestInFlight: Promise<Recommendation | null> | null = null;
 const intersectionRowIdCache = new Map<string, number | null>();
 const intersectionRowIdRequests = new Map<string, Promise<number | null>>();
-
-async function fetchLiveApi(
-  input: string,
-  init?: RequestInit,
-  timeoutMs = LIVE_API_TIMEOUT_MS
-): Promise<Response> {
-  const controller = new AbortController();
-  const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    return await fetch(input, { ...init, signal: controller.signal });
-  } finally {
-    window.clearTimeout(timeoutId);
-  }
-}
 
 /* =========================================================
  * INTERSECTION LOOKUP
@@ -263,7 +248,7 @@ export async function fetchSignalStatus(
   if (intersectionId !== DEFAULT_INTERSECTION_ID) return null;
   if (signalStatusRequestInFlight) return signalStatusRequestInFlight;
 
-  signalStatusRequestInFlight = fetchLiveApi(`${API_BASE_URL}/signal/status`)
+  signalStatusRequestInFlight = fetch(`${API_BASE_URL}/signal/status`)
     .then(async (response) => {
       if (!response.ok) return signalStatusCache;
       signalStatusCache = (await response.json()) as SignalStatus;
@@ -297,7 +282,7 @@ export async function fetchRecommendation(
   if (intersectionId !== DEFAULT_INTERSECTION_ID) return null;
   if (recommendationRequestInFlight) return recommendationRequestInFlight;
 
-  recommendationRequestInFlight = fetchLiveApi(`${API_BASE_URL}/recommendation`, {
+  recommendationRequestInFlight = fetch(`${API_BASE_URL}/recommendation`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ intersectionId }),
@@ -656,7 +641,7 @@ export async function fetchDigitalTwinScenarios(
   intersectionId: string = DEFAULT_INTERSECTION_ID
 ): Promise<DigitalTwinScenarioResponse | null> {
   try {
-    const response = await fetchLiveApi(
+    const response = await fetch(
       `${API_BASE_URL}/api/v1/digital-twin/scenarios/latest?intersectionId=${encodeURIComponent(
         intersectionId
       )}`
