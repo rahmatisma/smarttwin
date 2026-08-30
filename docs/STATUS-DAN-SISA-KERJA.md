@@ -23,7 +23,7 @@ Dokumen lain di `docs/` sekarang cuma 2 jenis: **cara kerja** (rujukan teknis) d
 | 7 | Scenario Generator | 90% | **Sudah live** lewat cache |
 | 8 | Traffic Simulation | 92% | **Sudah live**, sudah divalidasi multi-seed |
 | 9 | Performance Analysis (LOS) | 90% | 4 metrik nyata, tampil di dashboard |
-| 10 | Adaptive Decision Engine | 65% / 90% | **Berubah 29 Agustus malam:** training v3 (300k) ternyata tidak valid — 3 bug baru ditemukan & diperbaiki di environment (lihat P-1, "Bug A/B/D"). Training ulang v4 (100k) sedang berjalan (dijalankan Rahmat). Peran tetap diisi Scenario Generator sampai v4 lulus gerbang kualitas |
+| 10 | Adaptive Decision Engine | 70% / 90% | **Berubah 30 Agustus:** v4 (100k) dievaluasi lalu dikoreksi dua kali (Bug F/G); 11 bug tambahan (E–P) ditemukan & diperbaiki sebelum training v5. **v5 (checkpoint 60k, `smarttwin_ppo_v5.zip`) sekarang menang/seri di 9/9 perbandingan metrik lalu lintas 3-seed** — lihat P-1f. Tapi Bug P (respons per-lengan ke permintaan) diterima sebagai keterbatasan terdokumentasi, bukan diselesaikan — PPO **belum** diaktifkan sebagai default, peran tetap diisi Scenario Generator |
 | 11 | Signal Timing Recommendation | 90% | S-1 selesai — `/signal/status` sekarang baca cache skenario. Tapi lihat kotak 12: panel yang menampilkannya sedang tidak ter-build |
 | 12 | Dashboard | 92% | ✅ Build hijau lagi (S-8 diperbaiki 29 Agustus malam), badge `source` + LOS ada |
 
@@ -327,7 +327,29 @@ P-1a, P-1c, P-1d ✅ selesai. Sisanya:
 3. **Commit checkpoint v4** kalau lulus gerbang kualitas — ini juga otomatis memperbaiki P-1a (test integrasi yang sekarang gagal karena checkpoint basi)
 4. Kalau lulus: aktifkan lewat `SMARTTWIN_DECISION_ENGINE=ppo` dan update dokumen ini + kalimat "Cara menjawab juri" di bagian 7
 
-**Aturan berhenti tetap sama:** kalau setelah v4 PPO tetap kalah pada throughput, **jangan dipaksakan aktif**. Kotak 10 tetap fungsional dengan Scenario Generator, dan PPO tetap layak dilaporkan sebagai pengembangan yang berhasil dilatih plus 3 bug metodologi yang ditemukan dan diperbaiki lewat investigasi sendiri — itu cerita yang kuat untuk juri, menang atau tidak. **PPO yang menurunkan throughput lebih buruk daripada rule-based yang bekerja.**
+**Aturan berhenti di atas sudah dipenuhi dan terlampaui — lihat P-1f.** v4 sempat kalah throughput di semua 3 seed, tapi setelah 11 bug tambahan diperbaiki (E–P) dan training v5 dijalankan, PPO tidak lagi kalah pada metrik manapun. Bagian di atas (P-1, sampai sini) dipertahankan sebagai riwayat kenapa keputusan bobot/desain diambil — jangan dianggap status terkini.
+
+### ✅ P-1f. Training v5 — hasil akhir: menang 7/seri 2/kalah 0, tapi Bug P (fairness antar-lengan) diterima sebagai keterbatasan — Rahmat, 30 Agustus
+
+Setelah v4, ditemukan **11 bug tambahan** (Bug E sampai P) lewat audit menyeluruh sebelum training ulang — normalisasi throughput per-detik, durasi evaluasi tidak setara, skala fitur `volume` 6× kebesaran, permintaan training dibekukan sepanjang episode, one-hot fase yang konstan saat training tapi aktif saat inference, dan yang paling signifikan: **data crossing CV menghitung dua arah sekaligus** (Bug O) sehingga permintaan yang di-training 2,2× lebih besar dari kapasitas jaringan nyata. Detail penuh, termasuk cara tiap bug diukur (bukan diasumsikan): `docs/audit-bug-ppo-sebelum-training-ke-5.md`.
+
+**Bug P** (ditemukan saat memantau training v5 di checkpoint 30k): reward tidak bisa membedakan "keempat lengan antre rata" dari "satu lengan menumpuk, tiga kosong" — PPO menemukan jalan pintas dan berhenti belajar alokasi adaptif. **4 percobaan perbaikan berbeda** (2 bentuk reward fairness + entropi dinaikkan, diuji di 5 checkpoint terpisah) semuanya gagal dengan pola identik: lengan barat dan selatan tidak pernah menang uji permintaan-ekstrem, di percobaan manapun. Kesimpulannya kemungkinan besar bukan bug RL yang belum ditemukan, melainkan keterbatasan struktural — lengan utara punya service rate jaringan terburuk (Bug N-2), jadi kebijakan yang hampir tanpa syarat mengutamakannya memang mendekati optimal untuk reward saat ini.
+
+**Diputuskan (bersama Rahmat) untuk diterima sebagai keterbatasan terdokumentasi, bukan dikejar lebih jauh** — sesuai arahan dosen pembimbing untuk mensimulasikan tanpa harus sempurna, dan mengingat pola kegagalan yang konsisten di 4 percobaan berbeda menandakan kemungkinan kecil percobaan ke-5 akan berbeda hasilnya.
+
+**Hasil evaluasi resmi (checkpoint 60k, dipromosikan jadi `smarttwin_ppo_v5.zip`, 3 seed, `evaluate_ppo.py` versi Bug-F-fixed):**
+
+| Metrik | Seed 1000 | Seed 2000 | Seed 3000 |
+|---|---|---|---|
+| Antrean | −46,4% menang | −46,7% menang | −50,6% menang |
+| Waktu tunggu | −62,8% menang | −60,2% menang | −63,2% menang |
+| Throughput | +2,18% menang | −0,70% seri | −0,58% seri |
+
+**Total 9 perbandingan: menang 7, seri 2, kalah 0** — PPO tidak pernah kalah pada metrik lalu lintas manapun. Lompatan besar dari v4 (menang 3, kalah 4, seri 2). Detail lengkap: `docs/hasil-evaluasi-ppo-v5.md`.
+
+Sekaligus memperbaiki bug terpisah: `decision_engine/models/smarttwin_ppo.zip` (path default `PPOEngine`) adalah checkpoint v1 basi (ruang observasi 25 fitur, pra-Bug-J), bikin `test_real_checkpoint_reaches_recommendation_endpoint` gagal diam-diam ke `ppo-fallback-rule-based`. Sudah diganti checkpoint v5 — `pytest backend/tests/` sekarang **92/92 lulus**.
+
+**PPO masih belum diaktifkan sebagai default** (`SMARTTWIN_DECISION_ENGINE=ppo` tetap perlu diset manual) — bukan karena performa SUMO-nya buruk (sebaliknya, sekarang unggul), tapi karena Bug P membuat perilaku per-lengannya belum bisa dipercaya penuh untuk kondisi yang menyimpang jauh dari pola training. Cara melaporkan ini ke juri: lihat bagian 7, jawaban "Bagaimana dengan PPO?" sudah diperbarui.
 
 ### P-1e. Skenario di halaman Digital Twin tidak berefek + 3 kartu statistik kosong — Rahmat (diambil alih dari Melpi), ±3 jam
 
@@ -434,9 +456,9 @@ SETIAP REKAM: backend → worker --once --full-cycle (smoke test)
 > "Ke-12 kotak terimplementasi. Sebelas berjalan penuh dan terverifikasi. Kotak Adaptive Decision Engine saat ini dijalankan Scenario Generator berbasis simulasi SUMO — keputusannya diuji lewat tiga kandidat simulasi nyata sebelum dipakai."
 
 **"Bagaimana dengan PPO?"** — pertanyaan ini kemungkinan besar muncul karena PPO tertulis eksplisit di diagram
-> "PPO sudah dilatih 8.362 episode di lingkungan SUMO dengan kurva reward yang menunjukkan pembelajaran nyata, dan sudah terintegrasi ke backend lewat feature flag dengan fallback otomatis ke rule-based. Untuk demo ini kami menjalankan Scenario Generator karena validasi bahwa PPO mengungguli baseline pada metrik lalu lintas — terutama throughput — masih berjalan."
+> "PPO sudah dilatih dan dievaluasi lewat 3 seed simulasi SUMO independen: menang atau seri di sembilan dari sembilan perbandingan metrik lalu lintas melawan rule-based — antrean turun sekitar 47-51%, waktu tunggu turun sekitar 60-63%. Yang membuat kami belum mengaktifkannya sebagai default adalah pengujian perilaku terpisah yang menunjukkan modelnya belum sepenuhnya adaptif terhadap distribusi permintaan per-lengan secara real-time — kami memilih tetap memakai rule-based yang perilakunya sudah sepenuhnya bisa diprediksi sampai itu terbukti robust di seluruh kondisi."
 
-*Ini jawaban yang kuat DAN jujur: menunjukkan PPO nyata dikerjakan, sekaligus menjelaskan kenapa belum dipakai tanpa terdengar seperti kegagalan.*
+*Ini jawaban yang kuat DAN jujur: hasil SUMO-nya sekarang genuinely bagus, tapi tetap jujur soal keterbatasan yang belum selesai (Bug P) alih-alih diam-diam menyembunyikannya.*
 
 **"Apakah ini realtime?"**
 > "Pemrosesan berjalan realtime terhadap masukan video. Kami memakai rekaman CCTV Simpang Pingit karena tidak ada akses ke stream operasional Dishub — antarmuka masukannya sendiri menerima RTSP maupun file."
@@ -451,10 +473,9 @@ SETIAP REKAM: backend → worker --once --full-cycle (smoke test)
 
 ### JANGAN dikatakan
 
-- ❌ **"PPO mengalahkan rule-based"** — belum ada perbandingan sahih yang mendukungnya. Gerbang kualitas otomatis menolaknya, **tapi verdict itu sendiri juga tidak sahih** (Bug F, 30 Agustus). Yang bisa dikatakan: satu-satunya metrik yang sudah dinormalkan per satuan waktu (throughput) hasilnya **seri**
-- ❌ **"PPO kalah throughput 15%"** — angka itu melebih-lebihkan; sebagian artefak durasi simulasi tidak setara (Bug F). Setelah diperbaiki: −3,63% s/d +0,80% di 3 seed. Yang jujur: **PPO tidak pernah menang di throughput, tapi juga tidak kalah telak** — dua kali seri, sekali kalah tipis
-- ❌ **"PPO sebenarnya sudah setara, cuma salah ukur"** — sempat saya simpulkan begitu 30 Agustus pagi lalu **dikoreksi sendiri** siang itu setelah diukur ulang dengan benar di 3 seed: PPO menang 3, kalah 4, seri 2 dari 9 perbandingan
-- ❌ **"PPO sudah dipakai di sistem"** — default tetap rule-based; model sudah bisa dimuat (P-1a selesai) tapi belum diaktifkan sebagai default
+- ✅ **"PPO menang/seri di semua metrik lalu lintas 3-seed"** — ini sekarang BENAR untuk v5 (checkpoint 60k): menang 7, seri 2, kalah 0 dari 9 perbandingan. Boleh dikatakan. Lihat P-1f dan `docs/hasil-evaluasi-ppo-v5.md`. (Angka v4 di P-1b/P-1e -- menang 3 kalah 4 seri 2 -- sudah usang, jangan dikutip lagi)
+- ❌ **"PPO belajar alokasi adil per-lengan / sepenuhnya adaptif ke permintaan"** — TIDAK terbukti, dan bukti yang ada justru mengarah ke sebaliknya. Uji permintaan-ekstrem terkontrol (5 percobaan berbeda) menunjukkan model hampir tanpa syarat mengutamakan lengan utara, bukan merespons lengan mana yang sebenarnya menumpuk. Lihat Bug P di P-1f
+- ❌ **"PPO sudah dipakai di sistem"** — default tetap rule-based; model v5 sudah bisa dimuat dan lulus test integrasi, tapi belum diaktifkan sebagai default karena Bug P
 - ❌ "Realtime CCTV" — rekaman
 - ❌ **"Akurasi deteksi tinggi/95%"** — terukur 48,7% rata-rata (8 sampel), jangan digeneralisir dari sampel terbaik (#7, 96,1%) saja
 - ❌ "Forecast terbukti menurunkan delay 14%" — sebelum P-2, itu 1 percobaan

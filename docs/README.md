@@ -78,8 +78,9 @@ Jangan diubah. Ini yang dikutip di laporan dan dipakai menjawab juri.
 | [`hasil-kalibrasi-kandidat-agresif.md`](hasil-kalibrasi-kandidat-agresif.md) | Kenapa kandidat agresif jadi +1 detik, bukan +20% (sweep 28–34 detik) |
 | [`hasil-run-antrean-25-agustus.md`](hasil-run-antrean-25-agustus.md) | Run CV 4 kamera × 43 menit, 538 jendela, data antrean asli |
 | [`hasil-validasi-akurasi-cv.md`](hasil-validasi-akurasi-cv.md) | Akurasi deteksi CV vs hitung manual: 48,7% rata-rata (8 sampel) — dilaporkan apa adanya, bukan dipoles |
-| [`audit-bug-ppo-sebelum-training-ke-5.md`](audit-bug-ppo-sebelum-training-ke-5.md) | Audit sistematis seluruh jalur PPO sebelum training ulang: 6 bug baru terukur (E-L), plus 2 hipotesis yang diuji dan ternyata BUKAN masalah |
-| [`hasil-evaluasi-ppo-v4-80k.md`](hasil-evaluasi-ppo-v4-80k.md) | Evaluasi checkpoint PPO v4 80k: perbaikan Bug A/B/D bertahan, tapi 2 bug baru (E & F). Klaim "throughput PPO kalah" terbukti artefak durasi simulasi tidak setara — per detik hasilnya seri |
+| [`audit-bug-ppo-sebelum-training-ke-5.md`](audit-bug-ppo-sebelum-training-ke-5.md) | Audit sistematis seluruh jalur PPO sebelum training v5: 11 bug terukur (E-P), termasuk 5 percobaan berbeda mengejar Bug P (fairness antar-lengan) yang akhirnya diterima sebagai keterbatasan terdokumentasi |
+| [`hasil-evaluasi-ppo-v4-80k.md`](hasil-evaluasi-ppo-v4-80k.md) | Evaluasi checkpoint PPO v4 80k: perbaikan Bug A/B/D bertahan, tapi 2 bug baru (E & F). **Angkanya usang, sudah digantikan v5** — dipertahankan sebagai riwayat |
+| [`hasil-evaluasi-ppo-v5.md`](hasil-evaluasi-ppo-v5.md) | Evaluasi resmi PPO v5 (checkpoint 60k, final): menang 7/seri 2/kalah 0 dari 9 perbandingan 3-seed vs rule-based. Termasuk penjelasan kenapa ini TIDAK berarti Bug P sudah selesai |
 
 ---
 

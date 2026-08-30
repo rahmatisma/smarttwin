@@ -648,3 +648,204 @@ menghasilkan model `Box(21,)` + `MultiDiscrete([10 10 10 10])` yang benar.
 **Jangan** menulis "simulasi merepresentasikan Simpang Pingit secara akurat".
 Tulis: "simulasi berbasis geometri Simpang Pingit dengan permintaan
 terkalibrasi".
+
+---
+
+## 🔴 Bug P (BARU, 30 Agustus) — training v5 dihentikan di checkpoint 30k: reward tidak bisa mendeteksi lengan yang ditelantarkan
+
+**Training v5 (dijalankan Rahmat) dihentikan manual di 30.000/100.000 langkah**
+setelah pemantauan tiap-10k menemukan pola yang memburuk secara konsisten:
+
+| Checkpoint | Aksi dominan | Korelasi permintaan (Spearman) |
+|---|---:|---:|
+| 10k | 46% | — |
+| 20k | 50% | +0,083 |
+| 30k | **83%** | **−0,133** |
+
+Diverifikasi dengan uji terkontrol: dipaksa 3 skenario permintaan EKSTRIM
+(satu lengan=40, tiga lainnya=0), model 30k mengeluarkan **aksi yang persis
+sama** di ketiganya — sama sekali tidak membaca observasi permintaan.
+
+### Akar penyebab
+
+`_metrics()` menghitung `queue` sebagai **jumlah 4 lengan digabung** —
+`sum(getLastStepHaltingNumber(...) for a in FIXED_CYCLE_ORDER)`. Secara
+matematis ini tidak bisa membedakan "4 lengan masing-masing antre 2" dari
+"1 lengan antre 8, 3 lengan kosong" — keduanya sama-sama total 8.
+
+Dikombinasikan dengan kalibrasi permintaan (Bug K/N, `SKALA_PERMINTAAN=0,40`)
+yang membuat lalu lintas ringan, siklus pendek TETAP sudah cukup menjaga total
+antrean rendah tanpa perlu tahu lengan mana yang sibuk. PPO menemukan jalan
+pintas itu dan berhenti belajar mengalokasikan secara adaptif — bukan karena
+gagal belajar, tapi karena berhasil mengoptimalkan reward yang ternyata tidak
+menuntut perilaku adaptif sama sekali.
+
+### Perbaikan
+
+Tambah komponen reward baru berbasis lengan **TERBURUK**
+(`max_queue_lengan`), terpisah dari `queue_penalty` berbasis total:
+
+```
+FAIRNESS_REWARD_WEIGHT = 0,10   (QUEUE_REWARD_WEIGHT diturunkan 0,35 -> 0,25)
+MAX_QUEUE_LENGAN_SATURATION_VEH = 20,0   (diukur: p50=7, p95=12, maks=15)
+```
+
+**Terverifikasi lewat 2 uji terkontrol:**
+
+1. **Kasus ekstrem (satu lengan 40, lainnya 0):** mengutamakan lengan sibuk
+   sekarang **menang telak** — reward +0,0765 vs bagi rata +0,0073 vs sengaja
+   diabaikan −0,0180. `fairness_penalty` turun dari 0,040 ke 0,015 saat lengan
+   sibuk diprioritaskan, naik ke 0,053 saat diabaikan.
+2. **Kasus skew sedang (rasio ±2:1 dari data nyata):** bagi rata masih
+   menang. **Ini bukan bug** — diverifikasi penyebabnya `wait_penalty`, bukan
+   fairness: memberi satu lengan porsi besar (mis. 60 dari total 120 detik)
+   membuat lengan lain menunggu lebih lama menyaksikan satu fase panjang
+   berjalan, menaikkan waktu tunggu sistem secara keseluruhan. Untuk skew
+   sedang, alokasi mendekati rata memang bisa jadi pilihan yang masuk akal
+   secara teknik lalu lintas, bukan cuma jalan pintas.
+
+### Status: smoke test 20k sedang diverifikasi sebelum training penuh ulang
+
+Sebelum melanjutkan ke training 100k, dijalankan dulu training singkat (20k
+langkah) untuk memastikan perilaku terkunci-ke-satu-aksi benar-benar hilang
+dengan reward baru, bukan cuma menang di kasus buatan tangan.
+
+### ⚠️ Revisi 1 GAGAL — smoke test 20k membuktikan max() tidak cukup
+
+Hasil smoke test (checkpoint 20k, reward pakai `max_queue_lengan`):
+
+- Keragaman aksi TETAP terkunci: 2 kombinasi dari 24 langkah (71%/29%)
+- Korelasi permintaan TETAP negatif: −0,083
+- Uji ekstrem TETAP gagal: lengan dengan permintaan 40 tetap cuma dapat hijau
+  terpendek (15 detik)
+- **Temuan baru yang memberatkan:** `explained_variance = −0,113` (negatif —
+  fungsi nilai PPO lebih buruk daripada asal tebak rata-rata). Training
+  manapun sebelumnya di titik yang sebanding selalu positif.
+
+Diagnosis: `max()` melompat setiap kali lengan "terburuk" berpindah antar
+langkah -- sinyal patah yang membuat fungsi nilai kesulitan belajar, sehingga
+gradiennya tidak sampai memperbaiki kebijakan meski komponennya sendiri benar
+di uji-pasangan sederhana.
+
+### Revisi 2 — jumlah kuadrat antrean per lengan (lebih halus)
+
+Diukur (5 seed x 3 panjang rotasi): `Σq²` per langkah -- min 14, p50 76,
+p95 155, maks 347, rata-rata 87,9. `QUEUE_KUADRAT_SATURATION = 500,0`
+(~44% kepala ruang di atas maksimum teramati).
+
+Dipilih karena secara matematis tetap menghukum konsentrasi di satu lengan
+lebih keras daripada sebaran rata (untuk total antrean Q yang sama, Σq²
+minimum saat merata, maksimum saat terkumpul di satu lengan) tapi berubah
+HALUS seiring antrean bergeser antar lengan, bukan melompat seperti max().
+
+Uji ekstrem diulang: NORTH DIUTAMAKAN masih menang jelas (+0,0885 vs bagi rata
++0,0270 vs sengaja diabaikan +0,0082) -- selisihnya sebanding dengan versi
+max(), jadi daya bedanya tidak berkurang, cuma jadi lebih halus.
+
+**Status: smoke test 20k kedua sedang berjalan untuk verifikasi nyata.**
+
+### ⚠️ Revisi 2 JUGA GAGAL — jumlah kuadrat tidak lebih baik dari max()
+
+Hasil smoke test kedua (checkpoint 20k, reward pakai `queue_kuadrat`):
+
+- Keragaman aksi TETAP terkunci: 2 kombinasi dari 24 langkah (75% -- malah
+  sedikit lebih terkonsentrasi dari revisi 1)
+- Korelasi permintaan membaik tipis tapi masih lemah: −0,083 → **+0,125**
+- Uji ekstrem TETAP gagal identik: west permintaan 40 tetap cuma 15 detik
+- `explained_variance` justru LEBIH negatif: **−0,223** (dari −0,113)
+
+### Diagnosis diperbarui: bukan bentuk reward, tapi eksplorasi berhenti terlalu cepat
+
+Dua bentuk reward yang BERBEDA (max vs kuadrat) menghasilkan tingkat kuncian
+yang HAMPIR SAMA, dan `entropy_loss` juga hampir identik di keduanya
+(−5,04 vs −5,09). Ini petunjuk kuat bahwa masalahnya bukan di bentuk fungsi
+reward -- kedua bentuk sudah terbukti benar secara matematis di uji-pasangan
+terkontrol -- melainkan **PPO berhenti mengeksplorasi sebelum sempat
+menemukan & mengeksploitasi sinyal fairness itu**.
+
+### Revisi 3 — naikkan `ent_coef` (bonus eksplorasi PPO)
+
+`ent_coef` sebelumnya di-hardcode 0,01 di `train_ppo.py`, sekarang jadi
+argumen `--ent-coef` (default tetap 0,01). Smoke test dengan **0,05** (5x
+lipat) sedang berjalan untuk menguji apakah menambah eksplorasi memecah
+kuncian ini -- pendekatan standar PPO untuk "kebijakan terkunci ke sedikit
+aksi", berbeda dari 2 revisi sebelumnya yang mengutak-atik bentuk reward.
+
+### Revisi 3 — hasil 20k/50k/60k, dan kenapa akhirnya DITERIMA sebagai keterbatasan
+
+Smoke test 20k (ent_coef=0,05, reward tetap `queue_kuadrat` dari revisi 2 --
+keduanya berjalan BERSAMA, bukan bergantian) sempat menjanjikan: keragaman
+aksi naik ke 5 kombinasi (67% dominan, turun dari 71-83%), korelasi membaik
+ke +0,175 (terbaik sejauh itu). Checkpoint ini kemudian di-*resume* (bukan
+dilatih ulang dari nol) ke 50k lalu 60k dengan pemantauan per-10k yang sama:
+
+| Checkpoint | `entropy_loss` | `explained_variance` | Kombinasi aksi dominan | Korelasi | Uji ekstrem (utara/timur/selatan/barat) |
+|---|---:|---:|---:|---:|---|
+| 20k | −6,68 | −0,115 | 5 kombinasi, 67% | +0,175 | 0/3 benar |
+| 50k | −4,56 | **+0,113** (pertama positif) | 7 kombinasi, 54% | +0,133 | 1/3 -- utara benar |
+| 60k | −4,62 → −4,72 | +0,164 → +0,201 | 6 kombinasi, **75%** | **−0,083** | 1/3 -- utara benar, sama persis dgn 50k |
+
+**Training dihentikan manual di 60k** setelah pola ini terbaca: `explained_
+variance` naik terus di sepanjang 20k→60k, tapi itu SEJALAN dengan kebijakan
+yang makin mengunci ke pola tetap (dominasi kombinasi aksi naik lagi dari
+54%→75% di 10k terakhir), bukan sejalan dengan kebijakan menjadi lebih
+responsif ke permintaan. Korelasi permintaan-aksi tidak pernah stabil positif
+kuat di checkpoint manapun (rentang −0,083 s/d +0,175, semuanya lemah dan
+naik-turun tak beraturan tanpa tren jelas).
+
+**Kesimpulan setelah membandingkan seluruh 5 percobaan (max-based, kuadrat,
+kuadrat+ent_coef di 20k/50k/60k):** uji ekstrem gagal dengan pola yang
+**identik** di semuanya -- lengan barat dan selatan tidak pernah menang
+perlakuan ekstrem, di percobaan manapun, dengan reward shaping apapun. Hanya
+lengan utara yang pernah "menang", dan baru muncul setelah entropi dinaikkan.
+Konsistensi kegagalan lintas 5 percobaan yang berbeda mekanismenya (2 bentuk
+reward + 1 hyperparameter berbeda) adalah indikasi kuat ini **bukan** salah
+tuning, melainkan keterbatasan struktural: utara adalah lengan dengan service
+rate terburuk di jaringan (Bug N-2, 56% vs 73-84% lengan lain, akibat panjang
+edge & tidak ada edge hulu) -- kemungkinan sinyal struktural ini secara
+konsisten mengalahkan sinyal permintaan instan dalam kontribusinya ke reward,
+sehingga kebijakan yang hampir tanpa syarat mengutamakan utara memang
+mendekati optimal untuk fungsi reward saat ini, bukan cacat pembelajaran.
+
+**Keputusan (Rahmat, 30 Agustus, setelah melihat tabel perbandingan lengkap):
+diterima sebagai keterbatasan yang didokumentasikan, bukan dikejar lebih
+jauh.** Sesuai arahan dosen pembimbing ("simulasikan saja, tidak harus
+sempurna") dan mengingat 4 percobaan perbaikan berbeda sudah gagal dengan pola
+kegagalan yang sama, sisa waktu menjelang presentasi dialokasikan ke evaluasi
+resmi dan penulisan laporan, bukan iterasi ke-5.
+
+**Checkpoint 60k dipromosikan jadi `decision_engine/models/smarttwin_ppo_v5.zip`**
+(disalin dari `checkpoints/smoke_entcoef/smoke_entcoef_60000_steps.zip`) dan
+menggantikan `decision_engine/models/smarttwin_ppo.zip` (path default yang
+dipakai `PPOEngine`). Penggantian ini sekaligus memperbaiki bug terpisah yang
+baru ketahuan: `smarttwin_ppo.zip` yang lama adalah checkpoint v1 dari SEBELUM
+Bug J diperbaiki (ruang observasi 25 fitur, bukan 21), sehingga
+`test_real_checkpoint_reaches_recommendation_endpoint` gagal diam-diam --
+`PPOEngine` jatuh ke `ppo-fallback-rule-based` di setiap pemanggilan tanpa
+error yang terlihat. Setelah diganti checkpoint v5, `pytest backend/tests/`
+kembali 92/92 lulus.
+
+### Hasil evaluasi resmi v5 (checkpoint 60k, 3 seed, `evaluate_ppo.py` yang sudah diperbaiki Bug F)
+
+| Metrik | Seed 1000 | Seed 2000 | Seed 3000 |
+|---|---|---|---|
+| `mean_queue_veh` | **−46,4%** menang | **−46,7%** menang | **−50,6%** menang |
+| `mean_wait_per_vehicle_s` | **−62,8%** menang | **−60,2%** menang | **−63,2%** menang |
+| `throughput_veh_per_hour` | **+2,18%** menang | −0,70% seri | −0,58% seri |
+| Ringkasan | menang 3/3, gate lulus | menang 2, seri 1 | menang 2, seri 1 |
+
+**Totalnya, 9 perbandingan: menang 7, seri 2, kalah 0.** PPO **tidak pernah
+kalah** pada metrik lalu lintas manapun di seed manapun -- lompatan besar dari
+hasil v4 (menang 3, kalah 4, seri 2). Detail lengkap ada di
+`docs/hasil-evaluasi-ppo-v5.md`.
+
+**Catatan penting supaya tidak disalahpahami:** hasil bagus ini TIDAK berarti
+Bug P selesai. Kemungkinan besar penjelasannya adalah kebalikan dari yang
+diharapkan -- kebijakan yang hampir tanpa syarat memprioritaskan utara
+(lengan paling parah dilayani jaringan) ternyata memang strategi pengaturan
+sinyal yang secara global jauh lebih baik daripada rule-based, TERLEPAS dari
+apakah ia benar-benar responsif ke fluktuasi permintaan per siklus. Bagus
+untuk throughput/antrean sistem, tapi belum tentu adil per-lengan saat
+kondisi menyimpang jauh dari pola rata-rata yang dipelajari. Ini harus
+disebutkan eksplisit di laporan teknis, bukan diklaim sebagai "PPO belajar
+alokasi adaptif".

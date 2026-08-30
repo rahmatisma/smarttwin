@@ -55,11 +55,31 @@ YELLOW_STATE = {
     "north": "rrrrrrrrrryyyyyrrrrr", "west": "rrrrrrrrrrrrrrryyyyy",
 }
 
-# Reward v2: throughput menjadi tujuan utama. Bobot ketiga komponen berjumlah
-# 1,0 agar skala reward tetap mudah dibaca dan dibandingkan antar-training.
+# BUG P (ditemukan 30 Agustus, training v5 dihentikan di checkpoint 30k).
+# `queue_penalty` sebelumnya cuma memakai TOTAL antrean 4 lengan digabung --
+# secara matematis tidak bisa membedakan "4 lengan masing-masing antre 2" dari
+# "1 lengan antre 8, 3 lengan kosong". Dibuktikan lewat perilaku: dipaksa 3
+# skenario permintaan EKSTRIM timpang (satu lengan=40, tiga lengan lain=0),
+# model 30k mengeluarkan AKSI YANG PERSIS SAMA di ketiganya -- terlepas lengan
+# mana yang sedang kebanjiran. Korelasi peringkat alokasi-vs-permintaan
+# (Spearman) MEMBURUK sepanjang training: +0,083 (20k) -> -0,133 (30k), dan
+# aksi dominan naik dari 50% ke 83% langkah -- kebalikan dari yang diharapkan.
+#
+# Diagnosis: dengan permintaan hasil kalibrasi (SKALA_PERMINTAAN=0,40) yang
+# ringan, siklus pendek TETAP sudah cukup menjaga TOTAL antrean rendah tanpa
+# perlu tahu lengan mana yang sibuk -- PPO menemukan jalan pintas itu dan
+# berhenti belajar mengalokasikan secara adaptif, karena reward tidak pernah
+# menghukumnya untuk menelantarkan satu lengan asal total tetap kecil.
+#
+# Perbaikan: tambah FAIRNESS_REWARD_WEIGHT berbasis lengan TERBURUK
+# (max_queue_lengan di _metrics()), terpisah dari queue_penalty berbasis
+# total. Sekarang menelantarkan satu lengan langsung terlihat di reward,
+# berapa pun totalnya. QUEUE_REWARD_WEIGHT diturunkan 0,35->0,25 supaya total
+# bobot tetap 1,0.
 THROUGHPUT_REWARD_WEIGHT = 0.45
-QUEUE_REWARD_WEIGHT = 0.35
+QUEUE_REWARD_WEIGHT = 0.25
 WAIT_REWARD_WEIGHT = 0.20
+FAIRNESS_REWARD_WEIGHT = 0.10
 
 # Ambang saturasi. SEMUANYA ditetapkan dari PENGUKURAN, bukan tebakan --
 # lihat docs/STATUS-DAN-SISA-KERJA.md item P-1.
@@ -91,6 +111,23 @@ WAIT_REWARD_WEIGHT = 0.20
 # permintaan tidak lagi dibekukan, jadi laju yang terjadi akan berubah.
 THROUGHPUT_SATURATION_RATE = 1.0
 QUEUE_SATURATION_VEH = 100.0
+
+# BUG P (ditemukan 30 Agustus, training v5 dihentikan di 30k). Diukur, bukan
+# ditebak -- lihat catatan lengkap di FAIRNESS_REWARD_WEIGHT di atas.
+#
+# Revisi 2 (masih 30 Agustus): percobaan pertama pakai MAX_QUEUE_LENGAN_
+# SATURATION_VEH (ambang berbasis max() antrean lengan) TERBUKTI TIDAK CUKUP
+# lewat smoke test training 20k -- keragaman aksi tetap terkunci 2 kombinasi,
+# korelasi permintaan tetap negatif, DAN explained_variance jadi negatif
+# (-0,113, lebih buruk dari training manapun sebelumnya). Diganti ke jumlah
+# kuadrat antrean per lengan (queue_kuadrat di _metrics()) yang berubah halus,
+# bukan melompat -- lihat catatan lengkap di sana. Konstanta lama disisakan
+# supaya field max_queue_lengan di metrics tetap ada untuk diagnostik, tapi
+# TIDAK DIPAKAI lagi menghitung reward.
+MAX_QUEUE_LENGAN_SATURATION_VEH = 20.0  # tidak dipakai reward lagi, cuma diagnostik
+# Diukur (5 seed x 3 panjang rotasi): min 14, p50 76, p95 155, maks 347,
+# rata-rata 87,9. Kepala ruang ~44% di atas maksimum teramati.
+QUEUE_KUADRAT_SATURATION = 500.0
 
 # BUG O (ditemukan 30 Agustus): `jumlah_crossing` di crossing_simpang.csv
 # menghitung kendaraan yang melintasi garis ke ARAH MANA PUN -- lihat
@@ -491,11 +528,17 @@ class SmartTwinSumoEnv(gym.Env[np.ndarray, np.ndarray]):
         throughput_reward = THROUGHPUT_REWARD_WEIGHT * throughput_norm
         queue_penalty = QUEUE_REWARD_WEIGHT * queue_norm
         wait_penalty = WAIT_REWARD_WEIGHT * wait_norm
-        # Penalti starvation DIHAPUS 29 Agustus: program TLS sekarang selalu
-        # dipasang sebagai rotasi penuh 4 lengan dan selalu mulai dari fase 0,
-        # sama seperti produksi -- tidak ada lengan yang bisa tidak kebagian
-        # hijau, jadi penalti itu tidak punya kondisi pemicu yang sah lagi.
-        reward = float(throughput_reward - queue_penalty - wait_penalty)
+        # Penalti starvation HIJAU dihapus 29 Agustus tetap berlaku: rotasi
+        # selalu mencakup 4 lengan, jadi tidak ada lengan yang literal nol
+        # detik hijau. BUG P (30 Agustus) beda soal: lengan bisa tetap
+        # KETINGGALAN LAYANAN (antreannya menumpuk) walau kebagian hijau,
+        # kalau durasinya tidak cukup dibanding permintaannya -- dan
+        # queue_penalty berbasis TOTAL tidak bisa mendeteksi itu. fairness_
+        # penalty pakai lengan TERBURUK, bukan total, supaya menelantarkan
+        # satu lengan langsung terlihat di reward.
+        fairness_norm = min(1.0, metrics["queue_kuadrat"] / QUEUE_KUADRAT_SATURATION)
+        fairness_penalty = FAIRNESS_REWARD_WEIGHT * fairness_norm
+        reward = float(throughput_reward - queue_penalty - wait_penalty - fairness_penalty)
         # window_seconds WAJIB ikut dilaporkan: panjang satu langkah keputusan
         # ditentukan aksi agent sendiri (76-256 detik), jadi metrik apa pun yang
         # menumpuk sepanjang langkah (throughput, waktu tunggu) TIDAK bisa
@@ -506,17 +549,44 @@ class SmartTwinSumoEnv(gym.Env[np.ndarray, np.ndarray]):
         # docs/audit-bug-ppo-sebelum-training-ke-5.md.
         metrics.update({"reward": reward, "throughput_interval": float(arrived), "queue_norm": queue_norm,
                         "wait_norm": wait_norm, "window_seconds": float(window_seconds),
-                        "throughput_rate": float(throughput_rate),
+                        "throughput_rate": float(throughput_rate), "fairness_norm": fairness_norm,
                         "throughput_reward": throughput_reward, "queue_penalty": queue_penalty,
-                        "wait_penalty": wait_penalty})
+                        "wait_penalty": wait_penalty, "fairness_penalty": fairness_penalty})
         return self._observation(), reward, False, self.step_count >= self.episode_steps, metrics
 
     def _metrics(self) -> dict[str, float]:
         vehicles = list(self.connection.vehicle.getIDList()) if self.connection else []
         waiting = sum(float(self.connection.vehicle.getAccumulatedWaitingTime(v)) for v in vehicles) if self.connection else 0.0
-        queue = sum(self.connection.edge.getLastStepHaltingNumber(EDGE_HULU[a]) + self.connection.edge.getLastStepHaltingNumber(EDGE_MASUK[a]) for a in FIXED_CYCLE_ORDER) if self.connection else 0
+        # BUG P (ditemukan 30 Agustus): `queue` cuma jumlah 4 lengan DIGABUNG --
+        # secara matematis tidak bisa membedakan "4 lengan masing-masing antre 2"
+        # dari "1 lengan antre 8, 3 lengan kosong". Reward yang cuma memakai
+        # total ini TIDAK PUNYA CARA menghukum lengan yang ditelantarkan, asal
+        # totalnya tetap kecil. Lihat queue_per_lengan & max_queue_lengan di
+        # bawah, dipakai reward baru di step().
+        queue_per_lengan = {
+            a: self.connection.edge.getLastStepHaltingNumber(EDGE_HULU[a])
+            + self.connection.edge.getLastStepHaltingNumber(EDGE_MASUK[a])
+            for a in FIXED_CYCLE_ORDER
+        } if self.connection else {a: 0 for a in FIXED_CYCLE_ORDER}
+        queue = sum(queue_per_lengan.values())
         arrived = float(self.connection.simulation.getArrivedNumber()) if self.connection else 0.0
-        return {"vehicles": float(len(vehicles)), "queue": float(queue), "waiting": waiting, "arrived": arrived}
+        return {
+            "vehicles": float(len(vehicles)),
+            "queue": float(queue),
+            "max_queue_lengan": float(max(queue_per_lengan.values())),
+            # BUG P revisi 2: jumlah kuadrat, bukan max(). max() melompat kalau
+            # lengan "terburuk" berpindah antar langkah -- sinyal patah yang
+            # membuat fungsi nilai PPO kesulitan belajar (terverifikasi:
+            # explained_variance NEGATIF -0,113 pada smoke test 20k dengan
+            # max()). Jumlah kuadrat tetap menghukum konsentrasi di satu lengan
+            # lebih keras daripada sebaran rata (matematis: untuk total Q
+            # tetap, Σq² minimum saat semua q sama, maksimum saat terkumpul di
+            # satu lengan) tapi berubah HALUS seiring antrean bergeser antar
+            # lengan, bukan melompat.
+            "queue_kuadrat": float(sum(v * v for v in queue_per_lengan.values())),
+            "waiting": waiting,
+            "arrived": arrived,
+        }
 
     def _observation(self) -> np.ndarray:
         state = self._traffic_state()
