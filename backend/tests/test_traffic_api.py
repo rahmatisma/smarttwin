@@ -81,6 +81,32 @@ def test_get_invalid_intersection():
     assert response.status_code == 404
 
 
+def test_known_intersection_without_history_returns_empty_list(monkeypatch):
+    def no_history(**_kwargs):
+        from app.services.traffic_service import TrafficServiceError
+
+        raise TrafficServiceError("Belum ada traffic state lengkap.")
+
+    monkeypatch.setattr(
+        traffic_routes.traffic_service,
+        "get_latest_traffic",
+        no_history,
+    )
+
+    response = client.get(
+        f"/api/v1/traffic/{INTERSECTION_ID}",
+        params={"limit": 12},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "success": True,
+        "intersectionId": INTERSECTION_ID,
+        "count": 0,
+        "data": [],
+    }
+
+
 def test_get_latest_traffic_returns_controlled_503_on_connection_error(monkeypatch):
     def fail_temporarily(**_kwargs):
         raise RuntimeError("temporary upstream disconnect")

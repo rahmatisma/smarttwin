@@ -44,10 +44,39 @@ type SourceType =
   | "url"
   | "rtsp";
 
-// Bertahan saat CameraFeedPanel unmount karena pindah halaman/filter.
-let persistedCameraTime = 0;
-let persistedCameraPaused = false;
-let knownShortestDuration = Number.POSITIVE_INFINITY;
+// Posisi disimpan PER rekaman. Menggeser satu CCTV tidak boleh menyeret CCTV
+// lain ke timestamp yang sama; masing-masing melanjutkan waktu naturalnya.
+const persistedCameraTimes = new Map<string, number>();
+const CAMERA_TIME_SESSION_KEY = "smarttwin.camera.currentTimes";
+
+function restoreCameraTime(cameraId: string): number {
+  const memoryValue = persistedCameraTimes.get(cameraId);
+  if (memoryValue !== undefined) return memoryValue;
+  if (typeof window === "undefined") return 0;
+  try {
+    const stored = JSON.parse(
+      window.sessionStorage.getItem(CAMERA_TIME_SESSION_KEY) ?? "{}"
+    ) as Record<string, number>;
+    const value = Number(stored[cameraId]);
+    if (Number.isFinite(value) && value >= 0) {
+      persistedCameraTimes.set(cameraId, value);
+      return value;
+    }
+  } catch {
+    // Storage lama/rusak tidak boleh mencegah video diputar.
+  }
+  return 0;
+}
+
+function persistCameraTime(cameraId: string, time: number): void {
+  const safeTime = Math.max(0, time);
+  persistedCameraTimes.set(cameraId, safeTime);
+  if (typeof window !== "undefined") {
+    window.sessionStorage.setItem(CAMERA_TIME_SESSION_KEY, JSON.stringify(
+      Object.fromEntries(persistedCameraTimes)
+    ));
+  }
+}
 
 type Camera = {
   id: string;
@@ -150,12 +179,14 @@ export default function CameraFeedPanel({
   selectedApproach = "all",
   onApproachChange,
   onTimeUpdate,
+  onPlaybackChange,
 }: {
   counts: VehicleClassCount[];
   cameraStatus?: CameraStatus[];
   selectedApproach?: ApproachSelection;
   onApproachChange?: (selection: ApproachSelection) => void;
   onTimeUpdate?: (time: number) => void;
+  onPlaybackChange?: (playing: boolean) => void;
 }) {
 
   // ===================================================
@@ -165,46 +196,11 @@ export default function CameraFeedPanel({
   const [cameras, setCameras] =
     useState<Camera[]>([]);
   const videoRefs = useRef(new Map<string, HTMLVideoElement>());
-  const synchronizingVideos = useRef(false);
-
-  function syncVideos(master?: HTMLVideoElement) {
-    const videos = [...videoRefs.current.values()].filter(
-      (video) => Number.isFinite(video.duration) && video.duration > 0
-    );
-    if (videos.length === 0) return;
-
-    const visibleShortest = Math.min(...videos.map((video) => video.duration));
-    knownShortestDuration = Math.min(knownShortestDuration, visibleShortest);
-    const cycleDuration = knownShortestDuration;
-    const sourceTime = master?.currentTime ?? persistedCameraTime;
-    const targetTime = sourceTime % cycleDuration;
-    persistedCameraTime = targetTime;
-
-    synchronizingVideos.current = true;
-    for (const video of videos) {
-      if (Math.abs(video.currentTime - targetTime) > 0.35) {
-        video.currentTime = Math.min(targetTime, Math.max(0, video.duration - 0.05));
-      }
-      if (persistedCameraPaused) {
-        video.pause();
-      } else if (video.paused) {
-        void video.play().catch(() => undefined);
-      }
-    }
-    queueMicrotask(() => {
-      synchronizingVideos.current = false;
-    });
-
-    onTimeUpdate?.(targetTime);
-  }
-
-  useEffect(() => () => {
-    const master = cameras[0] ? videoRefs.current.get(cameras[0].id) : undefined;
-    if (master) persistedCameraTime = master.currentTime % knownShortestDuration;
-  }, [cameras]);
+  const restoredCameraIds = useRef(new Set<string>());
 
   useEffect(() => {
     let cancelled = false;
+    onPlaybackChange?.(false);
 
     // Load semua kamera dari semua kemungkinan ID simpang di database
     Promise.all(
@@ -222,12 +218,13 @@ export default function CameraFeedPanel({
         );
         setCameras(filtered);
       }
+      if (allCams.length === 0) onPlaybackChange?.(false);
     });
 
     return () => {
       cancelled = true;
     };
-  }, [selectedApproach]);
+  }, [onPlaybackChange, selectedApproach]);
 
   // resolveVideoSrc() nambah cache-buster (?t=Date.now()) supaya browser
   // tidak pakai response korup dari cache. Tapi kalau dipanggil LANGSUNG
@@ -364,7 +361,10 @@ export default function CameraFeedPanel({
                   <video
                     ref={(element) => {
                       if (element) videoRefs.current.set(camera.id, element);
-                      else videoRefs.current.delete(camera.id);
+                      else {
+                        videoRefs.current.delete(camera.id);
+                        restoredCameraIds.current.delete(camera.id);
+                      }
                     }}
                     src={resolvedSrcByCamera.get(camera.id)}
                     controls
@@ -374,21 +374,49 @@ export default function CameraFeedPanel({
                     playsInline
                     preload="auto"
                     className="h-full w-full object-contain"
-                    onLoadedMetadata={(event) => syncVideos(event.currentTarget)}
+                    onLoadedMetadata={(event) => {
+                      const savedTime = restoreCameraTime(camera.id);
+                      // Tandai siap SEBELUM seek karena browser dapat langsung
+                      // mengirim timeupdate/seeked secara sinkron setelah
+                      // currentTime diubah.
+                      restoredCameraIds.current.add(camera.id);
+                      if (savedTime > 0 && event.currentTarget.duration > 0) {
+                        event.currentTarget.currentTime = Math.min(
+                          savedTime,
+                          Math.max(0, event.currentTarget.duration - 0.05)
+                        );
+                      }
+                      void event.currentTarget.play().catch(() => undefined);
+                    }}
                     onTimeUpdate={(e) => {
-                      if (!synchronizingVideos.current && camera.id === cameras[0]?.id) {
-                        syncVideos(e.currentTarget);
+                      // Event currentTime=0 dapat muncul ketika src baru
+                      // dipasang atau elemen sedang dibongkar. Jangan sampai
+                      // event lifecycle itu menimpa posisi rekaman terakhir.
+                      if (!restoredCameraIds.current.has(camera.id)) return;
+                      persistCameraTime(camera.id, e.currentTarget.currentTime);
+                      if (camera.id === cameras[0]?.id) {
+                        onTimeUpdate?.(e.currentTarget.currentTime);
                       }
                     }}
                     onPause={() => {
-                      if (synchronizingVideos.current) return;
-                      persistedCameraPaused = true;
-                      syncVideos();
+                      if (camera.id === cameras[0]?.id) {
+                        onPlaybackChange?.(false);
+                      }
                     }}
                     onPlay={() => {
-                      if (synchronizingVideos.current) return;
-                      persistedCameraPaused = false;
-                      syncVideos();
+                      if (camera.id === cameras[0]?.id) {
+                        onPlaybackChange?.(true);
+                      }
+                    }}
+                    onPlaying={() => {
+                      if (camera.id === cameras[0]?.id) {
+                        onPlaybackChange?.(true);
+                      }
+                    }}
+                    onEnded={() => {
+                      if (camera.id === cameras[0]?.id) {
+                        onPlaybackChange?.(false);
+                      }
                     }}
                   />
 

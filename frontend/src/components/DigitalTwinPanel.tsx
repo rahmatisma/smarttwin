@@ -283,12 +283,13 @@ export default function DigitalTwinPanel({
   const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
 
   useEffect(() => {
-    const interval = setInterval(async () => {
+    let cancelled = false;
+    const pollState = async () => {
       try {
         const res = await fetch(`${API_BASE_URL}/api/v1/simulation/state`);
-        if (!res.ok) return;
+        if (!res.ok || cancelled) return;
         const data = await res.json();
-        
+        if (cancelled) return;
         setSimRunning(data.running);
         if (data.running) {
           setSimTime(data.simulationTimeSeconds ?? 0);
@@ -297,10 +298,15 @@ export default function DigitalTwinPanel({
           setLiveSignal(normalizeLiveSignal(data.signals?.[0]));
         }
       } catch {
-        setSimRunning(false);
+        if (!cancelled) setSimRunning(false);
       }
-    }, 500);
-    return () => clearInterval(interval);
+    };
+    void pollState();
+    const interval = setInterval(pollState, 500);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
   }, [API_BASE_URL]);
 
   // SENGAJA TIDAK auto-start simulasi dari sini lagi (30 Agustus 2026).

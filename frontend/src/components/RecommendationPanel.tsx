@@ -163,9 +163,9 @@ export default function RecommendationPanel({
   layout?: "grid" | "cross";
 }) {
   const displayRec = recommendation ?? null;
-  const showLoading = Boolean(isLoading || !displayRec);
+  const showLoading = Boolean(isLoading);
 
-  if (showLoading || !displayRec) {
+  if (showLoading) {
     return (
       <div className="rounded-lg border border-border bg-surface p-4">
         <div className="mb-3 flex items-center justify-between">
@@ -178,6 +178,27 @@ export default function RecommendationPanel({
           <div className="flex flex-col items-center justify-center space-y-3">
             <div className="h-5 w-5 animate-spin rounded-full border-2 border-text-muted border-t-transparent"></div>
             <p className="text-xs text-text-muted">Mengambil data rekomendasi...</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!displayRec) {
+    return (
+      <div className="rounded-lg border border-border bg-surface p-4">
+        <div className="mb-3 flex items-center justify-between">
+          <h2 className="font-display text-sm font-semibold text-text">
+            Signal Recommendation
+          </h2>
+          <span className="text-xs text-amber-500">Menunggu backend</span>
+        </div>
+        <div className="flex min-h-[320px] items-center justify-center rounded-md border border-border bg-surface-2 px-6 text-center">
+          <div>
+            <p className="text-sm font-medium text-text">Rekomendasi belum tersedia</p>
+            <p className="mt-2 text-xs text-text-muted">
+              Dashboard tetap dapat digunakan. Data akan diperbarui otomatis saat backend kembali merespons.
+            </p>
           </div>
         </div>
       </div>
