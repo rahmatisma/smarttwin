@@ -354,6 +354,59 @@ permintaan terhadap kapasitas**, bukan angka mutlaknya.
 ⚠️ **Ini keputusan pemodelan, bukan perbaikan bug** — harus disepakati dan
 **ditulis terang-terangan di laporan teknis**, jangan disembunyikan.
 
+### 🔬 DIAGNOSIS LANJUTAN (30 Agustus) — dua masalah terpisah, keduanya di jaringan
+
+Pemeriksaan jaringan SUMO menemukan penyebabnya lebih spesifik dari sekadar
+"kapasitas kurang". Ada **dua** hal:
+
+#### N-1. Lajur lebih sedikit daripada yang dibutuhkan
+
+2 lajur per lengan (8 total), 20 gerakan terkendali. Dengan saturation flow
+lazim 0,5 kend/detik/lajur dan tiap lengan mendapat ¼ siklus:
+kapasitas ≈ **1,00 kend/detik**, sementara permintaan dari data CV
+**1,66 kend/detik**. Untuk melayaninya butuh **±3,3 lajur per lengan**.
+
+#### N-2. Ruas pendekat terlalu pendek — kendaraan tidak bisa masuk sama sekali
+
+Panjang ruas pendekat sangat timpang, dan north **tidak punya ruas apa pun di
+belakangnya** (jalannya berhenti 62 m sebelum simpang di model):
+
+| Lengan | Panjang ruas | Muat | Diminta | Melintas | Terlayani | Nyangkut tak bisa masuk |
+|---|---:|---:|---:|---:|---:|---:|
+| north | 62 m | 18 | 338 | 113 | 33% | **215** |
+| east | 57 m | 16 | 281 | 115 | 41% | **169** |
+| south | **522 m** | 149 | 172 | 133 | **77%** | 5 |
+| west | 292 m | 83 | 432 | 160 | 37% | **233** |
+
+**622 kendaraan tertahan di antrean penyisipan SUMO** — tidak pernah masuk
+simulasi karena jaringannya tidak muat. Korelasinya jelas: lengan berruas
+panjang terlayani 77%, yang terpendek cuma 33%.
+
+**Yang paling berbahaya: 622 kendaraan itu tidak terlihat oleh PPO.** Mereka
+tidak masuk hitungan antrean (`getLastStepHaltingNumber` hanya membaca ruas
+yang ada), tidak masuk observasi, dan tidak masuk reward. Agent belajar di
+dunia yang **menyembunyikan sebagian besar permintaannya sendiri**.
+
+Ini juga berarti **metrik antrean selama ini undercount** — bukan cuma untuk
+PPO, tapi untuk seluruh evaluasi berbasis `ppo_env`.
+
+### Yang perlu diverifikasi manusia (tidak bisa saya cek sendiri)
+
+**Berapa lajur sebenarnya tiap pendekat Simpang Pingit?** Cek lewat citra
+satelit / Google Street View, hitung lajur di garis henti tiap lengan
+(termasuk pelebaran/flare yang sering ada menjelang simpang).
+
+- Kalau **3–4 lajur** → jaringan hasil impor OSM memang salah, dan jalan yang
+  benar adalah **membangun ulang jaringan** dengan area lebih luas + jumlah
+  lajur yang benar. Ini memperbaiki semua hasil simulasi, bukan cuma PPO.
+- Kalau memang **2 lajur** → berarti hitungan crossing CV yang perlu ditinjau
+  (kemungkinan overcount), dan kalibrasi skala permintaan jadi pilihan yang
+  sah.
+
+**Petunjuk tambahan bahwa impor OSM-nya bermasalah:** batas kecepatan ruas
+masuk north & south terbaca **100 km/jam** — nilai jalan bebas hambatan, mustahil
+untuk pendekat simpang dalam kota.
+
 
 ---
 
