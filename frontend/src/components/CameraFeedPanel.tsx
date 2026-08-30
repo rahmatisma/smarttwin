@@ -11,6 +11,7 @@ import {
 import {
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 
@@ -42,6 +43,11 @@ type SourceType =
   | "file"
   | "url"
   | "rtsp";
+
+// Bertahan saat CameraFeedPanel unmount karena pindah halaman/filter.
+let persistedCameraTime = 0;
+let persistedCameraPaused = false;
+let knownShortestDuration = Number.POSITIVE_INFINITY;
 
 type Camera = {
   id: string;
@@ -158,6 +164,44 @@ export default function CameraFeedPanel({
 
   const [cameras, setCameras] =
     useState<Camera[]>([]);
+  const videoRefs = useRef(new Map<string, HTMLVideoElement>());
+  const synchronizingVideos = useRef(false);
+
+  function syncVideos(master?: HTMLVideoElement) {
+    const videos = [...videoRefs.current.values()].filter(
+      (video) => Number.isFinite(video.duration) && video.duration > 0
+    );
+    if (videos.length === 0) return;
+
+    const visibleShortest = Math.min(...videos.map((video) => video.duration));
+    knownShortestDuration = Math.min(knownShortestDuration, visibleShortest);
+    const cycleDuration = knownShortestDuration;
+    const sourceTime = master?.currentTime ?? persistedCameraTime;
+    const targetTime = sourceTime % cycleDuration;
+    persistedCameraTime = targetTime;
+
+    synchronizingVideos.current = true;
+    for (const video of videos) {
+      if (Math.abs(video.currentTime - targetTime) > 0.35) {
+        video.currentTime = Math.min(targetTime, Math.max(0, video.duration - 0.05));
+      }
+      if (persistedCameraPaused) {
+        video.pause();
+      } else if (video.paused) {
+        void video.play().catch(() => undefined);
+      }
+    }
+    queueMicrotask(() => {
+      synchronizingVideos.current = false;
+    });
+
+    onTimeUpdate?.(targetTime);
+  }
+
+  useEffect(() => () => {
+    const master = cameras[0] ? videoRefs.current.get(cameras[0].id) : undefined;
+    if (master) persistedCameraTime = master.currentTime % knownShortestDuration;
+  }, [cameras]);
 
   useEffect(() => {
     let cancelled = false;
@@ -318,6 +362,10 @@ export default function CameraFeedPanel({
                   ------------------------------------- */
 
                   <video
+                    ref={(element) => {
+                      if (element) videoRefs.current.set(camera.id, element);
+                      else videoRefs.current.delete(camera.id);
+                    }}
                     src={resolvedSrcByCamera.get(camera.id)}
                     controls
                     muted
@@ -326,10 +374,21 @@ export default function CameraFeedPanel({
                     playsInline
                     preload="auto"
                     className="h-full w-full object-contain"
+                    onLoadedMetadata={(event) => syncVideos(event.currentTarget)}
                     onTimeUpdate={(e) => {
-                      if (onTimeUpdate && camera.id === cameras[0].id) {
-                        onTimeUpdate(e.currentTarget.currentTime);
+                      if (!synchronizingVideos.current && camera.id === cameras[0]?.id) {
+                        syncVideos(e.currentTarget);
                       }
+                    }}
+                    onPause={() => {
+                      if (synchronizingVideos.current) return;
+                      persistedCameraPaused = true;
+                      syncVideos();
+                    }}
+                    onPlay={() => {
+                      if (synchronizingVideos.current) return;
+                      persistedCameraPaused = false;
+                      syncVideos();
                     }}
                   />
 

@@ -253,6 +253,25 @@ class SumoController:
         except Exception as exc:
             logger.warning("Gagal menyembunyikan window SUMO-GUI: %s", exc)
 
+    @classmethod
+    def _keep_renderer_window_hidden(cls, process_id: int) -> None:
+        """Tangkap window GUI yang baru dibuat sesudah TraCI tersambung."""
+        if os.name != "nt" or process_id <= 0:
+            return
+
+        def hide_repeatedly() -> None:
+            # SUMO-GUI kadang membuat ulang top-level window sesaat setelah
+            # start. Satu ShowWindow terlalu dini sehingga popup masih muncul.
+            for _ in range(30):
+                cls._hide_windows_for_process(process_id)
+                time.sleep(0.1)
+
+        threading.Thread(
+            target=hide_repeatedly,
+            name="sumo-gui-window-hider",
+            daemon=True,
+        ).start()
+
     # ============================================================
     # INIT
     # ============================================================
@@ -657,7 +676,7 @@ class SumoController:
                 connection = traci.getConnection()
                 process = getattr(connection, "_process", None)
                 if process is not None:
-                    self._hide_windows_for_process(process.pid)
+                    self._keep_renderer_window_hidden(process.pid)
             
         except Exception as exc:
             logger.exception("Failed to start SUMO through TraCI")
@@ -1387,13 +1406,17 @@ class SumoController:
                     if self.is_gui and time.monotonic() - self._last_screenshot_at >= 0.25:
                         try:
                             frame_path = self.PROJECT_ROOT / "cache" / "simulation" / "frame.jpg"
+                            next_frame_path = frame_path.with_name("frame.next.jpg")
                             frame_path.parent.mkdir(parents=True, exist_ok=True)
                             self.traci.gui.screenshot(
                                 "View #0",
-                                str(frame_path),
+                                str(next_frame_path),
                                 width=self.STREAM_FRAME_WIDTH,
                                 height=self.STREAM_FRAME_HEIGHT,
                             )
+                            # Pembaca selalu melihat frame lama atau frame baru
+                            # secara utuh, tidak pernah JPEG yang sedang ditulis.
+                            os.replace(next_frame_path, frame_path)
                             self._last_screenshot_at = time.monotonic()
                         except Exception:
                             pass

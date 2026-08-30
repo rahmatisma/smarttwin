@@ -7,16 +7,19 @@ import { ScenarioProvider } from "@/context/ScenarioContext";
 const inter = Inter({
   subsets: ["latin"],
   variable: "--font-inter",
+  preload: false,
 });
 
 const spaceGrotesk = Space_Grotesk({
   subsets: ["latin"],
   variable: "--font-space-grotesk",
+  preload: false,
 });
 
 const jetbrainsMono = JetBrains_Mono({
   subsets: ["latin"],
   variable: "--font-jetbrains-mono",
+  preload: false,
 });
 
 export const metadata: Metadata = {

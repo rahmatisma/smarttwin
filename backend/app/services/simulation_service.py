@@ -898,25 +898,29 @@ class SimulationService:
     # ============================================================
 
     def get_simulation_state(self) -> dict[str, Any]:
-        with self._lock:
-            if self.controller is None or not self.controller.is_running():
-                return {
-                    "running": False,
-                    "paused": False,
-                    "vehicles": [],
-                    "signals": [],
-                    "simulationTimeSeconds": 0
-                }
+        # Jangan ikut menunggu lock run/update. Semua field di bawah merupakan
+        # snapshot cache Python yang ditulis loop SUMO secara atomik; endpoint
+        # state tidak melakukan panggilan TraCI. Sebelumnya satu screenshot atau
+        # sync_demand lambat dapat menahan polling dashboard >10 detik.
+        controller = self.controller
+        if controller is None or not controller.is_running():
             return {
-                "running": True,
-                "paused": self.controller.paused,
-                "vehicles": self.controller.active_vehicles_data,
-                "signals": self.controller.active_signals_data,
-                "simulationTimeSeconds": self.controller.last_simulation_time,
-                "detectedVehicles": self.controller.detected_vehicle_count,
-                "trafficTimestamp": self.controller.traffic_timestamp,
-                "cyclePlan": self.controller.active_cycle_plan,
+                "running": False,
+                "paused": False,
+                "vehicles": [],
+                "signals": [],
+                "simulationTimeSeconds": 0
             }
+        return {
+            "running": True,
+            "paused": controller.paused,
+            "vehicles": list(controller.active_vehicles_data),
+            "signals": list(controller.active_signals_data),
+            "simulationTimeSeconds": controller.last_simulation_time,
+            "detectedVehicles": controller.detected_vehicle_count,
+            "trafficTimestamp": controller.traffic_timestamp,
+            "cyclePlan": controller.active_cycle_plan,
+        }
 
     # ============================================================
     # PAUSE / RESUME
