@@ -201,6 +201,8 @@ class SmartTwinSumoEnv(gym.Env[np.ndarray, np.ndarray]):
         self.rng = random.Random()
         self.step_count = self.vehicle_counter = 0
         self.profile: dict[str, float] = self.profiles[0]
+        self._profile_index = 0
+        self._profile_seconds = 0
         self.current_phase = FIXED_CYCLE_ORDER[0]
         self.current_green = 30
         self.current_greens: dict[str, int] = {a: 30 for a in FIXED_CYCLE_ORDER}
@@ -212,7 +214,11 @@ class SmartTwinSumoEnv(gym.Env[np.ndarray, np.ndarray]):
         self.close()
         actual_seed = int(seed if seed is not None else self.np_random.integers(1, 2**31 - 1))
         self.rng.seed(actual_seed)
-        self.profile = self.profiles[actual_seed % len(self.profiles)]
+        # Titik MULAI di rekaman; profilnya akan bergerak maju sendiri tiap
+        # FEATURE_WINDOW_SECONDS detik simulasi -- lihat _maju_profil().
+        self._profile_index = actual_seed % len(self.profiles)
+        self._profile_seconds = 0
+        self.profile = self.profiles[self._profile_index]
         import traci
         traci.start([str(self.sumo_binary), "-c", str(self.config_path), "--start", "--seed", str(actual_seed),
                      "--no-step-log", "true", "--xml-validation", "never"], label=self.label)
@@ -239,7 +245,34 @@ class SmartTwinSumoEnv(gym.Env[np.ndarray, np.ndarray]):
         if "smart_car" not in existing:
             self.connection.vehicletype.copy("DEFAULT_VEHTYPE", "smart_car")
 
+    def _maju_profil(self) -> None:
+        """Majukan profil permintaan mengikuti rekaman aslinya.
+
+        BUG I (diperbaiki 30 Agustus): `self.profile` dulu ditetapkan SEKALI di
+        reset() lalu dibekukan sepanjang episode. Padahal satu profil berasal
+        dari jendela 5 DETIK data CV, sementara satu episode = 12 langkah x
+        76-256 detik = 15-50 MENIT simulasi. Cuplikan 5 detik direntangkan jadi
+        kondisi tetap selama setengah jam.
+
+        Akibatnya terukur parah: dibandingkan kapasitas simpang yang terukur
+        (0,68 kend/detik), 92,1% episode training berada DI ATAS kapasitas dan
+        71,9% di atas 2x kapasitas. Dalam kondisi macet total, pengaturan lampu
+        seperti apa pun tidak berpengaruh -- agent tidak punya apa pun untuk
+        dipelajari. Itu menjelaskan kebijakan v4 yang memilih aksi sama 54%
+        waktu dan reward yang cepat mendatar.
+
+        Sekarang profil maju satu langkah tiap FEATURE_WINDOW_SECONDS detik
+        simulasi, jadi permintaan bergerak persis seperti rekaman CV aslinya --
+        ramai dan sepi bergantian sebagaimana kenyataannya.
+        """
+        self._profile_seconds += 1
+        if self._profile_seconds >= FEATURE_WINDOW_SECONDS:
+            self._profile_seconds = 0
+            self._profile_index = (self._profile_index + 1) % len(self.profiles)
+            self.profile = self.profiles[self._profile_index]
+
     def _inject_one_second(self) -> None:
+        self._maju_profil()
         for approach in FIXED_CYCLE_ORDER:
             if self.rng.random() >= min(0.8, self.profile[approach] / 60.0):
                 continue

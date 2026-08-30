@@ -25,6 +25,7 @@ tidak jadi yang kelima yang terbuang.
 | **J** | 4 dari 25 fitur observasi konstan (one-hot fase) | 16% masukan model tidak berisi informasi apa pun | 🟡 Sebaiknya |
 | **K** | Lingkungan training jauh lebih macet daripada data nyata | Model belajar untuk kondisi yang jarang terjadi | 🟡 Kemungkinan besar ikut beres kalau I diperbaiki |
 | **L** | Nama checkpoint di-hardcode, bentrok antar-run | Sudah pernah bikin salah identifikasi checkpoint | 🟡 Kebersihan |
+| **N** | Permintaan data CV (1,66 kend/dtk) melampaui kapasitas jaringan SUMO (~1,00) | Lingkungan training selalu jenuh, padahal simpang asli tidak (antrean nyata cuma 2,7 kendaraan) | 🔴 **YA — butuh keputusan pemodelan** |
 
 **Dua hipotesis yang saya uji dan TERNYATA BUKAN MASALAH** — dicatat supaya
 tidak ada yang mengaudit ulang hal yang sama (bagian 9).
@@ -285,6 +286,74 @@ Konsekuensi konkretnya:
 **Perbaikan:** majukan indeks profil tiap langkah (`profiles[(idx + step) % n]`)
 supaya permintaan bergerak mengikuti rekaman aslinya. Ini juga membuat episode
 merepresentasikan **urutan waktu nyata**, bukan satu titik beku.
+
+### ✅ DIPERBAIKI 30 Agustus
+
+`_maju_profil()` memajukan profil satu langkah tiap `FEATURE_WINDOW_SECONDS`
+(5) detik simulasi, jadi permintaan bergerak persis seperti rekaman CV aslinya.
+Diukur, 5 seed × 6 langkah, aksi seragam 30 detik:
+
+| | Beku (lama) | Bergerak (baru) |
+|---|---:|---:|
+| Laju throughput rata-rata | 0,435 | **0,645 (+48%)** |
+| Antrean maksimum | 115,0 | **81,0 (−30%)** |
+| Antrean rata-rata | 39,5 | 56,0 |
+| Ragam permintaan dalam episode (sd) | 0,91 | 0,62 |
+
+Throughput naik hampir setengah dan kemacetan ekstrem berkurang jelas — episode
+tidak lagi terjebak di satu kondisi padat yang dibekukan.
+
+**Tapi rasio permintaan/kapasitas masih 2,41×.** Bug I bukan satu-satunya
+penyebab. Lihat Bug N.
+
+---
+
+## 🔴 Bug N (BARU, 30 Agustus) — permintaan dari data CV melampaui kapasitas jaringan SUMO
+
+Ditemukan saat memverifikasi Bug I. Ini **bukan** bug kode, melainkan
+ketidakcocokan antara data dan model simulasi — tapi dampaknya ke training
+sama besarnya.
+
+| Besaran | Nilai |
+|---|---:|
+| Permintaan rata-rata dari data CV | **1,66–1,74 kend/detik** |
+| Kapasitas teoretis jaringan SUMO (8 lajur, siklus 4 fase) | **~1,00 kend/detik** |
+| Throughput yang benar-benar tercapai di simulasi | **~0,65 kend/detik** |
+
+Jaringan SUMO punya **2 lajur per lengan (8 total)**. Dengan saturation flow
+lazim 0,5 kend/detik/lajur dan tiap lengan mendapat ¼ waktu siklus, kapasitas
+teoretisnya ~1,00 kend/detik — **secara fisik tidak mungkin** melayani
+permintaan 1,66 kend/detik yang diturunkan dari data CV.
+
+Artinya lingkungan training akan **selalu** jenuh, seberapa pun bagusnya
+pengaturan lampu. Padahal simpang aslinya jelas **tidak** jenuh — data CV
+mencatat antrean rata-rata cuma **2,7 kendaraan** (maks 17).
+
+### Kemungkinan penyebab (belum dipastikan)
+
+1. **Simpang asli punya lebih banyak lajur** daripada yang dimodelkan jaringan.
+2. **Sepeda motor menerobos dan memadat** melebihi saturation flow berbasis
+   lajur — data CV mencatat **29,9% motor** (mobil 64,6%, bus 4,1%, truk 1,4%),
+   sementara environment menyuntikkan **100% `smart_car`** (salinan
+   `DEFAULT_VEHTYPE`, mobil 5 meter). Ini **pasti** menyumbang, tapi 30% motor
+   saja tidak cukup menjelaskan selisih 2,4×.
+3. Hitungan crossing CV melebihi jumlah kendaraan sebenarnya.
+
+**Catatan sampingan:** batas kecepatan ruas masuk north & south terbaca
+**100 km/jam** di jaringan — nilai jalan bebas hambatan, kemungkinan artefak
+impor OSM. Perlu diperiksa terpisah.
+
+### Pilihan penanganan
+
+**Kalibrasi skala permintaan** adalah jalan paling pragmatis: kalikan profil
+dengan faktor sehingga tingkat kejenuhan simulasi menyerupai simpang aslinya
+(target terukur: antrean simulasi mendekati antrean nyata, rata-rata ±2,7
+kendaraan). Yang penting untuk belajar mengatur lampu adalah **rasio
+permintaan terhadap kapasitas**, bukan angka mutlaknya.
+
+⚠️ **Ini keputusan pemodelan, bukan perbaikan bug** — harus disepakati dan
+**ditulis terang-terangan di laporan teknis**, jangan disembunyikan.
+
 
 ---
 
