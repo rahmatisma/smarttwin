@@ -61,20 +61,35 @@ THROUGHPUT_REWARD_WEIGHT = 0.45
 QUEUE_REWARD_WEIGHT = 0.35
 WAIT_REWARD_WEIGHT = 0.20
 
-# Ambang saturasi. KEDUANYA ditetapkan dari PENGUKURAN, bukan tebakan --
+# Ambang saturasi. SEMUANYA ditetapkan dari PENGUKURAN, bukan tebakan --
 # lihat docs/STATUS-DAN-SISA-KERJA.md item P-1.
 #
 # Riwayat: nilai throughput lama 15,0 membuat reward buta (saturasi 81-97%
 # langkah). Dinaikkan ke 30,0 -- tapi itu diukur saat jendela keputusan masih
 # 30 detik. Setelah Bug A diperbaiki (jendela = satu rotasi penuh, ~76-256
 # detik), kedatangan per langkah melonjak ke 96-170 (rata-rata 154), sehingga
-# ambang 30 saturasi 10/10 langkah. Diukur ulang 29 Agustus dengan simulasi
-# yang sudah benar:
-#   antrean : min 34, maks 75, rata-rata 50  -> ambang 40 saturasi 7/10
-#   arrived : min 96, maks 170, rata-rata 154 -> ambang 30 saturasi 10/10
-# Ambang di bawah diberi kepala ruang di atas maksimum teramati supaya reward
-# tetap punya gradien saat kondisi memburuk melebihi yang pernah terlihat.
-THROUGHPUT_SATURATION_VEH = 200.0
+# ambang 30 saturasi 10/10 langkah. Diukur ulang 29 Agustus, ambang jumlah
+# mentah dinaikkan ke 200.
+#
+# BUG E (diperbaiki 30 Agustus): ambang berbasis JUMLAH MENTAH itu sendiri
+# cacat. `arrived` diakumulasi sepanjang jendela yang panjangnya DIPILIH AGENT
+# (76-256 detik), sedangkan antrean/tunggu cuma snapshot di akhir dan tidak
+# ikut memanjang. Akibatnya memperpanjang siklus menaikkan reward tanpa
+# memperbaiki apa pun -- terukur: korelasi durasi rotasi vs reward +0,978,
+# sementara throughput PER DETIK praktis datar (0,615/0,671/0,654).
+#
+# Sekarang throughput dinilai sebagai LAJU (kendaraan/detik), bukan jumlah.
+# Diukur 30 Agustus pada 5 profil permintaan x 3 panjang rotasi x 2 ulangan:
+#   laju: min 0,158 | p50 0,475 | p95 0,669 | maks 0,679 | rata-rata 0,424
+#   korelasi durasi vs LAJU          : +0,050  <- bias panjang siklus hilang
+#   korelasi durasi vs jumlah mentah : +0,675  <- inilah bias yang diperbaiki
+# Ambang 1,0 kend/detik: 0% saturasi, rata-rata ternormalisasi 0,424, maksimum
+# 0,679 -- masih menyisakan ~32% kepala ruang di atas apa pun yang pernah
+# teramati, jadi reward tetap punya gradien kalau throughput membaik.
+#
+# ⚠️ UKUR ULANG setelah Bug H & I diperbaiki: cap injeksi dinaikkan dan profil
+# permintaan tidak lagi dibekukan, jadi laju yang terjadi akan berubah.
+THROUGHPUT_SATURATION_RATE = 1.0
 QUEUE_SATURATION_VEH = 100.0
 
 
@@ -377,7 +392,11 @@ class SmartTwinSumoEnv(gym.Env[np.ndarray, np.ndarray]):
         metrics = self._metrics()
         queue_norm = min(1.0, metrics["queue"] / QUEUE_SATURATION_VEH)
         wait_norm = min(1.0, metrics["waiting"] / max(1.0, metrics["vehicles"] * 120.0))
-        throughput_norm = min(1.0, arrived / THROUGHPUT_SATURATION_VEH)
+        # BUG E: dinilai sebagai LAJU, bukan jumlah mentah. Tanpa pembagian
+        # window_seconds ini, agent bisa menaikkan reward hanya dengan
+        # memperpanjang siklus -- lihat catatan di THROUGHPUT_SATURATION_RATE.
+        throughput_rate = arrived / max(1, window_seconds)
+        throughput_norm = min(1.0, throughput_rate / THROUGHPUT_SATURATION_RATE)
         throughput_reward = THROUGHPUT_REWARD_WEIGHT * throughput_norm
         queue_penalty = QUEUE_REWARD_WEIGHT * queue_norm
         wait_penalty = WAIT_REWARD_WEIGHT * wait_norm
@@ -396,6 +415,7 @@ class SmartTwinSumoEnv(gym.Env[np.ndarray, np.ndarray]):
         # docs/audit-bug-ppo-sebelum-training-ke-5.md.
         metrics.update({"reward": reward, "throughput_interval": float(arrived), "queue_norm": queue_norm,
                         "wait_norm": wait_norm, "window_seconds": float(window_seconds),
+                        "throughput_rate": float(throughput_rate),
                         "throughput_reward": throughput_reward, "queue_penalty": queue_penalty,
                         "wait_penalty": wait_penalty})
         return self._observation(), reward, False, self.step_count >= self.episode_steps, metrics

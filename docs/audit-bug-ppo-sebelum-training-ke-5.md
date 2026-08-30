@@ -21,7 +21,7 @@ tidak jadi yang kelima yang terbuang.
 | **F** | Evaluasi membandingkan durasi simulasi tidak setara | Kita tidak bisa tahu training berhasil atau tidak | ✅ **YA** (perbaiki duluan — tidak perlu training) |
 | **G** | Skala fitur `volume` 14× kebesaran | ⚠️ **Sisi PPO: diperbaiki.** Sisi rule-based: divalidasi lewat SUMO, ternyata memperbaikinya justru **memperburuk** delay +3,9% & antrean +6,5% — TIDAK diubah | ✅ PPO saja |
 | **H** | Cap probabilitas injeksi memotong 9,9% permintaan | Kondisi puncak — yang paling penting — tidak pernah dialami agent | ✅ **YA** |
-| **I** | Profil permintaan dibekukan sepanjang episode | Sampel 5 detik direntangkan jadi 30–40 menit simulasi | ✅ **YA** |
+| **I** | Profil permintaan dibekukan sepanjang episode | 🔴 **PALING PENTING.** Terukur: **92,1% episode training di atas kapasitas simpang**, 71,9% di atas 2× kapasitas. Insentif reward tidak bisa divalidasi sampai ini beres | ✅ **YA — kerjakan duluan** |
 | **J** | 4 dari 25 fitur observasi konstan (one-hot fase) | 16% masukan model tidak berisi informasi apa pun | 🟡 Sebaiknya |
 | **K** | Lingkungan training jauh lebih macet daripada data nyata | Model belajar untuk kondisi yang jarang terjadi | 🟡 Kemungkinan besar ikut beres kalau I diperbaiki |
 | **L** | Nama checkpoint di-hardcode, bentrok antar-run | Sudah pernah bikin salah identifikasi checkpoint | 🟡 Kebersihan |
@@ -48,6 +48,70 @@ Korelasi durasi ↔ reward: **+0,978**. Efisiensi tidak berubah, reward naik 3,6
 **Perbaikan:** `throughput_norm = (arrived / window_seconds) / LAJU_MAKS`, dengan
 `LAJU_MAKS` diukur ulang (dari data di atas, laju wajar ±0,65 kend/detik —
 beri kepala ruang, mis. 1,0).
+
+### ✅ DIPERBAIKI 30 Agustus — dan menyingkap masalah yang jauh lebih besar
+
+`THROUGHPUT_SATURATION_VEH = 200,0` (jumlah mentah) diganti
+`THROUGHPUT_SATURATION_RATE = 1,0` (kendaraan/detik). Ambangnya **diukur**, tidak
+ditebak — 5 profil permintaan × 3 panjang rotasi × 2 ulangan:
+
+```
+laju: min 0,158 | p50 0,475 | p95 0,669 | maks 0,679 | rata-rata 0,424
+korelasi durasi vs LAJU          : +0,050   <- bias panjang siklus hilang
+korelasi durasi vs jumlah mentah : +0,675   <- inilah bias yang diperbaiki
+```
+
+Ambang 1,0 memberi 0% saturasi, rata-rata ternormalisasi 0,424, maksimum 0,679
+— menyisakan ~32% kepala ruang. Diverifikasi dengan mengulang pengujian yang
+dulu menemukan bug ini: **korelasi durasi ↔ reward +0,978 → −0,983.**
+
+### ⚠️ Tapi insentifnya BELUM bisa divalidasi — dan itu karena Bug I
+
+Setelah diperbaiki, saya uji apakah reward barunya masuk akal. Dua pengujian
+lanjutan memberi hasil yang mengkhawatirkan:
+
+**1. Optimum ada di ujung terpendek.** Diuji hijau seragam 15→60 detik: reward
+tertinggi di 15 detik (siklus 76 detik), menurun monoton sampai 60 detik. Agent
+tidak punya alasan memilih apa pun selain hijau minimum.
+
+**2. Alokasi proporsional permintaan KALAH dari bagi rata.** Pada total hijau
+yang sama (120 detik), seed dengan permintaan timpang (U60/T24/S24/B72):
+
+| Alokasi | Laju | Antrean | Reward |
+|---|---:|---:|---:|
+| Bagi rata `[30,30,30,30]` | 0,647 | 66,3 | **−0,0187** ← menang |
+| Proporsional `[40,15,15,50]` | 0,686 | 109,7 | −0,1503 |
+| Kebalikan `[20,45,45,15]` | 0,664 | 119,0 | −0,1813 |
+
+Alokasi proporsional memberi throughput **lebih tinggi** tapi antrean jauh lebih
+panjang, sehingga kalah. Urutannya benar (proporsional > kebalikan), tapi bagi
+rata tetap menang.
+
+**Akar penyebabnya BUKAN fungsi reward — melainkan Bug I.** Diukur pada 430
+profil training, dibandingkan kapasitas simpang yang benar-benar terukur
+(0,68 kend/detik):
+
+| Kondisi | Jumlah profil | Porsi |
+|---|---:|---:|
+| Di bawah kapasitas (sehat) | 34 | **7,9%** |
+| 1–2× kapasitas (jenuh) | 87 | 20,2% |
+| **>2× kapasitas (macet total)** | **309** | **71,9%** |
+
+**92,1% episode training berada di atas kapasitas simpang; rata-rata
+permintaan 2,46× kapasitas.** Dalam kondisi macet total, pengaturan lampu
+seperti apa pun tidak bisa mengatasi — antrean tetap tumbuh, dan keputusan
+alokasi nyaris tidak berpengaruh.
+
+Ini menjelaskan banyak hal sekaligus: kenapa kebijakan v4 memilih aksi yang
+sama 54% waktu, kenapa reward-nya cepat mendatar, dan kenapa PPO paling buruk
+justru di seed 3000 yang lalu lintasnya sepi (model tidak pernah berlatih di
+kondisi lengang yang realistis).
+
+**Konsekuensi untuk urutan kerja: Bug I WAJIB diperbaiki sebelum insentif
+reward bisa dinilai sama sekali.** Perbaikan Bug E sendiri sudah benar dan tetap
+diperlukan, tapi mengevaluasi apakah reward mendorong perilaku yang tepat tidak
+mungkin dilakukan di lingkungan yang 92% macet total.
+
 
 ---
 
