@@ -530,3 +530,70 @@ unggul secara sahih, jangan dipaksakan aktif. Kotak 10 tetap fungsional dengan
 Scenario Generator, dan temuan-temuan di dokumen ini sendiri sudah jadi bahan
 laporan teknis yang kuat — menunjukkan tim menguji metodologinya sendiri, bukan
 sekadar menerima angka apa adanya.
+
+---
+
+## 🔴 Bug O (BARU, 30 Agustus) — permintaan dihitung 2× karena garis CV memotong kedua arah
+
+**Ini akar penyebab terbesar dari Bug N, dan ditemukan karena pertanyaan yang
+tepat: "kok angkanya besar sekali?"**
+
+`jumlah_crossing` di `crossing_simpang.csv` menghitung kendaraan yang melintasi
+garis **ke arah mana pun**. Di `cv/vehicle_counter_pingit.py`:
+
+```python
+if sisi_lama * sisi_baru < 0:      # cuma cek PINDAH SISI
+    akum["total"] += 1             # tidak ada filter arah
+```
+
+Perilaku ini **disengaja untuk CV** dan sudah didokumentasikan di
+`hasil-validasi-akurasi-cv.md` ("kedua arah lalu lintas dihitung").
+
+Masalahnya muncul saat angka itu dipakai sebagai **permintaan pendekat** oleh
+`load_demand_profiles()`. Jalan pendekat Simpang Pingit **dua arah** —
+diverifikasi geometris pada jaringan SUMO:
+
+| Lengan | Jarak ruas masuk ↔ ruas keluar | Beda arah | Kesimpulan |
+|---|---:|---:|---|
+| north | **29,1 m** | **180°** | jalan yang sama, dua arah |
+| east | **28,4 m** | **179°** | jalan yang sama, dua arah |
+
+Jadi satu garis hitung memotong **dua arus sekaligus**: kendaraan yang MASUK ke
+simpang dan yang KELUAR dari simpang. Memakainya mentah sebagai permintaan
+pendekat **menggandakan angkanya**.
+
+### Bukti kecocokan
+
+| | Sebelum dibagi 2 | Sesudah dibagi 2 |
+|---|---:|---:|
+| Permintaan total | 90,5 kend/menit = **1,66 kend/detik** | 45,3 = **0,75 kend/detik** |
+| Kapasitas jaringan SUMO | ~1,00 kend/detik | ~1,00 kend/detik |
+| Status | **di ATAS kapasitas → macet permanen** | **di BAWAH kapasitas** ✓ |
+
+Versi yang sudah dibagi konsisten dengan kenyataan lapangan: data CV mencatat
+antrean nyata rata-rata cuma **2,7 kendaraan** — simpang aslinya jelas tidak
+jenuh.
+
+### Hasil setelah diperbaiki (diukur)
+
+| | Sebelum Bug O | Sesudah |
+|---|---:|---:|
+| Terlayani north | 33% | **56%** |
+| Terlayani east | 41% | **73%** |
+| Terlayani south | 77% | **84%** |
+| Terlayani west | 37% | **55%** |
+| Kendaraan nyangkut tak bisa masuk | 622 | **176 (−72%)** |
+| Antrean rata-rata | 56,0 | 42,2 |
+
+⚠️ **Pembagi 2 adalah TAKSIRAN, bukan pengukuran** — mengasumsikan arus masuk
+dan keluar kira-kira seimbang. Perbaikan yang benar adalah **memfilter arah di
+`hitung_crossing()`** sehingga `volume` berarti arus masuk saja. Itu mengubah
+keluaran CV produksi, jadi belum dikerjakan.
+
+### ⚠️ Masalahnya BELUM tuntas
+
+Setelah Bug O diperbaiki, antrean simulasi masih **42,2 kendaraan** vs
+**2,7 di lapangan** — masih ~15× lipat, dan 176 kendaraan tetap tidak bisa
+masuk. Jadi Bug N-1 (kurang lajur) dan N-2 (ruas terlalu pendek) **tetap
+berlaku** dan masih perlu verifikasi jumlah lajur asli.
+

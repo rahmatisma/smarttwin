@@ -89,4 +89,9 @@ def test_demand_profiles_use_crossing_flow_and_current_snapshot_windows(tmp_path
 
     profiles = load_demand_profiles(crossing, snapshot)
 
-    assert profiles == [{"north": 24.0, "east": 12.0, "south": 0.0, "west": 0.0}]
+    # BUG O: `jumlah_crossing` menghitung kedua arah lalu lintas (garis hitung CV
+    # tidak memfilter arah, dan jalan pendekatnya dua arah), jadi angkanya dibagi
+    # BAGI_ARUS_DUA_ARAH sebelum dipakai sebagai permintaan satu arah.
+    #   MAGELANG   2 crossing / 2 = 1 per 5 detik -> 12 kend/menit (north)
+    #   DIPONEGORO 1 crossing / 2 = 0,5 per 5 detik -> 6 kend/menit (east)
+    assert profiles == [{"north": 12.0, "east": 6.0, "south": 0.0, "west": 0.0}]

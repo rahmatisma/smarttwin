@@ -92,6 +92,33 @@ WAIT_REWARD_WEIGHT = 0.20
 THROUGHPUT_SATURATION_RATE = 1.0
 QUEUE_SATURATION_VEH = 100.0
 
+# BUG O (ditemukan 30 Agustus): `jumlah_crossing` di crossing_simpang.csv
+# menghitung kendaraan yang melintasi garis ke ARAH MANA PUN -- lihat
+# cv/vehicle_counter_pingit.py: `if sisi_lama * sisi_baru < 0`, tanpa filter
+# arah (perilaku ini disengaja untuk CV dan didokumentasikan di
+# docs/hasil-validasi-akurasi-cv.md).
+#
+# Masalahnya: jalan pendekat Simpang Pingit DUA ARAH. Diverifikasi geometris
+# pada jaringan SUMO -- ruas masuk dan ruas keluar north berjarak 29,1 m dengan
+# arah berlawanan 180 derajat (east: 28,4 m / 179 derajat), yaitu jalan yang
+# sama. Jadi satu garis hitung memotong DUA arus: kendaraan yang MASUK ke
+# simpang dan yang KELUAR dari simpang.
+#
+# Memakainya mentah-mentah sebagai permintaan pendekat menggandakan angkanya.
+# Terukur akibatnya: permintaan 1,66 kend/detik vs kapasitas jaringan ~1,00 --
+# 92% episode training macet total, padahal simpang aslinya lancar (antrean
+# nyata rata-rata cuma 2,7 kendaraan).
+#
+# Dibagi 2 sebagai taksiran terbaik yang tersedia (mengasumsikan arus masuk dan
+# keluar kira-kira seimbang). Setelah dibagi: 90,5/menit -> 45/menit = 0,75
+# kend/detik, yaitu DI BAWAH kapasitas -- konsisten dengan antrean pendek yang
+# teramati di lapangan.
+#
+# ⚠️ Ini TAKSIRAN, bukan pengukuran. Perbaikan yang benar adalah memfilter arah
+# di penghitung CV (`hitung_crossing()`), sehingga `volume` berarti arus masuk
+# saja. Itu mengubah keluaran CV produksi, jadi belum dikerjakan di sini.
+BAGI_ARUS_DUA_ARAH = 2.0
+
 
 def _floor_five_seconds(timestamp: str) -> str:
     parsed = datetime.fromisoformat(str(timestamp).strip().replace("Z", "+00:00"))
@@ -136,7 +163,9 @@ def load_demand_profiles(
     timestamps = sorted(set(grouped).intersection(measured))
     profiles = [
         {
-            approach: grouped[timestamp].get(approach, 0.0) * (60.0 / FEATURE_WINDOW_SECONDS)
+            approach: grouped[timestamp].get(approach, 0.0)
+            / BAGI_ARUS_DUA_ARAH
+            * (60.0 / FEATURE_WINDOW_SECONDS)
             for approach in FIXED_CYCLE_ORDER
         }
         for timestamp in timestamps
