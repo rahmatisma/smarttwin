@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import type {
   ApproachState,
   SignalStatus,
@@ -291,6 +291,9 @@ export default function DigitalTwinPanel({
   const [detectedVehicles, setDetectedVehicles] = useState(0);
   const [liveSignal, setLiveSignal] = useState<LiveSumoSignal | null>(null);
   const [frameVersion, setFrameVersion] = useState(0);
+  const [simError, setSimError] = useState<string | null>(null);
+  const [recoveryNonce, setRecoveryNonce] = useState(0);
+  const wasRunningRef = useRef(false);
 
   const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
 
@@ -303,13 +306,22 @@ export default function DigitalTwinPanel({
         
         setSimRunning(data.running);
         if (data.running) {
+          wasRunningRef.current = true;
+          setSimError(null);
           setSimTime(data.simulationTimeSeconds ?? 0);
           setVehiclesCount(data.vehicles?.length ?? 0);
           setDetectedVehicles(data.detectedVehicles ?? 0);
           setLiveSignal(normalizeLiveSignal(data.signals?.[0]));
+        } else if (wasRunningRef.current) {
+          // SUMO-GUI ditutup/crash di luar dashboard. Picu start ulang satu
+          // kali; controller backend akan dibangun ulang tanpa reload halaman.
+          wasRunningRef.current = false;
+          setSimError("Renderer SUMO terputus. Mencoba menyambungkan kembali…");
+          setRecoveryNonce((value) => value + 1);
         }
       } catch {
         setSimRunning(false);
+        setSimError("Backend simulasi tidak dapat dihubungi.");
       }
     }, 500);
     return () => clearInterval(interval);
@@ -363,17 +375,27 @@ export default function DigitalTwinPanel({
         },
       }),
     })
-      .then((response) => {
-        if (!cancelled && response.ok) setSimRunning(true);
+      .then(async (response) => {
+        if (!response.ok) {
+          const payload = await response.json().catch(() => null);
+          throw new Error(payload?.detail ?? "Gagal memulai SUMO");
+        }
+        if (!cancelled) {
+          wasRunningRef.current = true;
+          setSimRunning(true);
+          setSimError(null);
+        }
       })
-      .catch(() => {
-        // Polling state menampilkan denah fallback jika backend/SUMO mati.
+      .catch((error) => {
+        if (!cancelled) setSimError(
+          error instanceof Error ? error.message : "SUMO tidak tersedia."
+        );
       });
 
     return () => {
       cancelled = true;
     };
-  }, [API_BASE_URL, canStartSimulation, livePayloadSignature]);
+  }, [API_BASE_URL, canStartSimulation, livePayloadSignature, recoveryNonce]);
   /*
    * Mapping approach berdasarkan arah.
    */
@@ -474,6 +496,12 @@ export default function DigitalTwinPanel({
           {signal.intersectionId}
         </span>
       </div>
+
+      {simError && (
+        <div role="status" className="mb-3 rounded-md border border-signal-amber/40 bg-signal-amber/10 px-3 py-2 text-xs text-signal-amber">
+          {simError}
+        </div>
+      )}
 
       {/* =====================================================
           SVG INTERSECTION OR LIVE STREAM

@@ -50,6 +50,9 @@ def main() -> None:
     parser.add_argument("--episode-steps", type=_positive_int, default=12)
     parser.add_argument("--decision-seconds", type=_positive_int, default=30)
     parser.add_argument("--n-steps", type=_positive_int, default=512, help="Ukuran rollout PPO; gunakan 8 hanya untuk smoke test")
+    parser.add_argument("--ent-coef", type=float, default=0.01,
+                        help="Bobot bonus entropi PPO -- naikkan kalau kebijakan terkunci ke sedikit "
+                             "aksi terlalu cepat (lihat Bug P revisi 3 di audit-bug-ppo-sebelum-training-ke-5.md)")
     parser.add_argument("--device", choices=("cpu", "cuda", "auto"), default="cpu",
                         help="PPO MLP+SUMO default ke CPU; gunakan cuda hanya setelah benchmark")
     parser.add_argument("--resume", help="Checkpoint .zip untuk melanjutkan training")
@@ -81,10 +84,20 @@ def main() -> None:
         filename=str(output.parent / "training_monitor.csv"),
         override_existing=resume_path is None,
     )
+    # BUG L (diperbaiki 30 Agustus): name_prefix dulu di-hardcode
+    # "smarttwin_ppo" TANPA memedulikan --output, sehingga run yang berbeda
+    # (v3, v4, ...) menulis checkpoint dengan nama file yang SAMA PERSIS di
+    # folder yang sama dan saling menimpa. Itu pernah menyulitkan memastikan
+    # checkpoint mana milik run mana -- harus dibuktikan lewat
+    # `action_space.nvec` dan `num_timesteps`, bukan nama filenya.
+    #
+    # Sekarang diturunkan dari --output, dan tiap run punya subfolder sendiri
+    # supaya tidak ada lagi tabrakan nama antar-run.
+    nama_run = output.name
     callback = CheckpointCallback(
         save_freq=args.checkpoint_freq,
-        save_path=str(output.parent / "checkpoints"),
-        name_prefix="smarttwin_ppo",
+        save_path=str(output.parent / "checkpoints" / nama_run),
+        name_prefix=nama_run,
     )
     tensorboard_log = str(output.parent / "tensorboard") if importlib.util.find_spec("tensorboard") else None
     batch_size = min(64, args.n_steps)
@@ -95,7 +108,7 @@ def main() -> None:
         model = PPO(
             "MlpPolicy", env, learning_rate=3e-4, n_steps=args.n_steps,
             batch_size=batch_size, gamma=0.99, gae_lambda=0.95,
-            clip_range=0.2, ent_coef=0.01, seed=args.seed, verbose=1,
+            clip_range=0.2, ent_coef=args.ent_coef, seed=args.seed, verbose=1,
             tensorboard_log=tensorboard_log, device=args.device,
         )
     started_at = datetime.now(timezone.utc)
@@ -122,6 +135,7 @@ def main() -> None:
             "episodeSteps": args.episode_steps,
             "decisionSeconds": args.decision_seconds,
             "nSteps": int(model.n_steps),
+            "entCoef": float(model.ent_coef),
             "checkpointFrequency": args.checkpoint_freq,
             "resumedFrom": str(resume_path) if resume_path else None,
             "model": str(model_path),

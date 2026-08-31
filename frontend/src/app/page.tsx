@@ -318,6 +318,7 @@ export default function DashboardPage() {
   const selectedIntersection: IntersectionSelection = "all";
   
   const videoTimeRef = useRef<number>(0);
+  const lastClockSyncSecondRef = useRef<number>(-1);
   const requestIdRef = useRef<number>(0);
 
   /*
@@ -459,9 +460,10 @@ export default function DashboardPage() {
                   recommendation,
                   coords,
                 ] = await Promise.all([
-                  fetchOptional(
+                  fetchOptionalWithin(
                     `Traffic ${inter.name}`,
-                    fetchTrafficState(inter.databaseId, videoTimeRef.current)
+                    fetchTrafficState(inter.databaseId, videoTimeRef.current),
+                    2000
                   ),
                   hasLiveBackend
                     ? fetchOptionalWithin(`Status sinyal ${inter.name}`, fetchSignalStatus(inter.databaseId))
@@ -576,23 +578,24 @@ export default function DashboardPage() {
                 recommendation,
                 forecast,
               ] = await Promise.all([
-                fetchOptional(
+                fetchOptionalWithin(
                   `Traffic ${inter.name}`,
-                  fetchTrafficState(inter.databaseId, videoTimeRef.current)
+                  fetchTrafficState(inter.databaseId, videoTimeRef.current),
+                  2500
                 ),
                 hasLiveBackend
-                  ? fetchOptional(`Status sinyal ${inter.name}`, fetchSignalStatus(inter.databaseId))
+                  ? fetchOptionalWithin(`Status sinyal ${inter.name}`, fetchSignalStatus(inter.databaseId), 2500)
                   : null,
                 hasLiveBackend
                   ? (scenario === "Traffic Realtime"
-                      ? fetchOptional(`Rekomendasi ${inter.name}`, fetchRecommendation(inter.databaseId))
-                      : fetchOptional(`Digital Twin Scenario ${inter.name}`, fetchDigitalTwinScenarios(inter.databaseId).then(data => {
+                      ? fetchOptionalWithin(`Rekomendasi ${inter.name}`, fetchRecommendation(inter.databaseId), 2500)
+                      : fetchOptionalWithin(`Digital Twin Scenario ${inter.name}`, fetchDigitalTwinScenarios(inter.databaseId).then(data => {
                         const candidate = data?.candidates?.find((c) => c.candidateId === scenario.toLowerCase());
                         return candidate ? candidateToRecommendation(candidate, data?.updatedAt ?? null) : null;
-                      })))
+                      }), 2500))
                   : null,
                 hasLiveBackend
-                  ? fetchOptional(`Forecast ${inter.name}`, fetchForecast(inter.databaseId))
+                  ? fetchOptionalWithin(`Forecast ${inter.name}`, fetchForecast(inter.databaseId), 2500)
                   : null,
               ]);
               return {
@@ -1026,6 +1029,15 @@ export default function DashboardPage() {
                 onApproachChange={setSelectedApproach}
                 onTimeUpdate={(time) => {
                   videoTimeRef.current = time;
+                  const wholeSecond = Math.floor(time);
+                  if (wholeSecond !== lastClockSyncSecondRef.current) {
+                    lastClockSyncSecondRef.current = wholeSecond;
+                    void fetch(`${API_BASE_URL}/api/v1/simulation/sync-clock`, {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ videoTimeSeconds: time }),
+                    }).catch(() => undefined);
+                  }
                 }}
               />
             </div>

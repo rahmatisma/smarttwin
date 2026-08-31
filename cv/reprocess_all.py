@@ -15,7 +15,7 @@ yang aktif kepakai)
 Cara kerja
 ----------
 1. Baca kredensial (SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, HF_TOKEN,
-   HF_REPO_ID) langsung dari ../backend/.env, taruh ke os.environ --
+   HF_REPO_ID) langsung dari ../.env (root repo), taruh ke os.environ --
    ini sebabnya kamu TIDAK perlu export manual seperti kalau
    menjalankan process_uploaded_video.py sendirian.
 2. Cari semua kamera milik intersection "simpang4-pingit" di
@@ -56,10 +56,10 @@ INTERSECTION_SLUG = "simpang4-pingit"
 
 def load_backend_env() -> None:
     """
-    Baca ../backend/.env dan isi ke os.environ (tidak menimpa kalau
+    Baca ../.env (root repo) dan isi ke os.environ (tidak menimpa kalau
     variabelnya sudah di-set manual di shell).
     """
-    env_path = os.path.join(BASE_DIR, "..", "backend", ".env")
+    env_path = os.path.join(BASE_DIR, "..", ".env")
 
     if not os.path.exists(env_path):
         raise RuntimeError(

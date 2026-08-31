@@ -98,6 +98,16 @@ export async function fetchIntersectionCoords(
  * TRAFFIC STATE
  * ========================================================= */
 
+const APPROACH_COLUMNS =
+  "approach, volume, carCount, motorcycleCount, busCount, truckCount, queueLengthVeh, queueLengthMEst, densityIndex, avgSpeedKmh";
+
+type TrafficStateRow = {
+  id: number;
+  windowStart: string;
+  windowEnd: string;
+  trafficApproachStates: TrafficState["approaches"];
+};
+
 export async function fetchTrafficState(
   intersectionId: string = DEFAULT_INTERSECTION_ID,
   videoTime?: number
@@ -135,8 +145,7 @@ export async function fetchTrafficState(
     return null;
   }
 
-  let state: { id: number; windowStart: string; windowEnd: string } | null =
-    null;
+  let state: TrafficStateRow | null = null;
 
   if (videoTime !== undefined) {
     // 2. Cari window PERTAMA batch ini -- jadi acuan "detik ke-0"
@@ -162,13 +171,15 @@ export async function fetchTrafficState(
       //    diurutkan descending supaya yang paling dekat menang).
       //    Kalau video sudah lewat durasi data yang ada, ini otomatis
       //    jatuh ke window TERAKHIR batch (graceful, tidak error).
+      //    Approach-nya langsung di-embed di sini (bukan query
+      //    terpisah) supaya cuma 1 round-trip, bukan 2.
       const targetTime = new Date(
         new Date(origin.windowStart).getTime() + videoTime * 1000
       ).toISOString();
 
       const { data: matched, error: matchedError } = await supabase
         .from("trafficStates")
-        .select("id, windowStart, windowEnd")
+        .select(`id, windowStart, windowEnd, trafficApproachStates(${APPROACH_COLUMNS})`)
         .eq("intersectionId", rowId)
         .eq("createdAt", latest.createdAt)
         .lte("windowStart", targetTime)
@@ -182,17 +193,17 @@ export async function fetchTrafficState(
         );
       }
 
-      state = matched;
+      state = matched as TrafficStateRow | null;
     }
   }
 
   if (!state) {
     // Tidak ada videoTime (pemanggil tidak sedang menonton video
     // tertentu), atau batch-nya kosong -- jatuh balik ke window
-    // TERAKHIR batch paling baru.
+    // TERAKHIR batch paling baru. Approach-nya juga di-embed di sini.
     const { data: fallback, error: fallbackError } = await supabase
       .from("trafficStates")
-      .select("id, windowStart, windowEnd")
+      .select(`id, windowStart, windowEnd, trafficApproachStates(${APPROACH_COLUMNS})`)
       .eq("intersectionId", rowId)
       .eq("createdAt", latest.createdAt)
       .order("windowEnd", { ascending: false })
@@ -203,31 +214,18 @@ export async function fetchTrafficState(
       throw new Error(`Gagal mengambil traffic state: ${fallbackError.message}`);
     }
 
-    state = fallback;
+    state = fallback as TrafficStateRow | null;
   }
 
   if (!state) {
     return null;
   }
 
-  const { data: approaches, error: approachError } = await supabase
-    .from("trafficApproachStates")
-    .select(
-      "approach, volume, carCount, motorcycleCount, busCount, truckCount, queueLengthVeh, queueLengthMEst, densityIndex, avgSpeedKmh"
-    )
-    .eq("trafficStateId", state.id);
-
-  if (approachError) {
-    throw new Error(
-      `Gagal mengambil traffic approach state: ${approachError.message}`
-    );
-  }
-
   return {
     intersectionId,
     windowStart: state.windowStart,
     windowEnd: state.windowEnd,
-    approaches: approaches ?? [],
+    approaches: state.trafficApproachStates ?? [],
   };
 }
 

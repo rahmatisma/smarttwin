@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import os
 import random
 import shutil
 import uuid
@@ -14,7 +15,7 @@ import numpy as np
 from gymnasium import spaces
 
 from .ppo_engine import GREEN_OPTIONS
-from .ppo_features import build_ppo_observation
+from .ppo_features import OBSERVATION_SIZE, build_ppo_observation
 from .rule_based_engine import FIXED_CYCLE_ORDER, RuleBasedEngine, YELLOW_SECONDS
 from app.schemas.traffic import ApproachState, TrafficState
 
@@ -54,27 +55,134 @@ YELLOW_STATE = {
     "north": "rrrrrrrrrryyyyyrrrrr", "west": "rrrrrrrrrrrrrrryyyyy",
 }
 
-# Reward v2: throughput menjadi tujuan utama. Bobot ketiga komponen berjumlah
-# 1,0 agar skala reward tetap mudah dibaca dan dibandingkan antar-training.
+# BUG P (ditemukan 30 Agustus, training v5 dihentikan di checkpoint 30k).
+# `queue_penalty` sebelumnya cuma memakai TOTAL antrean 4 lengan digabung --
+# secara matematis tidak bisa membedakan "4 lengan masing-masing antre 2" dari
+# "1 lengan antre 8, 3 lengan kosong". Dibuktikan lewat perilaku: dipaksa 3
+# skenario permintaan EKSTRIM timpang (satu lengan=40, tiga lengan lain=0),
+# model 30k mengeluarkan AKSI YANG PERSIS SAMA di ketiganya -- terlepas lengan
+# mana yang sedang kebanjiran. Korelasi peringkat alokasi-vs-permintaan
+# (Spearman) MEMBURUK sepanjang training: +0,083 (20k) -> -0,133 (30k), dan
+# aksi dominan naik dari 50% ke 83% langkah -- kebalikan dari yang diharapkan.
+#
+# Diagnosis: dengan permintaan hasil kalibrasi (SKALA_PERMINTAAN=0,40) yang
+# ringan, siklus pendek TETAP sudah cukup menjaga TOTAL antrean rendah tanpa
+# perlu tahu lengan mana yang sibuk -- PPO menemukan jalan pintas itu dan
+# berhenti belajar mengalokasikan secara adaptif, karena reward tidak pernah
+# menghukumnya untuk menelantarkan satu lengan asal total tetap kecil.
+#
+# Perbaikan: tambah FAIRNESS_REWARD_WEIGHT berbasis lengan TERBURUK
+# (max_queue_lengan di _metrics()), terpisah dari queue_penalty berbasis
+# total. Sekarang menelantarkan satu lengan langsung terlihat di reward,
+# berapa pun totalnya. QUEUE_REWARD_WEIGHT diturunkan 0,35->0,25 supaya total
+# bobot tetap 1,0.
 THROUGHPUT_REWARD_WEIGHT = 0.45
-QUEUE_REWARD_WEIGHT = 0.35
+QUEUE_REWARD_WEIGHT = 0.25
 WAIT_REWARD_WEIGHT = 0.20
+FAIRNESS_REWARD_WEIGHT = 0.10
 
-# Ambang saturasi. KEDUANYA ditetapkan dari PENGUKURAN, bukan tebakan --
+# Ambang saturasi. SEMUANYA ditetapkan dari PENGUKURAN, bukan tebakan --
 # lihat docs/STATUS-DAN-SISA-KERJA.md item P-1.
 #
 # Riwayat: nilai throughput lama 15,0 membuat reward buta (saturasi 81-97%
 # langkah). Dinaikkan ke 30,0 -- tapi itu diukur saat jendela keputusan masih
 # 30 detik. Setelah Bug A diperbaiki (jendela = satu rotasi penuh, ~76-256
 # detik), kedatangan per langkah melonjak ke 96-170 (rata-rata 154), sehingga
-# ambang 30 saturasi 10/10 langkah. Diukur ulang 29 Agustus dengan simulasi
-# yang sudah benar:
-#   antrean : min 34, maks 75, rata-rata 50  -> ambang 40 saturasi 7/10
-#   arrived : min 96, maks 170, rata-rata 154 -> ambang 30 saturasi 10/10
-# Ambang di bawah diberi kepala ruang di atas maksimum teramati supaya reward
-# tetap punya gradien saat kondisi memburuk melebihi yang pernah terlihat.
-THROUGHPUT_SATURATION_VEH = 200.0
+# ambang 30 saturasi 10/10 langkah. Diukur ulang 29 Agustus, ambang jumlah
+# mentah dinaikkan ke 200.
+#
+# BUG E (diperbaiki 30 Agustus): ambang berbasis JUMLAH MENTAH itu sendiri
+# cacat. `arrived` diakumulasi sepanjang jendela yang panjangnya DIPILIH AGENT
+# (76-256 detik), sedangkan antrean/tunggu cuma snapshot di akhir dan tidak
+# ikut memanjang. Akibatnya memperpanjang siklus menaikkan reward tanpa
+# memperbaiki apa pun -- terukur: korelasi durasi rotasi vs reward +0,978,
+# sementara throughput PER DETIK praktis datar (0,615/0,671/0,654).
+#
+# Sekarang throughput dinilai sebagai LAJU (kendaraan/detik), bukan jumlah.
+# Diukur 30 Agustus pada 5 profil permintaan x 3 panjang rotasi x 2 ulangan:
+#   laju: min 0,158 | p50 0,475 | p95 0,669 | maks 0,679 | rata-rata 0,424
+#   korelasi durasi vs LAJU          : +0,050  <- bias panjang siklus hilang
+#   korelasi durasi vs jumlah mentah : +0,675  <- inilah bias yang diperbaiki
+# Ambang 1,0 kend/detik: 0% saturasi, rata-rata ternormalisasi 0,424, maksimum
+# 0,679 -- masih menyisakan ~32% kepala ruang di atas apa pun yang pernah
+# teramati, jadi reward tetap punya gradien kalau throughput membaik.
+#
+# ⚠️ UKUR ULANG setelah Bug H & I diperbaiki: cap injeksi dinaikkan dan profil
+# permintaan tidak lagi dibekukan, jadi laju yang terjadi akan berubah.
+THROUGHPUT_SATURATION_RATE = 1.0
 QUEUE_SATURATION_VEH = 100.0
+
+# BUG P (ditemukan 30 Agustus, training v5 dihentikan di 30k). Diukur, bukan
+# ditebak -- lihat catatan lengkap di FAIRNESS_REWARD_WEIGHT di atas.
+#
+# Revisi 2 (masih 30 Agustus): percobaan pertama pakai MAX_QUEUE_LENGAN_
+# SATURATION_VEH (ambang berbasis max() antrean lengan) TERBUKTI TIDAK CUKUP
+# lewat smoke test training 20k -- keragaman aksi tetap terkunci 2 kombinasi,
+# korelasi permintaan tetap negatif, DAN explained_variance jadi negatif
+# (-0,113, lebih buruk dari training manapun sebelumnya). Diganti ke jumlah
+# kuadrat antrean per lengan (queue_kuadrat di _metrics()) yang berubah halus,
+# bukan melompat -- lihat catatan lengkap di sana. Konstanta lama disisakan
+# supaya field max_queue_lengan di metrics tetap ada untuk diagnostik, tapi
+# TIDAK DIPAKAI lagi menghitung reward.
+MAX_QUEUE_LENGAN_SATURATION_VEH = 20.0  # tidak dipakai reward lagi, cuma diagnostik
+# Diukur (5 seed x 3 panjang rotasi): min 14, p50 76, p95 155, maks 347,
+# rata-rata 87,9. Kepala ruang ~44% di atas maksimum teramati.
+QUEUE_KUADRAT_SATURATION = 500.0
+
+# BUG O (ditemukan 30 Agustus): `jumlah_crossing` di crossing_simpang.csv
+# menghitung kendaraan yang melintasi garis ke ARAH MANA PUN -- lihat
+# cv/vehicle_counter_pingit.py: `if sisi_lama * sisi_baru < 0`, tanpa filter
+# arah (perilaku ini disengaja untuk CV dan didokumentasikan di
+# docs/hasil-validasi-akurasi-cv.md).
+#
+# Masalahnya: jalan pendekat Simpang Pingit DUA ARAH. Diverifikasi geometris
+# pada jaringan SUMO -- ruas masuk dan ruas keluar north berjarak 29,1 m dengan
+# arah berlawanan 180 derajat (east: 28,4 m / 179 derajat), yaitu jalan yang
+# sama. Jadi satu garis hitung memotong DUA arus: kendaraan yang MASUK ke
+# simpang dan yang KELUAR dari simpang.
+#
+# Memakainya mentah-mentah sebagai permintaan pendekat menggandakan angkanya.
+# Terukur akibatnya: permintaan 1,66 kend/detik vs kapasitas jaringan ~1,00 --
+# 92% episode training macet total, padahal simpang aslinya lancar (antrean
+# nyata rata-rata cuma 2,7 kendaraan).
+#
+# Dibagi 2 sebagai taksiran terbaik yang tersedia (mengasumsikan arus masuk dan
+# keluar kira-kira seimbang). Setelah dibagi: 90,5/menit -> 45/menit = 0,75
+# kend/detik, yaitu DI BAWAH kapasitas -- konsisten dengan antrean pendek yang
+# teramati di lapangan.
+#
+# ⚠️ Ini TAKSIRAN, bukan pengukuran. Perbaikan yang benar adalah memfilter arah
+# di penghitung CV (`hitung_crossing()`), sehingga `volume` berarti arus masuk
+# saja. Itu mengubah keluaran CV produksi, jadi belum dikerjakan di sini.
+BAGI_ARUS_DUA_ARAH = 2.0
+
+# KALIBRASI PERMINTAAN (30 Agustus) -- ini KEPUTUSAN PEMODELAN, bukan perbaikan
+# bug. Wajib disebut terang-terangan di laporan teknis, jangan disembunyikan.
+#
+# Alasannya: jaringan hasil impor OpenStreetMap memodelkan simpang lebih kecil
+# daripada aslinya -- 2 lajur per lengan (kapasitas ~1,00 kend/detik) dan ruas
+# pendekat sangat pendek (north cuma 62 m, tanpa ruas apa pun di belakangnya).
+# Akibatnya permintaan lapangan apa adanya menghasilkan JENUH PERMANEN: 227
+# kendaraan tidak bisa masuk simulasi sama sekali, dan setiap pilihan durasi
+# lampu menghasilkan kemacetan yang sama.
+#
+# Itu bukan sekadar "kurang mirip lapangan" -- dalam kondisi jenuh permanen
+# PPO TIDAK PUNYA APA PUN UNTUK DIPELAJARI, karena semua aksi berakhir sama.
+#
+# Faktor di bawah DIUKUR, bukan ditebak. Disapu 4 nilai, 3 seed, 3 panjang
+# rotasi, menilai seberapa besar reward BERBEDA antar-aksi (makin besar =
+# makin bisa dipelajari):
+#   skala 1,00 -> antrean 32,4 | 227 nyangkut | beda reward 0,0888
+#   skala 0,60 -> antrean 22,6 |  33 nyangkut | beda reward 0,1186
+#   skala 0,40 -> antrean 16,6 |   4 nyangkut | beda reward 0,1296  <- dipilih
+#   skala 0,25 -> antrean 11,6 |   0 nyangkut | beda reward 0,1041
+# 0,40 adalah puncaknya: di bawah itu lalu lintas terlalu sepi sehingga
+# pengaturan lampu kembali kurang berpengaruh.
+#
+# Catatan kejujuran: antrean simulasi pada skala ini (16,6) masih di atas
+# antrean nyata di lapangan (2,7 kendaraan, dari snapshot_zona.csv). Kalibrasi
+# ini mengejar lingkungan yang BISA DIPELAJARI, bukan replika lapangan.
+SKALA_PERMINTAAN = 0.40
 
 
 def _floor_five_seconds(timestamp: str) -> str:
@@ -120,7 +228,10 @@ def load_demand_profiles(
     timestamps = sorted(set(grouped).intersection(measured))
     profiles = [
         {
-            approach: grouped[timestamp].get(approach, 0.0) * (60.0 / FEATURE_WINDOW_SECONDS)
+            approach: grouped[timestamp].get(approach, 0.0)
+            / BAGI_ARUS_DUA_ARAH
+            * SKALA_PERMINTAAN
+            * (60.0 / FEATURE_WINDOW_SECONDS)
             for approach in FIXED_CYCLE_ORDER
         }
         for timestamp in timestamps
@@ -132,10 +243,16 @@ def load_demand_profiles(
 
 
 def resolve_sumo_binary(explicit: str | Path | None = None) -> Path:
+    # Sejak backend/simulation/decision_engine digabung jadi satu venv di
+    # root repo (30 Agustus 2026), SUMO cuma ada di situ -- bukan lagi
+    # simulation/.venv yang sudah dihapus. SUMO_HOME dicek duluan supaya
+    # tetap benar kalau seseorang jalankan dari venv non-standar.
+    sumo_home = os.environ.get("SUMO_HOME")
     candidates = [
         Path(explicit) if explicit else None,
         Path(found) if (found := shutil.which("sumo")) else None,
-        ROOT / "simulation/.venv/Lib/site-packages/sumo/bin/sumo.exe",
+        Path(sumo_home) / "bin" / "sumo.exe" if sumo_home else None,
+        ROOT / ".venv/Lib/site-packages/sumo/bin/sumo.exe",
     ]
     for candidate in candidates:
         if candidate and candidate.exists():
@@ -169,7 +286,7 @@ class SmartTwinSumoEnv(gym.Env[np.ndarray, np.ndarray]):
         # train_ppo.py tidak error dan metadata training lama tetap terbaca,
         # tapi mengubahnya TIDAK berpengaruh pada simulasi.
         self.decision_seconds = int(decision_seconds)
-        self.observation_space = spaces.Box(0.0, 1.0, shape=(25,), dtype=np.float32)
+        self.observation_space = spaces.Box(0.0, 1.0, shape=(OBSERVATION_SIZE,), dtype=np.float32)
         # Empat durasi hijau saja (utara, timur, selatan, barat). Urutan rotasi
         # bukan keputusan PPO -- lihat _set_action().
         self.action_space = spaces.MultiDiscrete([len(GREEN_OPTIONS)] * len(FIXED_CYCLE_ORDER))
@@ -179,6 +296,8 @@ class SmartTwinSumoEnv(gym.Env[np.ndarray, np.ndarray]):
         self.rng = random.Random()
         self.step_count = self.vehicle_counter = 0
         self.profile: dict[str, float] = self.profiles[0]
+        self._profile_index = 0
+        self._profile_seconds = 0
         self.current_phase = FIXED_CYCLE_ORDER[0]
         self.current_green = 30
         self.current_greens: dict[str, int] = {a: 30 for a in FIXED_CYCLE_ORDER}
@@ -190,7 +309,11 @@ class SmartTwinSumoEnv(gym.Env[np.ndarray, np.ndarray]):
         self.close()
         actual_seed = int(seed if seed is not None else self.np_random.integers(1, 2**31 - 1))
         self.rng.seed(actual_seed)
-        self.profile = self.profiles[actual_seed % len(self.profiles)]
+        # Titik MULAI di rekaman; profilnya akan bergerak maju sendiri tiap
+        # FEATURE_WINDOW_SECONDS detik simulasi -- lihat _maju_profil().
+        self._profile_index = actual_seed % len(self.profiles)
+        self._profile_seconds = 0
+        self.profile = self.profiles[self._profile_index]
         import traci
         traci.start([str(self.sumo_binary), "-c", str(self.config_path), "--start", "--seed", str(actual_seed),
                      "--no-step-log", "true", "--xml-validation", "never"], label=self.label)
@@ -217,7 +340,34 @@ class SmartTwinSumoEnv(gym.Env[np.ndarray, np.ndarray]):
         if "smart_car" not in existing:
             self.connection.vehicletype.copy("DEFAULT_VEHTYPE", "smart_car")
 
+    def _maju_profil(self) -> None:
+        """Majukan profil permintaan mengikuti rekaman aslinya.
+
+        BUG I (diperbaiki 30 Agustus): `self.profile` dulu ditetapkan SEKALI di
+        reset() lalu dibekukan sepanjang episode. Padahal satu profil berasal
+        dari jendela 5 DETIK data CV, sementara satu episode = 12 langkah x
+        76-256 detik = 15-50 MENIT simulasi. Cuplikan 5 detik direntangkan jadi
+        kondisi tetap selama setengah jam.
+
+        Akibatnya terukur parah: dibandingkan kapasitas simpang yang terukur
+        (0,68 kend/detik), 92,1% episode training berada DI ATAS kapasitas dan
+        71,9% di atas 2x kapasitas. Dalam kondisi macet total, pengaturan lampu
+        seperti apa pun tidak berpengaruh -- agent tidak punya apa pun untuk
+        dipelajari. Itu menjelaskan kebijakan v4 yang memilih aksi sama 54%
+        waktu dan reward yang cepat mendatar.
+
+        Sekarang profil maju satu langkah tiap FEATURE_WINDOW_SECONDS detik
+        simulasi, jadi permintaan bergerak persis seperti rekaman CV aslinya --
+        ramai dan sepi bergantian sebagaimana kenyataannya.
+        """
+        self._profile_seconds += 1
+        if self._profile_seconds >= FEATURE_WINDOW_SECONDS:
+            self._profile_seconds = 0
+            self._profile_index = (self._profile_index + 1) % len(self.profiles)
+            self.profile = self.profiles[self._profile_index]
+
     def _inject_one_second(self) -> None:
+        self._maju_profil()
         for approach in FIXED_CYCLE_ORDER:
             if self.rng.random() >= min(0.8, self.profile[approach] / 60.0):
                 continue
@@ -370,27 +520,73 @@ class SmartTwinSumoEnv(gym.Env[np.ndarray, np.ndarray]):
         metrics = self._metrics()
         queue_norm = min(1.0, metrics["queue"] / QUEUE_SATURATION_VEH)
         wait_norm = min(1.0, metrics["waiting"] / max(1.0, metrics["vehicles"] * 120.0))
-        throughput_norm = min(1.0, arrived / THROUGHPUT_SATURATION_VEH)
+        # BUG E: dinilai sebagai LAJU, bukan jumlah mentah. Tanpa pembagian
+        # window_seconds ini, agent bisa menaikkan reward hanya dengan
+        # memperpanjang siklus -- lihat catatan di THROUGHPUT_SATURATION_RATE.
+        throughput_rate = arrived / max(1, window_seconds)
+        throughput_norm = min(1.0, throughput_rate / THROUGHPUT_SATURATION_RATE)
         throughput_reward = THROUGHPUT_REWARD_WEIGHT * throughput_norm
         queue_penalty = QUEUE_REWARD_WEIGHT * queue_norm
         wait_penalty = WAIT_REWARD_WEIGHT * wait_norm
-        # Penalti starvation DIHAPUS 29 Agustus: program TLS sekarang selalu
-        # dipasang sebagai rotasi penuh 4 lengan dan selalu mulai dari fase 0,
-        # sama seperti produksi -- tidak ada lengan yang bisa tidak kebagian
-        # hijau, jadi penalti itu tidak punya kondisi pemicu yang sah lagi.
-        reward = float(throughput_reward - queue_penalty - wait_penalty)
+        # Penalti starvation HIJAU dihapus 29 Agustus tetap berlaku: rotasi
+        # selalu mencakup 4 lengan, jadi tidak ada lengan yang literal nol
+        # detik hijau. BUG P (30 Agustus) beda soal: lengan bisa tetap
+        # KETINGGALAN LAYANAN (antreannya menumpuk) walau kebagian hijau,
+        # kalau durasinya tidak cukup dibanding permintaannya -- dan
+        # queue_penalty berbasis TOTAL tidak bisa mendeteksi itu. fairness_
+        # penalty pakai lengan TERBURUK, bukan total, supaya menelantarkan
+        # satu lengan langsung terlihat di reward.
+        fairness_norm = min(1.0, metrics["queue_kuadrat"] / QUEUE_KUADRAT_SATURATION)
+        fairness_penalty = FAIRNESS_REWARD_WEIGHT * fairness_norm
+        reward = float(throughput_reward - queue_penalty - wait_penalty - fairness_penalty)
+        # window_seconds WAJIB ikut dilaporkan: panjang satu langkah keputusan
+        # ditentukan aksi agent sendiri (76-256 detik), jadi metrik apa pun yang
+        # menumpuk sepanjang langkah (throughput, waktu tunggu) TIDAK bisa
+        # dibandingkan antar-kebijakan tanpa tahu berapa detik yang dijalankan.
+        # Tanpa ini, evaluate_ppo.py sempat membandingkan PPO vs rule-based pada
+        # durasi simulasi berbeda (18-20%) dan menyimpulkan PPO kalah throughput
+        # 15% -- padahal per detik justru seri. Lihat Bug F di
+        # docs/audit-bug-ppo-sebelum-training-ke-5.md.
         metrics.update({"reward": reward, "throughput_interval": float(arrived), "queue_norm": queue_norm,
-                        "wait_norm": wait_norm,
+                        "wait_norm": wait_norm, "window_seconds": float(window_seconds),
+                        "throughput_rate": float(throughput_rate), "fairness_norm": fairness_norm,
                         "throughput_reward": throughput_reward, "queue_penalty": queue_penalty,
-                        "wait_penalty": wait_penalty})
+                        "wait_penalty": wait_penalty, "fairness_penalty": fairness_penalty})
         return self._observation(), reward, False, self.step_count >= self.episode_steps, metrics
 
     def _metrics(self) -> dict[str, float]:
         vehicles = list(self.connection.vehicle.getIDList()) if self.connection else []
         waiting = sum(float(self.connection.vehicle.getAccumulatedWaitingTime(v)) for v in vehicles) if self.connection else 0.0
-        queue = sum(self.connection.edge.getLastStepHaltingNumber(EDGE_HULU[a]) + self.connection.edge.getLastStepHaltingNumber(EDGE_MASUK[a]) for a in FIXED_CYCLE_ORDER) if self.connection else 0
+        # BUG P (ditemukan 30 Agustus): `queue` cuma jumlah 4 lengan DIGABUNG --
+        # secara matematis tidak bisa membedakan "4 lengan masing-masing antre 2"
+        # dari "1 lengan antre 8, 3 lengan kosong". Reward yang cuma memakai
+        # total ini TIDAK PUNYA CARA menghukum lengan yang ditelantarkan, asal
+        # totalnya tetap kecil. Lihat queue_per_lengan & max_queue_lengan di
+        # bawah, dipakai reward baru di step().
+        queue_per_lengan = {
+            a: self.connection.edge.getLastStepHaltingNumber(EDGE_HULU[a])
+            + self.connection.edge.getLastStepHaltingNumber(EDGE_MASUK[a])
+            for a in FIXED_CYCLE_ORDER
+        } if self.connection else {a: 0 for a in FIXED_CYCLE_ORDER}
+        queue = sum(queue_per_lengan.values())
         arrived = float(self.connection.simulation.getArrivedNumber()) if self.connection else 0.0
-        return {"vehicles": float(len(vehicles)), "queue": float(queue), "waiting": waiting, "arrived": arrived}
+        return {
+            "vehicles": float(len(vehicles)),
+            "queue": float(queue),
+            "max_queue_lengan": float(max(queue_per_lengan.values())),
+            # BUG P revisi 2: jumlah kuadrat, bukan max(). max() melompat kalau
+            # lengan "terburuk" berpindah antar langkah -- sinyal patah yang
+            # membuat fungsi nilai PPO kesulitan belajar (terverifikasi:
+            # explained_variance NEGATIF -0,113 pada smoke test 20k dengan
+            # max()). Jumlah kuadrat tetap menghukum konsentrasi di satu lengan
+            # lebih keras daripada sebaran rata (matematis: untuk total Q
+            # tetap, Σq² minimum saat semua q sama, maksimum saat terkumpul di
+            # satu lengan) tapi berubah HALUS seiring antrean bergeser antar
+            # lengan, bukan melompat.
+            "queue_kuadrat": float(sum(v * v for v in queue_per_lengan.values())),
+            "waiting": waiting,
+            "arrived": arrived,
+        }
 
     def _observation(self) -> np.ndarray:
         state = self._traffic_state()

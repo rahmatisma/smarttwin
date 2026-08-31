@@ -1,0 +1,76 @@
+{
+  "episodes": 3,
+  "seed_start": 1000,
+  "seconds_per_episode": 1800,
+  "ppo": {
+    "mean_reward": 0.041352485070948734,
+    "mean_queue_veh": 35.13793103448276,
+    "mean_wait_per_vehicle_s": 57.16092275053421,
+    "throughput_veh_per_hour": 2196.4989059080963,
+    "simulated_seconds": 5484.0,
+    "decision_steps": 29,
+    "total_throughput_veh": 3346.0
+  },
+  "rule_based": {
+    "mean_reward": 0.07174075408969575,
+    "mean_queue_veh": 38.72,
+    "mean_wait_per_vehicle_s": 61.29554754618256,
+    "throughput_veh_per_hour": 2179.0140845070423,
+    "simulated_seconds": 5680.0,
+    "decision_steps": 25,
+    "total_throughput_veh": 3438.0
+  },
+  "comparison": {
+    "metrics": {
+      "mean_reward": {
+        "ppo": 0.041352485070948734,
+        "rule_based": 0.07174075408969575,
+        "direction": "higher",
+        "delta": -0.03038826901874702,
+        "delta_percent": null,
+        "ppo_better_or_equal": false,
+        "tie": false
+      },
+      "mean_queue_veh": {
+        "ppo": 35.13793103448276,
+        "rule_based": 38.72,
+        "direction": "lower",
+        "delta": -3.5820689655172373,
+        "delta_percent": -9.251211171273857,
+        "ppo_better_or_equal": true,
+        "tie": false
+      },
+      "mean_wait_per_vehicle_s": {
+        "ppo": 57.16092275053421,
+        "rule_based": 61.29554754618256,
+        "direction": "lower",
+        "delta": -4.1346247956483495,
+        "delta_percent": -6.7453917309950695,
+        "ppo_better_or_equal": true,
+        "tie": false
+      },
+      "throughput_veh_per_hour": {
+        "ppo": 2196.4989059080963,
+        "rule_based": 2179.0140845070423,
+        "direction": "higher",
+        "delta": 17.484821401053978,
+        "delta_percent": 0.8024189253925618,
+        "ppo_better_or_equal": true,
+        "tie": true
+      }
+    },
+    "traffic_metrics_won": 2,
+    "traffic_metrics_tied": 1,
+    "traffic_metrics_total": 3,
+    "quality_gate_passed": false,
+    "recommended_for_activation": false,
+    "verdict": "PPO belum boleh diaktifkan; gunakan rule-based fallback."
+  },
+  "fairness": {
+    "ppo_simulated_seconds": 5484.0,
+    "rule_based_simulated_seconds": 5680.0,
+    "skew_percent": 3.450704225352113,
+    "comparable": true,
+    "note": "Kedua kebijakan mendapat anggaran waktu simulasi sama. Selisih kecil wajar karena langkah terakhir diselesaikan utuh (tidak dipotong di tengah rotasi). Kalau skew_percent >= 5, metrik laju masih bisa dipakai tapi jangan kutip total mentah."
+  }
+}

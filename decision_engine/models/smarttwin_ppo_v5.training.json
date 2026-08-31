@@ -1,0 +1,27 @@
+{
+  "note": "Checkpoint promosi manual, BUKAN keluaran model.save() dari learn() yang selesai -- proses training dihentikan sengaja di 60.000 langkah (lihat docs/audit-bug-ppo-sebelum-training-ke-5.md, bagian Bug P). File ini adalah salinan langsung dari checkpoints/smoke_entcoef/smoke_entcoef_60000_steps.zip.",
+  "modelTotalTimesteps": 60000,
+  "python": "3.11.9",
+  "platform": "Windows-10-10.0.26200-SP0",
+  "stableBaselines3": "2.9.0",
+  "seed": 42,
+  "deviceUsed": "cpu",
+  "episodeSteps": 12,
+  "decisionSeconds": 30,
+  "nSteps": 512,
+  "entCoef": 0.05,
+  "resumedChain": [
+    "smarttwin_ppo_v5 dilatih dari nol dengan reward+observasi hasil Bug E-O, ent_coef=0.01 (0-20k, run smoke_entcoef)",
+    "resume 20k->50k dengan ent_coef=0.05 (percobaan perbaikan Bug P revisi 3)",
+    "resume 50k->60k dengan ent_coef=0.05, dihentikan manual setelah uji ekstrem tetap gagal identik dengan checkpoint 50k"
+  ],
+  "bugPStatus": "DITERIMA SEBAGAI KETERBATASAN, BUKAN DISELESAIKAN -- lihat docs/audit-bug-ppo-sebelum-training-ke-5.md. Model memprioritaskan lengan utara hampir tanpa syarat (bukan murni respons ke permintaan real-time), kemungkinan karena utara adalah lengan dgn service rate terburuk secara struktural (Bug N-2). 4 percobaan reward-shaping/entropi berbeda semuanya gagal di uji ekstrem yang sama.",
+  "data": {
+    "path": "cv/output/crossing_simpang.csv",
+    "sha256": "f5511caad91d9889d0ca42813ccc6cb413db412ceb19bfa001b49f09aff1375b"
+  },
+  "densityData": {
+    "path": "cv/output/snapshot_zona.csv",
+    "sha256": "f3dcd3a9bbf4b807b3e1a18a8e37fa9b0a89170c58ee672d9c91af57a9702728"
+  }
+}

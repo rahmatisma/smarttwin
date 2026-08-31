@@ -37,17 +37,36 @@ def make_state() -> TrafficState:
     )
 
 
-def test_observation_has_stable_25_features():
+def test_observation_has_stable_21_features():
     engine = PPOEngine(model=FakeModel([0, 0, 0, 0, 0]))
 
     observation = engine.build_observation(
         make_state(), current_phase="east", current_green_seconds=30
     )
 
-    assert len(observation) == 25
-    assert observation[20:24] == [0.0, 1.0, 0.0, 0.0]
-    assert observation[24] == 0.5
+    # 21, bukan 25: one-hot fase aktif DIHAPUS (Bug J). Fitur itu konstan
+    # sepanjang training tapi berubah-ubah saat inference, jadi menyuntikkan
+    # bobot yang tidak pernah terlatih -- lihat catatan di ppo_features.py.
+    assert len(observation) == 21
+    # 20 fitur pertama = 4 lengan x 5 besaran; slot terakhir = durasi hijau.
+    assert observation[20] == 0.5
     assert all(0.0 <= value <= 1.0 for value in observation)
+
+
+def test_observation_tidak_berubah_saat_fase_aktif_berbeda():
+    """Regresi Bug J: setelah one-hot dihapus, `current_phase` tidak boleh lagi
+    mengubah observasi. Kalau berubah, berarti ada sisa ketergantungan fase yang
+    tidak pernah dipelajari saat training."""
+    engine = PPOEngine(model=FakeModel([0, 0, 0, 0, 0]))
+
+    obs_utara = engine.build_observation(
+        make_state(), current_phase="north", current_green_seconds=30
+    )
+    obs_timur = engine.build_observation(
+        make_state(), current_phase="east", current_green_seconds=30
+    )
+
+    assert obs_utara == obs_timur
 
 
 def test_ppo_recommends_phase_and_four_green_times():

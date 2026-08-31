@@ -15,10 +15,12 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 # parents[0] = core
 # parents[1] = app
 # parents[2] = backend
+# parents[3] = root repo
 
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
-ENV_FILE = BACKEND_ROOT / ".env"
+ENV_FILE = PROJECT_ROOT / ".env"
 
 
 # ============================================================

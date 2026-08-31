@@ -30,6 +30,7 @@ Penjelasan tiap kotak diagram untuk **dijelaskan ke orang lain** (dosen pembimbi
 
 | Dokumen | Isinya |
 |---|---|
+| [`alur-kerja-sistem-non-teknis.md`](alur-kerja-sistem-non-teknis.md) | Alur kerja sistem dari kamera sampai rekomendasi lampu, dengan flowchart, **tanpa istilah pemrograman** — buat dibaca siapa saja (termasuk dosen pembimbing) yang mau paham cara kerja sistem tanpa harus baca kode |
 | [`../CLAUDE.md`](../CLAUDE.md) | Konteks proyek, konvensi, ringkasan arsitektur. Paling singkat, buat orientasi awal |
 | [`data-contract.md`](data-contract.md) | Kontrak **semantik** antar modul — field apa saja yang ada dan artinya apa (gaya Pydantic, snake_case). Kalau ubah field yang menyeberang modul, sepakati di sini dulu |
 | [`sop-demo-end-to-end.md`](sop-demo-end-to-end.md) | **Urutan nyalakan sistem sebelum demo/rekaman.** Wajib diikuti — kalau worker tidak jalan, dashboard diam-diam melewati kotak 7/8/9 tanpa error |
@@ -78,6 +79,9 @@ Jangan diubah. Ini yang dikutip di laporan dan dipakai menjawab juri.
 | [`hasil-kalibrasi-kandidat-agresif.md`](hasil-kalibrasi-kandidat-agresif.md) | Kenapa kandidat agresif jadi +1 detik, bukan +20% (sweep 28–34 detik) |
 | [`hasil-run-antrean-25-agustus.md`](hasil-run-antrean-25-agustus.md) | Run CV 4 kamera × 43 menit, 538 jendela, data antrean asli |
 | [`hasil-validasi-akurasi-cv.md`](hasil-validasi-akurasi-cv.md) | Akurasi deteksi CV vs hitung manual: 48,7% rata-rata (8 sampel) — dilaporkan apa adanya, bukan dipoles |
+| [`audit-bug-ppo-sebelum-training-ke-5.md`](audit-bug-ppo-sebelum-training-ke-5.md) | Audit sistematis seluruh jalur PPO sebelum training v5: 11 bug terukur (E-P), termasuk 5 percobaan berbeda mengejar Bug P (fairness antar-lengan) yang akhirnya diterima sebagai keterbatasan terdokumentasi |
+| [`hasil-evaluasi-ppo-v4-80k.md`](hasil-evaluasi-ppo-v4-80k.md) | Evaluasi checkpoint PPO v4 80k: perbaikan Bug A/B/D bertahan, tapi 2 bug baru (E & F). **Angkanya usang, sudah digantikan v5** — dipertahankan sebagai riwayat |
+| [`hasil-evaluasi-ppo-v5.md`](hasil-evaluasi-ppo-v5.md) | Evaluasi resmi PPO v5 (checkpoint 60k, final): menang 7/seri 2/kalah 0 dari 9 perbandingan 3-seed vs rule-based. Termasuk penjelasan kenapa ini TIDAK berarti Bug P sudah selesai |
 
 ---
 

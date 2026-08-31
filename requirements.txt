@@ -14,8 +14,7 @@ supabase==2.11.0
 # sistem -- sumo_controller.py mencari binarynya di
 # sys.prefix/Lib/site-packages/sumo/bin (lihat SUMO_BIN_DIR di sana).
 # Jadi `traci` saja tidak cukup: tanpa eclipse-sumo, importnya lolos
-# tapi binary sumo.exe tidak ada. Versi disamakan dengan
-# simulation/.venv (1.27.1) supaya dua environment tidak beda perilaku.
+# tapi binary sumo.exe tidak ada.
 eclipse-sumo==1.27.1
 traci==1.27.1
 sumolib==1.27.1
@@ -30,9 +29,8 @@ torch==2.13.0
 # PPO (decision_engine/ppo_engine.py) -- opsional secara desain: backend
 # tetap start dan fallback ke rule-based tanpa ini (lihat engine_factory.py).
 # Tapi TANPA paket ini, PPOEngine._load_model() gagal dengan
-# ModuleNotFoundError meski checkpoint .zip sudah ada -- versi disamakan
-# dengan decision_engine/requirements-rl.txt supaya training & serving
-# tidak beda perilaku.
+# ModuleNotFoundError meski checkpoint .zip sudah ada.
 stable-baselines3==2.9.0
 gymnasium==1.3.0
-# library YOLO belum ditambahkan (dipasang terpisah di cv/.venv)
+# library YOLO belum ditambahkan (dipasang terpisah di cv/.venv, sengaja
+# beda venv karena butuh torch build CUDA -- lihat catatan di README/CLAUDE.md)

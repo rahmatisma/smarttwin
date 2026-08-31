@@ -72,6 +72,15 @@ class SimulationRequest(BaseModel):
     trafficTimestamp: str | None = None
 
 
+class SimulationClockRequest(BaseModel):
+    videoTimeSeconds: float = Field(ge=0)
+
+
+class SimulationScenarioRequest(BaseModel):
+    scenario: Literal["Traffic Realtime", "Baseline", "Aggressive", "Balanced"]
+    cyclePlan: SimulationCyclePlan
+
+
 class SimulationResult(BaseModel):
     trafficStateId: int | None = None
     intersectionId: str

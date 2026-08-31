@@ -24,7 +24,7 @@ BACKEND_ROOT = PROJECT_ROOT / "backend"
 # LOAD ENVIRONMENT SEBELUM IMPORT BACKEND
 # ============================================================
 
-ENV_FILE = BACKEND_ROOT / ".env"
+ENV_FILE = PROJECT_ROOT / ".env"
 
 if not ENV_FILE.exists():
     raise FileNotFoundError(

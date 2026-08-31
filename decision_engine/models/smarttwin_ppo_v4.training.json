@@ -1,0 +1,26 @@
+{
+  "startedAt": "2026-08-29T15:12:18.311172+00:00",
+  "finishedAt": "2026-08-30T00:28:57.418501+00:00",
+  "python": "3.11.9",
+  "platform": "Windows-10-10.0.26200-SP0",
+  "stableBaselines3": "2.9.0",
+  "timestepsRequestedThisRun": 100000,
+  "modelTotalTimesteps": 100352,
+  "seed": 42,
+  "deviceRequested": "cpu",
+  "deviceUsed": "cpu",
+  "episodeSteps": 12,
+  "decisionSeconds": 30,
+  "nSteps": 512,
+  "checkpointFrequency": 10000,
+  "resumedFrom": null,
+  "model": "E:\\KMIPN 2026\\smarttwin\\decision_engine\\models\\smarttwin_ppo_v4.zip",
+  "data": {
+    "path": "E:\\KMIPN 2026\\smarttwin\\cv\\output\\crossing_simpang.csv",
+    "sha256": "f5511caad91d9889d0ca42813ccc6cb413db412ceb19bfa001b49f09aff1375b"
+  },
+  "densityData": {
+    "path": "E:\\KMIPN 2026\\smarttwin\\cv\\output\\snapshot_zona.csv",
+    "sha256": "f3dcd3a9bbf4b807b3e1a18a8e37fa9b0a89170c58ee672d9c91af57a9702728"
+  }
+}

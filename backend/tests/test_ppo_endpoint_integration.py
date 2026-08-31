@@ -52,7 +52,12 @@ def configure_endpoint(engine: PPOEngine) -> None:
     recommendation_service.cache_service = EmptyCache()
     recommendation_service.engine = engine
     # Hindari akses Supabase kedua dari SignalService; tetap gunakan hasil engine
-    # yang sama untuk cycle plan empat lengan.
+    # yang sama untuk cycle plan empat lengan. cache_service SignalService juga
+    # harus di-mock terpisah -- get_cycle_plan() konsultasi cache-nya sendiri
+    # (self.cache_service), bukan cuma pakai _cycle_plan yang di-set manual di
+    # bawah; kalau cache Supabase asli lagi fresh (worker scenario_worker.py
+    # jalan), dia menimpa _cycle_plan ini dan assertion source jadi salah.
+    signal_service.cache_service = EmptyCache()
     signal_service._cycle_plan = engine.recommend_cycle(state, currentPhase="north")
 
 

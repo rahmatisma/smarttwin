@@ -81,8 +81,14 @@ def _service_with_fixed_green(seconds: int) -> SignalService:
     ditest di sini) dari logika demand-based duration ASLI (yang baca
     Supabase sungguhan, sudah ditest sendiri di
     test_rule_based_engine_cycle.py) dan bikin test ini deterministik.
+
+    cache_service juga di-stub kosong -- get_cycle_plan()/get_live_status()
+    konsultasi cache SENDIRI (bukan cuma _recompute_cycle_plan yang
+    dipatch), jadi kalau default ke live_scenario_cache_service asli dan
+    scenario_worker.py kebetulan lagi jalan (cache Supabase fresh), test
+    ini jadi flaky -- bukan lagi nguji fixed_plan yang deterministik.
     """
-    service = SignalService()
+    service = SignalService(cache_service=_ScenarioCacheStub(None))
 
     def fixed_plan(active_approach: str) -> CyclePlan:
         plan = CyclePlan(
@@ -259,6 +265,7 @@ def test_recompute_cycle_plan_passes_forecast_to_decision_engine():
     service = SignalService(
         traffic_service=_TrafficHistoryStub([record]),
         forecast_service=_ForecastStub(result=forecast),
+        cache_service=_ScenarioCacheStub(None),
     )
     captured = {}
 
@@ -293,6 +300,7 @@ def test_recompute_cycle_plan_falls_back_when_forecast_fails(monkeypatch):
     service = SignalService(
         traffic_service=_TrafficHistoryStub([record]),
         forecast_service=_ForecastStub(error=ValueError("history belum cukup")),
+        cache_service=_ScenarioCacheStub(None),
     )
 
     plan = service._recompute_cycle_plan("north")

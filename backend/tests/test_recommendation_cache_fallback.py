@@ -92,7 +92,7 @@ def _valid_row(updated_at=None):
 
 def _request(monkeypatch, supabase):
     # Test kontrak fallback harus deterministik dan tidak mengikuti feature
-    # flag developer di backend/.env (misalnya mesin lokal sedang mencoba PPO).
+    # flag developer di .env root repo (misalnya mesin lokal sedang mencoba PPO).
     monkeypatch.setenv("SMARTTWIN_DECISION_ENGINE", "rule-based")
     monkeypatch.setattr(recommendation_module, "signal_service", _SignalService())
     monkeypatch.setattr(

@@ -7,10 +7,11 @@ Frontend tidak perlu diubah oleh SOP ini.
 ## 0. Prasyarat
 
 - Jalankan semua perintah dari root repository kecuali disebut lain.
-- Pastikan `backend/.env` berisi kredensial Supabase yang benar.
+- Pastikan `.env` di root repo berisi kredensial Supabase yang benar.
 - Pastikan tabel `liveScenarioCache` sudah dibuat menggunakan
   `backend/app/db/live_scenario_cache.sql`.
-- Gunakan `simulation/.venv` untuk worker/SUMO dan `backend/.venv` untuk backend.
+- Satu venv bersama di root (`.venv`) untuk backend, simulation, dan
+  decision_engine (digabung 30 Agustus 2026 — lihat CLAUDE.md).
 - Jika SUMO tidak ditemukan otomatis, export `SUMO_HOME` sesuai `CLAUDE.md`.
 
 ## 1. Ingest hasil CV
@@ -18,7 +19,7 @@ Frontend tidak perlu diubah oleh SOP ini.
 Jalankan setelah CSV CV terbaru selesai dibuat:
 
 ```powershell
-backend\.venv\Scripts\python.exe run_ingest.py
+.venv\Scripts\python.exe run_ingest.py
 ```
 
 Perintah aman diulang karena ingest memakai upsert. Pastikan output tidak berisi
@@ -30,7 +31,7 @@ Terminal kedua:
 
 ```powershell
 cd backend
-.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8000
+..\.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
 
 Verifikasi:
@@ -47,7 +48,7 @@ Terminal ketiga:
 
 ```powershell
 cd simulation
-.venv\Scripts\python.exe scenario_worker.py --once --full-cycle
+..\.venv\Scripts\python.exe scenario_worker.py --once --full-cycle
 ```
 
 Hasil yang diharapkan:
@@ -74,7 +75,7 @@ Setelah smoke test berhasil:
 
 ```powershell
 cd simulation
-.venv\Scripts\python.exe scenario_worker.py --full-cycle --interval 60
+..\.venv\Scripts\python.exe scenario_worker.py --full-cycle --interval 60
 ```
 
 Biarkan terminal ini terbuka. Backend menganggap cache basi setelah 120 detik,
@@ -94,7 +95,7 @@ merusak tabel demo:
 ```powershell
 cd backend
 $env:DEBUG = "false"
-.venv\Scripts\python.exe -m pytest -q tests\test_live_scenario_cache.py
+..\.venv\Scripts\python.exe -m pytest -q tests\test_live_scenario_cache.py
 ```
 
 ## 7. Jalankan SUMO penuh dan simpan metrik
@@ -103,7 +104,7 @@ Ini terpisah dari worker cache dan dipakai untuk bukti persistence E2E:
 
 ```powershell
 cd simulation
-.venv\Scripts\python.exe run_tls_simulation.py
+..\.venv\Scripts\python.exe run_tls_simulation.py
 ```
 
 Hasil yang wajib terlihat:
