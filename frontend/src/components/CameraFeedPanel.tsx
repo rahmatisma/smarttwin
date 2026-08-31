@@ -44,10 +44,46 @@ type SourceType =
   | "url"
   | "rtsp";
 
-// Bertahan saat CameraFeedPanel unmount karena pindah halaman/filter.
-let persistedCameraTime = 0;
-let persistedCameraPaused = false;
-let knownShortestDuration = Number.POSITIVE_INFINITY;
+// Timeline bersama bertahan saat panel unmount/navigasi dalam tab yang sama.
+// Durasi disimpan per kamera supaya filter satu kamera tidak merusak patokan
+// durasi terpendek saat kembali ke tampilan semua kamera.
+const CAMERA_TIMELINE_KEY = "smarttwin.camera-timeline";
+const knownDurations = new Map<string, number>();
+
+type CameraTimeline = { time: number; paused: boolean; updatedAt: number };
+
+function readPersistedTimeline(): CameraTimeline {
+  if (typeof window === "undefined") return { time: 0, paused: false, updatedAt: Date.now() };
+  try {
+    const value = JSON.parse(sessionStorage.getItem(CAMERA_TIMELINE_KEY) ?? "null");
+    return {
+      time: Number.isFinite(value?.time) && value.time >= 0 ? value.time : 0,
+      paused: typeof value?.paused === "boolean" ? value.paused : false,
+      updatedAt: Number.isFinite(value?.updatedAt) ? value.updatedAt : Date.now(),
+    };
+  } catch {
+    return { time: 0, paused: false, updatedAt: Date.now() };
+  }
+}
+
+function persistTimeline(time: number, paused: boolean, updatedAt = Date.now()) {
+  if (typeof window === "undefined" || !Number.isFinite(time)) return;
+  sessionStorage.setItem(CAMERA_TIMELINE_KEY, JSON.stringify({
+    time,
+    paused,
+    updatedAt,
+  }));
+}
+
+function currentTimelineTime(timeline: CameraTimeline) {
+  if (timeline.paused) return timeline.time;
+  return timeline.time + Math.max(0, Date.now() - timeline.updatedAt) / 1000;
+}
+
+function anchorTimeline(timeline: CameraTimeline, time: number) {
+  timeline.time = time;
+  timeline.updatedAt = Date.now();
+}
 
 type Camera = {
   id: string;
@@ -166,6 +202,21 @@ export default function CameraFeedPanel({
     useState<Camera[]>([]);
   const videoRefs = useRef(new Map<string, HTMLVideoElement>());
   const synchronizingVideos = useRef(false);
+  const ignoredPlayEvents = useRef(new WeakSet<HTMLVideoElement>());
+  const ignoredPauseEvents = useRef(new WeakSet<HTMLVideoElement>());
+  const timelineRef = useRef<CameraTimeline>({ time: 0, paused: false, updatedAt: 0 });
+  const timelineRestoredRef = useRef(false);
+
+  useEffect(() => {
+    timelineRef.current = readPersistedTimeline();
+    timelineRestoredRef.current = true;
+  }, []);
+
+  const isInspectionMode = selectedApproach !== "all";
+
+  function getSharedTimelineTime() {
+    return currentTimelineTime(timelineRef.current);
+  }
 
   function syncVideos(master?: HTMLVideoElement) {
     const videos = [...videoRefs.current.values()].filter(
@@ -173,22 +224,35 @@ export default function CameraFeedPanel({
     );
     if (videos.length === 0) return;
 
-    const visibleShortest = Math.min(...videos.map((video) => video.duration));
-    knownShortestDuration = Math.min(knownShortestDuration, visibleShortest);
-    const cycleDuration = knownShortestDuration;
-    const sourceTime = master?.currentTime ?? persistedCameraTime;
-    const targetTime = sourceTime % cycleDuration;
-    persistedCameraTime = targetTime;
+    for (const [cameraId, video] of videoRefs.current) {
+      if (Number.isFinite(video.duration) && video.duration > 0) {
+        knownDurations.set(cameraId, video.duration);
+      }
+    }
+    const durations = [...knownDurations.values()].filter(
+      (duration) => Number.isFinite(duration) && duration > 0
+    );
+    const cycleDuration = durations.length > 0 ? Math.min(...durations) : null;
+    const sourceTime = master?.currentTime ?? getSharedTimelineTime();
+    const targetTime = cycleDuration ? sourceTime % cycleDuration : Math.max(0, sourceTime);
+    anchorTimeline(timelineRef.current, targetTime);
+    persistTimeline(targetTime, timelineRef.current.paused, timelineRef.current.updatedAt);
 
     synchronizingVideos.current = true;
     for (const video of videos) {
       if (Math.abs(video.currentTime - targetTime) > 0.35) {
         video.currentTime = Math.min(targetTime, Math.max(0, video.duration - 0.05));
       }
-      if (persistedCameraPaused) {
-        video.pause();
+      if (timelineRef.current.paused) {
+        if (!video.paused) {
+          ignoredPauseEvents.current.add(video);
+          video.pause();
+        }
       } else if (video.paused) {
-        void video.play().catch(() => undefined);
+        ignoredPlayEvents.current.add(video);
+        void video.play().catch(() => {
+          ignoredPlayEvents.current.delete(video);
+        });
       }
     }
     queueMicrotask(() => {
@@ -198,10 +262,27 @@ export default function CameraFeedPanel({
     onTimeUpdate?.(targetTime);
   }
 
+  function initializeInspectionVideo(video: HTMLVideoElement) {
+    if (!Number.isFinite(video.duration) || video.duration <= 0) return;
+    const targetTime = getSharedTimelineTime() % video.duration;
+    video.currentTime = Math.min(targetTime, Math.max(0, video.duration - 0.05));
+    // Sesudah posisi awal diterapkan, kontrol native video ini sepenuhnya
+    // lokal: user bebas seek maju/mundur tanpa mengubah timeline utama.
+  }
+
   useEffect(() => () => {
     const master = cameras[0] ? videoRefs.current.get(cameras[0].id) : undefined;
-    if (master) persistedCameraTime = master.currentTime % knownShortestDuration;
-  }, [cameras]);
+    if (!isInspectionMode && master && Number.isFinite(master.currentTime)) {
+      anchorTimeline(timelineRef.current, master.currentTime);
+    } else if (isInspectionMode) {
+      anchorTimeline(timelineRef.current, getSharedTimelineTime());
+    }
+    persistTimeline(
+      timelineRef.current.time,
+      timelineRef.current.paused,
+      timelineRef.current.updatedAt
+    );
+  }, [cameras, isInspectionMode]);
 
   useEffect(() => {
     let cancelled = false;
@@ -374,20 +455,53 @@ export default function CameraFeedPanel({
                     playsInline
                     preload="auto"
                     className="h-full w-full object-contain"
-                    onLoadedMetadata={(event) => syncVideos(event.currentTarget)}
+                    onLoadedMetadata={(event) => {
+                      const video = event.currentTarget;
+                      if (Number.isFinite(video.duration) && video.duration > 0) {
+                        knownDurations.set(camera.id, video.duration);
+                      }
+                      // Saat remount, currentTime elemen baru masih 0. Jangan
+                      // jadikan angka itu master karena akan menimpa timeline
+                      // yang disimpan sebelum pindah halaman.
+                      if (timelineRestoredRef.current) {
+                        if (isInspectionMode) initializeInspectionVideo(video);
+                        else syncVideos();
+                      }
+                    }}
+                    onDurationChange={(event) => {
+                      const duration = event.currentTarget.duration;
+                      if (Number.isFinite(duration) && duration > 0) {
+                        knownDurations.set(camera.id, duration);
+                        if (isInspectionMode) initializeInspectionVideo(event.currentTarget);
+                        else syncVideos();
+                      }
+                    }}
                     onTimeUpdate={(e) => {
-                      if (!synchronizingVideos.current && camera.id === cameras[0]?.id) {
+                      if (
+                        timelineRestoredRef.current &&
+                        !isInspectionMode &&
+                        !synchronizingVideos.current &&
+                        camera.id === cameras[0]?.id
+                      ) {
                         syncVideos(e.currentTarget);
                       }
                     }}
-                    onPause={() => {
+                    onPause={(event) => {
+                      if (isInspectionMode) return;
+                      if (ignoredPauseEvents.current.delete(event.currentTarget)) return;
                       if (synchronizingVideos.current) return;
-                      persistedCameraPaused = true;
+                      timelineRef.current.paused = true;
+                      anchorTimeline(timelineRef.current, timelineRef.current.time);
+                      persistTimeline(timelineRef.current.time, true, timelineRef.current.updatedAt);
                       syncVideos();
                     }}
-                    onPlay={() => {
+                    onPlay={(event) => {
+                      if (isInspectionMode) return;
+                      if (ignoredPlayEvents.current.delete(event.currentTarget)) return;
                       if (synchronizingVideos.current) return;
-                      persistedCameraPaused = false;
+                      timelineRef.current.paused = false;
+                      anchorTimeline(timelineRef.current, timelineRef.current.time);
+                      persistTimeline(timelineRef.current.time, false, timelineRef.current.updatedAt);
                       syncVideos();
                     }}
                   />

@@ -356,22 +356,13 @@ class SimulationService:
 
         with self._lock:
 
-            # Bila mode GUI berubah (misalnya sesi lama masih memakai
-            # SUMO-GUI) ATAU skenario berubah (Baseline/Aggressive/
-            # Balanced), restart sekali agar permintaan baru benar-benar
-            # diterapkan. Tanpa cek scenario di sini, controller lama
-            # dipakai ulang apa adanya (lihat blok "SUMO SUDAH RUNNING"
-            # di bawah) dan request.scenario yang baru tidak pernah
-            # sampai ke SumoController baru -- ganti dropdown skenario
-            # di frontend jadi tidak berefek sama sekali selama simulasi
-            # masih berjalan.
+            # Perubahan renderer (GUI/headless) perlu process baru. Perubahan
+            # skenario tidak: program TLS dapat diganti lewat TraCI pada
+            # controller yang sama supaya kendaraan dan simulationTime lanjut.
             if (
                 self.controller is not None
                 and self.controller.is_running()
-                and (
-                    self.controller.is_gui != request.gui
-                    or self.controller.scenario != request.scenario
-                )
+                and self.controller.is_gui != request.gui
             ):
                 self.controller.close()
                 self.controller = None
@@ -420,6 +411,8 @@ class SimulationService:
                 print(
                     "Menggunakan instance SUMO yang sama."
                 )
+
+                self.controller.scenario = request.scenario
 
                 print("=" * 70)
 
@@ -922,21 +915,67 @@ class SimulationService:
             "cyclePlan": controller.active_cycle_plan,
         }
 
+    def sync_clock(self, video_time_seconds: float) -> dict[str, Any]:
+        """Camera Feed adalah clock utama untuk fase lampu realtime."""
+        controller = self.controller
+        if controller is None or not controller.is_running():
+            return {
+                "synced": False,
+                "reason": "SUMO belum berjalan.",
+                "videoTimeSeconds": video_time_seconds,
+            }
+        if controller.active_cycle_plan is None:
+            return {
+                "synced": False,
+                "reason": "CyclePlan SUMO belum aktif.",
+                "videoTimeSeconds": video_time_seconds,
+            }
+        try:
+            return controller.sync_signal_clock(video_time_seconds)
+        except RuntimeError as exc:
+            return {
+                "synced": False,
+                "reason": str(exc),
+                "videoTimeSeconds": video_time_seconds,
+            }
+
+    def apply_scenario(self, scenario: str, cycle_plan: dict[str, Any]) -> dict[str, Any]:
+        """Terapkan skenario ke controller aktif tanpa operasi database."""
+        # Jangan mengambil service._lock: request /run yang sedang menunggu
+        # database memegang lock itu. Controller memiliki _traci_lock sendiri
+        # untuk menjamin pergantian program TLS tetap thread-safe.
+        controller = self.controller
+        if controller is None or not controller.is_running():
+            raise SimulationServiceError("SUMO belum berjalan. Tekan Start Simulation dahulu.")
+        try:
+            controller.apply_cycle_plan(cycle_plan)
+        except Exception as exc:
+            raise SimulationServiceError(f"Gagal menerapkan skenario: {exc}") from exc
+        controller.scenario = scenario
+        return {
+            "applied": True,
+            "scenario": scenario,
+            "paused": controller.paused,
+            "simulationTimeSeconds": controller.last_simulation_time,
+        }
+
     # ============================================================
     # PAUSE / RESUME
     # ============================================================
 
     def pause(self) -> dict:
-        with self._lock:
-            if self.controller is not None and self.controller.is_running():
-                self.controller.pause()
-            return {"status": "paused"}
+        controller = self.controller
+        if controller is not None and controller.is_running():
+            controller.pause()
+            return {"status": "paused", "applied": True}
+        return {"status": "idle", "applied": False}
 
     def resume(self) -> dict:
-        with self._lock:
-            if self.controller is not None and self.controller.is_running():
-                self.controller.resume()
-            return {"status": "running"}
+        controller = self.controller
+        if controller is not None and controller.is_running():
+            controller.resume()
+            return {"status": "running", "applied": True}
+        return {"status": "idle", "applied": False}
 
     # ============================================================
     # STOP

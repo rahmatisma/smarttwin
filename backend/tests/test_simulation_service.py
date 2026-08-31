@@ -78,6 +78,18 @@ def test_get_simulation_state_without_running_sumo():
     assert state["simulationTimeSeconds"] == 0
 
 
+def test_sync_clock_before_sumo_is_ready_is_a_noop():
+    service = SimulationService()
+
+    result = service.sync_clock(12.5)
+
+    assert result == {
+        "synced": False,
+        "reason": "SUMO belum berjalan.",
+        "videoTimeSeconds": 12.5,
+    }
+
+
 def test_stop_without_running_sumo_is_a_noop():
     service = SimulationService()
 
@@ -104,11 +116,9 @@ def test_get_config_file_points_to_simpang4_pingit():
     )
 
 
-def test_ensure_sumo_restarts_controller_when_scenario_changes(monkeypatch):
-    # Regresi buat bug: ganti skenario (Baseline -> Balanced) sambil
-    # simulasi jalan dulu tidak memicu restart sama sekali -- controller
-    # lama dipakai ulang apa adanya dan request.scenario yang baru tidak
-    # pernah sampai ke SumoController manapun.
+def test_ensure_sumo_reuses_controller_when_scenario_changes(monkeypatch):
+    # Program TLS bisa diganti lewat TraCI; jangan membuang kendaraan dan
+    # simulationTime hanya karena dropdown skenario berubah.
     monkeypatch.setattr(
         simulation_service_module, "SumoController", _FakeSumoController
     )
@@ -124,13 +134,11 @@ def test_ensure_sumo_restarts_controller_when_scenario_changes(monkeypatch):
         gui=True,
     )
 
-    new_controller = service._ensure_sumo(request)
+    result = service._ensure_sumo(request)
 
-    assert old_controller.closed is True, (
-        "Controller lama harus di-close begitu skenario berubah"
-    )
-    assert new_controller is not old_controller
-    assert new_controller.scenario == "Balanced"
+    assert old_controller.closed is False
+    assert result is old_controller
+    assert result.scenario == "Balanced"
 
 
 def test_ensure_sumo_reuses_controller_when_scenario_unchanged(monkeypatch):

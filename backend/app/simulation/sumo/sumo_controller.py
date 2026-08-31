@@ -1176,6 +1176,27 @@ class SumoController:
 
         return {"added": added, "removed": removed, "total": target_total}
 
+    def _replenish_current_demand(self) -> int:
+        """Jaga jumlah kendaraan live sesuai snapshot CCTV terakhir.
+
+        Dipanggil dari loop saat lock TraCI sudah dipegang. Kendaraan yang
+        sudah tiba diganti, sehingga simulasi realtime tidak kosong setelah
+        satu batch awal selesai melintasi simpang.
+        """
+        added = 0
+        for approach, desired_counts in self.current_demand.items():
+            for vehicle_type, wanted in desired_counts.items():
+                existing_count = sum(
+                    1
+                    for vehicle_id, vehicle_approach in self._vehicle_approach.items()
+                    if vehicle_approach == approach
+                    and self._vehicle_type.get(vehicle_id) == vehicle_type
+                )
+                for _ in range(max(0, wanted - existing_count)):
+                    if self.add_vehicle(vehicle_type=vehicle_type, approach=approach):
+                        added += 1
+        return added
+
     def apply_cycle_plan(self, cycle_plan: dict[str, Any]) -> None:
         """Pasang siklus N-E-S-W sebagai program TLS nyata di TraCI."""
         if self.traci is None:
@@ -1217,6 +1238,49 @@ class SumoController:
             self.traci.trafficlight.setProgram(tls_id, program_id)
             self.traci.trafficlight.setPhase(tls_id, 0)
             self.active_cycle_plan = normalized_plan
+
+    def sync_signal_clock(self, video_time_seconds: float) -> dict[str, Any]:
+        """Selaraskan fase TLS dengan clock CCTV tanpa mereset simulasi."""
+        if self.traci is None or not self.running or not self.active_cycle_plan:
+            raise RuntimeError("CyclePlan SUMO belum aktif.")
+
+        durations: list[int] = []
+        for phase in self.active_cycle_plan["phases"]:
+            durations.extend([
+                max(1, int(phase.get("greenSeconds", 1))),
+                max(1, int(phase.get("yellowSeconds", 4))),
+            ])
+        cycle_seconds = sum(durations)
+        offset = max(0.0, float(video_time_seconds)) % cycle_seconds
+        phase_index = 0
+        elapsed_in_phase = offset
+        for index, duration in enumerate(durations):
+            if elapsed_in_phase < duration:
+                phase_index = index
+                break
+            elapsed_in_phase -= duration
+        remaining = max(0.05, durations[phase_index] - elapsed_in_phase)
+
+        with self._traci_lock:
+            tls_ids = list(self.traci.trafficlight.getIDList())
+            if not tls_ids:
+                raise RuntimeError("Traffic light SUMO tidak ditemukan.")
+            tls_id = tls_ids[0]
+            current_phase = self.traci.trafficlight.getPhase(tls_id)
+            current_remaining = max(
+                0.0,
+                self.traci.trafficlight.getNextSwitch(tls_id) - self.last_simulation_time,
+            )
+            if current_phase != phase_index or abs(current_remaining - remaining) > 1.25:
+                self.traci.trafficlight.setPhase(tls_id, phase_index)
+                self.traci.trafficlight.setPhaseDuration(tls_id, remaining)
+
+        return {
+            "synced": True,
+            "videoTimeSeconds": video_time_seconds,
+            "phase": phase_index,
+            "remainingSeconds": remaining,
+        }
 
     # ============================================================
     # SIMULATION LOOP
@@ -1324,6 +1388,11 @@ class SumoController:
                             self.arrived_total[
                                 approach
                             ] += 1
+
+                        # Snapshot CCTV merepresentasikan okupansi realtime,
+                        # bukan batch kendaraan sekali jalan. Isi kembali
+                        # kendaraan yang sudah keluar agar target tetap hidup.
+                        self._replenish_current_demand()
 
                     # ==========================================
                     # ACTIVE VEHICLES POSITIONS
