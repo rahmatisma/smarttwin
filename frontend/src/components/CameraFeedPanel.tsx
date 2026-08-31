@@ -167,6 +167,10 @@ export default function CameraFeedPanel({
   const videoRefs = useRef(new Map<string, HTMLVideoElement>());
   const synchronizingVideos = useRef(false);
 
+  useEffect(() => {
+    persistedCameraPaused = false;
+  }, []);
+
   function syncVideos(master?: HTMLVideoElement) {
     const videos = [...videoRefs.current.values()].filter(
       (video) => Number.isFinite(video.duration) && video.duration > 0
