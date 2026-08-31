@@ -76,6 +76,7 @@ def test_get_simulation_state_without_running_sumo():
     assert state["vehicles"] == []
     assert state["signals"] == []
     assert state["simulationTimeSeconds"] == 0
+    assert state["backendInstanceId"] == service.instance_id
 
 
 def test_sync_clock_before_sumo_is_ready_is_a_noop():

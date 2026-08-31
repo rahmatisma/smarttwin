@@ -25,6 +25,7 @@ const API_BASE_URL =
 const FORECAST_ZONE_CAPACITY = 33;
 const FORECAST_REFRESH_INTERVAL_MS = 15_000;
 const FORECAST_FAILURE_COOLDOWN_MS = 60_000;
+const TRAFFIC_FAILURE_COOLDOWN_MS = 30_000;
 
 let forecastCache: ForecastResponse | null = null;
 let forecastCacheTime = 0;
@@ -36,6 +37,9 @@ let recommendationCache: Recommendation | null = null;
 let recommendationRequestInFlight: Promise<Recommendation | null> | null = null;
 const intersectionRowIdCache = new Map<string, number | null>();
 const intersectionRowIdRequests = new Map<string, Promise<number | null>>();
+const trafficStateCache = new Map<string, TrafficState>();
+const trafficStateRequests = new Map<string, Promise<TrafficState | null>>();
+const trafficRetryAfter = new Map<string, number>();
 
 /* =========================================================
  * INTERSECTION LOOKUP
@@ -108,7 +112,7 @@ type TrafficStateRow = {
   trafficApproachStates: TrafficState["approaches"];
 };
 
-export async function fetchTrafficState(
+async function requestTrafficState(
   intersectionId: string = DEFAULT_INTERSECTION_ID,
   videoTime?: number
 ): Promise<TrafficState | null> {
@@ -227,6 +231,48 @@ export async function fetchTrafficState(
     windowEnd: state.windowEnd,
     approaches: state.trafficApproachStates ?? [],
   };
+}
+
+export async function fetchTrafficState(
+  intersectionId: string = DEFAULT_INTERSECTION_ID,
+  videoTime?: number
+): Promise<TrafficState | null> {
+  const cached = trafficStateCache.get(intersectionId) ?? null;
+
+  // Poll dashboard berjalan tiap 5 detik. Saat Supabase sedang tidak dapat
+  // dijangkau, jangan membuat request gagal (dan stack trace) pada tiap poll.
+  if (Date.now() < (trafficRetryAfter.get(intersectionId) ?? 0)) {
+    return cached;
+  }
+
+  const activeRequest = trafficStateRequests.get(intersectionId);
+  if (activeRequest) return activeRequest;
+
+  const request = requestTrafficState(intersectionId, videoTime)
+    .then((state) => {
+      if (state) trafficStateCache.set(intersectionId, state);
+      trafficRetryAfter.delete(intersectionId);
+      return state ?? cached;
+    })
+    .catch((error: unknown) => {
+      trafficRetryAfter.set(
+        intersectionId,
+        Date.now() + TRAFFIC_FAILURE_COOLDOWN_MS
+      );
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn(
+        `Traffic ${intersectionId} sementara tidak tersedia; mencoba lagi dalam ${
+          TRAFFIC_FAILURE_COOLDOWN_MS / 1000
+        } detik. ${message}`
+      );
+      return cached;
+    })
+    .finally(() => {
+      trafficStateRequests.delete(intersectionId);
+    });
+
+  trafficStateRequests.set(intersectionId, request);
+  return request;
 }
 
 /* =========================================================

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import inspect
 import threading
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -140,6 +141,10 @@ class SimulationService:
     # ============================================================
 
     def __init__(self) -> None:
+
+        # Berubah setiap proses backend dimulai ulang. Frontend memakai ID ini
+        # untuk membedakan sesi kamera lama dari sesi backend yang baru.
+        self.instance_id = uuid.uuid4().hex
 
         # --------------------------------------------------------
         # TRAFFIC STATE BUILDER
@@ -898,6 +903,7 @@ class SimulationService:
         controller = self.controller
         if controller is None or not controller.is_running():
             return {
+                "backendInstanceId": self.instance_id,
                 "running": False,
                 "paused": False,
                 "vehicles": [],
@@ -905,6 +911,7 @@ class SimulationService:
                 "simulationTimeSeconds": 0
             }
         return {
+            "backendInstanceId": self.instance_id,
             "running": True,
             "paused": controller.paused,
             "vehicles": list(controller.active_vehicles_data),
