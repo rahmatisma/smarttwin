@@ -10,6 +10,7 @@ import {
 
 import {
   useEffect,
+  useCallback,
   useMemo,
   useRef,
   useState,
@@ -211,7 +212,7 @@ export default function CameraFeedPanel({
   cameraStatus?: CameraStatus[];
   selectedApproach?: ApproachSelection;
   onApproachChange?: (selection: ApproachSelection) => void;
-  onTimeUpdate?: (time: number) => void;
+  onTimeUpdate?: (time: number, duration?: number) => void;
 }) {
 
   // ===================================================
@@ -235,11 +236,11 @@ export default function CameraFeedPanel({
 
   const isInspectionMode = selectedApproach !== "all";
 
-  function getSharedTimelineTime() {
+  const getSharedTimelineTime = useCallback(() => {
     return currentTimelineTime(timelineRef.current);
-  }
+  }, []);
 
-  function syncVideos(master?: HTMLVideoElement) {
+  const syncVideos = useCallback((master?: HTMLVideoElement) => {
     const videos = [...videoRefs.current.values()].filter(
       (video) => Number.isFinite(video.duration) && video.duration > 0
     );
@@ -285,8 +286,37 @@ export default function CameraFeedPanel({
       synchronizingVideos.current = false;
     });
 
-    onTimeUpdate?.(targetTime);
-  }
+    onTimeUpdate?.(targetTime, cycleDuration ?? undefined);
+  }, [getSharedTimelineTime, onTimeUpdate]);
+
+  const restartVideosFromBeginning = useCallback(() => {
+    anchorTimeline(timelineRef.current, 0);
+    timelineRef.current.paused = false;
+    persistTimeline(
+      0,
+      false,
+      timelineRef.current.updatedAt,
+      timelineRef.current.backendInstanceId,
+    );
+
+    synchronizingVideos.current = true;
+    for (const video of videoRefs.current.values()) {
+      video.currentTime = 0;
+      if (video.paused) {
+        ignoredPlayEvents.current.add(video);
+        void video.play().catch(() => {
+          ignoredPlayEvents.current.delete(video);
+        });
+      }
+    }
+    queueMicrotask(() => {
+      synchronizingVideos.current = false;
+    });
+    const durations = [...knownDurations.values()].filter(
+      (duration) => Number.isFinite(duration) && duration > 0
+    );
+    onTimeUpdate?.(0, durations.length > 0 ? Math.min(...durations) : undefined);
+  }, [onTimeUpdate]);
 
   function initializeInspectionVideo(video: HTMLVideoElement) {
     if (!Number.isFinite(video.duration) || video.duration <= 0) return;
@@ -335,7 +365,7 @@ export default function CameraFeedPanel({
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [syncVideos]);
 
   useEffect(() => {
     let cancelled = false;
@@ -389,7 +419,7 @@ export default function CameraFeedPanel({
       cancelled = true;
       window.clearInterval(interval);
     };
-  }, []);
+  }, [syncVideos]);
 
   useEffect(() => () => {
     const master = cameras[0] ? videoRefs.current.get(cameras[0].id) : undefined;
@@ -404,7 +434,7 @@ export default function CameraFeedPanel({
       timelineRef.current.updatedAt,
       timelineRef.current.backendInstanceId
     );
-  }, [cameras, isInspectionMode]);
+  }, [cameras, getSharedTimelineTime, isInspectionMode]);
 
   useEffect(() => {
     let cancelled = false;
@@ -573,7 +603,6 @@ export default function CameraFeedPanel({
                     controls
                     muted
                     autoPlay
-                    loop
                     playsInline
                     preload="auto"
                     className="h-full w-full object-contain"
@@ -607,6 +636,14 @@ export default function CameraFeedPanel({
                       ) {
                         syncVideos(e.currentTarget);
                       }
+                    }}
+                    onEnded={(event) => {
+                      if (isInspectionMode) {
+                        event.currentTarget.currentTime = 0;
+                        void event.currentTarget.play();
+                        return;
+                      }
+                      restartVideosFromBeginning();
                     }}
                     onPause={(event) => {
                       if (isInspectionMode) return;

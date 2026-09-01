@@ -4,7 +4,6 @@ import { useState, useEffect, useRef } from "react";
 import {
     Play,
     Pause,
-    RotateCcw,
     Zap,
     Car,
     List,
@@ -85,7 +84,6 @@ export default function DigitalTwinView() {
     const [lastSyncFailedInsertions, setLastSyncFailedInsertions] = useState(0);
 
 
-    const [isInitialLoading, setIsInitialLoading] = useState(true);
     const [isSimStateLoaded, setIsSimStateLoaded] = useState(false);
 
     const [recommendationLoading, setRecommendationLoading] = useState(false);
@@ -167,15 +165,7 @@ export default function DigitalTwinView() {
                 if (!data.running) {
                     // SSOT: Use Supabase when simulation is idle
                     try {
-                        const dbSignal = await fetchSignalStatus("simpang4-pingit");
-                        if (dbSignal) {
-                            const phase = dbSignal.currentPhase.toLowerCase();
-                            const isNS = phase.includes("ns") || phase.includes("north") || phase.includes("south");
-                            const isEW = phase.includes("ew") || phase.includes("east") || phase.includes("west");
-                            const isAmber = phase.includes("amber") || phase.includes("yellow");
-                            const activeColor = isAmber ? "YELLOW" : "GREEN";
-                            setIsInitialLoading(false);
-                        }
+                        await fetchSignalStatus("simpang4-pingit");
                     } catch (dbErr) {
                         console.error("Failed to fetch Supabase signal:", dbErr);
                     }
@@ -219,7 +209,6 @@ export default function DigitalTwinView() {
                         setSimSharedState(active.state);
                         setSimSharedRemaining(remaining);
                         
-                        setIsInitialLoading(false);
                     }
                 }
                 if (data.simulationTimeSeconds !== undefined) {
@@ -310,9 +299,12 @@ export default function DigitalTwinView() {
 
         setLoading(true);
         try {
+            const abortController = new AbortController();
+            const timeout = window.setTimeout(() => abortController.abort(), 20_000);
             const response = await fetch(`${API_BASE_URL}/api/v1/simulation/run`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
+                signal: abortController.signal,
                 body: JSON.stringify({
                     context,
                     intersectionId: "simpang4-pingit",
@@ -322,7 +314,7 @@ export default function DigitalTwinView() {
                     seed: 42,
                     scenario: effectiveScenario
                 }),
-            });
+            }).finally(() => window.clearTimeout(timeout));
 
             if (!response.ok) {
                 const errData = await response.json().catch(() => ({}));
@@ -338,7 +330,12 @@ export default function DigitalTwinView() {
             setRecommendationLoading(false);
         } catch (error) {
             console.error(error);
-            alert(error instanceof Error ? error.message : "Terjadi kesalahan saat memulai simulasi");
+            const message = error instanceof DOMException && error.name === "AbortError"
+                ? "SUMO tidak merespons dalam 20 detik. Periksa backend/SUMO."
+                : error instanceof Error
+                    ? error.message
+                    : "Terjadi kesalahan saat memulai simulasi";
+            alert(message);
         } finally {
             setLoading(false);
         }
@@ -545,6 +542,8 @@ export default function DigitalTwinView() {
 
                             {/* SUMO-GUI Live Stream */}
                             {status === "running" ? (
+                                // Frame berubah terus dan tidak boleh masuk cache/optimizer Next Image.
+                                // eslint-disable-next-line @next/next/no-img-element
                                 <img
                                     src={`${API_BASE_URL}/api/v1/simulation/frame?context=${contextForScenario(scenario)}&v=${Math.floor(simulationTime)}`}
                                     alt="Live SUMO Simulation Stream"
@@ -1099,7 +1098,6 @@ export default function DigitalTwinView() {
         </div>
     );
 }
-
 /* ========================================================= */
 /* COMPONENTS */
 /* ========================================================= */
@@ -1247,53 +1245,6 @@ function MiniTrendChart({
                         </LineChart>
                     </ResponsiveContainer>
                 )}
-            </div>
-
-        </div>
-    );
-}
-
-function SignalRow({
-    direction,
-    state,
-    time,
-}: {
-    direction: string;
-    state: "GREEN" | "RED" | "YELLOW";
-    time: string;
-}) {
-    const stateColor =
-        state === "GREEN"
-            ? "bg-signal-green"
-            : state === "YELLOW"
-            ? "bg-yellow-400"
-            : "bg-red-400";
-
-    return (
-        <div className="flex items-center justify-between rounded-xl border border-border p-3">
-
-            <div className="flex items-center gap-3">
-
-                <span
-                    className={`h-2.5 w-2.5 rounded-full ${stateColor}`}
-                />
-
-                <span className="text-xs font-medium">
-                    {direction}
-                </span>
-
-            </div>
-
-            <div className="flex items-center gap-3">
-
-                <span className="text-[10px] text-text-muted">
-                    {time}
-                </span>
-
-                <span className="text-[10px] font-semibold">
-                    {state}
-                </span>
-
             </div>
 
         </div>

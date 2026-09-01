@@ -1027,7 +1027,7 @@ export default function DashboardPage() {
                 counts={hasTrafficData ? vehicleClassCounts : []}
                 selectedApproach={selectedApproach}
                 onApproachChange={setSelectedApproach}
-                onTimeUpdate={(time) => {
+                onTimeUpdate={(time, duration) => {
                   videoTimeRef.current = time;
                   const wholeSecond = Math.floor(time);
                   if (wholeSecond !== lastClockSyncSecondRef.current) {
@@ -1035,7 +1035,11 @@ export default function DashboardPage() {
                     void fetch(`${API_BASE_URL}/api/v1/simulation/sync-clock`, {
                       method: "POST",
                       headers: { "Content-Type": "application/json" },
-                      body: JSON.stringify({ context: "dashboard", videoTimeSeconds: time }),
+                      body: JSON.stringify({
+                        context: "dashboard",
+                        videoTimeSeconds: time,
+                        videoDurationSeconds: duration,
+                      }),
                     }).catch(() => undefined);
                   }
                 }}

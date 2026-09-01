@@ -1,0 +1,3 @@
+# Opsional saat runtime; engine tetap fallback ke rule-based bila tidak tersedia.
+stable-baselines3==2.9.0
+gymnasium==1.3.0

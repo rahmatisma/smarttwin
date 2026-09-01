@@ -1,4 +1,9 @@
+import pytest
+
 from app.services.supabase_client import get_supabase
+
+
+pytestmark = pytest.mark.integration
 
 
 def test_database_connection():

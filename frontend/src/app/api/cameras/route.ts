@@ -18,7 +18,6 @@ import { supabase } from "@/lib/supabaseClient";
 import { findOrCreateIntersection } from "./intersectionHelper";
 
 const supabaseClient = supabaseAdmin || supabase;
-import { DEFAULT_INTERSECTION_ID } from "@/lib/supabaseData";
 
 interface CreateCameraBody {
   name: string;

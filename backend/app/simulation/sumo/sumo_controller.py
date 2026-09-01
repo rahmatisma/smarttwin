@@ -374,6 +374,12 @@ class SumoController:
 
         self.last_simulation_time = 0.0
 
+        # Waktu tampilan mengikuti siklus CCTV. Waktu internal SUMO tetap
+        # monoton supaya kendaraan terus berjalan ketika rekaman mengulang.
+        self._camera_clock_time: float | None = None
+        self._camera_clock_duration: float | None = None
+        self._camera_clock_synced_at: float | None = None
+
         self.last_error: str | None = None
 
         self.active_vehicles_data: list[dict[str, Any]] = []
@@ -1299,10 +1305,35 @@ class SumoController:
             self.traci.trafficlight.setPhase(tls_id, 0)
             self.active_cycle_plan = normalized_plan
 
-    def sync_signal_clock(self, video_time_seconds: float) -> dict[str, Any]:
+    def get_display_time(self) -> float:
+        """Kembalikan clock CCTV yang berjalan, atau clock mesin sebagai fallback."""
+        if self._camera_clock_time is None or self._camera_clock_synced_at is None:
+            return self.last_simulation_time
+        display_time = self._camera_clock_time + max(
+            0.0, time.monotonic() - self._camera_clock_synced_at
+        )
+        if self._camera_clock_duration:
+            display_time %= self._camera_clock_duration
+        return display_time
+
+    def sync_signal_clock(
+        self,
+        video_time_seconds: float,
+        video_duration_seconds: float | None = None,
+    ) -> dict[str, Any]:
         """Selaraskan fase TLS dengan clock CCTV tanpa mereset simulasi."""
         if self.traci is None or not self.running or not self.active_cycle_plan:
             raise RuntimeError("CyclePlan SUMO belum aktif.")
+
+        self._camera_clock_duration = (
+            max(0.001, float(video_duration_seconds))
+            if video_duration_seconds is not None
+            else self._camera_clock_duration
+        )
+        self._camera_clock_time = max(0.0, float(video_time_seconds))
+        if self._camera_clock_duration:
+            self._camera_clock_time %= self._camera_clock_duration
+        self._camera_clock_synced_at = time.monotonic()
 
         durations: list[int] = []
         for phase in self.active_cycle_plan["phases"]:
@@ -1340,6 +1371,7 @@ class SumoController:
             "videoTimeSeconds": video_time_seconds,
             "phase": phase_index,
             "remainingSeconds": remaining,
+            "videoDurationSeconds": self._camera_clock_duration,
         }
 
     # ============================================================
@@ -1685,7 +1717,8 @@ class SumoController:
                             print(
                                 "[SUMO LOOP] "
                                 f"time="
-                                f"{current_second}s "
+                                f"{int(self.get_display_time())}s "
+                                f"engineTime={current_second}s "
                                 f"active="
                                 f"{active_count} "
                                 f"spawned="

@@ -18,6 +18,7 @@ from .rule_based_engine import (
     YELLOW_SECONDS,
 )
 from .ppo_features import build_ppo_observation
+from .ppo_features import OBSERVATION_SIZE
 
 logger = logging.getLogger(__name__)
 
@@ -78,11 +79,35 @@ class PPOEngine:
         try:
             from stable_baselines3 import PPO
 
-            return PPO.load(str(self.model_path))
+            model = PPO.load(str(self.model_path))
+            self._validate_model_contract(model)
+            return model
         except Exception as exc:
             self.load_error = f"checkpoint gagal dimuat: {type(exc).__name__}: {exc}"
             logger.warning("PPO tidak tersedia, memakai rule-based: %s", self.load_error)
             return None
+
+    @staticmethod
+    def _validate_model_contract(model: PPOModel) -> None:
+        observation_space = getattr(model, "observation_space", None)
+        observation_shape = getattr(observation_space, "shape", None)
+        if observation_shape != (OBSERVATION_SIZE,):
+            raise ValueError(
+                "observation space checkpoint tidak kompatibel: "
+                f"diharapkan {(OBSERVATION_SIZE,)}, diterima {observation_shape}"
+            )
+
+        action_space = getattr(model, "action_space", None)
+        nvec = getattr(action_space, "nvec", None)
+        if nvec is None or not hasattr(nvec, "tolist"):
+            raise ValueError("action space checkpoint bukan MultiDiscrete")
+        action_sizes = [int(value) for value in nvec.tolist()]
+        expected = [len(GREEN_OPTIONS)] * len(FIXED_CYCLE_ORDER)
+        if action_sizes != expected:
+            raise ValueError(
+                "action space checkpoint tidak kompatibel: "
+                f"diharapkan {expected}, diterima {action_sizes}"
+            )
 
     def build_observation(
         self,

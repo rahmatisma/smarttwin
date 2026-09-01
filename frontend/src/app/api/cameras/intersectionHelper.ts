@@ -17,6 +17,9 @@ export async function findOrCreateIntersection(name: string) {
   if (existing) {
     return existing;
   }
+  if (existingError) {
+    throw new Error(existingError.message);
+  }
 
   // Not found, create new
   const { data: newIntersection, error: insertError } = await supabaseClient

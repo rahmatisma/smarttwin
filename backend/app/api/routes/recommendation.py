@@ -1,4 +1,4 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 import os
 from pathlib import Path
 
@@ -7,6 +7,7 @@ from app.schemas.recommendation import (
     RecommendationResponse,
 )
 from app.services.recommendation_service import recommendation_service
+from app.core.auth import get_current_user, require_operator
 
 
 router = APIRouter(
@@ -32,7 +33,7 @@ def get_decision_engine_status():
     }
 
 
-@router.post("/engine-test")
+@router.post("/engine-test", dependencies=[Depends(require_operator)])
 def test_decision_engine(
     state: TrafficState,
     currentPhase: str = "north",
@@ -57,6 +58,7 @@ def test_decision_engine(
 @router.post(
     "",
     response_model=RecommendationResponse,
+    dependencies=[Depends(get_current_user)],
 )
 def get_recommendation(
     request: RecommendationRequest,

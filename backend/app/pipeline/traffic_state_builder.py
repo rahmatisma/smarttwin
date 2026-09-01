@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 import sys
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from supabase import Client
 
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
@@ -67,6 +67,16 @@ class ApproachTrafficState(BaseModel):
     avgSpeedKmh: float | None = None
 
 
+class TrafficStateQuality(BaseModel):
+    """Kelengkapan data, bukan klaim akurasi deteksi kendaraan."""
+
+    completenessScore: float
+    metricRowCount: int
+    missingApproaches: list[str]
+    warnings: list[str]
+    accuracyValidated: bool = False
+
+
 class BuiltTrafficState(BaseModel):
     """
     Traffic state hasil agregasi dari Supabase.
@@ -97,6 +107,15 @@ class BuiltTrafficState(BaseModel):
     approaches: list[ApproachTrafficState]
 
     source: str = "cv"
+
+    dataQuality: TrafficStateQuality = Field(
+        default_factory=lambda: TrafficStateQuality(
+            completenessScore=0.0,
+            metricRowCount=0,
+            missingApproaches=list(EXPECTED_APPROACHES),
+            warnings=["Kualitas data belum dihitung."],
+        )
+    )
 
 
 # ============================================================
@@ -730,6 +749,22 @@ class TrafficStateBuilder:
         # FINAL STATE
         # ----------------------------------------------------
 
+        missing_approaches = [
+            approach
+            for approach in EXPECTED_APPROACHES
+            if not approach_rows[approach]
+        ]
+        metric_row_count = sum(len(rows) for rows in approach_rows.values())
+        warnings: list[str] = []
+        if missing_approaches:
+            warnings.append(
+                "TrafficLaneMetrics tidak lengkap untuk: "
+                + ", ".join(missing_approaches)
+            )
+        warnings.append(
+            "Completeness tidak mengukur akurasi YOLO/ByteTrack."
+        )
+
         return BuiltTrafficState(
             trafficStateId=traffic_state_id,
             intersectionId=intersection_name,
@@ -749,6 +784,16 @@ class TrafficStateBuilder:
                     "source",
                     "cv",
                 )
+            ),
+            dataQuality=TrafficStateQuality(
+                completenessScore=round(
+                    (len(EXPECTED_APPROACHES) - len(missing_approaches))
+                    / len(EXPECTED_APPROACHES),
+                    3,
+                ),
+                metricRowCount=metric_row_count,
+                missingApproaches=missing_approaches,
+                warnings=warnings,
             ),
         )
 

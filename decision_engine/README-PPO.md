@@ -3,11 +3,6 @@
 Dokumen ini ditulis untuk anggota tim yang belum pernah melatih reinforcement
 learning. Baca berurutan dan jangan langsung mengaktifkan PPO pada demo.
 
-> Tahapan operasional lengkap dari instalasi, smoke test, training, evaluasi,
-> sampai pemasangan endpoint terdapat di `README-PPO-UNTUK-TIM.md`. Panduan itu
-> juga menyediakan perintah berbeda untuk eksekusi dari root proyek dan langsung
-> dari folder `decision_engine`.
-
 ## 1. Perbedaan LSTM, PPO, Rule-Based, dan Scenario Generator
 
 ```text
@@ -67,14 +62,16 @@ Sudah tersedia:
 - integrasi opt-in ke RecommendationService dan SignalService;
 - unit test inferensi, invalid action, missing checkpoint, dan factory;
 - dependency PPO yang terpisah dari dependency utama.
-- `SmartTwinSumoEnv` berbasis Gymnasium dan TraCI headless;
-- loader/agregator demand dari rekaman CV;
-- script training dan penyimpanan checkpoint;
-- script evaluasi PPO melawan baseline pada seed sama.
 
-Checkpoint eksperimen tersedia, tetapi default produksi tetap `rule-based` dan
-checkpoint baru hanya boleh diaktifkan setelah lolos quality gate. Panduan
-operasional paling lengkap ada di `README-PPO-UNTUK-TIM.md`.
+Belum tersedia:
+
+- `SmartTwinSumoEnv` berbasis Gymnasium;
+- script training;
+- checkpoint hasil training;
+- evaluasi PPO melawan rule-based.
+
+Artinya endpoint sudah siap menerima **checkpoint inference**, tetapi model PPO
+belum bisa dilatih sampai environment pada bagian 8 dibuat.
 
 ## 4. Observation dan action contract
 
@@ -92,10 +89,9 @@ Total traffic: `4 x 5 = 20`, ditambah one-hot fase aktif `4`, dan green-time
 aktif `1`, sehingga total `25`.
 
 Jika forecast tersedia, state diproyeksikan memakai 70% state aktual dan 30%
-forecast LSTM sebelum dibentuk menjadi observation. Normalisasi tunggal berada
-di `ppo_features.py` dan dipakai bersama oleh environment training dan
-`PPOEngine` inference. Kontrak ini tidak boleh diubah setelah checkpoint dilatih
-tanpa retraining.
+forecast LSTM sebelum dibentuk menjadi observation. Kontrak ini ada di
+`PPOEngine.build_observation()` dan tidak boleh diubah setelah checkpoint
+dilatih tanpa retraining.
 
 ### Action: fase + empat green-time
 
@@ -133,13 +129,13 @@ Fallback berlaku untuk:
 
 Sumber hasil dapat diaudit:
 
-| `source` | Engine yang benar-benar digunakan |
-|---|---|
-| `rule-based` | Rule-based dengan state aktual |
-| `rule-based+forecast` | Rule-based dengan state dan LSTM |
-| `ppo` | Checkpoint PPO menghasilkan action valid |
+| `source`                  | Engine yang benar-benar digunakan                       |
+| ------------------------- | ------------------------------------------------------- |
+| `rule-based`              | Rule-based dengan state aktual                          |
+| `rule-based+forecast`     | Rule-based dengan state dan LSTM                        |
+| `ppo`                     | Checkpoint PPO menghasilkan action valid                |
 | `ppo-fallback-rule-based` | Mode PPO aktif, tetapi rule-based menyelamatkan request |
-| `scenario-generator` | Cache segar berasal dari kandidat yang diuji SUMO |
+| `scenario-generator`      | Cache segar berasal dari kandidat yang diuji SUMO       |
 
 Fallback bisa terjadi karena checkpoint hilang, Stable-Baselines3 belum terpasang,
 versi checkpoint tidak kompatibel, shape observation berubah, atau action PPO di
@@ -188,10 +184,10 @@ python -c "import gymnasium, stable_baselines3; print('PPO dependency OK')"
 
 Dependency dipisahkan agar demo rule-based tidak rusak jika instalasi RL gagal.
 
-## 8. Environment training yang sudah tersedia
+## 8. Environment training yang harus dibuat
 
-Training tidak dilakukan lewat endpoint dashboard. Implementasi
-`SmartTwinSumoEnv` mengontrol SUMO headless secara langsung:
+Training jangan dilakukan lewat endpoint dashboard. Buat Gymnasium environment
+headless yang mengontrol SUMO secara langsung:
 
 ```python
 class SmartTwinSumoEnv(gymnasium.Env):
@@ -218,22 +214,25 @@ Ketentuan penting:
 
 ## 9. Reward: apa yang dihargai dan dihukum?
 
-Reward aktif versi 2 menjadikan throughput komponen terbesar:
+Reward awal yang sederhana:
 
 ```text
-reward = +0.45 * throughput_norm
-         -0.35 * queue_norm
-         -0.20 * wait_norm
-         -starvation_penalty
+reward = -(
+    0.45 * normalized_delay
+  + 0.35 * normalized_queue
+  + 0.15 * normalized_waiting_time
+  + 0.05 * phase_change_penalty
+) + 0.10 * normalized_throughput
 ```
 
-Starvation diberi penalti terpisah. Komponen environment dinormalisasi dengan
-batas operasional berikut:
+Tambahkan penalti besar untuk action invalid dan starvation. Semua metrik harus
+dinormalisasi terhadap run rule-based dengan snapshot/seed sama:
 
 ```text
-queue_norm      = min(queue_vehicle / 40, 1)
-wait_norm       = min(total_wait / (vehicle_aktif * 120), 1)
-throughput_norm = min(vehicle_tiba_dalam_interval / 15, 1)
+normalized_delay      = ppo_delay / max(rule_delay, 1)
+normalized_queue      = ppo_queue / max(rule_queue, 1)
+normalized_waiting    = ppo_waiting / max(rule_waiting, 1)
+normalized_throughput = ppo_throughput / max(rule_throughput, 1)
 ```
 
 Reward ini titik awal, bukan formula optimum. SUMO-RL memakai perubahan total
@@ -254,12 +253,12 @@ mengumpulkan kelipatan `n_steps x n_envs`. Rujukan:
 
 Tahapan realistis:
 
-| Tahap | Timesteps | Tujuan | Siap demo? |
-|---|---:|---|---|
-| Smoke | 2.048–10.000 | Memastikan env/reward/save-load berjalan | Tidak |
-| Awal | 50.000 | Melihat reward dan action mulai terarah | Belum |
-| Kandidat | 100.000–300.000 | Evaluasi terhadap rule-based | Mungkin jika lolos gerbang |
-| Lebih kuat | 500.000+ dengan minimal 3 seed | Menilai stabilitas | Lebih meyakinkan |
+| Tahap      |                      Timesteps | Tujuan                                   | Siap demo?                 |
+| ---------- | -----------------------------: | ---------------------------------------- | -------------------------- |
+| Smoke      |                   2.048–10.000 | Memastikan env/reward/save-load berjalan | Tidak                      |
+| Awal       |                         50.000 | Melihat reward dan action mulai terarah  | Belum                      |
+| Kandidat   |                100.000–300.000 | Evaluasi terhadap rule-based             | Mungkin jika lolos gerbang |
+| Lebih kuat | 500.000+ dengan minimal 3 seed | Menilai stabilitas                       | Lebih meyakinkan           |
 
 Jumlah bukan jaminan. Policy 100.000 timestep yang menang pada evaluation set
 lebih baik daripada 500.000 timestep yang overfit satu snapshot.
@@ -278,12 +277,12 @@ estimasi_jam = target_timestep / steps_per_second / 3600
 
 Contoh jika benchmark mencapai 20 step/detik:
 
-| Target | Perkiraan waktu |
-|---:|---:|
-| 10.000 | 8 menit |
-| 50.000 | 42 menit |
-| 100.000 | 1,4 jam |
-| 300.000 | 4,2 jam |
+|  Target | Perkiraan waktu |
+| ------: | --------------: |
+|  10.000 |         8 menit |
+|  50.000 |        42 menit |
+| 100.000 |         1,4 jam |
+| 300.000 |         4,2 jam |
 
 Jika environment hanya 1 step/detik, 100.000 timestep membutuhkan sekitar 27,8
 jam. Jadi jawaban “berapa lama” baru valid setelah environment selesai dan
@@ -375,14 +374,14 @@ runner evaluasi terpisah.
 
 ## 15. Troubleshooting
 
-| Gejala | Penyebab | Tindakan |
-|---|---|---|
-| `ppo-fallback-rule-based` | Model/dependency/action bermasalah | Periksa path dan log backend |
-| Observation shape mismatch | Kontrak checkpoint berbeda | Retrain dengan 25 fitur |
-| Reward tidak naik | Reward salah skala/episode pendek | Log komponen dan bandingkan random/rule |
-| Satu arah terus dipilih | Starvation tidak dipenalti | Tambah starvation penalty dan variasi demand |
-| Training lambat | SUMO restart atau GUI aktif | Gunakan headless persistent |
-| Endpoint tetap rule-based | `.env` belum disalin atau backend belum restart | Periksa `backend/.env` dan restart |
+| Gejala                     | Penyebab                                        | Tindakan                                     |
+| -------------------------- | ----------------------------------------------- | -------------------------------------------- |
+| `ppo-fallback-rule-based`  | Model/dependency/action bermasalah              | Periksa path dan log backend                 |
+| Observation shape mismatch | Kontrak checkpoint berbeda                      | Retrain dengan 25 fitur                      |
+| Reward tidak naik          | Reward salah skala/episode pendek               | Log komponen dan bandingkan random/rule      |
+| Satu arah terus dipilih    | Starvation tidak dipenalti                      | Tambah starvation penalty dan variasi demand |
+| Training lambat            | SUMO restart atau GUI aktif                     | Gunakan headless persistent                  |
+| Endpoint tetap rule-based  | `.env` belum disalin atau backend belum restart | Periksa `backend/.env` dan restart           |
 
 ## 16. Gerbang sebelum PPO dipakai demo
 

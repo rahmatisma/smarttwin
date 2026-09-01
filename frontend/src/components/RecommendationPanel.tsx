@@ -142,8 +142,6 @@ function ApproachCard({
 export default function RecommendationPanel({
   recommendation,
   signal,
-  selectedApproach,
-  activeCycleSeconds,
   sharedVisualPhase,
   sharedVisualPhaseState,
   sharedVisualRemaining,

@@ -25,9 +25,9 @@
   --color-road-center: #303638;
   --color-canvas-grid: rgba(148, 163, 184, 0.2);
 
-  --font-display: var(--font-space-grotesk);
-  --font-sans: var(--font-inter);
-  --font-mono: var(--font-jetbrains-mono);
+  --font-display: "Segoe UI", Arial, sans-serif;
+  --font-sans: "Segoe UI", Arial, sans-serif;
+  --font-mono: "Cascadia Mono", "Consolas", monospace;
 }
 
 body {

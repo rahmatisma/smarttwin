@@ -56,6 +56,16 @@ class Settings(BaseSettings):
         "http://127.0.0.1:3000"
     )
 
+    auth_required: bool = False
+
+    operator_roles: str = "operator,admin,service_role"
+
+    max_video_upload_bytes: int = Field(
+        default=1_073_741_824,
+        ge=1,
+        description="Batas ukuran upload video dalam byte (default 1 GiB).",
+    )
+
     # ========================================================
     # DATABASE
     # ========================================================
@@ -123,6 +133,14 @@ class Settings(BaseSettings):
             for origin in self.cors_origins.split(",")
             if origin.strip()
         ]
+
+    @property
+    def operator_roles_list(self) -> set[str]:
+        return {
+            role.strip()
+            for role in self.operator_roles.split(",")
+            if role.strip()
+        }
 
 
 # ============================================================

@@ -306,6 +306,7 @@ export default function DigitalTwinPanel({
   const [simError, setSimError] = useState<string | null>(null);
   const [recoveryNonce, setRecoveryNonce] = useState(0);
   const wasRunningRef = useRef(false);
+  const runRequestInFlightRef = useRef(false);
 
   const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
 
@@ -367,16 +368,21 @@ export default function DigitalTwinPanel({
 
   useEffect(() => {
     if (!canStartSimulation) return;
+    if (runRequestInFlightRef.current) return;
 
     const payload = JSON.parse(livePayloadSignature);
     let cancelled = false;
+    const abortController = new AbortController();
+    const timeout = window.setTimeout(() => abortController.abort(), 20_000);
+    runRequestInFlightRef.current = true;
     void fetch(`${API_BASE_URL}/api/v1/simulation/run`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
+      signal: abortController.signal,
       body: JSON.stringify({
         context: SIM_CONTEXT,
         intersectionId: "simpang4-pingit",
-        durationSeconds: 86400,
+        durationSeconds: 3600,
         gui: true,
         guiDelayMs: 0,
         seed: 42,
@@ -402,9 +408,16 @@ export default function DigitalTwinPanel({
         }
       })
       .catch((error) => {
-        if (!cancelled) setSimError(
-          error instanceof Error ? error.message : "SUMO tidak tersedia."
-        );
+        if (!cancelled) {
+          const message = error instanceof DOMException && error.name === "AbortError"
+            ? "SUMO tidak merespons dalam 20 detik. Periksa backend/SUMO."
+            : error instanceof Error ? error.message : "SUMO tidak tersedia.";
+          setSimError(message);
+        }
+      })
+      .finally(() => {
+        window.clearTimeout(timeout);
+        runRequestInFlightRef.current = false;
       });
 
     return () => {
@@ -525,6 +538,8 @@ export default function DigitalTwinPanel({
       <div className="relative aspect-[16/11] w-full overflow-hidden rounded-md bg-[var(--color-canvas)]">
         {simRunning ? (
           <>
+            {/* Frame berubah terus dan tidak boleh masuk cache/optimizer Next Image. */}
+            {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src={`${API_BASE_URL}/api/v1/simulation/frame?context=${SIM_CONTEXT}&v=${frameVersion}`}
               alt="Live SUMO Simpang Pingit"

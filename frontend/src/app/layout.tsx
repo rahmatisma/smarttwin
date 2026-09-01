@@ -1,26 +1,7 @@
 import type { Metadata } from "next";
-import { Inter, Space_Grotesk, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 import LanguageProvider from "@/components/LanguageProvider";
 import { ScenarioProvider } from "@/context/ScenarioContext";
-
-const inter = Inter({
-  subsets: ["latin"],
-  variable: "--font-inter",
-  preload: false,
-});
-
-const spaceGrotesk = Space_Grotesk({
-  subsets: ["latin"],
-  variable: "--font-space-grotesk",
-  preload: false,
-});
-
-const jetbrainsMono = JetBrains_Mono({
-  subsets: ["latin"],
-  variable: "--font-jetbrains-mono",
-  preload: false,
-});
 
 export const metadata: Metadata = {
   title: "SmartTwin — Dashboard Simpang",
@@ -36,7 +17,7 @@ export default function RootLayout({
   return (
     <html lang="id">
       <body
-        className={`${inter.variable} ${spaceGrotesk.variable} ${jetbrainsMono.variable} font-sans antialiased bg-bg text-text`}
+        className="font-sans antialiased bg-bg text-text"
       >
         <ScenarioProvider>
           <LanguageProvider>{children}</LanguageProvider>

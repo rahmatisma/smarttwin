@@ -22,7 +22,7 @@ export default function SharedSignalPanels({
   const isInitialLoading = activeSignal.source === "mock" && scenario === "Traffic Realtime" && !activeRecommendation;
 
   const visualPhase = activeSignal.currentPhase || null;
-  const [now, setNow] = useState(Date.now());
+  const [now, setNow] = useState<number | null>(null);
 
   // Force re-render setiap 1 detik untuk menghitung ulang elapsedSeconds
   useEffect(() => {
@@ -30,7 +30,9 @@ export default function SharedSignalPanels({
     return () => clearInterval(timer);
   }, []);
 
-  const elapsedSeconds = Math.max(0, Math.floor((now - new Date(activeSignal.timestamp).getTime()) / 1000));
+  const elapsedSeconds = now === null
+    ? 0
+    : Math.max(0, Math.floor((now - new Date(activeSignal.timestamp).getTime()) / 1000));
   const visualRemaining = Math.max(0, activeSignal.remainingSeconds - elapsedSeconds);
 
   const visualPhaseState: "GREEN" | "YELLOW" = activeSignal.state ??

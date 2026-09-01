@@ -55,6 +55,7 @@ class SimulationRequest(BaseModel):
     durationSeconds: int = Field(
         default=60,
         ge=1,
+        le=3600,
         description="Durasi simulasi dalam detik.",
     )
 
@@ -66,6 +67,7 @@ class SimulationRequest(BaseModel):
     guiDelayMs: int = Field(
         default=100,
         ge=0,
+        le=5000,
         description="Delay GUI SUMO dalam milidetik.",
     )
 
@@ -84,6 +86,7 @@ class SimulationRequest(BaseModel):
 class SimulationClockRequest(BaseModel):
     context: str = Field(default="default")
     videoTimeSeconds: float = Field(ge=0)
+    videoDurationSeconds: float | None = Field(default=None, gt=0)
 
 
 class SimulationScenarioRequest(BaseModel):
