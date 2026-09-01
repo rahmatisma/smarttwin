@@ -87,6 +87,7 @@ def test_get_simulation_state_without_running_sumo():
     assert state["vehicles"] == []
     assert state["signals"] == []
     assert state["simulationTimeSeconds"] == 0
+    assert state["backendInstanceId"] == service.instance_id
 
 
 class _FakeControllerWithLiveMetrics:
