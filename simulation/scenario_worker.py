@@ -29,8 +29,137 @@ from run_tls_simulation import (
 )
 from scenario_generator import ScenarioEngine
 
+from app.pipeline.traffic_state_builder import (  # noqa: E402
+    TrafficStateBuilder,
+    TrafficStateBuilderConfig,
+)
+
 INTERSECTION_ID = "simpang4-pingit"
 CACHE_TABLE = "liveScenarioCache"
+
+# Tabel riwayat (append-only). Beda peran dari CACHE_TABLE yang cuma 1 baris
+# dan ditimpa tiap siklus: cache dipakai dashboard untuk "sekarang", tabel di
+# bawah ini menyimpan jejak "pernah memutuskan apa saja" untuk halaman Riwayat
+# dan laporan teknis.
+RECOMMENDATIONS_TABLE = "recommendations"
+SIMULATIONS_TABLE = "simulations"
+SIMULATION_METRICS_TABLE = "simulationMetrics"
+
+# recommendations.intersectionId itu bigint (FK ke intersections.id), bukan
+# teks seperti INTERSECTION_ID di atas. Di-cache supaya tidak query tiap siklus.
+_intersection_row_id: int | None = None
+
+# Jendela rekaman berjarak 5 detik (lihat cv_csv_bridge.py) -- 12 langkah
+# per siklus (interval default 60s) kira-kira 1 menit rekaman per siklus,
+# supaya kondisi benar-benar terlihat berbeda antar siklus, bukan cuma
+# maju beberapa detik yang nyaris tidak berubah.
+REPLAY_STEP_DEFAULT = 12
+
+
+class ReplaySource:
+    """Memutar ulang urutan TrafficState terekam (49 menit, 15 Agustus),
+    bukan selalu mengambil kondisi TERBARU seperti loadTrafficState().
+
+    Kenapa ini perlu: kalau CV/data live tidak sedang berjalan, "kondisi
+    terbaru" di database tidak pernah berganti -- worker akan mengevaluasi
+    kondisi yang SAMA berulang kali walau dipanggil puluhan kali (lihat
+    trafficStateId di riwayat: identik semua). Mode ini memutar maju
+    melalui 538 kondisi yang sudah terekam, jadi tiap siklus benar-benar
+    mengevaluasi situasi berbeda -- datanya asli, cuma urutan
+    pemutarannya yang diatur.
+
+    Posisi SENGAJA tidak disimpan ke disk: tiap kali worker dijalankan
+    ulang, replay dimulai dari awal lagi. Ini membuat urutan kejadian
+    selalu identik antar sesi -- cocok untuk latihan presentasi berkali-
+    kali dengan hasil yang bisa direproduksi persis sama.
+    """
+
+    def __init__(
+        self,
+        builder: "TrafficStateBuilder",
+        intersection_id: str,
+        step: int = REPLAY_STEP_DEFAULT,
+    ) -> None:
+        self._builder = builder
+        self._intersection_id = intersection_id
+        self._step = max(1, step)
+        self._state_ids: list[int] | None = None
+        self._maps: tuple[dict, dict, dict] | None = None
+        self._position = 0
+
+    def _ensure_loaded(self) -> None:
+        if self._state_ids is not None:
+            return
+
+        intersection_map, approach_map, lane_map = (
+            self._builder.build_relation_maps()
+        )
+        self._maps = (intersection_map, approach_map, lane_map)
+
+        row_id = next(
+            (
+                rid
+                for rid, row in intersection_map.items()
+                if row.get("intersectionId") == self._intersection_id
+            ),
+            None,
+        )
+        if row_id is None:
+            raise RuntimeError(
+                f"Intersection '{self._intersection_id}' tidak ditemukan "
+                "di tabel intersections."
+            )
+
+        rows = (
+            self._builder.supabase.table("trafficStates")
+            .select("id")
+            .eq("intersectionId", row_id)
+            .order("windowStart", desc=False)
+            .execute()
+        ).data or []
+
+        self._state_ids = [int(row["id"]) for row in rows]
+        if not self._state_ids:
+            raise RuntimeError(
+                f"Tidak ada trafficStates untuk '{self._intersection_id}' "
+                "-- replay butuh data historis yang sudah terekam."
+            )
+
+    def next(self):
+        """Kembalikan (BuiltTrafficState, posisi_1_basis, total) lalu maju."""
+        self._ensure_loaded()
+        assert self._state_ids is not None and self._maps is not None
+
+        index = self._position % len(self._state_ids)
+        traffic_state_id = self._state_ids[index]
+        self._position += self._step
+
+        row = (
+            self._builder.supabase.table("trafficStates")
+            .select(
+                "id, intersectionId, windowStart, windowEnd, source, "
+                "processingJobId, createdAt"
+            )
+            .eq("id", traffic_state_id)
+            .limit(1)
+            .execute()
+        ).data
+        if not row:
+            raise RuntimeError(
+                f"trafficStates id={traffic_state_id} tidak ditemukan "
+                "(terhapus setelah daftar ID dimuat?)."
+            )
+
+        lane_metrics = self._builder.get_lane_metrics([traffic_state_id])
+        intersection_map, approach_map, lane_map = self._maps
+        built = self._builder.build_state(
+            row[0], lane_metrics, intersection_map, approach_map, lane_map
+        )
+        if built is None:
+            raise RuntimeError(
+                f"Gagal membangun TrafficState id={traffic_state_id}."
+            )
+        return built, index + 1, len(self._state_ids)
 
 
 def _make_engine(short_sim_steps: int | None = None) -> ScenarioEngine:
@@ -109,12 +238,199 @@ def write_cache(supabase, payload: dict[str, Any]) -> None:
         )
 
 
-def evaluate_once(supabase, *, full_cycle: bool = False) -> dict[str, Any]:
-    state = loadTrafficState()
-    forecast_client = ForecastClient()
-    forecast = forecast_client.get_live_forecast()
+def _resolve_intersection_row_id(supabase) -> int | None:
+    """intersections.id (bigint) dari intersectionId (teks). Di-cache."""
+    global _intersection_row_id
+
+    if _intersection_row_id is not None:
+        return _intersection_row_id
+
+    try:
+        res = (
+            supabase.table("intersections")
+            .select("id")
+            .eq("intersectionId", INTERSECTION_ID)
+            .limit(1)
+            .execute()
+        )
+        if res.data:
+            _intersection_row_id = int(res.data[0]["id"])
+    except Exception as exc:
+        print(f"[WARN] Gagal membaca intersections.id: {exc}")
+
+    return _intersection_row_id
+
+
+def write_history(supabase, payload: dict[str, Any], state) -> None:
+    """Simpan hasil siklus ini sebagai riwayat permanen (append-only).
+
+    Ditulis TIAP siklus, termasuk saat isinya sama dengan siklus sebelumnya --
+    penanda "berubah" sengaja TIDAK dihitung di sini, melainkan di halaman
+    Riwayat dengan membandingkan baris berurutan. Alasannya: data yang tidak
+    ditulis tidak bisa dipulihkan, sedangkan cara menampilkan selalu bisa
+    diubah kapan saja.
+
+    Kegagalan di sini TIDAK BOLEH mematikan worker: tugas utama worker adalah
+    mengisi cache untuk dashboard live (write_cache di atas). Riwayat itu
+    pelengkap, jadi errornya cukup diperingatkan.
+    """
+    intersection_row_id = _resolve_intersection_row_id(supabase)
+    if intersection_row_id is None:
+        print("[WARN] intersections.id tidak diketahui; riwayat dilewati.")
+        return
+
+    recommendation = payload.get("recommendation") or {}
+    cycle_plan = recommendation.get("cyclePlan") or {}
+    phases = cycle_plan.get("phases") or []
+
+    if not phases:
+        print("[WARN] cyclePlan kosong; riwayat dilewati.")
+        return
+
+    timestamp = payload["updatedAt"]
+
+    # Sumber dilaporkan APA ADANYA dari engine -- termasuk saat jatuh ke
+    # rule-based karena SUMO gagal/cache basi. Riwayat yang menyembunyikan
+    # fallback justru berbahaya: alur terlihat mulus padahal kotak 7/8/9
+    # sempat terlewat.
+    source = recommendation.get("source") or "unknown"
+    winner_id = payload.get("candidateId")
+
+    # ------------------------------------------------------------------
+    # 1. recommendations -- satu baris per lengan
+    # ------------------------------------------------------------------
+    rows = []
+    for phase in phases:
+        approach = str(phase.get("approach", "")).lower().strip()
+        if not approach:
+            continue
+        rows.append(
+            {
+                "intersectionId": intersection_row_id,
+                "timestamp": timestamp,
+                # Nama lengan disimpan dalam bahasa Inggris (north/south/
+                # east/west) mengikuti kontrak docs/data-contract.md.
+                # Penerjemahan ke Indonesia dilakukan di lapisan tampilan.
+                "recommendedPhase": approach,
+                "recommendedGreenSeconds": int(phase.get("greenSeconds", 0)),
+                "currentGreenSeconds": int(
+                    recommendation.get("currentGreenSeconds", 0) or 0
+                ),
+                "expectedDelayReductionPercent": float(
+                    recommendation.get("expectedDelayReductionPercent", 0) or 0
+                ),
+                "confidence": float(recommendation.get("confidence", 0) or 0),
+                "reason": (
+                    f"{source} | kandidat={winner_id} | "
+                    f"delay={payload.get('avgDelaySeconds')}s | "
+                    f"antrean={payload.get('avgQueueLengthM')}m | "
+                    f"LOS={payload.get('los')}"
+                ),
+                "source": source,
+            }
+        )
+
+    try:
+        inserted = (
+            supabase.table(RECOMMENDATIONS_TABLE).insert(rows).execute()
+        )
+        recommendation_id = (
+            int(inserted.data[0]["id"]) if inserted.data else None
+        )
+    except Exception as exc:
+        print(f"[WARN] Gagal menyimpan riwayat rekomendasi: {exc}")
+        return
+
+    # ------------------------------------------------------------------
+    # 2. simulations + 3. simulationMetrics -- satu baris per KANDIDAT,
+    #    supaya halaman Riwayat bisa menampilkan perbandingan ketiganya
+    #    ("kenapa kandidat ini yang menang"), bukan cuma pemenangnya.
+    # ------------------------------------------------------------------
+    traffic_state_id = getattr(state, "trafficStateId", None)
+
+    for candidate in payload.get("candidates") or []:
+        candidate_id = candidate.get("candidateId")
+        try:
+            simulation = (
+                supabase.table(SIMULATIONS_TABLE)
+                .insert(
+                    {
+                        "intersectionId": intersection_row_id,
+                        "trafficStateId": traffic_state_id,
+                        "recommendationId": recommendation_id,
+                        "simulationName": f"{candidate_id} @ {timestamp}",
+                        "simulationType": "scenario-comparison",
+                        "engine": source,
+                        "status": (
+                            "winner" if candidate_id == winner_id else "completed"
+                        ),
+                        "startedAt": timestamp,
+                        "completedAt": timestamp,
+                    }
+                )
+                .execute()
+            )
+            if not simulation.data:
+                continue
+            simulation_id = int(simulation.data[0]["id"])
+
+            # LOS sengaja TIDAK disimpan: nilainya murni turunan dari
+            # avgDelaySeconds lewat calculate_los(), jadi menyimpannya cuma
+            # menduplikasi data yang bisa dihitung ulang kapan saja.
+            metrics = [
+                ("avgDelaySeconds", candidate.get("avgDelaySeconds"), "s"),
+                ("avgQueueLengthM", candidate.get("avgQueueLengthM"), "m"),
+                ("throughputVeh", candidate.get("throughputVeh"), "veh"),
+            ]
+            metric_rows = [
+                {
+                    "simulationId": simulation_id,
+                    "metricName": name,
+                    "metricValue": float(value),
+                    "unit": unit,
+                }
+                for name, value, unit in metrics
+                if value is not None
+            ]
+            if metric_rows:
+                supabase.table(SIMULATION_METRICS_TABLE).insert(
+                    metric_rows
+                ).execute()
+        except Exception as exc:
+            print(f"[WARN] Gagal menyimpan simulasi '{candidate_id}': {exc}")
+
+
+def evaluate_once(
+    supabase,
+    *,
+    full_cycle: bool = False,
+    replay: "ReplaySource | None" = None,
+) -> dict[str, Any]:
+    if replay is not None:
+        state, posisi, total = replay.next()
+        print(
+            f"[REPLAY] kondisi {posisi}/{total} "
+            f"(window {state.windowStart} .. {state.windowEnd})"
+        )
+        # Forecast dilewati di mode replay -- forecast_client membaca
+        # kondisi TERBARU (bukan yang sedang diputar), jadi ikut sertakan
+        # forecast di sini akan mencampur dua kerangka waktu berbeda.
+        forecast = None
+    else:
+        state = loadTrafficState()
+        forecast = ForecastClient().get_live_forecast()
+
     payload = evaluate_state(state, forecast=forecast, full_cycle=full_cycle)
+
+    if replay is not None:
+        # Ditandai jujur, bukan disamarkan seolah realtime -- sama seperti
+        # tim sudah jujur soal memakai rekaman CCTV, bukan stream live.
+        payload["recommendation"]["source"] = (
+            f"{payload['recommendation']['source']}+replay"
+        )
+
     write_cache(supabase, payload)
+    write_history(supabase, payload, state)
     return payload
 
 
@@ -257,6 +573,26 @@ def main() -> int:
         help="Mode studi lama satu fase; jangan dipakai untuk halaman Digital Twin.",
     )
     parser.add_argument(
+        "--replay",
+        action="store_true",
+        help=(
+            "Putar ulang urutan TrafficState terekam (data historis asli) "
+            "alih-alih selalu mengambil kondisi terbaru. Dipakai saat CV "
+            "tidak sedang berjalan supaya tiap siklus tetap mengevaluasi "
+            "kondisi yang benar-benar berbeda."
+        ),
+    )
+    parser.add_argument(
+        "--replay-step",
+        type=int,
+        default=REPLAY_STEP_DEFAULT,
+        help=(
+            "Berapa jendela rekaman dilompati tiap siklus replay "
+            f"(default {REPLAY_STEP_DEFAULT} -> jendela 5 detik, "
+            "jadi kira-kira 1 menit rekaman per siklus)."
+        ),
+    )
+    parser.add_argument(
         "--comparison-output",
         type=Path,
         default=Path("outputs/forecast_impact.json"),
@@ -282,9 +618,22 @@ def main() -> int:
         print(f"Laporan: {args.report_output}")
         return 0
 
+    replay_source = None
+    if args.replay:
+        builder = TrafficStateBuilder(TrafficStateBuilderConfig())
+        replay_source = ReplaySource(
+            builder, INTERSECTION_ID, step=args.replay_step
+        )
+        print(
+            f"[REPLAY] mode aktif -- melompat {args.replay_step} jendela "
+            "per siklus, dimulai dari kondisi paling lama."
+        )
+
     while True:
         try:
-            row = evaluate_once(supabase, full_cycle=args.full_cycle)
+            row = evaluate_once(
+                supabase, full_cycle=args.full_cycle, replay=replay_source
+            )
             print(
                 f"Cache diperbarui {row['updatedAt']} | "
                 f"{row['candidateId']} | LOS {row['los']}"

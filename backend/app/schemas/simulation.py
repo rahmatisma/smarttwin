@@ -28,6 +28,15 @@ class SimulationCyclePlan(BaseModel):
 
 
 class SimulationRequest(BaseModel):
+    context: str = Field(
+        default="default",
+        description=(
+            "Slot instance SUMO yang dikendalikan, mis. 'dashboard' vs "
+            "'digitaltwin' -- keduanya bisa jalan bersamaan tanpa saling "
+            "pengaruh (start/pause/stop/skenario terpisah per context)."
+        ),
+    )
+
     intersectionId: str = Field(
         ...,
         description="ID intersection, contoh: simpang4-pingit",
@@ -73,10 +82,12 @@ class SimulationRequest(BaseModel):
 
 
 class SimulationClockRequest(BaseModel):
+    context: str = Field(default="default")
     videoTimeSeconds: float = Field(ge=0)
 
 
 class SimulationScenarioRequest(BaseModel):
+    context: str = Field(default="default")
     scenario: Literal["Traffic Realtime", "Baseline", "Aggressive", "Balanced"]
     cyclePlan: SimulationCyclePlan
 

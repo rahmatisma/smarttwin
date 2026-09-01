@@ -2,12 +2,15 @@ import asyncio
 import os
 from pathlib import Path
 
-async def stream_simulation(fps: int = 10):
+async def stream_simulation(fps: int = 10, context: str = "default"):
     """
     Generator yang membaca screenshot simulasi SUMO secara kontinu
     dan menghasilkan MJPEG stream.
     """
-    frame_path = Path(__file__).resolve().parents[3] / "cache" / "simulation" / "frame.jpg"
+    frame_path = (
+        Path(__file__).resolve().parents[3]
+        / "cache" / "simulation" / f"frame_{context}.jpg"
+    )
     wait_time = 1.0 / fps
     
     last_mtime = 0

@@ -7,7 +7,7 @@ import time
 import logging
 import os
 import subprocess
-from collections import defaultdict
+from collections import defaultdict, deque
 from pathlib import Path
 from typing import Any
 
@@ -282,9 +282,20 @@ class SumoController:
         config_file: str | Path | None = None,
         seed: int | None = None,
         scenario: str = "Baseline",
+        context: str = "default",
     ) -> None:
-    
+
         os.makedirs("cache/simulation", exist_ok=True)
+
+        # --------------------------------------------------------
+        # CONTEXT
+        # --------------------------------------------------------
+        # Membedakan instance SUMO ini dari instance lain yang mungkin
+        # jalan bersamaan (mis. "dashboard" vs "digitaltwin") -- dipakai
+        # untuk nama file screenshot supaya keduanya tidak saling timpa.
+        # Lihat get_simulation_frame()/stream_simulation() di sisi API.
+
+        self.context = context
 
         # --------------------------------------------------------
         # SUMO BINARY
@@ -405,6 +416,25 @@ class SumoController:
         self.active_vehicles_data: list[
             dict[str, Any]
         ] = []
+
+        # --------------------------------------------------------
+        # LIVE TRAFFIC METRICS (buat kartu statistik Digital Twin)
+        # --------------------------------------------------------
+
+        self.live_queue_length_veh: int = 0
+        self.live_queue_busiest_approach: str | None = None
+        self.live_total_queue_length_veh: int = 0
+        self.live_avg_delay_seconds: float = 0.0
+        self.live_throughput_veh_per_min: float = 0.0
+        self.live_visible_vehicle_count: int = 0
+        self.live_last_sync_failed_insertions: int = 0
+        self.live_last_sync_failed_by_approach: dict[str, int] = {}
+
+        # Timestamp simulasi (detik) tiap kendaraan "arrived", dipakai
+        # menghitung laju 60 detik TERAKHIR -- bukan rata-rata sejak
+        # simulasi mulai (itu nyaris tidak bergerak begitu simulasi
+        # sudah jalan lama, dan tidak mencerminkan kondisi "sekarang").
+        self._arrival_timeline: deque[float] = deque()
 
     # ============================================================
     # DEFAULT SUMO BINARY
@@ -568,6 +598,15 @@ class SumoController:
             "--no-step-log",
 
             "--start",
+
+            # Tanpa ini, sumo-gui TIDAK otomatis keluar/nutup window
+            # begitu koneksi TraCI ditutup (traci.close() di close())
+            # -- ia cuma berhenti melangkah dan window-nya nyangkut
+            # menunggu diklik X manual. Karena window-nya sengaja
+            # ditaruh di luar layar (--window-pos di bawah), tanpa
+            # flag ini window itu jadi proses zombie yang harus
+            # dicari lewat Alt+Tab dulu baru bisa ditutup.
+            "--quit-on-end",
         ]
 
         # ========================================================
@@ -1117,6 +1156,8 @@ class SumoController:
 
         added = 0
         removed = 0
+        failed_insertions = 0
+        failed_by_approach: dict[str, int] = {}
         target_total = sum(
             max(0, int(item.get("targetVehicleCount", 0) or 0))
             for item in demand
@@ -1168,13 +1209,32 @@ class SumoController:
                     for _ in range(max(0, wanted - len(existing))):
                         if self.add_vehicle(vehicle_type=vehicle_type, approach=approach):
                             added += 1
+                        else:
+                            # add_vehicle() menelan TraCIException diam-diam
+                            # (mis. ruas masuk terlalu padat untuk disisipi
+                            # kendaraan baru -- ruas EDGE_MASUK cuma 6-12m).
+                            # Dicatat di sini supaya gap antara "Deteksi"
+                            # (target_total) dan jumlah kendaraan yang
+                            # benar-benar ada di network bisa DIBUKTIKAN
+                            # penyebabnya, bukan cuma diduga wajar/tidak.
+                            failed_insertions += 1
+                            failed_by_approach[approach] = (
+                                failed_by_approach.get(approach, 0) + 1
+                            )
 
                 self.current_demand[approach] = desired
 
             self.detected_vehicle_count = target_total
             self.traffic_timestamp = traffic_timestamp
+            self.live_last_sync_failed_insertions = failed_insertions
+            self.live_last_sync_failed_by_approach = failed_by_approach
 
-        return {"added": added, "removed": removed, "total": target_total}
+        return {
+            "added": added,
+            "removed": removed,
+            "total": target_total,
+            "failedInsertions": failed_insertions,
+        }
 
     def _replenish_current_demand(self) -> int:
         """Jaga jumlah kendaraan live sesuai snapshot CCTV terakhir.
@@ -1389,6 +1449,10 @@ class SumoController:
                                 approach
                             ] += 1
 
+                            self._arrival_timeline.append(
+                                self.last_simulation_time
+                            )
+
                         # Snapshot CCTV merepresentasikan okupansi realtime,
                         # bukan batch kendaraan sekali jalan. Isi kembali
                         # kendaraan yang sudah keluar agar target tetap hidup.
@@ -1399,13 +1463,14 @@ class SumoController:
                     # ==========================================
                     
                     current_vehicles_data = []
-                    
+                    waiting_values: list[float] = []
+
                     for vehicle_id in self.traci.vehicle.getIDList():
                         try:
                             x, y = self.traci.vehicle.getPosition(vehicle_id)
                             angle = self.traci.vehicle.getAngle(vehicle_id)
                             vclass = self.traci.vehicle.getVehicleClass(vehicle_id)
-                            
+
                             current_vehicles_data.append({
                                 "id": vehicle_id,
                                 "x": x,
@@ -1413,10 +1478,45 @@ class SumoController:
                                 "angle": angle,
                                 "type": vclass,
                             })
+
+                            # Dipakai kartu "Hasil Simulasi" (Digital Twin) --
+                            # dihitung sekali di sini, bukan panggilan TraCI
+                            # terpisah lagi di get_metrics(), supaya tidak
+                            # dobel jalan per-kendaraan tiap step.
+                            waiting_values.append(
+                                self.traci.vehicle.getAccumulatedWaitingTime(
+                                    vehicle_id
+                                )
+                            )
                         except self.traci.TraCIException:
                             pass
-                            
+
                     self.active_vehicles_data = current_vehicles_data
+
+                    # Kartu "Current Vehicles" dulu menghitung SEMUA
+                    # kendaraan di seluruh network (633x1020m), padahal
+                    # video cuma menampilkan crop kamera (~140x79m di
+                    # sekitar simpang, lihat _stream_view_boundary()) --
+                    # jadi angkanya jauh lebih besar dari yang kelihatan di
+                    # layar (edge upstream lengan Selatan saja 515m,
+                    # jauh di luar crop). Dihitung terpisah di sini supaya
+                    # kartu bisa nunjukkan angka yang benar-benar cocok
+                    # dengan apa yang terlihat.
+                    view_xmin, view_ymin, view_xmax, view_ymax = (
+                        self._stream_view_boundary()
+                    )
+                    self.live_visible_vehicle_count = sum(
+                        1
+                        for vehicle in current_vehicles_data
+                        if view_xmin <= vehicle["x"] <= view_xmax
+                        and view_ymin <= vehicle["y"] <= view_ymax
+                    )
+
+                    self.live_avg_delay_seconds = (
+                        sum(waiting_values) / len(waiting_values)
+                        if waiting_values
+                        else 0.0
+                    )
 
                     # ==========================================
                     # TRAFFIC LIGHT STATE
@@ -1470,12 +1570,74 @@ class SumoController:
                     self.active_signals_data = current_signals_data
 
                     # ==========================================
+                    # LIVE TRAFFIC METRICS (antrean + throughput)
+                    # ==========================================
+                    # Dipakai kartu "Queue Length"/"Traffic Flow" di halaman
+                    # Digital Twin -- dihitung sekali per step, sama seperti
+                    # posisi kendaraan/sinyal di atas, bukan dipanggil TraCI
+                    # langsung dari endpoint (lihat komentar di
+                    # get_simulation_state()).
+
+                    # Per lengan, bukan dijumlah -- total 4 lengan sekaligus
+                    # jadi angka yang tidak actionable ("7 kendaraan" di mana
+                    # persisnya?). Kartu menampilkan lengan TERPADAT saja,
+                    # konsisten dengan panel Rekomendasi di sebelahnya yang
+                    # juga per-lengan.
+                    queue_by_approach: dict[str, int] = {}
+
+                    for approach, edge_id in self.EDGE_MASUK.items():
+                        try:
+                            queue_by_approach[approach] = (
+                                self.traci
+                                .edge
+                                .getLastStepHaltingNumber(edge_id)
+                            )
+                        except self.traci.TraCIException:
+                            queue_by_approach[approach] = 0
+
+                    busiest_approach = max(
+                        queue_by_approach,
+                        key=queue_by_approach.get,
+                    )
+
+                    queue_length_veh = queue_by_approach[busiest_approach]
+                    self.live_queue_busiest_approach = busiest_approach
+
+                    self.live_queue_length_veh = queue_length_veh
+
+                    # Total 4 lengan sekaligus -- dipakai panel "Hasil
+                    # Simulasi" (LOS/delay/antrean simpang secara keseluruhan),
+                    # beda tujuan dari live_queue_length_veh di atas yang
+                    # sengaja per-lengan (lengan terpadat) untuk kartu Queue
+                    # Length.
+                    self.live_total_queue_length_veh = sum(
+                        queue_by_approach.values()
+                    )
+
+                    # Buang catatan arrived yang lebih tua dari 60 detik
+                    # simulasi terakhir, sisanya dihitung langsung sebagai
+                    # "kendaraan/menit" -- laju SEKARANG, bukan rata-rata
+                    # sepanjang simulasi (yang nyaris tidak berubah lagi
+                    # setelah simulasi jalan lama).
+                    cutoff = self.last_simulation_time - 60
+
+                    while (
+                        self._arrival_timeline
+                        and self._arrival_timeline[0] < cutoff
+                    ):
+                        self._arrival_timeline.popleft()
+
+                    self.live_throughput_veh_per_min = float(
+                        len(self._arrival_timeline)
+                    )
+
+                    # ==========================================
                     # SCREENSHOT (MJPEG STREAM)
                     # ==========================================
                     if self.is_gui and time.monotonic() - self._last_screenshot_at >= 0.25:
                         try:
-                            frame_path = self.PROJECT_ROOT / "cache" / "simulation" / "frame.jpg"
-                            next_frame_path = frame_path.with_name("frame.next.jpg")
+                            frame_path = self.PROJECT_ROOT / "cache" / "simulation" / f"frame_{self.context}.jpg"
+                            next_frame_path = frame_path.with_name(f"frame_{self.context}.next.jpg")
                             frame_path.parent.mkdir(parents=True, exist_ok=True)
                             self.traci.gui.screenshot(
                                 "View #0",
@@ -1924,6 +2086,15 @@ class SumoController:
         self.last_error = None
         self.active_vehicles_data.clear()
         self.active_signals_data.clear()
+        self._arrival_timeline.clear()
+        self.live_queue_length_veh = 0
+        self.live_queue_busiest_approach = None
+        self.live_total_queue_length_veh = 0
+        self.live_avg_delay_seconds = 0.0
+        self.live_throughput_veh_per_min = 0.0
+        self.live_visible_vehicle_count = 0
+        self.live_last_sync_failed_insertions = 0
+        self.live_last_sync_failed_by_approach = {}
 
         print(
             "SUMO realtime controller closed."

@@ -2,10 +2,14 @@ from __future__ import annotations
 
 import inspect
 import threading
+import time
 from pathlib import Path
 from typing import Any
 
+import httpx
+
 from app.pipeline.traffic_state_builder import TrafficStateBuilder
+from app.services.supabase_client import get_supabase
 from app.schemas.simulation import (
     SimulationRequest,
     SimulationResult,
@@ -15,7 +19,11 @@ from app.simulation.sumo.traffic_state_adapter import (
     SumoTrafficStateAdapter,
 )
 from decision_engine.rule_based_engine import RuleBasedEngine, FIXED_CYCLE_ORDER
-from simulation.scenario_generator import generate_cycle_candidate_plans
+from simulation.scenario_generator import (
+    calculate_los,
+    generate_cycle_candidate_plans,
+    METERS_PER_QUEUED_VEHICLE,
+)
 
 # Konstanta State String SUMO diambil dari spesifikasi scenario_generator
 _GREEN_STATE_BY_APPROACH = {
@@ -148,23 +156,42 @@ class SimulationService:
         self.builder = TrafficStateBuilder()
 
         # --------------------------------------------------------
-        # SUMO CONTROLLER
+        # SUMO CONTROLLERS -- SATU PER "context"
         # --------------------------------------------------------
+        # Dashboard (live realtime, auto-start) dan halaman /digitaltwin
+        # (sandbox skenario, manual start/pause/stop) berjalan sebagai
+        # instance SUMO TERPISAH sepenuhnya -- masing-masing dikunci
+        # oleh string context (mis. "dashboard"/"digitaltwin"), supaya
+        # pause/stop di satu context tidak menyentuh context lain sama
+        # sekali. Tidak ada context bawaan yang "lebih benar"; "default"
+        # cuma nama slot untuk pemanggil yang tidak mengirim context.
 
-        self.controller: SumoController | None = None
+        self.controllers: dict[str, SumoController | None] = {}
 
         # --------------------------------------------------------
         # LOCK
         # --------------------------------------------------------
+        # Satu lock untuk semua context -- operasi start/stop antar
+        # context jadi serial (bukan paralel), tapi ini murah (cuma
+        # beberapa detik saat start SUMO) dan jauh lebih aman daripada
+        # lock per-context yang berisiko deadlock kalau nanti ada
+        # operasi yang menyentuh 2 context sekaligus.
 
         self._lock = threading.RLock()
 
         # --------------------------------------------------------
-        # ACTIVE STATE
+        # ACTIVE STATE -- PER CONTEXT
         # --------------------------------------------------------
 
-        self.active_intersection_id: str | None = None
-        self.active_traffic_state_id: str | None = None
+        self.active_intersection_id: dict[str, str | None] = {}
+        self.active_traffic_state_id: dict[str, str | None] = {}
+
+    # ============================================================
+    # CONTROLLER LOOKUP
+    # ============================================================
+
+    def _get_controller(self, context: str) -> SumoController | None:
+        return self.controllers.get(context)
 
     # ============================================================
     # SUMO CONFIG PATH
@@ -285,6 +312,42 @@ class SimulationService:
                 )
             )
 
+        except httpx.TransportError:
+
+            # get_supabase() di-@lru_cache -- satu koneksi (pool httpx)
+            # dipakai seumur proses backend. Kalau backend idle cukup
+            # lama, PostgREST/Supabase bisa menutup keep-alive di sisi
+            # server duluan tanpa client tahu, dan request berikutnya
+            # gagal dengan "Server disconnected". Refresh client + coba
+            # sekali lagi sebelum benar-benar menyerah -- ini transient,
+            # bukan masalah data.
+            #
+            # Jeda singkat SEBELUM retry: kalau penyebabnya kontensi
+            # CPU/IO sesaat (mis. proses SUMO-GUI lain baru saja start
+            # bersamaan), retry tanpa jeda sama sekali bisa masih kena
+            # jendela gangguan yang persis sama dan gagal lagi juga.
+            time.sleep(0.5)
+
+            get_supabase.cache_clear()
+            self.builder.supabase = get_supabase()
+
+            try:
+
+                traffic_state = (
+                    self.builder
+                    .build_latest_state_for_intersection(
+                        intersection_id=request.intersectionId,
+                        save=True,
+                    )
+                )
+
+            except Exception as exc:
+
+                raise SimulationServiceError(
+                    "Gagal membangun TrafficState "
+                    f"dari database: {exc}"
+                ) from exc
+
         except Exception as exc:
 
             raise SimulationServiceError(
@@ -310,8 +373,8 @@ class SimulationService:
             print("Simulation akan berjalan TANPA demand kendaraan.")
             print("=" * 70)
 
-            self.active_intersection_id = request.intersectionId
-            self.active_traffic_state_id = None
+            self.active_intersection_id[request.context] = request.intersectionId
+            self.active_traffic_state_id[request.context] = None
 
             return None
 
@@ -319,11 +382,11 @@ class SimulationService:
         # SAVE ACTIVE STATE
         # --------------------------------------------------------
 
-        self.active_intersection_id = (
+        self.active_intersection_id[request.context] = (
             traffic_state.intersectionId
         )
 
-        self.active_traffic_state_id = (
+        self.active_traffic_state_id[request.context] = (
             traffic_state.trafficStateId
         )
 
@@ -354,36 +417,42 @@ class SimulationService:
         request: SimulationRequest,
     ) -> SumoController:
 
+        context = request.context
+
         with self._lock:
+
+            controller = self.controllers.get(context)
 
             # Perubahan renderer (GUI/headless) perlu process baru. Perubahan
             # skenario tidak: program TLS dapat diganti lewat TraCI pada
             # controller yang sama supaya kendaraan dan simulationTime lanjut.
             if (
-                self.controller is not None
-                and self.controller.is_running()
-                and self.controller.is_gui != request.gui
+                controller is not None
+                and controller.is_running()
+                and controller.is_gui != request.gui
             ):
-                self.controller.close()
-                self.controller = None
+                controller.close()
+                controller = None
+                self.controllers[context] = None
 
             # ====================================================
-            # SUMO SUDAH RUNNING
+            # SUMO SUDAH RUNNING (di context ini)
             # ====================================================
 
             if (
-                self.controller is not None
-                and self.controller.is_running()
+                controller is not None
+                and controller.is_running()
             ):
 
                 print()
                 print("=" * 70)
                 print("SUMO CONTROLLER ALREADY RUNNING")
+                print("Context:", context)
                 print("=" * 70)
 
                 print(
                     "Active intersection:",
-                    self.active_intersection_id,
+                    self.active_intersection_id.get(context),
                 )
 
                 print(
@@ -396,14 +465,14 @@ class SimulationService:
                 # ------------------------------------------------
 
                 if (
-                    self.active_intersection_id
+                    self.active_intersection_id.get(context)
                     != request.intersectionId
                 ):
 
                     raise SimulationServiceError(
                         "SUMO sedang menjalankan "
                         f"intersection "
-                        f"'{self.active_intersection_id}'. "
+                        f"'{self.active_intersection_id.get(context)}'. "
                         "Stop simulation terlebih dahulu "
                         "sebelum mengganti intersection."
                     )
@@ -412,11 +481,11 @@ class SimulationService:
                     "Menggunakan instance SUMO yang sama."
                 )
 
-                self.controller.scenario = request.scenario
+                controller.scenario = request.scenario
 
                 print("=" * 70)
 
-                return self.controller
+                return controller
 
             # ====================================================
             # CONFIG
@@ -438,12 +507,14 @@ class SimulationService:
             print()
             print("=" * 70)
             print("CREATING SUMO CONTROLLER")
+            print("Context:", context)
             print("=" * 70)
 
             controller = SumoController(
                 config_file=config_file,
                 seed=request.seed,
                 scenario=request.scenario,
+                context=context,
             )
 
             print(
@@ -537,11 +608,11 @@ class SimulationService:
             # SAVE CONTROLLER
             # ====================================================
 
-            self.controller = controller
+            self.controllers[context] = controller
 
             print(
                 "SUMO controller berhasil disimpan "
-                "sebagai active controller."
+                f"sebagai active controller (context={context})."
             )
 
             return controller
@@ -604,8 +675,8 @@ class SimulationService:
 
             if request.approaches is not None:
                 traffic_state = None
-                self.active_intersection_id = request.intersectionId
-                self.active_traffic_state_id = (
+                self.active_intersection_id[request.context] = request.intersectionId
+                self.active_traffic_state_id[request.context] = (
                     str(request.trafficStateId) if request.trafficStateId is not None else None
                 )
             else:
@@ -661,6 +732,15 @@ class SimulationService:
                         logic_phases=tls_phases,
                         scenario_id=selected_candidate["candidateId"],
                     )
+
+                    # apply_scenario_logic() cuma menyuntik TraCI, tidak
+                    # mencatat active_cycle_plan (beda dari apply_cycle_plan()
+                    # yang dipakai jalur dashboard) -- tanpa ini,
+                    # get_simulation_state() akan expose cyclePlan basi/None
+                    # untuk skenario sandbox. Dicatat di sini supaya kartu
+                    # "Durasi Sinyal" di frontend selalu akurat untuk kedua
+                    # jalur.
+                    controller.active_cycle_plan = selected_candidate
 
                 except Exception as exc:
                     print(f"Gagal apply scenario logic: {exc}")
@@ -729,18 +809,44 @@ class SimulationService:
                     ) from exc
             elif demand:
 
+                # Rekonsiliasi (sync_demand), BUKAN inject_demand. Controller
+                # di sini bisa saja instance yang SUDAH JALAN dan dipakai
+                # berkali-kali -- direuse _ensure_sumo() tiap kali skenario
+                # diterapkan ulang, atau dipakai bersama dashboard lewat
+                # context "dashboard" untuk skenario "Traffic Realtime".
+                # inject_demand() SELALU MENAMBAH kendaraan di atas yang
+                # sudah ada tanpa mengecek berapa yang sudah aktif --
+                # dipanggil berulang di controller yang sama membuat
+                # kendaraan menumpuk terus, kelihatan seperti simulasi
+                # "restart/ngulang" walau prosesnya sendiri tidak pernah
+                # mati. sync_demand() rekonsiliasi ke target (hapus
+                # kelebihan, tambah kekurangan) -- aman dipanggil berkali-
+                # kali di controller yang sama, termasuk yang baru dibuat
+                # (tidak ada kelebihan untuk dihapus).
+                #
+                # adapter.to_demand() menulis total per lengan sebagai
+                # "volume", sync_demand() mengharapkan "targetVehicleCount"
+                # (nama field yang sama dipakai skema approaches dashboard)
+                # -- dipetakan di sini, bukan mengubah adapter yang juga
+                # dipakai jalur lain.
                 try:
 
+                    sync_ready_demand = [
+                        {**item, "targetVehicleCount": item.get("volume", 0)}
+                        for item in demand
+                    ]
+
                     injected = (
-                        controller.inject_demand(
-                            demand
+                        controller.sync_demand(
+                            sync_ready_demand,
+                            traffic_timestamp=request.trafficTimestamp,
                         )
                     )
 
                 except Exception as exc:
 
                     raise SimulationServiceError(
-                        "Gagal memasukkan "
+                        "Gagal menyinkronkan "
                         "TrafficState terbaru "
                         "ke SUMO: "
                         f"{exc}"
@@ -823,23 +929,25 @@ class SimulationService:
     # STATUS
     # ============================================================
 
-    def status(self) -> dict:
+    def status(self, context: str = "default") -> dict:
 
         with self._lock:
+
+            controller = self.controllers.get(context)
 
             # ----------------------------------------------------
             # NO CONTROLLER
             # ----------------------------------------------------
 
-            if self.controller is None:
+            if controller is None:
 
                 return {
                     "running": False,
                     "intersectionId": (
-                        self.active_intersection_id
+                        self.active_intersection_id.get(context)
                     ),
                     "trafficStateId": (
-                        self.active_traffic_state_id
+                        self.active_traffic_state_id.get(context)
                     ),
                 }
 
@@ -850,7 +958,7 @@ class SimulationService:
             try:
 
                 metrics = (
-                    self.controller.get_metrics()
+                    controller.get_metrics()
                 )
 
             except Exception as exc:
@@ -858,10 +966,10 @@ class SimulationService:
                 return {
                     "running": False,
                     "intersectionId": (
-                        self.active_intersection_id
+                        self.active_intersection_id.get(context)
                     ),
                     "trafficStateId": (
-                        self.active_traffic_state_id
+                        self.active_traffic_state_id.get(context)
                     ),
                     "error": str(exc),
                 }
@@ -872,16 +980,16 @@ class SimulationService:
 
             return {
                 "running": (
-                    self.controller.is_running()
+                    controller.is_running()
                 ),
                 "paused": (
-                    self.controller.paused
+                    controller.paused
                 ),
                 "intersectionId": (
-                    self.active_intersection_id
+                    self.active_intersection_id.get(context)
                 ),
                 "trafficStateId": (
-                    self.active_traffic_state_id
+                    self.active_traffic_state_id.get(context)
                 ),
                 **metrics,
             }
@@ -890,12 +998,12 @@ class SimulationService:
     # SIMULATION STATE (VEHICLES + SIGNALS)
     # ============================================================
 
-    def get_simulation_state(self) -> dict[str, Any]:
+    def get_simulation_state(self, context: str = "default") -> dict[str, Any]:
         # Jangan ikut menunggu lock run/update. Semua field di bawah merupakan
         # snapshot cache Python yang ditulis loop SUMO secara atomik; endpoint
         # state tidak melakukan panggilan TraCI. Sebelumnya satu screenshot atau
         # sync_demand lambat dapat menahan polling dashboard >10 detik.
-        controller = self.controller
+        controller = self.controllers.get(context)
         if controller is None or not controller.is_running():
             return {
                 "running": False,
@@ -908,16 +1016,38 @@ class SimulationService:
             "running": True,
             "paused": controller.paused,
             "vehicles": list(controller.active_vehicles_data),
+            "visibleVehicleCount": controller.live_visible_vehicle_count,
+            "lastSyncFailedInsertions": controller.live_last_sync_failed_insertions,
+            "lastSyncFailedByApproach": controller.live_last_sync_failed_by_approach,
             "signals": list(controller.active_signals_data),
             "simulationTimeSeconds": controller.last_simulation_time,
             "detectedVehicles": controller.detected_vehicle_count,
             "trafficTimestamp": controller.traffic_timestamp,
             "cyclePlan": controller.active_cycle_plan,
+            "queueLengthVeh": controller.live_queue_length_veh,
+            "queueBusiestApproach": controller.live_queue_busiest_approach,
+            "throughputVehPerMin": round(
+                controller.live_throughput_veh_per_min, 1
+            ),
+            # Metrik simpang keseluruhan (4 lengan digabung) untuk panel
+            # "Hasil Simulasi" -- dihitung LANGSUNG dari SUMO yang sedang
+            # jalan di halaman ini, BUKAN dari liveScenarioCache produksi
+            # (itu decision engine, sengaja dipisah dari sandbox skenario).
+            "avgDelaySeconds": round(controller.live_avg_delay_seconds, 1),
+            "avgQueueLengthVeh": controller.live_total_queue_length_veh,
+            "avgQueueLengthM": round(
+                controller.live_total_queue_length_veh
+                * METERS_PER_QUEUED_VEHICLE,
+                1,
+            ),
+            "los": calculate_los(controller.live_avg_delay_seconds),
         }
 
-    def sync_clock(self, video_time_seconds: float) -> dict[str, Any]:
+    def sync_clock(
+        self, video_time_seconds: float, context: str = "default"
+    ) -> dict[str, Any]:
         """Camera Feed adalah clock utama untuk fase lampu realtime."""
-        controller = self.controller
+        controller = self.controllers.get(context)
         if controller is None or not controller.is_running():
             return {
                 "synced": False,
@@ -939,12 +1069,17 @@ class SimulationService:
                 "videoTimeSeconds": video_time_seconds,
             }
 
-    def apply_scenario(self, scenario: str, cycle_plan: dict[str, Any]) -> dict[str, Any]:
+    def apply_scenario(
+        self,
+        scenario: str,
+        cycle_plan: dict[str, Any],
+        context: str = "default",
+    ) -> dict[str, Any]:
         """Terapkan skenario ke controller aktif tanpa operasi database."""
         # Jangan mengambil service._lock: request /run yang sedang menunggu
         # database memegang lock itu. Controller memiliki _traci_lock sendiri
         # untuk menjamin pergantian program TLS tetap thread-safe.
-        controller = self.controller
+        controller = self.controllers.get(context)
         if controller is None or not controller.is_running():
             raise SimulationServiceError("SUMO belum berjalan. Tekan Start Simulation dahulu.")
         try:
@@ -963,15 +1098,15 @@ class SimulationService:
     # PAUSE / RESUME
     # ============================================================
 
-    def pause(self) -> dict:
-        controller = self.controller
+    def pause(self, context: str = "default") -> dict:
+        controller = self.controllers.get(context)
         if controller is not None and controller.is_running():
             controller.pause()
             return {"status": "paused", "applied": True}
         return {"status": "idle", "applied": False}
 
-    def resume(self) -> dict:
-        controller = self.controller
+    def resume(self, context: str = "default") -> dict:
+        controller = self.controllers.get(context)
         if controller is not None and controller.is_running():
             controller.resume()
             return {"status": "running", "applied": True}
@@ -981,15 +1116,17 @@ class SimulationService:
     # STOP
     # ============================================================
 
-    def stop(self) -> dict:
+    def stop(self, context: str = "default") -> dict:
 
         with self._lock:
+
+            controller = self.controllers.get(context)
 
             # ----------------------------------------------------
             # NO CONTROLLER
             # ----------------------------------------------------
 
-            if self.controller is None:
+            if controller is None:
 
                 return {
                     "running": False,
@@ -1004,7 +1141,7 @@ class SimulationService:
 
             try:
 
-                self.controller.close()
+                controller.close()
 
             except Exception as exc:
 
@@ -1026,11 +1163,11 @@ class SimulationService:
 
             finally:
 
-                self.controller = None
+                self.controllers[context] = None
 
-                self.active_intersection_id = None
+                self.active_intersection_id[context] = None
 
-                self.active_traffic_state_id = None
+                self.active_traffic_state_id[context] = None
 
             # ----------------------------------------------------
             # RETURN
@@ -1043,6 +1180,16 @@ class SimulationService:
                     "berhasil dihentikan."
                 ),
             }
+
+    def stop_all(self) -> None:
+        """Tutup SEMUA context (dashboard, digitaltwin, dst) -- dipanggil
+        saat backend shutdown supaya tidak ada proses SUMO yang tertinggal
+        (bukan cuma context "default")."""
+        for context in list(self.controllers.keys()):
+            try:
+                self.stop(context)
+            except SimulationServiceError:
+                pass
 
 
 # ================================================================

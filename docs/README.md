@@ -22,6 +22,15 @@ Dirapikan **28 Agustus 2026**. Sebelumnya ada 20 dokumen yang saling bertentanga
 
 Penjelasan tiap kotak diagram untuk **dijelaskan ke orang lain** (dosen pembimbing, juri): apa fungsinya, sudah sejauh mana, buktinya apa, batasannya apa — plus kalimat siap-pakai untuk pertanyaan sulit. **Bukan pelacak status** — angkanya bersumber dari `STATUS-DAN-SISA-KERJA.md` di atas; kalau berbeda, yang di atas yang benar.
 
+### Catatan per-sesi — **bukan pelacak status**
+
+Dokumen "apa yang berubah di satu sesi kerja", supaya tidak perlu membaca diff mentah. Ditulis sekali lalu dibiarkan (arsip), tidak dipelihara seperti dokumen status.
+
+| Dokumen | Isinya |
+|---|---|
+| [`audit_final_31agustus.md`](audit_final_31agustus.md) | Audit menyeluruh 31 Agustus: verifikasi klaim "selesai" ke kode/DB/test, termasuk temuan 2 commit revert dini hari yang menghapus perbaikan dashboard |
+| [`catatan-perubahan-1-september.md`](catatan-perubahan-1-september.md) | Perubahan 1 September: isolasi SUMO dashboard vs `/digitaltwin`, panel "Hasil Simulasi", kartu durasi sinyal + grafik tren, dan 5 bug (termasuk `Server disconnected` yang ternyata masalah HTTP/2, bukan jaringan) |
+
 ---
 
 ## 🔵 CARA KERJA — rujukan teknis
