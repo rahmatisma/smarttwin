@@ -50,28 +50,48 @@ type SourceType =
 const CAMERA_TIMELINE_KEY = "smarttwin.camera-timeline";
 const knownDurations = new Map<string, number>();
 
-type CameraTimeline = { time: number; paused: boolean; updatedAt: number };
+type CameraTimeline = {
+  time: number;
+  paused: boolean;
+  updatedAt: number;
+  backendInstanceId: string | null;
+};
+
+const emptyTimeline = (backendInstanceId: string | null = null): CameraTimeline => ({
+  time: 0,
+  paused: false,
+  updatedAt: Date.now(),
+  backendInstanceId,
+});
 
 function readPersistedTimeline(): CameraTimeline {
-  if (typeof window === "undefined") return { time: 0, paused: false, updatedAt: Date.now() };
+  if (typeof window === "undefined") return emptyTimeline();
   try {
     const value = JSON.parse(sessionStorage.getItem(CAMERA_TIMELINE_KEY) ?? "null");
     return {
       time: Number.isFinite(value?.time) && value.time >= 0 ? value.time : 0,
       paused: typeof value?.paused === "boolean" ? value.paused : false,
       updatedAt: Number.isFinite(value?.updatedAt) ? value.updatedAt : Date.now(),
+      backendInstanceId:
+        typeof value?.backendInstanceId === "string" ? value.backendInstanceId : null,
     };
   } catch {
-    return { time: 0, paused: false, updatedAt: Date.now() };
+    return emptyTimeline();
   }
 }
 
-function persistTimeline(time: number, paused: boolean, updatedAt = Date.now()) {
+function persistTimeline(
+  time: number,
+  paused: boolean,
+  updatedAt = Date.now(),
+  backendInstanceId: string | null = null
+) {
   if (typeof window === "undefined" || !Number.isFinite(time)) return;
   sessionStorage.setItem(CAMERA_TIMELINE_KEY, JSON.stringify({
     time,
     paused,
     updatedAt,
+    backendInstanceId,
   }));
 }
 
@@ -204,13 +224,14 @@ export default function CameraFeedPanel({
   const synchronizingVideos = useRef(false);
   const ignoredPlayEvents = useRef(new WeakSet<HTMLVideoElement>());
   const ignoredPauseEvents = useRef(new WeakSet<HTMLVideoElement>());
-  const timelineRef = useRef<CameraTimeline>({ time: 0, paused: false, updatedAt: 0 });
+  const timelineRef = useRef<CameraTimeline>({
+    time: 0,
+    paused: false,
+    updatedAt: 0,
+    backendInstanceId: null,
+  });
   const timelineRestoredRef = useRef(false);
-
-  useEffect(() => {
-    timelineRef.current = readPersistedTimeline();
-    timelineRestoredRef.current = true;
-  }, []);
+  const backendFailureCountRef = useRef(0);
 
   const isInspectionMode = selectedApproach !== "all";
 
@@ -240,7 +261,12 @@ export default function CameraFeedPanel({
     const sourceTime = master?.currentTime ?? getSharedTimelineTime();
     const targetTime = cycleDuration ? sourceTime % cycleDuration : Math.max(0, sourceTime);
     anchorTimeline(timelineRef.current, targetTime);
-    persistTimeline(targetTime, timelineRef.current.paused, timelineRef.current.updatedAt);
+    persistTimeline(
+      targetTime,
+      timelineRef.current.paused,
+      timelineRef.current.updatedAt,
+      timelineRef.current.backendInstanceId
+    );
 
     synchronizingVideos.current = true;
     for (const video of videos) {
@@ -274,6 +300,101 @@ export default function CameraFeedPanel({
     // lokal: user bebas seek maju/mundur tanpa mengubah timeline utama.
   }
 
+  useEffect(() => {
+    let cancelled = false;
+
+    async function restoreTimeline() {
+      const persisted = readPersistedTimeline();
+      try {
+        const response = await fetch(`${API_BASE_URL}/api/v1/simulation/state`, {
+          cache: "no-store",
+        });
+        if (!response.ok) throw new Error("Backend tidak tersedia");
+        const state = await response.json();
+        const instanceId =
+          typeof state.backendInstanceId === "string" ? state.backendInstanceId : null;
+        const sameBackend =
+          instanceId !== null && persisted.backendInstanceId === instanceId;
+        timelineRef.current = state.running && sameBackend
+          ? persisted
+          : emptyTimeline(instanceId);
+      } catch {
+        // Backend yang mati menutup sesi kamera. Jangan menghitung waktu
+        // laptop sleep/offline sebagai waktu pemutaran video.
+        timelineRef.current = emptyTimeline();
+      }
+
+      if (cancelled) return;
+      persistTimeline(
+        timelineRef.current.time,
+        timelineRef.current.paused,
+        timelineRef.current.updatedAt,
+        timelineRef.current.backendInstanceId
+      );
+      timelineRestoredRef.current = true;
+      syncVideos();
+    }
+
+    void restoreTimeline();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    function resetTimeline(instanceId: string | null) {
+      timelineRef.current = emptyTimeline(instanceId);
+      persistTimeline(0, false, timelineRef.current.updatedAt, instanceId);
+      if (timelineRestoredRef.current) syncVideos();
+    }
+
+    async function checkBackendSession() {
+      if (!timelineRestoredRef.current) return;
+      try {
+        const response = await fetch(`${API_BASE_URL}/api/v1/simulation/state`, {
+          cache: "no-store",
+        });
+        if (!response.ok) throw new Error("Backend tidak tersedia");
+        const state = await response.json();
+        if (cancelled) return;
+
+        backendFailureCountRef.current = 0;
+        const instanceId =
+          typeof state.backendInstanceId === "string" ? state.backendInstanceId : null;
+        const backendChanged =
+          instanceId !== null &&
+          timelineRef.current.backendInstanceId !== null &&
+          timelineRef.current.backendInstanceId !== instanceId;
+
+        if (!state.running || backendChanged) {
+          resetTimeline(instanceId);
+        } else if (timelineRef.current.backendInstanceId === null) {
+          timelineRef.current.backendInstanceId = instanceId;
+          persistTimeline(
+            timelineRef.current.time,
+            timelineRef.current.paused,
+            timelineRef.current.updatedAt,
+            instanceId
+          );
+        }
+      } catch {
+        if (cancelled) return;
+        backendFailureCountRef.current += 1;
+        // Dua kegagalan berturut-turut mencegah satu hiccup jaringan singkat
+        // menghapus posisi, tetapi backend yang benar-benar mati tetap terdeteksi.
+        if (backendFailureCountRef.current >= 2) resetTimeline(null);
+      }
+    }
+
+    const interval = window.setInterval(checkBackendSession, 2000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, []);
+
   useEffect(() => () => {
     const master = cameras[0] ? videoRefs.current.get(cameras[0].id) : undefined;
     if (!isInspectionMode && master && Number.isFinite(master.currentTime)) {
@@ -284,7 +405,8 @@ export default function CameraFeedPanel({
     persistTimeline(
       timelineRef.current.time,
       timelineRef.current.paused,
-      timelineRef.current.updatedAt
+      timelineRef.current.updatedAt,
+      timelineRef.current.backendInstanceId
     );
   }, [cameras, isInspectionMode]);
 
@@ -496,7 +618,12 @@ export default function CameraFeedPanel({
                       if (synchronizingVideos.current) return;
                       timelineRef.current.paused = true;
                       anchorTimeline(timelineRef.current, timelineRef.current.time);
-                      persistTimeline(timelineRef.current.time, true, timelineRef.current.updatedAt);
+                      persistTimeline(
+                        timelineRef.current.time,
+                        true,
+                        timelineRef.current.updatedAt,
+                        timelineRef.current.backendInstanceId
+                      );
                       syncVideos();
                     }}
                     onPlay={(event) => {
@@ -505,7 +632,12 @@ export default function CameraFeedPanel({
                       if (synchronizingVideos.current) return;
                       timelineRef.current.paused = false;
                       anchorTimeline(timelineRef.current, timelineRef.current.time);
-                      persistTimeline(timelineRef.current.time, false, timelineRef.current.updatedAt);
+                      persistTimeline(
+                        timelineRef.current.time,
+                        false,
+                        timelineRef.current.updatedAt,
+                        timelineRef.current.backendInstanceId
+                      );
                       syncVideos();
                     }}
                   />

@@ -396,7 +396,7 @@ export default function DashboardPage() {
     async function loadLiveSumoSignal() {
       try {
         const response = await fetch(
-          `${process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000"}/api/v1/simulation/state`
+          `${process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000"}/api/v1/simulation/state?context=dashboard`
         );
         if (!response.ok || cancelled) return;
         const state = await response.json();
@@ -1035,7 +1035,7 @@ export default function DashboardPage() {
                     void fetch(`${API_BASE_URL}/api/v1/simulation/sync-clock`, {
                       method: "POST",
                       headers: { "Content-Type": "application/json" },
-                      body: JSON.stringify({ videoTimeSeconds: time }),
+                      body: JSON.stringify({ context: "dashboard", videoTimeSeconds: time }),
                     }).catch(() => undefined);
                   }
                 }}

@@ -138,7 +138,50 @@ Rekomendasi: **Opsi A dulu** (cepat, konsisten dengan filosofi auto-refresh yang
 
 ---
 
-## Masalah 3 — 3 kartu statistik gak pernah diisi
+## ✅ Masalah 3 — SELESAI (31 Agustus/1 September)
+
+Diimplementasikan persis rancangan di bawah, dengan 2 penyesuaian: kartu "Average
+Speed" sudah lebih dulu dilepas dari UI (tinggal "Current Vehicles"/"Queue
+Length"/"Traffic Flow"), jadi cuma `queueLengthVeh` dan `throughputVehPerMin`
+yang perlu disambungkan — `averageSpeedKmh` tidak jadi ditambahkan karena tidak
+ada kartu yang memakainya.
+
+- `sumo_controller.py`: tambah `self.live_queue_length_veh` (jumlah
+  `getLastStepHaltingNumber()` di semua `EDGE_MASUK`) dan
+  `self.live_throughput_veh_per_min` (`sum(arrived_total.values()) /
+  last_simulation_time * 60`), dihitung sekali per step di loop yang sama
+  dengan posisi kendaraan/sinyal.
+- `simulation_service.py::get_simulation_state()`: expose `queueLengthVeh` dan
+  `throughputVehPerMin` (dibulatkan 1 desimal).
+- `digitaltwinview.tsx`: state baru `queueLengthVeh`/`throughputVehPerMin`
+  disambungkan ke polling `/api/v1/simulation/state`, direset ke 0 di
+  `handleReset()`, dan dirender di 2 `StatCard` yang tadinya hardcode `"-"`
+  (pola fallback sama seperti "Current Vehicles": `"0"` saat idle).
+- Test baru: `test_get_simulation_state_exposes_live_traffic_metrics` di
+  `backend/tests/test_simulation_service.py`.
+- Terverifikasi: `pytest backend/tests simulation/tests -q` → 111 passed, 0
+  failed. `npm run build` → sukses, 13/13 route, 0 error TypeScript.
+- **Belum diverifikasi manual di browser dengan SUMO beneran jalan** (angka
+  berubah-ubah seiring simulasi) — cek ini sebelum demo.
+
+**Koreksi setelah dicek user langsung di browser:** `throughputVehPerMin`
+awalnya dihitung sebagai rata-rata KUMULATIF sejak simulasi mulai
+(`arrived_total / last_simulation_time * 60`) — angkanya nyaris tidak
+bergerak lagi setelah simulasi jalan beberapa menit, jadi tidak terasa
+"live". Diganti jadi laju **60 detik simulasi terakhir**: tiap kendaraan
+`arrived` dicatat timestamp-nya di `self._arrival_timeline` (deque), lalu
+`live_throughput_veh_per_min` = jumlah entri yang timestamp-nya masih dalam
+60 detik terakhir (entri lebih lama dibuang tiap step). `queueLengthVeh`
+dikonfirmasi BENAR secara desain (dijumlah dari `EDGE_MASUK`, 4 edge ~6,7–12,5m
+dekat garis henti) tapi labelnya bisa membingungkan karena itu **total 4
+lengan sekaligus**, bukan satu lengan -- dan tidak menghitung antrean yang
+sudah meluap ke `EDGE_HULU` (segmen lebih jauh dari simpang).
+
+Rancangan asli di bawah ini dipertahankan sebagai riwayat.
+
+---
+
+## Masalah 3 (rancangan asli) — 3 kartu statistik gak pernah diisi
 
 ### Akar masalah
 

@@ -357,6 +357,15 @@ Ganti dropdown skenario (Baseline/Aggressive/Balanced) di `/digitaltwin` sambil 
 
 Rencana perbaikan detail (akar masalah + rancangan per-file) ada di **`docs/rencana-perbaikan-digital-twin-scenario.md`** — 3 masalah terpisah, urutan pengerjaan, dan cara verifikasi.
 
+> ### ✅ P-1e sebagian besar SELESAI 1 September — lihat `docs/catatan-perubahan-1-september.md`
+>
+> Ketiga masalah asli sudah ditangani: (1) `_ensure_sumo()` restart saat skenario berubah — sudah lebih dulu selesai lewat commit `1cf0124`; (2) dropdown sekarang benar-benar menerapkan skenario saat simulasi jalan; (3) kartu statistik disambungkan ke SUMO live.
+>
+> Ruang lingkupnya berkembang jauh melampaui rencana awal — ikut dikerjakan: **isolasi 2 instance SUMO** (dashboard vs sandbox `/digitaltwin`, sebelumnya berbagi satu instance dan saling ganggu), penggantian panel "Signal Recommendation" (ternyata membaca `liveScenarioCache` produksi, **bukan** simulasi yang sedang ditonton) dengan panel "Hasil Simulasi", kartu durasi sinyal per lengan, 3 grafik tren, plus **5 bug** — termasuk `Server disconnected` yang akar masalahnya HTTP/2 di `postgrest-py` (terbukti: 14/16 request paralel gagal dengan `http2=True`, 0/16 setelah dipaksa HTTP/1.1) dan jendela SUMO yang tidak menutup karena `--quit-on-end` tidak dipasang.
+>
+> **Bukti:** `pytest backend/tests simulation/tests` → 112 passed; `npm run build` → 13/13 route.
+> ⚠️ **Belum diverifikasi manual di browser** dengan SUMO sungguhan jalan, dan **belum di-commit**. Regresi revert 31 Agustus di `CameraFeedPanel`/`SharedSignalPanels`/`traffic.py` juga **belum dipulihkan** — rinciannya di catatan perubahan.
+
 ### P-2. Perkuat bukti LSTM — Yuli, 2–3 jam
 
 Dua klaim masih bertumpu sampel kecil:

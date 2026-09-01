@@ -6,6 +6,12 @@ import type {
   CyclePlan,
 } from "@/types/traffic";
 
+// Instance SUMO dashboard ini TERPISAH dari instance sandbox di halaman
+// /digitaltwin -- keduanya dibedakan lewat "context" supaya start/pause/
+// stop/ganti-skenario di satu halaman tidak pernah menyentuh simulasi di
+// halaman lain.
+const SIM_CONTEXT = "dashboard";
+
 /*
  * =========================================================
  * SIGNAL COLOR
@@ -288,7 +294,13 @@ export default function DigitalTwinPanel({
   const [simRunning, setSimRunning] = useState(false);
   const [simTime, setSimTime] = useState(0);
   const [vehiclesCount, setVehiclesCount] = useState(0);
+  const [visibleVehicleCount, setVisibleVehicleCount] = useState(0);
   const [detectedVehicles, setDetectedVehicles] = useState(0);
+  // Berapa kendaraan GAGAL disisipkan TraCI pada sinkronisasi demand
+  // terakhir (mis. ruas masuk terlalu padat) -- kalau ini > 0, itu
+  // penjelasan konkret kenapa "Total jaringan" bisa lebih kecil dari
+  // "Deteksi", bukan cuma dugaan drift alami.
+  const [lastSyncFailedInsertions, setLastSyncFailedInsertions] = useState(0);
   const [liveSignal, setLiveSignal] = useState<LiveSumoSignal | null>(null);
   const [frameVersion, setFrameVersion] = useState(0);
   const [simError, setSimError] = useState<string | null>(null);
@@ -300,7 +312,7 @@ export default function DigitalTwinPanel({
   useEffect(() => {
     const interval = setInterval(async () => {
       try {
-        const res = await fetch(`${API_BASE_URL}/api/v1/simulation/state`);
+        const res = await fetch(`${API_BASE_URL}/api/v1/simulation/state?context=${SIM_CONTEXT}`);
         if (!res.ok) return;
         const data = await res.json();
         
@@ -310,7 +322,9 @@ export default function DigitalTwinPanel({
           setSimError(null);
           setSimTime(data.simulationTimeSeconds ?? 0);
           setVehiclesCount(data.vehicles?.length ?? 0);
+          setVisibleVehicleCount(data.visibleVehicleCount ?? 0);
           setDetectedVehicles(data.detectedVehicles ?? 0);
+          setLastSyncFailedInsertions(data.lastSyncFailedInsertions ?? 0);
           setLiveSignal(normalizeLiveSignal(data.signals?.[0]));
         } else if (wasRunningRef.current) {
           // SUMO-GUI ditutup/crash di luar dashboard. Picu start ulang satu
@@ -360,6 +374,7 @@ export default function DigitalTwinPanel({
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
+        context: SIM_CONTEXT,
         intersectionId: "simpang4-pingit",
         durationSeconds: 86400,
         gui: true,
@@ -511,7 +526,7 @@ export default function DigitalTwinPanel({
         {simRunning ? (
           <>
             <img
-              src={`${API_BASE_URL}/api/v1/simulation/frame?v=${frameVersion}`}
+              src={`${API_BASE_URL}/api/v1/simulation/frame?context=${SIM_CONTEXT}&v=${frameVersion}`}
               alt="Live SUMO Simpang Pingit"
               className="absolute inset-0 h-full w-full object-cover object-center"
             />
@@ -546,7 +561,10 @@ export default function DigitalTwinPanel({
             </div>
             <div className="absolute bottom-2 left-2 rounded-lg border border-white/10 bg-black/50 px-2 py-1 backdrop-blur-sm">
               <p className="font-mono text-xs font-medium text-white">
-                Deteksi: {detectedVehicles} · Aktif SUMO: {vehiclesCount}
+                Deteksi: {detectedVehicles} · Terlihat: {visibleVehicleCount} · Total jaringan: {vehiclesCount}
+                {lastSyncFailedInsertions > 0 && (
+                  <span className="text-signal-amber"> · Gagal sisip: {lastSyncFailedInsertions}</span>
+                )}
               </p>
             </div>
           </>

@@ -1,1339 +1,1204 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
-  Activity,
-  AlertCircle,
-  ArrowDown,
-  ArrowUp,
-  Brain,
-  CalendarDays,
-  CheckCircle2,
-  ChevronDown,
-  Clock3,
-  Eye,
-  Filter,
-  Gauge,
-  History as HistoryIcon,
-  Search,
-  Server,
-  SlidersHorizontal,
-  Sparkles,
-  Timer,
-  TrafficCone,
-  TrendingDown,
-  TrendingUp,
-  X,
-  XCircle,
+    Activity,
+    ChevronDown,
+    ChevronLeft,
+    ChevronRight,
+    Clock3,
+    Eye,
+    Filter,
+    History as HistoryIcon,
+    Layers,
+    Minus,
+    Search,
+    TrafficCone,
+    TrendingDown,
+    TrendingUp,
+    X,
 } from "lucide-react";
+
+import {
+    CartesianGrid,
+    Legend,
+    Line,
+    LineChart,
+    ResponsiveContainer,
+    Tooltip,
+    XAxis,
+    YAxis,
+} from "recharts";
 
 import Sidebar from "@/components/Sidebar";
 
-type SimulationStatus = "Completed" | "Running" | "Failed" | "Cancelled";
+/*
+ * =========================================================
+ * RIWAYAT KEPUTUSAN
+ * =========================================================
+ *
+ * Halaman ini sebelumnya memakai data contoh (HISTORY_DATA yang
+ * di-hardcode). Sekarang membaca riwayat asli dari
+ * GET /api/v1/history/recommendations -- yaitu keputusan yang benar-benar
+ * dikeluarkan sistem, ditulis tiap siklus oleh simulation/scenario_worker.py.
+ *
+ * Satu baris = satu SIKLUS keputusan (satu timestamp), berisi durasi hijau
+ * untuk keempat lengan sekaligus -- bukan satu keputusan per lengan.
+ */
 
-type TrafficLevel = "Low" | "Medium" | "High";
+const API_BASE_URL =
+    process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
 
-type DecisionType =
-  | "Extend Green"
-  | "Reduce Green"
-  | "Phase Shift"
-  | "Keep Current"
-  | "Emergency Adjustment";
+const PAGE_SIZE = 20;
 
-interface HistoryRecord {
-  id: string;
-  timestamp: string;
-  intersection: string;
-  trafficLevel: TrafficLevel;
-  vehicleCount: number;
-  queueLength: number;
-  avgSpeed: number;
-  waitingTime: number;
+// Nama lengan disimpan dalam bahasa Inggris di database (kontrak
+// docs/data-contract.md). Penerjemahan ke bahasa Indonesia SENGAJA cuma di
+// lapisan tampilan ini, supaya kontrak antar-modul tidak ikut berubah.
+const LABEL_LENGAN: Record<string, string> = {
+    north: "Utara",
+    south: "Selatan",
+    east: "Timur",
+    west: "Barat",
+    // Data lama sempat memakai bahasa Indonesia + proxy "simpang_tengah"
+    // untuk lengan utara (kamera CCTV_2 memantau tengah simpang).
+    utara: "Utara",
+    selatan: "Selatan",
+    timur: "Timur",
+    barat: "Barat",
+    simpang_tengah: "Utara*",
+};
 
-  decision: DecisionType;
-  decisionDescription: string;
+const URUTAN_LENGAN = ["north", "east", "south", "west"];
 
-  currentGreen: number;
-  recommendedGreen: number;
+/*
+ * Warna 4 lengan. Diambil dari palet yang sudah lolos uji:
+ * pita terang, ambang chroma, keterpisahan buta warna (ΔE terburuk 8,4
+ * protan / 24,4 tritan), dan kontras >= 3:1 terhadap latar gelap.
+ * Jangan diganti asal -- urutannya bagian dari jaminan keterbacaan itu.
+ */
+const WARNA_LENGAN: Record<string, string> = {
+    north: "#3987e5",
+    east: "#d95926",
+    south: "#199e70",
+    west: "#c98500",
+};
 
-  improvement: number;
-  queueReduction: number;
-  waitingReduction: number;
-  throughputIncrease: number;
+// Ambang penanda "berubah". Dihitung di sini, BUKAN disimpan di database --
+// supaya angkanya bisa diubah kapan saja tanpa menyentuh data yang sudah ada.
+const AMBANG_BERUBAH_DETIK = 2;
 
-  status: SimulationStatus;
-
-  simulationDuration: number;
-  confidence: number;
-
-  forecast: string;
-  model: string;
+interface Fase {
+    approach: string;
+    greenSeconds: number | null;
+    currentGreenSeconds: number | null;
+    confidence: number | null;
+    expectedDelayReductionPercent: number | null;
 }
 
-const HISTORY_DATA: HistoryRecord[] = [
-  {
-    id: "SIM-20260823-0132",
-    timestamp: "23 Aug 2026, 01:32",
-    intersection: "Simpang 4 Pingit",
-    trafficLevel: "High",
-    vehicleCount: 486,
-    queueLength: 42,
-    avgSpeed: 24,
-    waitingTime: 87,
-    decision: "Extend Green",
-    decisionDescription:
-      "Extend north-south green phase because of high queue density.",
-    currentGreen: 40,
-    recommendedGreen: 55,
-    improvement: 12.4,
-    queueReduction: 19,
-    waitingReduction: 22,
-    throughputIncrease: 11,
-    status: "Completed",
-    simulationDuration: 38,
-    confidence: 94,
-    forecast: "High congestion expected in the next 10 minutes.",
-    model: "PPO v1.0 + LSTM v1.2",
-  },
-  {
-    id: "SIM-20260823-0058",
-    timestamp: "23 Aug 2026, 00:58",
-    intersection: "Simpang 2",
-    trafficLevel: "Medium",
-    vehicleCount: 318,
-    queueLength: 31,
-    avgSpeed: 29,
-    waitingTime: 64,
-    decision: "Extend Green",
-    decisionDescription:
-      "Slightly extend the green phase to reduce queue accumulation.",
-    currentGreen: 35,
-    recommendedGreen: 43,
-    improvement: 8.7,
-    queueReduction: 14,
-    waitingReduction: 17,
-    throughputIncrease: 8,
-    status: "Completed",
-    simulationDuration: 31,
-    confidence: 89,
-    forecast: "Moderate traffic increase expected.",
-    model: "PPO v1.0 + LSTM v1.2",
-  },
-  {
-    id: "SIM-20260823-0021",
-    timestamp: "23 Aug 2026, 00:21",
-    intersection: "Simpang 1",
-    trafficLevel: "High",
-    vehicleCount: 524,
-    queueLength: 48,
-    avgSpeed: 21,
-    waitingTime: 96,
-    decision: "Phase Shift",
-    decisionDescription:
-      "Shift signal phase to prioritize the heavily congested approach.",
-    currentGreen: 30,
-    recommendedGreen: 45,
-    improvement: 16.2,
-    queueReduction: 27,
-    waitingReduction: 25,
-    throughputIncrease: 15,
-    status: "Completed",
-    simulationDuration: 44,
-    confidence: 96,
-    forecast: "Severe congestion predicted on the east approach.",
-    model: "PPO v1.0 + LSTM v1.2",
-  },
-  {
-    id: "SIM-20260822-2354",
-    timestamp: "22 Aug 2026, 23:54",
-    intersection: "Simpang 4 Pingit",
-    trafficLevel: "Medium",
-    vehicleCount: 274,
-    queueLength: 24,
-    avgSpeed: 34,
-    waitingTime: 51,
-    decision: "Keep Current",
-    decisionDescription:
-      "Current signal timing provides sufficient traffic performance.",
-    currentGreen: 40,
-    recommendedGreen: 40,
-    improvement: 2.8,
-    queueReduction: 4,
-    waitingReduction: 5,
-    throughputIncrease: 3,
-    status: "Completed",
-    simulationDuration: 26,
-    confidence: 82,
-    forecast: "Traffic condition expected to remain stable.",
-    model: "PPO v1.0 + LSTM v1.2",
-  },
-  {
-    id: "SIM-20260822-2318",
-    timestamp: "22 Aug 2026, 23:18",
-    intersection: "Simpang 3",
-    trafficLevel: "Low",
-    vehicleCount: 148,
-    queueLength: 11,
-    avgSpeed: 41,
-    waitingTime: 28,
-    decision: "Reduce Green",
-    decisionDescription:
-      "Reduce green duration because traffic demand is currently low.",
-    currentGreen: 45,
-    recommendedGreen: 32,
-    improvement: 7.4,
-    queueReduction: 9,
-    waitingReduction: 13,
-    throughputIncrease: 5,
-    status: "Completed",
-    simulationDuration: 24,
-    confidence: 87,
-    forecast: "Low traffic condition expected to continue.",
-    model: "PPO v1.0 + LSTM v1.2",
-  },
-  {
-    id: "SIM-20260822-2242",
-    timestamp: "22 Aug 2026, 22:42",
-    intersection: "Simpang 2",
-    trafficLevel: "High",
-    vehicleCount: 462,
-    queueLength: 44,
-    avgSpeed: 23,
-    waitingTime: 91,
-    decision: "Emergency Adjustment",
-    decisionDescription:
-      "Rapid signal adjustment triggered by sudden queue growth.",
-    currentGreen: 30,
-    recommendedGreen: 50,
-    improvement: 18.6,
-    queueReduction: 31,
-    waitingReduction: 29,
-    throughputIncrease: 18,
-    status: "Completed",
-    simulationDuration: 52,
-    confidence: 97,
-    forecast: "Rapid congestion growth detected.",
-    model: "PPO v1.0 + LSTM v1.2",
-  },
-  {
-    id: "SIM-20260822-2145",
-    timestamp: "22 Aug 2026, 21:45",
-    intersection: "Simpang 1",
-    trafficLevel: "Medium",
-    vehicleCount: 302,
-    queueLength: 27,
-    avgSpeed: 31,
-    waitingTime: 58,
-    decision: "Extend Green",
-    decisionDescription:
-      "Increase green duration to handle growing traffic demand.",
-    currentGreen: 35,
-    recommendedGreen: 42,
-    improvement: 9.3,
-    queueReduction: 15,
-    waitingReduction: 18,
-    throughputIncrease: 9,
-    status: "Completed",
-    simulationDuration: 33,
-    confidence: 91,
-    forecast: "Traffic volume is expected to increase.",
-    model: "PPO v1.0 + LSTM v1.2",
-  },
-  {
-    id: "SIM-20260822-2059",
-    timestamp: "22 Aug 2026, 20:59",
-    intersection: "Simpang 4 Pingit",
-    trafficLevel: "High",
-    vehicleCount: 491,
-    queueLength: 46,
-    avgSpeed: 22,
-    waitingTime: 93,
-    decision: "Phase Shift",
-    decisionDescription:
-      "Change signal phase order to prioritize the longest queue.",
-    currentGreen: 35,
-    recommendedGreen: 48,
-    improvement: 14.8,
-    queueReduction: 23,
-    waitingReduction: 26,
-    throughputIncrease: 14,
-    status: "Failed",
-    simulationDuration: 19,
-    confidence: 92,
-    forecast: "High congestion expected.",
-    model: "PPO v1.0 + LSTM v1.2",
-  },
-];
+interface Kandidat {
+    candidateId: string;
+    isWinner: boolean;
+    avgDelaySeconds: number | null;
+    avgQueueLengthM: number | null;
+    throughputVeh: number | null;
+    los: string | null;
+}
+
+interface MetrikBeforeAfter {
+    metric: string;
+    label: string;
+    unit: string;
+    before: number;
+    after: number;
+    changePercent: number | null;
+    // true = membaik, false = memburuk, null = tidak ada perubahan
+    // (baseline yang menang -- keputusan yang sah, bukan kegagalan sistem).
+    improved: boolean | null;
+}
+
+interface BeforeAfter {
+    baselineCandidateId: string;
+    winnerCandidateId: string;
+    changed: boolean;
+    metrics: MetrikBeforeAfter[];
+}
+
+interface KondisiLengan {
+    approach: string;
+    volume: number | null;
+    queueLengthVeh: number | null;
+    queueLengthMEst: number | null;
+    densityIndex: number | null;
+}
+
+interface Siklus {
+    timestamp: string;
+    source: string | null;
+    phases: Fase[];
+    candidates: Kandidat[];
+    trafficConditions: KondisiLengan[];
+    winner: Kandidat | null;
+    // Identitas kondisi lalu lintas yang dievaluasi. Kalau nilainya sama
+    // dengan siklus sebelumnya, berarti sistem mengevaluasi ULANG kondisi
+    // yang sama -- bukan merespons situasi baru. Dibedakan di tabel supaya
+    // baris identik tidak salah dibaca sebagai keputusan yang berbeda-beda.
+    trafficStateId: number | null;
+    beforeAfter: BeforeAfter | null;
+}
+
+interface ResponRiwayat {
+    page: number;
+    pageSize: number;
+    totalCycles: number;
+    items: Siklus[];
+}
+
+function labelLengan(approach: string): string {
+    return LABEL_LENGAN[approach?.toLowerCase()] ?? approach;
+}
+
+function urutkanFase(phases: Fase[]): Fase[] {
+    return [...phases].sort((a, b) => {
+        const indeksA = URUTAN_LENGAN.indexOf(a.approach?.toLowerCase());
+        const indeksB = URUTAN_LENGAN.indexOf(b.approach?.toLowerCase());
+        return (indeksA === -1 ? 99 : indeksA) - (indeksB === -1 ? 99 : indeksB);
+    });
+}
+
+function formatWaktu(timestamp: string): string {
+    const waktu = new Date(timestamp);
+    if (Number.isNaN(waktu.getTime())) return timestamp;
+    return waktu.toLocaleString("id-ID", {
+        day: "2-digit",
+        month: "short",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+    });
+}
+
+/*
+ * Penanda "berubah": siklus dibandingkan dengan siklus SEBELUMNYA (yang di
+ * daftar ini berarti item berikutnya, karena urutannya terbaru dulu).
+ * Dianggap berubah kalau kandidat pemenangnya ganti ATAU ada lengan yang
+ * durasinya bergeser >= AMBANG_BERUBAH_DETIK. Tanpa ambang, selisih 1 detik
+ * akibat fluktuasi kecil akan menyalakan penanda hampir di semua baris dan
+ * penanda itu jadi tidak berguna.
+ */
+function apakahBerubah(sekarang: Siklus, sebelumnya: Siklus | undefined): boolean {
+    if (!sebelumnya) return false;
+
+    if (sekarang.winner?.candidateId !== sebelumnya.winner?.candidateId) {
+        return true;
+    }
+
+    const durasiSebelumnya = new Map(
+        sebelumnya.phases.map((fase) => [fase.approach, fase.greenSeconds ?? 0])
+    );
+
+    return sekarang.phases.some((fase) => {
+        const lama = durasiSebelumnya.get(fase.approach);
+        if (lama === undefined) return true;
+        return Math.abs((fase.greenSeconds ?? 0) - lama) >= AMBANG_BERUBAH_DETIK;
+    });
+}
+
+interface TitikGrafik {
+    waktu: string;
+    [kunci: string]: string | number | null;
+}
+
+/*
+ * Menyiapkan data untuk dua grafik bertumpuk.
+ *
+ * Daftar dari API urut TERBARU DULU; grafik waktu harus dibaca kiri->kanan
+ * secara kronologis, jadi urutannya dibalik dulu di sini.
+ */
+function siapkanDataGrafik(items: Siklus[]): TitikGrafik[] {
+    return [...items].reverse().map((siklus) => {
+        const titik: TitikGrafik = { waktu: formatJam(siklus.timestamp) };
+
+        for (const fase of siklus.phases) {
+            const lengan = fase.approach?.toLowerCase();
+            if (URUTAN_LENGAN.includes(lengan)) {
+                titik[`hijau_${lengan}`] = fase.greenSeconds;
+            }
+        }
+
+        for (const kondisi of siklus.trafficConditions) {
+            const lengan = kondisi.approach?.toLowerCase();
+            if (URUTAN_LENGAN.includes(lengan)) {
+                titik[`antrean_${lengan}`] = kondisi.queueLengthVeh;
+            }
+        }
+
+        return titik;
+    });
+}
+
+function formatJam(timestamp: string): string {
+    const waktu = new Date(timestamp);
+    if (Number.isNaN(waktu.getTime())) return timestamp;
+    return waktu.toLocaleTimeString("id-ID", {
+        hour: "2-digit",
+        minute: "2-digit",
+    });
+}
+
+function GrafikLengan({
+    judul,
+    keterangan,
+    data,
+    prefiks,
+    satuan,
+    kosong,
+}: {
+    judul: string;
+    keterangan: string;
+    data: TitikGrafik[];
+    prefiks: "hijau" | "antrean";
+    satuan: string;
+    kosong: boolean;
+}) {
+    return (
+        <div>
+            <div className="mb-1 flex items-baseline justify-between">
+                <h3 className="text-xs font-medium">{judul}</h3>
+                <span className="text-[10px] text-text-muted">{keterangan}</span>
+            </div>
+
+            <div className="h-[150px] w-full">
+                {kosong ? (
+                    <div className="flex h-full items-center justify-center rounded-lg border border-dashed border-border">
+                        <span className="text-[11px] text-text-muted">
+                            Data belum tersedia untuk siklus di halaman ini
+                        </span>
+                    </div>
+                ) : (
+                    <ResponsiveContainer width="100%" height="100%">
+                        <LineChart
+                            data={data}
+                            margin={{ top: 6, right: 8, left: -18, bottom: 0 }}
+                        >
+                            <CartesianGrid stroke="#232935" vertical={false} />
+                            <XAxis
+                                dataKey="waktu"
+                                tick={{ fill: "#5b6472", fontSize: 10 }}
+                                axisLine={{ stroke: "#232935" }}
+                                tickLine={false}
+                                minTickGap={24}
+                            />
+                            <YAxis
+                                tick={{ fill: "#5b6472", fontSize: 10 }}
+                                axisLine={false}
+                                tickLine={false}
+                                width={34}
+                            />
+                            <Tooltip
+                                contentStyle={{
+                                    background: "#171c27",
+                                    border: "1px solid #232935",
+                                    borderRadius: 8,
+                                    fontSize: 11,
+                                }}
+                                formatter={(value, name) => [
+                                    `${value}${satuan}`,
+                                    labelLengan(String(name).replace(`${prefiks}_`, "")),
+                                ]}
+                            />
+                            <Legend
+                                formatter={(value) =>
+                                    labelLengan(String(value).replace(`${prefiks}_`, ""))
+                                }
+                                wrapperStyle={{ fontSize: 11 }}
+                                iconType="plainline"
+                            />
+                            {URUTAN_LENGAN.map((lengan) => (
+                                <Line
+                                    key={lengan}
+                                    type="monotone"
+                                    dataKey={`${prefiks}_${lengan}`}
+                                    name={`${prefiks}_${lengan}`}
+                                    stroke={WARNA_LENGAN[lengan]}
+                                    strokeWidth={2}
+                                    dot={false}
+                                    activeDot={{ r: 4 }}
+                                    isAnimationActive={false}
+                                    connectNulls
+                                />
+                            ))}
+                        </LineChart>
+                    </ResponsiveContainer>
+                )}
+            </div>
+        </div>
+    );
+}
+
+/*
+ * Ambang kepadatan SAMA PERSIS dengan StatsRow.tsx (dashboard) --
+ * dikalibrasi ulang 25 Agustus 2026 ke skala densityIndex sebenarnya
+ * (rata-rata kendaraan per zona per window, bukan vehicles/km atau LOS
+ * PKJI resmi). Threshold lama (90/130) dirancang untuk skala yang jauh
+ * lebih besar dari data asli (0-13,4 di seluruh dataset), jadi tidak
+ * ditulis ulang di sini -- kalau ambang dashboard berubah, ini ikut basi.
+ */
+function tingkatKepadatan(kondisi: KondisiLengan[]): {
+    label: string;
+    warna: string;
+} {
+    const nilai = kondisi
+        .map((k) => k.densityIndex)
+        .filter((v): v is number => v != null);
+
+    if (nilai.length === 0) {
+        return { label: "—", warna: "bg-surface-2 text-text-muted" };
+    }
+
+    const rata = nilai.reduce((a, b) => a + b, 0) / nilai.length;
+
+    if (rata >= 10) return { label: "Tinggi", warna: "bg-signal-red/10 text-signal-red" };
+    if (rata >= 5) return { label: "Sedang", warna: "bg-signal-amber/10 text-signal-amber" };
+    return { label: "Rendah", warna: "bg-signal-green/10 text-signal-green" };
+}
+
+function warnaLos(los: string | null): string {
+    if (!los) return "bg-surface-2 text-text-muted";
+    if (los === "A" || los === "B") return "bg-signal-green/10 text-signal-green";
+    if (los === "C" || los === "D") return "bg-signal-amber/10 text-signal-amber";
+    return "bg-signal-red/10 text-signal-red";
+}
 
 export default function HistoryPage() {
-  const [search, setSearch] = useState("");
-  const [intersection, setIntersection] = useState("All Intersections");
-  const [status, setStatus] = useState("All Status");
-  const [traffic, setTraffic] = useState("All Traffic");
-  const [selectedRecord, setSelectedRecord] =
-    useState<HistoryRecord | null>(null);
+    const [data, setData] = useState<ResponRiwayat | null>(null);
+    const [halaman, setHalaman] = useState(1);
+    const [memuat, setMemuat] = useState(true);
+    const [galat, setGalat] = useState<string | null>(null);
+    const [dipilih, setDipilih] = useState<Siklus | null>(null);
 
-  const filteredData = useMemo(() => {
-    return HISTORY_DATA.filter((item) => {
-      const searchMatch =
-        item.id.toLowerCase().includes(search.toLowerCase()) ||
-        item.intersection.toLowerCase().includes(search.toLowerCase()) ||
-        item.decision.toLowerCase().includes(search.toLowerCase());
+    // Filter cuma menyaring siklus yang SUDAH dimuat di halaman ini (client-
+    // side) -- backend tidak diminta ulang. Tidak ada dropdown "Persimpangan"
+    // seperti mockup: sistem ini cuma punya satu simpang (Pingit), jadi
+    // dropdown begitu cuma akan berisi 1 opsi yang selalu terpilih --
+    // elemen UI tanpa fungsi nyata.
+    const [cari, setCari] = useState("");
+    const [filterSumber, setFilterSumber] = useState("Semua Sumber");
+    const [filterStatus, setFilterStatus] = useState("Semua Status");
 
-      const intersectionMatch =
-        intersection === "All Intersections" ||
-        item.intersection === intersection;
+    const ambilData = useCallback(async (nomorHalaman: number) => {
+        setMemuat(true);
+        setGalat(null);
+        try {
+            const res = await fetch(
+                `${API_BASE_URL}/api/v1/history/recommendations` +
+                    `?page=${nomorHalaman}&pageSize=${PAGE_SIZE}`
+            );
+            if (!res.ok) {
+                throw new Error(`Backend menjawab ${res.status}`);
+            }
+            setData(await res.json());
+        } catch (err) {
+            setGalat(
+                err instanceof Error
+                    ? err.message
+                    : "Tidak dapat menghubungi backend."
+            );
+            setData(null);
+        } finally {
+            setMemuat(false);
+        }
+    }, []);
 
-      const statusMatch =
-        status === "All Status" || item.status === status;
+    useEffect(() => {
+        void ambilData(halaman);
+    }, [ambilData, halaman]);
 
-      const trafficMatch =
-        traffic === "All Traffic" || item.trafficLevel === traffic;
+    const totalHalaman = data
+        ? Math.max(1, Math.ceil(data.totalCycles / PAGE_SIZE))
+        : 1;
 
-      return (
-        searchMatch &&
-        intersectionMatch &&
-        statusMatch &&
-        trafficMatch
-      );
+    // Grafik menampilkan siklus pada HALAMAN INI saja (maksimal 20), bukan
+    // seluruh riwayat -- supaya yang terlihat selalu sama dengan tabel di
+    // bawahnya dan tidak perlu menarik ribuan baris sekaligus.
+    const dataGrafik = data ? siapkanDataGrafik(data.items) : [];
+
+    // Data lama (hasil impor batch) tidak punya kondisi lalu lintas terkait.
+    // Dibedakan supaya grafik atas menampilkan keterangan jujur, bukan
+    // kotak kosong tanpa penjelasan.
+    const adaDataAntrean = dataGrafik.some((titik) =>
+        URUTAN_LENGAN.some((lengan) => titik[`antrean_${lengan}`] != null)
+    );
+
+    const jumlahKondisiUnik = data
+        ? new Set(
+              data.items
+                  .map((siklus) => siklus.trafficStateId)
+                  .filter((id): id is number => id != null)
+          ).size
+        : 0;
+
+    // Dipakai isi dropdown "Sumber" -- daftar sumber yang BENAR-BENAR ada
+    // di halaman ini, bukan daftar yang dikarang di muka.
+    const daftarSumber = data
+        ? Array.from(
+              new Set(data.items.map((s) => s.source).filter((s): s is string => !!s))
+          )
+        : [];
+
+    const itemDenganStatus = (data?.items ?? []).map((siklus, indeks) => ({
+        siklus,
+        berubah: apakahBerubah((data?.items ?? [])[indeks], (data?.items ?? [])[indeks + 1]),
+    }));
+
+    const itemTersaring = itemDenganStatus.filter(({ siklus, berubah }) => {
+        if (
+            cari.trim() &&
+            !siklus.winner?.candidateId?.toLowerCase().includes(cari.trim().toLowerCase()) &&
+            !siklus.source?.toLowerCase().includes(cari.trim().toLowerCase())
+        ) {
+            return false;
+        }
+        if (filterSumber !== "Semua Sumber" && siklus.source !== filterSumber) {
+            return false;
+        }
+        if (filterStatus === "Berubah" && !berubah) return false;
+        if (filterStatus === "Tetap" && berubah) return false;
+        return true;
     });
-  }, [search, intersection, status, traffic]);
 
-  const completed = HISTORY_DATA.filter(
-    (item) => item.status === "Completed"
-  );
+    // Ringkasan dihitung dari siklus BERUBAH di halaman ini saja -- rata-rata
+    // dampak siklus yang "tetap" akan selalu 0% dan menenggelamkan angka
+    // sebenarnya. Tidak ada skor komposit ("Overall Performance") seperti
+    // mockup awal -- itu angka tanpa rumus jelas, tidak bisa dipertanggung-
+    // jawabkan kalau ditanya "12,4% itu dari mana?".
+    const siklusBerubah = itemDenganStatus.filter((x) => x.berubah);
+    const rataRataPerbaikanDelay = (() => {
+        const nilai = siklusBerubah
+            .map((x) => x.siklus.beforeAfter?.metrics.find((m) => m.metric === "avgDelaySeconds")?.changePercent)
+            .filter((v): v is number => v != null);
+        if (nilai.length === 0) return null;
+        return nilai.reduce((a, b) => a + b, 0) / nilai.length;
+    })();
 
-  const averageImprovement =
-    completed.reduce((sum, item) => sum + item.improvement, 0) /
-    completed.length;
-
-  const averageQueueReduction =
-    completed.reduce((sum, item) => sum + item.queueReduction, 0) /
-    completed.length;
-
-  return (
-    <div className="flex min-h-screen bg-bg text-text">
-      <Sidebar />
-
-      <main className="min-w-0 flex-1 px-6 py-6">
-        <div className="mx-auto max-w-[1600px] space-y-6">
-        {/* HEADER */}
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-          <div>
-            <div className="mb-2 flex items-center gap-2">
-              <HistoryIcon className="h-6 w-6 text-text" />
-
-              <h1 className="text-2xl font-bold tracking-tight">
-                History
-              </h1>
-            </div>
-
-            <p className="text-sm text-text-muted">
-              Riwayat simulasi dan pengambilan keputusan Digital Twin.
-            </p>
-          </div>
-
-          <button
-            type="button"
-            className="flex h-10 items-center justify-center gap-2 rounded-xl border border-border bg-surface px-4 text-sm font-medium text-text shadow-sm transition hover:bg-bg"
-          >
-            <CalendarDays className="h-4 w-4" />
-            Last 24 Hours
-            <ChevronDown className="h-4 w-4" />
-          </button>
-        </div>
-
-        {/* SUMMARY CARDS */}
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
-          <SummaryCard
-            title="Total Simulations"
-            value={HISTORY_DATA.length.toString()}
-            subtitle="Recorded simulations"
-            icon={<Activity className="h-5 w-5" />}
-          />
-
-          <SummaryCard
-            title="AI Decisions"
-            value={completed.length.toString()}
-            subtitle="Successful decisions"
-            icon={<Brain className="h-5 w-5" />}
-          />
-
-          <SummaryCard
-            title="Avg. Improvement"
-            value={`+${averageImprovement.toFixed(1)}%`}
-            subtitle="Overall performance"
-            icon={<TrendingUp className="h-5 w-5" />}
-            positive
-          />
-
-          <SummaryCard
-            title="Queue Reduction"
-            value={`${averageQueueReduction.toFixed(1)}%`}
-            subtitle="Average reduction"
-            icon={<TrendingDown className="h-5 w-5" />}
-            positive
-          />
-        </div>
-
-        {/* FILTER */}
-        <div className="rounded-2xl border border-border bg-surface p-4 shadow-sm">
-          <div className="mb-4 flex items-center gap-2">
-            <SlidersHorizontal className="h-4 w-4 text-text-muted" />
-
-            <h2 className="text-sm font-semibold">
-              Filter History
-            </h2>
-          </div>
-
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-5">
-            {/* SEARCH */}
-            <div className="relative xl:col-span-2">
-              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-text-muted" />
-
-              <input
-                value={search}
-                onChange={(event) => setSearch(event.target.value)}
-                placeholder="Search simulation, intersection..."
-                className="h-10 w-full rounded-xl border border-border bg-bg pl-10 pr-3 text-sm outline-none transition placeholder:text-text-muted focus:border-slate-400 focus:bg-surface"
-              />
-            </div>
-
-            <SelectFilter
-              value={intersection}
-              onChange={setIntersection}
-              options={[
-                "All Intersections",
-                "Simpang 1",
-                "Simpang 2",
-                "Simpang 3",
-                "Simpang 4 Pingit",
-              ]}
-            />
-
-            <SelectFilter
-              value={traffic}
-              onChange={setTraffic}
-              options={[
-                "All Traffic",
-                "Low",
-                "Medium",
-                "High",
-              ]}
-            />
-
-            <SelectFilter
-              value={status}
-              onChange={setStatus}
-              options={[
-                "All Status",
-                "Completed",
-                "Running",
-                "Failed",
-                "Cancelled",
-              ]}
-            />
-          </div>
-        </div>
-
-        {/* TABLE */}
-        <div className="overflow-hidden rounded-2xl border border-border bg-surface shadow-sm">
-          <div className="flex flex-col gap-3 border-b border-border px-5 py-4 md:flex-row md:items-center md:justify-between">
-            <div>
-              <h2 className="font-semibold">
-                Simulation History
-              </h2>
-
-              <p className="mt-1 text-xs text-text-muted">
-                Showing {filteredData.length} of {HISTORY_DATA.length} records
-              </p>
-            </div>
-
-            <button
-              type="button"
-              className="flex h-9 items-center gap-2 self-start rounded-lg border border-border px-3 text-xs font-medium text-text-secondary hover:bg-bg"
-            >
-              <Filter className="h-3.5 w-3.5" />
-              Advanced Filter
-            </button>
-          </div>
-
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[1100px]">
-              <thead>
-                <tr className="border-b border-border bg-bg text-left">
-                  <th className="px-5 py-3 text-xs font-semibold text-text-muted">
-                    Time
-                  </th>
-
-                  <th className="px-5 py-3 text-xs font-semibold text-text-muted">
-                    Intersection
-                  </th>
-
-                  <th className="px-5 py-3 text-xs font-semibold text-text-muted">
-                    Traffic
-                  </th>
-
-                  <th className="px-5 py-3 text-xs font-semibold text-text-muted">
-                    AI Decision
-                  </th>
-
-                  <th className="px-5 py-3 text-xs font-semibold text-text-muted">
-                    Signal
-                  </th>
-
-                  <th className="px-5 py-3 text-xs font-semibold text-text-muted">
-                    Result
-                  </th>
-
-                  <th className="px-5 py-3 text-xs font-semibold text-text-muted">
-                    Improvement
-                  </th>
-
-                  <th className="px-5 py-3 text-xs font-semibold text-text-muted">
-                    Status
-                  </th>
-
-                  <th className="px-5 py-3 text-right text-xs font-semibold text-text-muted">
-                    Action
-                  </th>
-                </tr>
-              </thead>
-
-              <tbody>
-                {filteredData.map((item) => (
-                  <HistoryRow
-                    key={item.id}
-                    item={item}
-                    onView={() => setSelectedRecord(item)}
-                  />
-                ))}
-              </tbody>
-            </table>
-
-            {filteredData.length === 0 && (
-              <div className="flex flex-col items-center justify-center px-6 py-16 text-center">
-                <Search className="mb-3 h-8 w-8 text-text-muted/50" />
-
-                <h3 className="font-semibold text-text">
-                  No history found
-                </h3>
-
-                <p className="mt-1 text-sm text-text-muted">
-                  Coba ubah kata pencarian atau filter.
-                </p>
-              </div>
-            )}
-          </div>
-        </div>
-        </div>
-
-        {/* DETAIL MODAL */}
-        {selectedRecord && (
-          <HistoryDetailModal
-            record={selectedRecord}
-            onClose={() => setSelectedRecord(null)}
-          />
-        )}
-      </main>
-    </div>
-  );
-}
-
-/* =========================================================
-   SUMMARY CARD
-========================================================= */
-
-interface SummaryCardProps {
-  title: string;
-  value: string;
-  subtitle: string;
-  icon: React.ReactNode;
-  positive?: boolean;
-}
-
-function SummaryCard({
-  title,
-  value,
-  subtitle,
-  icon,
-  positive,
-}: SummaryCardProps) {
-  return (
-    <div className="rounded-2xl border border-border bg-surface p-5 shadow-sm">
-      <div className="flex items-start justify-between">
-        <div>
-          <p className="text-sm font-medium text-text-muted">
-            {title}
-          </p>
-
-          <p className="mt-2 text-2xl font-bold tracking-tight">
-            {value}
-          </p>
-
-          <p
-            className={`mt-1 text-xs ${
-              positive ? "text-emerald-600" : "text-text-muted"
-            }`}
-          >
-            {subtitle}
-          </p>
-        </div>
-
-        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-bg text-text-secondary">
-          {icon}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/* =========================================================
-   SELECT FILTER
-========================================================= */
-
-interface SelectFilterProps {
-  value: string;
-  onChange: (value: string) => void;
-  options: string[];
-}
-
-function SelectFilter({
-  value,
-  onChange,
-  options,
-}: SelectFilterProps) {
-  return (
-    <div className="relative">
-      <select
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        className="h-10 w-full appearance-none rounded-xl border border-border bg-bg px-3 pr-9 text-sm text-text-secondary outline-none transition focus:border-slate-400 focus:bg-surface"
-      >
-        {options.map((option) => (
-          <option key={option} value={option}>
-            {option}
-          </option>
-        ))}
-      </select>
-
-      <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-text-muted" />
-    </div>
-  );
-}
-
-/* =========================================================
-   HISTORY ROW
-========================================================= */
-
-interface HistoryRowProps {
-  item: HistoryRecord;
-  onView: () => void;
-}
-
-function HistoryRow({ item, onView }: HistoryRowProps) {
-  return (
-    <tr className="border-b border-border transition hover:bg-bg">
-      <td className="px-5 py-4">
-        <div className="flex items-center gap-2">
-          <Clock3 className="h-4 w-4 text-text-muted" />
-
-          <div>
-            <p className="whitespace-nowrap text-sm font-medium text-text">
-              {item.timestamp}
-            </p>
-
-            <p className="mt-0.5 font-mono text-[10px] text-text-muted">
-              {item.id}
-            </p>
-          </div>
-        </div>
-      </td>
-
-      <td className="px-5 py-4">
-        <div className="flex items-center gap-2">
-          <TrafficCone className="h-4 w-4 text-text-muted" />
-
-          <span className="whitespace-nowrap text-sm font-medium text-text">
-            {item.intersection}
-          </span>
-        </div>
-      </td>
-
-      <td className="px-5 py-4">
-        <TrafficBadge level={item.trafficLevel} />
-      </td>
-
-      <td className="px-5 py-4">
-        <div>
-          <p className="whitespace-nowrap text-sm font-semibold text-text">
-            {item.decision}
-          </p>
-
-          <p className="mt-1 max-w-[220px] truncate text-xs text-text-muted">
-            {item.decisionDescription}
-          </p>
-        </div>
-      </td>
-
-      <td className="px-5 py-4">
-        <div className="flex items-center gap-2">
-          <span className="text-xs text-text-muted">
-            {item.currentGreen}s
-          </span>
-
-          <ArrowUp className="h-3.5 w-3.5 text-text-muted" />
-
-          <span className="text-sm font-semibold text-text">
-            {item.recommendedGreen}s
-          </span>
-        </div>
-      </td>
-
-      <td className="px-5 py-4">
-        <div>
-          <p className="text-sm font-semibold text-text">
-            Queue ↓ {item.queueReduction}%
-          </p>
-
-          <p className="mt-1 text-xs text-text-muted">
-            Wait ↓ {item.waitingReduction}%
-          </p>
-        </div>
-      </td>
-
-      <td className="px-5 py-4">
-        <div className="flex items-center gap-1.5">
-          <TrendingUp className="h-4 w-4 text-emerald-500" />
-
-          <span className="text-sm font-bold text-emerald-600">
-            +{item.improvement}%
-          </span>
-        </div>
-      </td>
-
-      <td className="px-5 py-4">
-        <StatusBadge status={item.status} />
-      </td>
-
-      <td className="px-5 py-4 text-right">
-        <button
-          type="button"
-          onClick={onView}
-          className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border px-3 text-xs font-semibold text-text-secondary transition hover:bg-bg"
-        >
-          <Eye className="h-3.5 w-3.5" />
-          View
-        </button>
-      </td>
-    </tr>
-  );
-}
-
-/* =========================================================
-   TRAFFIC BADGE
-========================================================= */
-
-function TrafficBadge({
-  level,
-}: {
-  level: TrafficLevel;
-}) {
-  const styles = {
-    Low: "bg-bg text-text-secondary",
-    Medium: "bg-amber-50 text-amber-700",
-    High: "bg-red-50 text-red-600",
-  };
-
-  return (
-    <span
-      className={`inline-flex rounded-full px-2.5 py-1 text-[11px] font-semibold ${styles[level]}`}
-    >
-      {level}
-    </span>
-  );
-}
-
-/* =========================================================
-   STATUS BADGE
-========================================================= */
-
-function StatusBadge({
-  status,
-}: {
-  status: SimulationStatus;
-}) {
-  if (status === "Completed") {
     return (
-      <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-600">
-        <CheckCircle2 className="h-3 w-3" />
-        Completed
-      </span>
-    );
-  }
+        <div className="flex min-h-screen bg-bg text-text">
+            <Sidebar />
 
-  if (status === "Running") {
-    return (
-      <span className="inline-flex items-center gap-1.5 rounded-full bg-blue-50 px-2.5 py-1 text-[11px] font-semibold text-blue-600">
-        <Activity className="h-3 w-3" />
-        Running
-      </span>
-    );
-  }
+            <main className="min-w-0 flex-1 px-6 py-6">
+                <div className="mx-auto max-w-[1600px] space-y-6">
 
-  if (status === "Failed") {
-    return (
-      <span className="inline-flex items-center gap-1.5 rounded-full bg-red-50 px-2.5 py-1 text-[11px] font-semibold text-red-600">
-        <XCircle className="h-3 w-3" />
-        Failed
-      </span>
-    );
-  }
-
-  return (
-    <span className="inline-flex items-center gap-1.5 rounded-full bg-bg px-2.5 py-1 text-[11px] font-semibold text-text-muted">
-      <AlertCircle className="h-3 w-3" />
-      Cancelled
-    </span>
-  );
-}
-
-/* =========================================================
-   DETAIL MODAL
-========================================================= */
-
-interface HistoryDetailModalProps {
-  record: HistoryRecord;
-  onClose: () => void;
-}
-
-function HistoryDetailModal({
-  record,
-  onClose,
-}: HistoryDetailModalProps) {
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 p-4 backdrop-blur-sm">
-      <div className="flex max-h-[92vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-border bg-surface shadow-2xl">
-        {/* MODAL HEADER */}
-        <div className="flex items-start justify-between border-b border-border px-6 py-5">
-          <div>
-            <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-bg">
-                <HistoryIcon className="h-5 w-5 text-text-secondary" />
-              </div>
-
-              <div>
-                <h2 className="text-lg font-bold">
-                  Simulation Details
-                </h2>
-
-                <p className="mt-0.5 font-mono text-xs text-text-muted">
-                  {record.id}
-                </p>
-              </div>
-            </div>
-          </div>
-
-          <button
-            type="button"
-            onClick={onClose}
-            className="flex h-9 w-9 items-center justify-center rounded-lg text-text-muted transition hover:bg-bg hover:text-text"
-          >
-            <X className="h-5 w-5" />
-          </button>
-        </div>
-
-        {/* MODAL BODY */}
-        <div className="overflow-y-auto p-6">
-          <div className="space-y-6">
-            {/* OVERVIEW */}
-            <section>
-              <SectionTitle
-                icon={<Server className="h-4 w-4" />}
-                title="Simulation Overview"
-              />
-
-              <div className="mt-3 grid grid-cols-2 gap-3 md:grid-cols-4">
-                <InfoBox
-                  label="Intersection"
-                  value={record.intersection}
-                />
-
-                <InfoBox
-                  label="Timestamp"
-                  value={record.timestamp}
-                />
-
-                <InfoBox
-                  label="Duration"
-                  value={`${record.simulationDuration}s`}
-                />
-
-                <InfoBox
-                  label="Model"
-                  value={record.model}
-                />
-              </div>
-            </section>
-
-            {/* TRAFFIC STATE */}
-            <section>
-              <SectionTitle
-                icon={<Activity className="h-4 w-4" />}
-                title="Traffic State Before Decision"
-              />
-
-              <div className="mt-3 grid grid-cols-2 gap-3 md:grid-cols-4">
-                <MetricBox
-                  label="Vehicles"
-                  value={record.vehicleCount.toString()}
-                  suffix="vehicles"
-                  icon={<TrafficCone className="h-4 w-4" />}
-                />
-
-                <MetricBox
-                  label="Queue Length"
-                  value={record.queueLength.toString()}
-                  suffix="vehicles"
-                  icon={<Activity className="h-4 w-4" />}
-                />
-
-                <MetricBox
-                  label="Average Speed"
-                  value={record.avgSpeed.toString()}
-                  suffix="km/h"
-                  icon={<Gauge className="h-4 w-4" />}
-                />
-
-                <MetricBox
-                  label="Waiting Time"
-                  value={record.waitingTime.toString()}
-                  suffix="seconds"
-                  icon={<Timer className="h-4 w-4" />}
-                />
-              </div>
-            </section>
-
-            {/* DECISION */}
-            <section>
-              <SectionTitle
-                icon={<Brain className="h-4 w-4" />}
-                title="AI Decision"
-              />
-
-              <div className="mt-3 rounded-xl border border-border bg-bg p-5">
-                <div className="flex flex-col gap-5 md:flex-row md:items-start md:justify-between">
-                  <div>
-                    <p className="text-xs font-medium uppercase tracking-wider text-text-muted">
-                      Recommended Action
-                    </p>
-
-                    <h3 className="mt-1 text-xl font-bold text-slate-800">
-                      {record.decision}
-                    </h3>
-
-                    <p className="mt-2 max-w-2xl text-sm leading-6 text-text-muted">
-                      {record.decisionDescription}
-                    </p>
-                  </div>
-
-                  <div className="flex items-center gap-2 rounded-xl border border-border bg-surface px-4 py-3">
-                    <Sparkles className="h-4 w-4 text-text-muted" />
-
+                    {/* HEADER */}
                     <div>
-                      <p className="text-[10px] uppercase tracking-wider text-text-muted">
-                        Confidence
-                      </p>
-
-                      <p className="text-sm font-bold">
-                        {record.confidence}%
-                      </p>
+                        <div className="mb-2 flex items-center gap-2">
+                            <HistoryIcon className="h-6 w-6 text-text" />
+                            <h1 className="text-2xl font-bold tracking-tight">
+                                Riwayat Keputusan
+                            </h1>
+                        </div>
+                        <p className="text-sm text-text-muted">
+                            Rekomendasi durasi lampu yang pernah dikeluarkan sistem,
+                            beserta kondisi lalu lintas yang memicunya.
+                        </p>
                     </div>
-                  </div>
+
+                    {/* RINGKASAN */}
+                    {/*
+                        4 kartu gaya "header dashboard". Semua angka nyata dari
+                        data yang sedang tampil -- TIDAK ada skor komposit
+                        seperti "Overall Performance +12,4%" (mockup awal),
+                        karena rumusnya tidak jelas dan tidak bisa dijawab
+                        kalau ditanya "12,4% itu dari mana?".
+                    */}
+                    {data && !memuat && (
+                        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                            <div className="rounded-2xl border border-border bg-surface p-5 shadow-sm">
+                                <div className="flex items-start justify-between">
+                                    <div>
+                                        <p className="text-xs text-text-muted">Total Siklus</p>
+                                        <p className="mt-2 font-display text-xl font-semibold">
+                                            {data.totalCycles}
+                                        </p>
+                                    </div>
+                                    <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-surface-2 text-text-secondary">
+                                        <Activity size={18} />
+                                    </div>
+                                </div>
+                                <p className="mt-3 text-[10px] text-text-muted">
+                                    Halaman {data.page} dari {totalHalaman}
+                                </p>
+                            </div>
+
+                            {/*
+                                Angka paling jujur di halaman ini: banyak siklus
+                                TIDAK sama dengan banyak kondisi yang direspons.
+                                Kalau CV tidak berjalan, puluhan siklus bisa
+                                mengevaluasi satu kondisi yang sama berulang kali.
+                            */}
+                            <div className="rounded-2xl border border-border bg-surface p-5 shadow-sm">
+                                <div className="flex items-start justify-between">
+                                    <div>
+                                        <p className="text-xs text-text-muted">Kondisi Unik</p>
+                                        <p className="mt-2 font-display text-xl font-semibold">
+                                            {jumlahKondisiUnik}
+                                            <span className="text-sm font-normal text-text-muted">
+                                                {" "}
+                                                / {data.items.length}
+                                            </span>
+                                        </p>
+                                    </div>
+                                    <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-surface-2 text-text-secondary">
+                                        <Layers size={18} />
+                                    </div>
+                                </div>
+                                <p
+                                    className={`mt-3 text-[10px] ${
+                                        jumlahKondisiUnik === 1 && data.items.length > 1
+                                            ? "text-signal-amber"
+                                            : "text-text-muted"
+                                    }`}
+                                >
+                                    {jumlahKondisiUnik === 1 && data.items.length > 1
+                                        ? "CV tidak sedang memasok data baru"
+                                        : "kondisi lalu lintas berbeda"}
+                                </p>
+                            </div>
+
+                            <div className="rounded-2xl border border-border bg-surface p-5 shadow-sm">
+                                <div className="flex items-start justify-between">
+                                    <div>
+                                        <p className="text-xs text-text-muted">Skenario Berubah</p>
+                                        <p className="mt-2 font-display text-xl font-semibold">
+                                            {siklusBerubah.length}
+                                            <span className="text-sm font-normal text-text-muted">
+                                                {" "}
+                                                / {data.items.length}
+                                            </span>
+                                        </p>
+                                    </div>
+                                    <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-surface-2 text-text-secondary">
+                                        <TrendingUp size={18} />
+                                    </div>
+                                </div>
+                                <p className="mt-3 text-[10px] text-text-muted">
+                                    sistem menyimpang dari baseline
+                                </p>
+                            </div>
+
+                            <div className="rounded-2xl border border-border bg-surface p-5 shadow-sm">
+                                <div className="flex items-start justify-between">
+                                    <div>
+                                        <p className="text-xs text-text-muted">
+                                            Rata-rata Perbaikan Delay
+                                        </p>
+                                        <p className="mt-2 font-display text-xl font-semibold">
+                                            {rataRataPerbaikanDelay != null
+                                                ? `${rataRataPerbaikanDelay > 0 ? "+" : ""}${rataRataPerbaikanDelay.toFixed(1)}%`
+                                                : "—"}
+                                        </p>
+                                    </div>
+                                    <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-surface-2 text-text-secondary">
+                                        <TrendingDown size={18} />
+                                    </div>
+                                </div>
+                                <p
+                                    className={`mt-3 text-[10px] ${
+                                        rataRataPerbaikanDelay == null
+                                            ? "text-text-muted"
+                                            : rataRataPerbaikanDelay < 0
+                                              ? "text-signal-green"
+                                              : "text-signal-amber"
+                                    }`}
+                                >
+                                    {rataRataPerbaikanDelay != null
+                                        ? `dari ${siklusBerubah.length} siklus yang berubah`
+                                        : "belum ada siklus yang berubah"}
+                                </p>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* GRAFIK: INPUT vs OUTPUT */}
+                    {/*
+                        Dua grafik BERTUMPUK dengan sumbu waktu sejajar, bukan
+                        satu grafik gabungan: satuannya beda (kendaraan vs
+                        detik), dan menggabungkannya butuh dua sumbu-Y yang
+                        membuat skalanya gampang salah dibaca. Ditumpuk begini
+                        korelasinya tetap terbaca -- kalau antrean sebuah lengan
+                        naik dan durasi hijaunya ikut naik, sistemnya terbukti
+                        merespons, bukan mengeluarkan angka statis.
+                    */}
+                    {data && !memuat && data.items.length > 0 && (
+                        <div className="rounded-2xl border border-border bg-surface p-5 shadow-sm">
+                            <div className="mb-4">
+                                <h2 className="text-sm font-semibold">
+                                    Apakah Sistem Merespons Lalu Lintas?
+                                </h2>
+                                <p className="text-xs text-text-muted">
+                                    Bandingkan kedua grafik pada waktu yang sama: antrean naik
+                                    di suatu lengan seharusnya diikuti durasi hijau lengan itu.
+                                </p>
+                            </div>
+
+                            {dataGrafik.length < 2 ? (
+                                <div className="rounded-lg border border-dashed border-border py-8 text-center">
+                                    <p className="text-xs text-text-muted">
+                                        Butuh minimal 2 siklus untuk membentuk garis — baru ada{" "}
+                                        {dataGrafik.length}.
+                                    </p>
+                                    <p className="mt-1 text-[10px] text-text-muted">
+                                        Grafik terisi otomatis selama <code>scenario_worker.py</code>{" "}
+                                        berjalan (1 siklus per menit).
+                                    </p>
+                                </div>
+                            ) : (
+                                <div className="space-y-4">
+                                    <GrafikLengan
+                                        judul="1. Antrean per Lengan  (kondisi lapangan)"
+                                        keterangan="masukan sistem"
+                                        data={dataGrafik}
+                                        prefiks="antrean"
+                                        satuan=" kend"
+                                        kosong={!adaDataAntrean}
+                                    />
+                                    <GrafikLengan
+                                        judul="2. Durasi Hijau per Lengan  (keputusan sistem)"
+                                        keterangan="keluaran sistem"
+                                        data={dataGrafik}
+                                        prefiks="hijau"
+                                        satuan="s"
+                                        kosong={false}
+                                    />
+                                </div>
+                            )}
+                        </div>
+                    )}
+
+                    {/* FILTER */}
+                    {/*
+                        Tidak ada dropdown "Persimpangan" seperti mockup awal --
+                        sistem ini cuma punya SATU simpang (Pingit). Dropdown
+                        dengan 1 opsi yang selalu terpilih bukan filter, itu
+                        elemen dekoratif -- jadi sengaja tidak dibuat.
+                    */}
+                    {data && data.items.length > 0 && (
+                        <div className="rounded-2xl border border-border bg-surface p-5 shadow-sm">
+                            <div className="mb-3 flex items-center gap-2">
+                                <Filter size={15} className="text-text-secondary" />
+                                <h2 className="text-xs font-medium">Filter Riwayat</h2>
+                            </div>
+                            <div className="flex flex-col gap-3 sm:flex-row">
+                                <div className="relative flex-1">
+                                    <Search
+                                        size={14}
+                                        className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-text-muted"
+                                    />
+                                    <input
+                                        type="text"
+                                        value={cari}
+                                        onChange={(e) => setCari(e.target.value)}
+                                        placeholder="Cari kandidat atau sumber…"
+                                        className="w-full rounded-lg border border-border bg-surface-2 py-2 pl-9 pr-3 text-xs outline-none transition focus:border-text-muted"
+                                    />
+                                </div>
+
+                                <div className="relative">
+                                    <select
+                                        value={filterSumber}
+                                        onChange={(e) => setFilterSumber(e.target.value)}
+                                        className="w-full appearance-none rounded-lg border border-border bg-surface-2 py-2 pl-3 pr-8 text-xs outline-none transition focus:border-text-muted sm:w-48"
+                                    >
+                                        <option>Semua Sumber</option>
+                                        {daftarSumber.map((sumber) => (
+                                            <option key={sumber} value={sumber}>
+                                                {sumber}
+                                            </option>
+                                        ))}
+                                    </select>
+                                    <ChevronDown
+                                        size={13}
+                                        className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-text-muted"
+                                    />
+                                </div>
+
+                                <div className="relative">
+                                    <select
+                                        value={filterStatus}
+                                        onChange={(e) => setFilterStatus(e.target.value)}
+                                        className="w-full appearance-none rounded-lg border border-border bg-surface-2 py-2 pl-3 pr-8 text-xs outline-none transition focus:border-text-muted sm:w-40"
+                                    >
+                                        <option>Semua Status</option>
+                                        <option>Berubah</option>
+                                        <option>Tetap</option>
+                                    </select>
+                                    <ChevronDown
+                                        size={13}
+                                        className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-text-muted"
+                                    />
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* TABEL */}
+                    <div className="overflow-hidden rounded-2xl border border-border bg-surface shadow-sm">
+
+                        {data && !memuat && data.items.length > 0 && (
+                            <div className="flex items-center justify-between border-b border-border px-5 py-3">
+                                <div>
+                                    <h2 className="text-sm font-semibold">Riwayat Siklus</h2>
+                                    <p className="text-xs text-text-muted">
+                                        Menampilkan {itemTersaring.length} dari {data.items.length}{" "}
+                                        siklus di halaman ini
+                                    </p>
+                                </div>
+                            </div>
+                        )}
+
+                        {memuat ? (
+                            <div className="p-10 text-center">
+                                <div className="mx-auto h-6 w-6 animate-spin rounded-full border-2 border-text-muted border-t-transparent" />
+                                <p className="mt-3 text-xs text-text-muted">Memuat riwayat…</p>
+                            </div>
+                        ) : galat ? (
+                            <div className="p-10 text-center">
+                                <p className="text-sm text-signal-red">Gagal memuat riwayat</p>
+                                <p className="mt-1 text-xs text-text-muted">{galat}</p>
+                            </div>
+                        ) : !data || data.items.length === 0 ? (
+                            <div className="p-10 text-center">
+                                <p className="text-sm text-text">Belum ada riwayat</p>
+                                <p className="mt-1 text-xs text-text-muted">
+                                    Riwayat terisi otomatis saat <code>scenario_worker.py</code> berjalan.
+                                </p>
+                            </div>
+                        ) : itemTersaring.length === 0 ? (
+                            <div className="p-10 text-center">
+                                <p className="text-sm text-text">Tidak ada siklus yang cocok</p>
+                                <p className="mt-1 text-xs text-text-muted">
+                                    Coba ubah kata kunci pencarian atau filter di atas.
+                                </p>
+                            </div>
+                        ) : (
+                            <div className="overflow-x-auto">
+                                <table className="w-full text-left text-sm">
+                                    <thead className="border-b border-border text-xs text-text-muted">
+                                        <tr>
+                                            <th className="px-5 py-3 font-medium">Waktu</th>
+                                            <th className="px-5 py-3 font-medium">Persimpangan</th>
+                                            <th className="px-5 py-3 font-medium">Kepadatan</th>
+                                            <th className="px-5 py-3 font-medium">Durasi Hijau per Lengan</th>
+                                            <th className="px-5 py-3 font-medium">Dampak (vs Baseline)</th>
+                                            <th className="px-5 py-3 font-medium">LOS</th>
+                                            <th className="px-5 py-3 font-medium">Sumber</th>
+                                            <th className="px-5 py-3 font-medium">Status</th>
+                                            <th className="px-5 py-3 font-medium"></th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {itemTersaring.map(({ siklus, berubah }, indeks) => {
+                                            const sebelumnya = itemTersaring[indeks + 1]?.siklus;
+                                            const kondisiSama =
+                                                sebelumnya != null &&
+                                                siklus.trafficStateId != null &&
+                                                siklus.trafficStateId === sebelumnya.trafficStateId;
+                                            const kepadatan = tingkatKepadatan(siklus.trafficConditions);
+                                            const dampakDelay = siklus.beforeAfter?.metrics.find(
+                                                (m) => m.metric === "avgDelaySeconds"
+                                            );
+
+                                            return (
+                                                <tr
+                                                    key={siklus.timestamp}
+                                                    onClick={() => setDipilih(siklus)}
+                                                    className="cursor-pointer border-b border-border/50 transition hover:bg-surface-2"
+                                                >
+                                                    <td className="whitespace-nowrap px-5 py-3 font-mono text-xs">
+                                                        {formatWaktu(siklus.timestamp)}
+                                                        <div className="mt-0.5">
+                                                            {siklus.trafficStateId == null ? (
+                                                                <span className="text-[10px] text-text-muted">—</span>
+                                                            ) : kondisiSama ? (
+                                                                <span
+                                                                    className="text-[10px] text-signal-amber"
+                                                                    title="Kondisi lalu lintas identik dengan siklus sebelumnya — sistem mengevaluasi ulang kondisi yang sama."
+                                                                >
+                                                                    kondisi sama
+                                                                </span>
+                                                            ) : (
+                                                                <span className="text-[10px] text-signal-green">
+                                                                    kondisi baru
+                                                                </span>
+                                                            )}
+                                                        </div>
+                                                    </td>
+                                                    <td className="whitespace-nowrap px-5 py-3 text-xs text-text-secondary">
+                                                        <div className="flex items-center gap-1.5">
+                                                            <TrafficCone size={12} className="text-text-muted" />
+                                                            Simpang 4 Pingit
+                                                        </div>
+                                                    </td>
+                                                    <td className="px-5 py-3">
+                                                        <span
+                                                            className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${kepadatan.warna}`}
+                                                        >
+                                                            {kepadatan.label}
+                                                        </span>
+                                                    </td>
+                                                    <td className="px-5 py-3">
+                                                        <div className="flex flex-wrap gap-2">
+                                                            {urutkanFase(siklus.phases).map((fase) => (
+                                                                <span
+                                                                    key={fase.approach}
+                                                                    className="rounded-md bg-surface-2 px-2 py-0.5 text-[11px]"
+                                                                >
+                                                                    {labelLengan(fase.approach)}{" "}
+                                                                    <span className="font-mono font-medium">
+                                                                        {fase.greenSeconds}s
+                                                                    </span>
+                                                                </span>
+                                                            ))}
+                                                        </div>
+                                                    </td>
+                                                    <td className="whitespace-nowrap px-5 py-3">
+                                                        {dampakDelay && dampakDelay.improved !== null ? (
+                                                            <span
+                                                                className={`flex items-center gap-1 text-xs font-medium ${
+                                                                    dampakDelay.improved
+                                                                        ? "text-signal-green"
+                                                                        : "text-signal-red"
+                                                                }`}
+                                                            >
+                                                                {dampakDelay.improved ? (
+                                                                    <TrendingDown size={13} />
+                                                                ) : (
+                                                                    <TrendingUp size={13} />
+                                                                )}
+                                                                Delay {dampakDelay.changePercent}%
+                                                            </span>
+                                                        ) : siklus.beforeAfter ? (
+                                                            <span className="flex items-center gap-1 text-xs text-text-muted">
+                                                                <Minus size={12} />
+                                                                Tetap (baseline menang)
+                                                            </span>
+                                                        ) : (
+                                                            <span className="text-xs text-text-muted">—</span>
+                                                        )}
+                                                    </td>
+                                                    <td className="px-5 py-3">
+                                                        {siklus.winner?.los ? (
+                                                            <span
+                                                                className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${warnaLos(
+                                                                    siklus.winner.los
+                                                                )}`}
+                                                            >
+                                                                {siklus.winner.los}
+                                                            </span>
+                                                        ) : (
+                                                            <span className="text-xs text-text-muted">—</span>
+                                                        )}
+                                                    </td>
+                                                    <td className="px-5 py-3">
+                                                        <span className="rounded-md bg-surface-2 px-2 py-0.5 text-[11px] text-text-secondary">
+                                                            {siklus.source ?? "—"}
+                                                        </span>
+                                                    </td>
+                                                    <td className="px-5 py-3">
+                                                        {berubah ? (
+                                                            <span className="rounded-full bg-accent-blue/15 px-2 py-0.5 text-[11px] text-accent-blue">
+                                                                berubah
+                                                            </span>
+                                                        ) : (
+                                                            <span className="text-[11px] text-text-muted">tetap</span>
+                                                        )}
+                                                    </td>
+                                                    <td className="whitespace-nowrap px-5 py-3">
+                                                        <button
+                                                            type="button"
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                setDipilih(siklus);
+                                                            }}
+                                                            className="flex items-center gap-1 rounded-lg border border-border px-2.5 py-1 text-[11px] transition hover:bg-surface-2"
+                                                        >
+                                                            <Eye size={12} />
+                                                            Lihat
+                                                        </button>
+                                                    </td>
+                                                </tr>
+                                            );
+                                        })}
+                                    </tbody>
+                                </table>
+                            </div>
+                        )}
+
+                        {/* PAGINASI */}
+                        {data && data.items.length > 0 && (
+                            <div className="flex items-center justify-between border-t border-border px-5 py-3">
+                                <p className="text-xs text-text-muted">
+                                    Halaman {data.page} dari {totalHalaman}
+                                </p>
+                                <div className="flex gap-2">
+                                    <button
+                                        type="button"
+                                        disabled={halaman <= 1}
+                                        onClick={() => setHalaman((n) => Math.max(1, n - 1))}
+                                        className="flex items-center gap-1 rounded-lg border border-border px-3 py-1.5 text-xs transition hover:bg-surface-2 disabled:opacity-40"
+                                    >
+                                        <ChevronLeft size={14} />
+                                        Sebelumnya
+                                    </button>
+                                    <button
+                                        type="button"
+                                        disabled={halaman >= totalHalaman}
+                                        onClick={() => setHalaman((n) => n + 1)}
+                                        className="flex items-center gap-1 rounded-lg border border-border px-3 py-1.5 text-xs transition hover:bg-surface-2 disabled:opacity-40"
+                                    >
+                                        Berikutnya
+                                        <ChevronRight size={14} />
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+                    </div>
                 </div>
+            </main>
 
-                <div className="mt-5 grid grid-cols-1 gap-3 md:grid-cols-3">
-                  <SignalCard
-                    label="Current Green"
-                    value={`${record.currentGreen}s`}
-                  />
+            {/* DETAIL */}
+            {dipilih && (
+                <div
+                    className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+                    onClick={() => setDipilih(null)}
+                >
+                    <div
+                        className="max-h-[85vh] w-full max-w-3xl overflow-y-auto rounded-2xl border border-border bg-surface p-6 shadow-xl"
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <div className="mb-5 flex items-start justify-between">
+                            <div>
+                                <h2 className="text-sm font-semibold">Detail Keputusan</h2>
+                                <p className="mt-0.5 font-mono text-xs text-text-muted">
+                                    {formatWaktu(dipilih.timestamp)} · {dipilih.source ?? "—"}
+                                </p>
+                            </div>
+                            <button
+                                type="button"
+                                onClick={() => setDipilih(null)}
+                                className="flex h-9 w-9 items-center justify-center rounded-lg text-text-muted transition hover:bg-surface-2 hover:text-text"
+                            >
+                                <X className="h-5 w-5" />
+                            </button>
+                        </div>
 
-                  <SignalCard
-                    label="Recommended Green"
-                    value={`${record.recommendedGreen}s`}
-                    highlight
-                  />
+                        {/* DURASI DIREKOMENDASIKAN */}
+                        <div className="mb-5">
+                            <div className="mb-2 flex items-center gap-2">
+                                <TrafficCone size={15} className="text-text-secondary" />
+                                <h3 className="text-xs font-medium">Durasi Hijau Direkomendasikan</h3>
+                            </div>
+                            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                                {urutkanFase(dipilih.phases).map((fase) => (
+                                    <div
+                                        key={fase.approach}
+                                        className="rounded-lg border border-border bg-surface-2 p-3"
+                                    >
+                                        <p className="text-[11px] text-text-muted">
+                                            {labelLengan(fase.approach)}
+                                        </p>
+                                        <p className="mt-1 font-mono text-sm font-semibold">
+                                            {fase.greenSeconds}s
+                                        </p>
+                                        {fase.currentGreenSeconds != null && (
+                                            <p className="mt-0.5 text-[10px] text-text-muted">
+                                                eksisting {fase.currentGreenSeconds}s
+                                            </p>
+                                        )}
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
 
-                  <SignalCard
-                    label="Change"
-                    value={`${
-                      record.recommendedGreen -
-                      record.currentGreen >
-                      0
-                        ? "+"
-                        : ""
-                    }${
-                      record.recommendedGreen -
-                      record.currentGreen
-                    }s`}
-                  />
+                        {/* DAMPAK: BEFORE / AFTER */}
+                        {/*
+                            Panel ini yang paling langsung menjawab "apa gunanya
+                            program ini" -- baseline (before) dan pemenang (after)
+                            SAMA-SAMA disimulasikan sungguhan di SUMO, bukan
+                            diperkirakan, jadi selisihnya angka yang bisa
+                            dipertanggungjawabkan.
+                        */}
+                        {dipilih.beforeAfter && (
+                            <div className="mb-5">
+                                <div className="mb-2 flex items-center gap-2">
+                                    <TrendingUp size={15} className="text-text-secondary" />
+                                    <h3 className="text-xs font-medium">
+                                        Dampak: Baseline vs Rekomendasi
+                                    </h3>
+                                </div>
+
+                                {!dipilih.beforeAfter.changed && (
+                                    <p className="mb-3 rounded-lg border border-border bg-surface-2 px-3 py-2 text-[11px] text-text-muted">
+                                        Sistem menyimpulkan pengaturan{" "}
+                                        <strong>baseline</strong> sudah paling baik untuk
+                                        kondisi ini — bukan kegagalan sistem, ini keputusan
+                                        yang sah.
+                                    </p>
+                                )}
+
+                                <div className="overflow-hidden rounded-lg border border-border">
+                                    <table className="w-full text-left text-xs">
+                                        <thead className="bg-surface-2 text-text-muted">
+                                            <tr>
+                                                <th className="px-3 py-2 font-medium">Metrik</th>
+                                                <th className="px-3 py-2 font-medium">
+                                                    Before ({dipilih.beforeAfter.baselineCandidateId})
+                                                </th>
+                                                <th className="px-3 py-2 font-medium">
+                                                    After ({dipilih.beforeAfter.winnerCandidateId})
+                                                </th>
+                                                <th className="px-3 py-2 font-medium">Change</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {dipilih.beforeAfter.metrics.map((metrik) => (
+                                                <tr
+                                                    key={metrik.metric}
+                                                    className="border-t border-border"
+                                                >
+                                                    <td className="px-3 py-2">{metrik.label}</td>
+                                                    <td className="px-3 py-2 font-mono text-text-muted">
+                                                        {metrik.before}
+                                                        {metrik.unit}
+                                                    </td>
+                                                    <td className="px-3 py-2 font-mono">
+                                                        {metrik.after}
+                                                        {metrik.unit}
+                                                    </td>
+                                                    <td className="px-3 py-2">
+                                                        {metrik.improved === null ? (
+                                                            <span className="flex items-center gap-1 text-text-muted">
+                                                                <Minus size={12} />
+                                                                tetap
+                                                            </span>
+                                                        ) : (
+                                                            <span
+                                                                className={`flex items-center gap-1 font-medium ${
+                                                                    metrik.improved
+                                                                        ? "text-signal-green"
+                                                                        : "text-signal-red"
+                                                                }`}
+                                                            >
+                                                                {metrik.improved ? (
+                                                                    <TrendingDown size={12} />
+                                                                ) : (
+                                                                    <TrendingUp size={12} />
+                                                                )}
+                                                                {metrik.changePercent != null &&
+                                                                    `${metrik.changePercent > 0 ? "+" : ""}${metrik.changePercent}%`}
+                                                            </span>
+                                                        )}
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* KANDIDAT */}
+                        <div className="mb-5">
+                            <div className="mb-2 flex items-center gap-2">
+                                <Layers size={15} className="text-text-secondary" />
+                                <h3 className="text-xs font-medium">Kandidat yang Diuji di SUMO</h3>
+                            </div>
+                            {dipilih.candidates.length === 0 ? (
+                                <p className="text-xs text-text-muted">
+                                    Tidak ada data kandidat — keputusan ini tidak melalui
+                                    Scenario Generator.
+                                </p>
+                            ) : (
+                                <div className="overflow-hidden rounded-lg border border-border">
+                                    <table className="w-full text-left text-xs">
+                                        <thead className="bg-surface-2 text-text-muted">
+                                            <tr>
+                                                <th className="px-3 py-2 font-medium">Kandidat</th>
+                                                <th className="px-3 py-2 font-medium">Delay</th>
+                                                <th className="px-3 py-2 font-medium">Antrean</th>
+                                                <th className="px-3 py-2 font-medium">Throughput</th>
+                                                <th className="px-3 py-2 font-medium">LOS</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {dipilih.candidates.map((kandidat) => (
+                                                <tr
+                                                    key={kandidat.candidateId}
+                                                    className={`border-t border-border ${
+                                                        kandidat.isWinner ? "bg-signal-green/5" : ""
+                                                    }`}
+                                                >
+                                                    <td className="px-3 py-2">
+                                                        {kandidat.candidateId}
+                                                        {kandidat.isWinner && (
+                                                            <span className="ml-2 text-signal-green">
+                                                                ✓ terpilih
+                                                            </span>
+                                                        )}
+                                                    </td>
+                                                    <td className="px-3 py-2 font-mono">
+                                                        {kandidat.avgDelaySeconds ?? "—"}s
+                                                    </td>
+                                                    <td className="px-3 py-2 font-mono">
+                                                        {kandidat.avgQueueLengthM ?? "—"}m
+                                                    </td>
+                                                    <td className="px-3 py-2 font-mono">
+                                                        {kandidat.throughputVeh ?? "—"}
+                                                    </td>
+                                                    <td className="px-3 py-2">{kandidat.los ?? "—"}</td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            )}
+                        </div>
+
+                        {/* KONDISI PEMICU */}
+                        <div>
+                            <div className="mb-2 flex items-center gap-2">
+                                <Clock3 size={15} className="text-text-secondary" />
+                                <h3 className="text-xs font-medium">
+                                    Kondisi Lalu Lintas Saat Itu
+                                </h3>
+                            </div>
+                            {dipilih.trafficConditions.length === 0 ? (
+                                <p className="text-xs text-text-muted">
+                                    Tidak ada data kondisi untuk keputusan ini.
+                                </p>
+                            ) : (
+                                <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                                    {dipilih.trafficConditions.map((kondisi) => (
+                                        <div
+                                            key={kondisi.approach}
+                                            className="rounded-lg border border-border bg-surface-2 p-3"
+                                        >
+                                            <p className="text-[11px] text-text-muted">
+                                                {labelLengan(kondisi.approach)}
+                                            </p>
+                                            <p className="mt-1 font-mono text-xs">
+                                                {kondisi.volume ?? "—"} kendaraan
+                                            </p>
+                                            <p className="text-[10px] text-text-muted">
+                                                antrean {kondisi.queueLengthVeh ?? "—"} kend ·{" "}
+                                                {kondisi.queueLengthMEst ?? "—"}m
+                                            </p>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                    </div>
                 </div>
-              </div>
-            </section>
-
-            {/* FORECAST */}
-            <section>
-              <SectionTitle
-                icon={<Sparkles className="h-4 w-4" />}
-                title="Forecast"
-              />
-
-              <div className="mt-3 rounded-xl border border-border bg-surface p-4">
-                <p className="text-sm text-text-secondary">
-                  {record.forecast}
-                </p>
-
-                <div className="mt-3 flex items-center gap-2 text-xs text-text-muted">
-                  <Brain className="h-3.5 w-3.5" />
-                  LSTM Forecast Model
-                </div>
-              </div>
-            </section>
-
-            {/* RESULTS */}
-            <section>
-              <SectionTitle
-                icon={<TrendingUp className="h-4 w-4" />}
-                title="Simulation Result"
-              />
-
-              <div className="mt-3 overflow-hidden rounded-xl border border-border">
-                <table className="w-full">
-                  <thead>
-                    <tr className="bg-bg text-left">
-                      <th className="px-4 py-3 text-xs font-semibold text-text-muted">
-                        Metric
-                      </th>
-
-                      <th className="px-4 py-3 text-xs font-semibold text-text-muted">
-                        Before
-                      </th>
-
-                      <th className="px-4 py-3 text-xs font-semibold text-text-muted">
-                        After
-                      </th>
-
-                      <th className="px-4 py-3 text-xs font-semibold text-text-muted">
-                        Change
-                      </th>
-                    </tr>
-                  </thead>
-
-                  <tbody>
-                    <ComparisonRow
-                      label="Queue Length"
-                      before={`${record.queueLength} vehicles`}
-                      after={`${Math.round(
-                        record.queueLength *
-                          (1 - record.queueReduction / 100)
-                      )} vehicles`}
-                      change={`-${record.queueReduction}%`}
-                    />
-
-                    <ComparisonRow
-                      label="Waiting Time"
-                      before={`${record.waitingTime}s`}
-                      after={`${Math.round(
-                        record.waitingTime *
-                          (1 - record.waitingReduction / 100)
-                      )}s`}
-                      change={`-${record.waitingReduction}%`}
-                    />
-
-                    <ComparisonRow
-                      label="Throughput"
-                      before="420 veh/h"
-                      after={`${Math.round(
-                        420 *
-                          (1 +
-                            record.throughputIncrease / 100)
-                      )} veh/h`}
-                      change={`+${record.throughputIncrease}%`}
-                    />
-
-                    <ComparisonRow
-                      label="Overall Performance"
-                      before="Baseline"
-                      after="Optimized"
-                      change={`+${record.improvement}%`}
-                    />
-                  </tbody>
-                </table>
-              </div>
-            </section>
-
-            {/* DECISION PIPELINE */}
-            <section>
-              <SectionTitle
-                icon={<Activity className="h-4 w-4" />}
-                title="Decision Pipeline"
-              />
-
-              <div className="mt-4 flex flex-col md:flex-row md:items-center">
-                <PipelineStep
-                  number="01"
-                  title="Traffic Data"
-                  description="CV Detection"
-                />
-
-                <PipelineConnector />
-
-                <PipelineStep
-                  number="02"
-                  title="Forecast"
-                  description="LSTM"
-                />
-
-                <PipelineConnector />
-
-                <PipelineStep
-                  number="03"
-                  title="AI Decision"
-                  description="PPO"
-                />
-
-                <PipelineConnector />
-
-                <PipelineStep
-                  number="04"
-                  title="Simulation"
-                  description="SUMO"
-                />
-
-                <PipelineConnector />
-
-                <PipelineStep
-                  number="05"
-                  title="Result"
-                  description="Metrics"
-                />
-              </div>
-            </section>
-          </div>
+            )}
         </div>
-
-        {/* MODAL FOOTER */}
-        <div className="flex items-center justify-between border-t border-border bg-bg px-6 py-4">
-          <StatusBadge status={record.status} />
-
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-800"
-          >
-            Close
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/* =========================================================
-   SECTION TITLE
-========================================================= */
-
-function SectionTitle({
-  icon,
-  title,
-}: {
-  icon: React.ReactNode;
-  title: string;
-}) {
-  return (
-    <div className="flex items-center gap-2">
-      <div className="text-text-muted">{icon}</div>
-
-      <h3 className="text-sm font-bold text-slate-800">
-        {title}
-      </h3>
-    </div>
-  );
-}
-
-/* =========================================================
-   INFO BOX
-========================================================= */
-
-function InfoBox({
-  label,
-  value,
-}: {
-  label: string;
-  value: string;
-}) {
-  return (
-    <div className="rounded-xl border border-border bg-bg p-4">
-      <p className="text-[10px] font-semibold uppercase tracking-wider text-text-muted">
-        {label}
-      </p>
-
-      <p className="mt-1 text-sm font-semibold text-text">
-        {value}
-      </p>
-    </div>
-  );
-}
-
-/* =========================================================
-   METRIC BOX
-========================================================= */
-
-function MetricBox({
-  label,
-  value,
-  suffix,
-  icon,
-}: {
-  label: string;
-  value: string;
-  suffix: string;
-  icon: React.ReactNode;
-}) {
-  return (
-    <div className="rounded-xl border border-border bg-surface p-4">
-      <div className="flex items-center gap-2 text-text-muted">
-        {icon}
-
-        <span className="text-xs font-medium">
-          {label}
-        </span>
-      </div>
-
-      <div className="mt-3 flex items-end gap-1.5">
-        <span className="text-xl font-bold">
-          {value}
-        </span>
-
-        <span className="mb-0.5 text-xs text-text-muted">
-          {suffix}
-        </span>
-      </div>
-    </div>
-  );
-}
-
-/* =========================================================
-   SIGNAL CARD
-========================================================= */
-
-function SignalCard({
-  label,
-  value,
-  highlight,
-}: {
-  label: string;
-  value: string;
-  highlight?: boolean;
-}) {
-  return (
-    <div
-      className={`rounded-xl border p-4 ${
-        highlight
-          ? "border-slate-300 bg-surface"
-          : "border-border bg-surface"
-      }`}
-    >
-      <p className="text-xs text-text-muted">
-        {label}
-      </p>
-
-      <p
-        className={`mt-1 text-lg font-bold ${
-          highlight
-            ? "text-text"
-            : "text-text"
-        }`}
-      >
-        {value}
-      </p>
-    </div>
-  );
-}
-
-/* =========================================================
-   COMPARISON ROW
-========================================================= */
-
-function ComparisonRow({
-  label,
-  before,
-  after,
-  change,
-}: {
-  label: string;
-  before: string;
-  after: string;
-  change: string;
-}) {
-  return (
-    <tr className="border-t border-border">
-      <td className="px-4 py-3 text-sm font-medium text-text">
-        {label}
-      </td>
-
-      <td className="px-4 py-3 text-sm text-text-muted">
-        {before}
-      </td>
-
-      <td className="px-4 py-3 text-sm font-semibold text-text">
-        {after}
-      </td>
-
-      <td className="px-4 py-3">
-        <span className="inline-flex items-center gap-1 text-xs font-bold text-emerald-600">
-          <ArrowDown className="h-3 w-3" />
-          {change.replace("-", "")}
-        </span>
-      </td>
-    </tr>
-  );
-}
-
-/* =========================================================
-   PIPELINE
-========================================================= */
-
-function PipelineStep({
-  number,
-  title,
-  description,
-}: {
-  number: string;
-  title: string;
-  description: string;
-}) {
-  return (
-    <div className="flex items-center gap-3 md:flex-1 md:flex-col md:gap-2">
-      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-slate-900 text-xs font-bold text-white">
-        {number}
-      </div>
-
-      <div className="md:text-center">
-        <p className="text-xs font-bold text-text">
-          {title}
-        </p>
-
-        <p className="mt-0.5 text-[10px] text-text-muted">
-          {description}
-        </p>
-      </div>
-    </div>
-  );
-}
-
-function PipelineConnector() {
-  return (
-    <div className="ml-5 h-6 w-px bg-slate-200 md:ml-0 md:h-px md:w-full" />
-  );
+    );
 }

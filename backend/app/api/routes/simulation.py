@@ -29,33 +29,33 @@ def run_simulation(request: SimulationRequest) -> SimulationResult:
 
 
 @router.post("/stop")
-def stop_simulation():
+def stop_simulation(context: str = "default"):
 	try:
-		return simulation_service.stop()
+		return simulation_service.stop(context)
 	except SimulationServiceError as exc:
 		raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @router.post("/pause")
-def pause_simulation():
+def pause_simulation(context: str = "default"):
 	try:
-		return simulation_service.pause()
+		return simulation_service.pause(context)
 	except Exception as exc:
 		raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @router.post("/resume")
-def resume_simulation():
+def resume_simulation(context: str = "default"):
 	try:
-		return simulation_service.resume()
+		return simulation_service.resume(context)
 	except Exception as exc:
 		raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @router.get("/state")
-def get_simulation_state():
+def get_simulation_state(context: str = "default"):
 	try:
-		return simulation_service.get_simulation_state()
+		return simulation_service.get_simulation_state(context)
 	except Exception as exc:
 		raise HTTPException(status_code=500, detail=str(exc)) from exc
 
@@ -64,7 +64,7 @@ def get_simulation_state():
 def sync_simulation_clock(request: SimulationClockRequest):
 	# Sinkronisasi bersifat best-effort. Saat video lebih dulu siap daripada
 	# SUMO, respons tetap 200 dengan synced=false dan event berikutnya mencoba lagi.
-	return simulation_service.sync_clock(request.videoTimeSeconds)
+	return simulation_service.sync_clock(request.videoTimeSeconds, request.context)
 
 
 @router.post("/scenario")
@@ -74,23 +74,24 @@ def apply_simulation_scenario(request: SimulationScenarioRequest):
 		return simulation_service.apply_scenario(
 			request.scenario,
 			request.cyclePlan.model_dump(),
+			request.context,
 		)
 	except SimulationServiceError as exc:
 		raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @router.get("/stream")
-def get_simulation_stream():
+def get_simulation_stream(context: str = "default"):
 	return StreamingResponse(
-		stream_simulation(fps=10),
+		stream_simulation(fps=10, context=context),
 		media_type="multipart/x-mixed-replace; boundary=frame"
 	)
 
 
 @router.get("/frame")
-def get_simulation_frame():
+def get_simulation_frame(context: str = "default"):
 	"""Satu frame SUMO; request finite supaya shutdown Ctrl+C bersih."""
-	frame_path = Path(__file__).resolve().parents[4] / "cache" / "simulation" / "frame.jpg"
+	frame_path = Path(__file__).resolve().parents[4] / "cache" / "simulation" / f"frame_{context}.jpg"
 	if not frame_path.exists():
 		raise HTTPException(status_code=404, detail="Frame SUMO belum tersedia.")
 	try:
