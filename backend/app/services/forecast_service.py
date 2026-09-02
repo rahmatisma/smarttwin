@@ -1112,6 +1112,21 @@ class ForecastService:
 
             forecasts.append(row)
 
+        metrics = self.metadata.get("metrics", {})
+        feature_mae = metrics.get("feature_mae", {}) if isinstance(metrics, dict) else {}
+        error_bands: dict[str, float] = {
+            feature: max(0.0, float(feature_mae.get(feature, 0.0)))
+            for feature in FEATURES
+        }
+        for row in forecasts:
+            row["empiricalErrorBand"] = {
+                feature: {
+                    "lower": round(max(0.0, float(row[feature]) - error_bands[feature]), 4),
+                    "upper": round(float(row[feature]) + error_bands[feature], 4),
+                }
+                for feature in FEATURES
+            }
+
         # ----------------------------------------------------
         # Response
         # ----------------------------------------------------
@@ -1161,6 +1176,20 @@ class ForecastService:
             },
 
             "forecast": forecasts,
+
+            "uncertainty": {
+                "method": "holdout-mae-error-band",
+                "isConfidenceInterval": False,
+                "featureMae": error_bands,
+                "note": (
+                    "Rentang adalah prediksi ± MAE holdout dan bukan interval "
+                    "kepercayaan statistik. Gunakan sebagai indikator ketidakpastian."
+                ),
+            },
+
+            "baselineEvaluation": metrics.get("naive_baseline", {}),
+
+            "beatsNaiveBaseline": bool(metrics.get("beatsNaiveBaseline", False)),
         }
 
     # ========================================================

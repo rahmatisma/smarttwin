@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import Response, StreamingResponse
 from pathlib import Path
 from app.schemas.simulation import (
@@ -12,6 +12,7 @@ from app.services.simulation_service import (
 	simulation_service,
 )
 from app.services.simulation_stream_service import stream_simulation
+from app.core.auth import require_operator
 
 
 router = APIRouter(
@@ -20,7 +21,7 @@ router = APIRouter(
 )
 
 
-@router.post("/run", response_model=SimulationResult)
+@router.post("/run", response_model=SimulationResult, dependencies=[Depends(require_operator)])
 def run_simulation(request: SimulationRequest) -> SimulationResult:
 	try:
 		return simulation_service.run(request)
@@ -28,7 +29,7 @@ def run_simulation(request: SimulationRequest) -> SimulationResult:
 		raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
-@router.post("/stop")
+@router.post("/stop", dependencies=[Depends(require_operator)])
 def stop_simulation(context: str = "default"):
 	try:
 		return simulation_service.stop(context)
@@ -36,7 +37,7 @@ def stop_simulation(context: str = "default"):
 		raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
-@router.post("/pause")
+@router.post("/pause", dependencies=[Depends(require_operator)])
 def pause_simulation(context: str = "default"):
 	try:
 		return simulation_service.pause(context)
@@ -44,7 +45,7 @@ def pause_simulation(context: str = "default"):
 		raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
-@router.post("/resume")
+@router.post("/resume", dependencies=[Depends(require_operator)])
 def resume_simulation(context: str = "default"):
 	try:
 		return simulation_service.resume(context)
@@ -60,14 +61,18 @@ def get_simulation_state(context: str = "default"):
 		raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
-@router.post("/sync-clock")
+@router.post("/sync-clock", dependencies=[Depends(require_operator)])
 def sync_simulation_clock(request: SimulationClockRequest):
 	# Sinkronisasi bersifat best-effort. Saat video lebih dulu siap daripada
 	# SUMO, respons tetap 200 dengan synced=false dan event berikutnya mencoba lagi.
-	return simulation_service.sync_clock(request.videoTimeSeconds, request.context)
+	return simulation_service.sync_clock(
+		request.videoTimeSeconds,
+		request.videoDurationSeconds,
+		request.context,
+	)
 
 
-@router.post("/scenario")
+@router.post("/scenario", dependencies=[Depends(require_operator)])
 def apply_simulation_scenario(request: SimulationScenarioRequest):
 	"""Ganti program TLS pada sesi aktif tanpa build TrafficState/restart SUMO."""
 	try:
@@ -81,9 +86,9 @@ def apply_simulation_scenario(request: SimulationScenarioRequest):
 
 
 @router.get("/stream")
-def get_simulation_stream(context: str = "default"):
+def get_simulation_stream(request: Request, context: str = "default"):
 	return StreamingResponse(
-		stream_simulation(fps=10, context=context),
+		stream_simulation(request, fps=10, context=context),
 		media_type="multipart/x-mixed-replace; boundary=frame"
 	)
 

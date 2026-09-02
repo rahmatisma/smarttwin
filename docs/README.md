@@ -1,5 +1,10 @@
 # Indeks Dokumentasi SmartTwin
 
+> Catatan perapian repository dan hasil audit terbaru:
+> [`CATATAN-PERAPIAN-DAN-HASIL-AUDIT.md`](CATATAN-PERAPIAN-DAN-HASIL-AUDIT.md).
+> Dokumen tersebut mencatat perubahan dokumentasi dan temuan audit, bukan
+> menggantikan status resmi proyek di bawah ini.
+
 Dirapikan **28 Agustus 2026**. Sebelumnya ada 20 dokumen yang saling bertentangan dan banyak berisi tugas yang sudah selesai — itu bikin tim bingung. Sekarang tinggal 14, dan **cuma ada 3 jenis**:
 
 | Jenis | Isinya | Berubah kapan |
@@ -43,6 +48,7 @@ Dokumen "apa yang berubah di satu sesi kerja", supaya tidak perlu membaca diff m
 | [`../CLAUDE.md`](../CLAUDE.md) | Konteks proyek, konvensi, ringkasan arsitektur. Paling singkat, buat orientasi awal |
 | [`data-contract.md`](data-contract.md) | Kontrak **semantik** antar modul — field apa saja yang ada dan artinya apa (gaya Pydantic, snake_case). Kalau ubah field yang menyeberang modul, sepakati di sini dulu |
 | [`sop-demo-end-to-end.md`](sop-demo-end-to-end.md) | **Urutan nyalakan sistem sebelum demo/rekaman.** Wajib diikuti — kalau worker tidak jalan, dashboard diam-diam melewati kotak 7/8/9 tanpa error |
+| [`MODEL-DAN-DATASET-CARD.md`](MODEL-DAN-DATASET-CARD.md) | Ringkasan model CV/LSTM/PPO, metrik yang boleh diklaim, serta keterbatasannya |
 
 ### Sesuai bagianmu
 

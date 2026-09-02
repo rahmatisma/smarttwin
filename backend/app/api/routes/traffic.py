@@ -4,6 +4,7 @@ from typing import Any
 
 from fastapi import (
     APIRouter,
+    Depends,
     HTTPException,
     Query,
     WebSocket,
@@ -13,6 +14,7 @@ from fastapi import (
 from app.services.traffic_service import (
     TrafficService,
     TrafficServiceError,
+    TrafficServiceUnavailableError,
 )
 
 from app.schemas.traffic_response import (
@@ -28,6 +30,7 @@ from app.pipeline.traffic_state_builder import (
     TrafficStateBuilder,
     TrafficStateBuilderConfig,
 )
+from app.core.auth import require_operator
 
 
 # ============================================================
@@ -151,8 +154,8 @@ def get_live_csv(
     except Exception as exc:
 
         raise HTTPException(
-            status_code=500,
-            detail=str(exc),
+            status_code=503,
+            detail="Data traffic sementara tidak tersedia.",
         ) from exc
 
 
@@ -211,6 +214,13 @@ def get_latest_traffic(
                 data,
         }
 
+    except TrafficServiceUnavailableError as exc:
+
+        raise HTTPException(
+            status_code=503,
+            detail="Data traffic sementara tidak tersedia.",
+        ) from exc
+
     except TrafficServiceError as exc:
 
         raise HTTPException(
@@ -265,7 +275,7 @@ async def traffic_websocket(
 # NOTIFY TRAFFIC UPDATE
 # ============================================================
 
-@router.post("/notify")
+@router.post("/notify", dependencies=[Depends(require_operator)])
 async def notify_traffic_update(
     payload: dict[str, Any],
 ) -> dict[str, str]:

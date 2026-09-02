@@ -4,6 +4,7 @@ import inspect
 import threading
 import time
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -190,6 +191,9 @@ class SimulationService:
 
         self.active_intersection_id: dict[str, str | None] = {}
         self.active_traffic_state_id: dict[str, str | None] = {}
+        self.active_scenario: dict[str, str | None] = {}
+        self.active_seed: dict[str, int | None] = {}
+        self.started_at: dict[str, str | None] = {}
 
     # ============================================================
     # CONTROLLER LOOKUP
@@ -614,6 +618,9 @@ class SimulationService:
             # ====================================================
 
             self.controllers[context] = controller
+            self.active_scenario[context] = request.scenario
+            self.active_seed[context] = request.seed
+            self.started_at[context] = datetime.now(timezone.utc).isoformat()
 
             print(
                 "SUMO controller berhasil disimpan "
@@ -954,6 +961,9 @@ class SimulationService:
                     "trafficStateId": (
                         self.active_traffic_state_id.get(context)
                     ),
+                    "scenario": self.active_scenario.get(context),
+                    "seed": self.active_seed.get(context),
+                    "startedAt": self.started_at.get(context),
                 }
 
             # ----------------------------------------------------
@@ -996,6 +1006,9 @@ class SimulationService:
                 "trafficStateId": (
                     self.active_traffic_state_id.get(context)
                 ),
+                "scenario": self.active_scenario.get(context),
+                "seed": self.active_seed.get(context),
+                "startedAt": self.started_at.get(context),
                 **metrics,
             }
 
@@ -1016,7 +1029,10 @@ class SimulationService:
                 "paused": False,
                 "vehicles": [],
                 "signals": [],
-                "simulationTimeSeconds": 0
+                "simulationTimeSeconds": 0,
+                "scenario": self.active_scenario.get(context),
+                "seed": self.active_seed.get(context),
+                "startedAt": self.started_at.get(context),
             }
         return {
             "backendInstanceId": self.instance_id,
@@ -1027,7 +1043,7 @@ class SimulationService:
             "lastSyncFailedInsertions": controller.live_last_sync_failed_insertions,
             "lastSyncFailedByApproach": controller.live_last_sync_failed_by_approach,
             "signals": list(controller.active_signals_data),
-            "simulationTimeSeconds": controller.last_simulation_time,
+            "simulationTimeSeconds": controller.get_display_time(),
             "detectedVehicles": controller.detected_vehicle_count,
             "trafficTimestamp": controller.traffic_timestamp,
             "cyclePlan": controller.active_cycle_plan,
@@ -1048,10 +1064,16 @@ class SimulationService:
                 1,
             ),
             "los": calculate_los(controller.live_avg_delay_seconds),
+            "scenario": self.active_scenario.get(context),
+            "seed": self.active_seed.get(context),
+            "startedAt": self.started_at.get(context),
         }
 
     def sync_clock(
-        self, video_time_seconds: float, context: str = "default"
+        self,
+        video_time_seconds: float,
+        video_duration_seconds: float | None = None,
+        context: str = "default",
     ) -> dict[str, Any]:
         """Camera Feed adalah clock utama untuk fase lampu realtime."""
         controller = self.controllers.get(context)
@@ -1068,7 +1090,7 @@ class SimulationService:
                 "videoTimeSeconds": video_time_seconds,
             }
         try:
-            return controller.sync_signal_clock(video_time_seconds)
+            return controller.sync_signal_clock(video_time_seconds, video_duration_seconds)
         except RuntimeError as exc:
             return {
                 "synced": False,
@@ -1094,11 +1116,12 @@ class SimulationService:
         except Exception as exc:
             raise SimulationServiceError(f"Gagal menerapkan skenario: {exc}") from exc
         controller.scenario = scenario
+        self.active_scenario[context] = scenario
         return {
             "applied": True,
             "scenario": scenario,
             "paused": controller.paused,
-            "simulationTimeSeconds": controller.last_simulation_time,
+            "simulationTimeSeconds": controller.get_display_time(),
         }
 
     # ============================================================
@@ -1175,6 +1198,12 @@ class SimulationService:
                 self.active_intersection_id[context] = None
 
                 self.active_traffic_state_id[context] = None
+
+                self.active_scenario[context] = None
+
+                self.active_seed[context] = None
+
+                self.started_at[context] = None
 
             # ----------------------------------------------------
             # RETURN

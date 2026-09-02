@@ -1,4 +1,5 @@
 import logging
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -10,6 +11,8 @@ load_dotenv(Path(__file__).resolve().parents[1] / ".env", override=False)
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+
+from app.core.config import settings
 
 from app.api.routes.traffic import (
     router as traffic_router,
@@ -31,6 +34,17 @@ from app.services.simulation_service import simulation_service
 
 
 logger = logging.getLogger("uvicorn.error")
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    try:
+        yield
+    finally:
+        # Tutup thread/TraCI lebih dahulu agar proses SUMO tidak tertinggal,
+        # baru tutup koneksi HTTP eksternal.
+        simulation_service.stop()
+        await close_hf_client()
 
 
 # =========================================================
@@ -79,6 +93,7 @@ except Exception as exc:
 app = FastAPI(
     title="SmartTwin Backend",
     version="1.0.0",
+    lifespan=lifespan,
 )
 
 
@@ -89,10 +104,7 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
 
-    allow_origins=[
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-    ],
+    allow_origins=settings.cors_origins_list,
 
     allow_credentials=True,
 

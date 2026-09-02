@@ -5,6 +5,12 @@ keadaan lampu, bagaimana melatihnya, bagaimana mengujinya, dan kapan model aman
 dipasang ke backend**. Perintah diasumsikan dijalankan dari
 `D:\LOMBA\kmipn\smarttwin` menggunakan PowerShell.
 
+> **Pembagian dokumentasi:** `README-PPO.md` adalah ringkasan konsep, kontrak,
+> dan status implementasi PPO. Dokumen ini adalah panduan operasional tim untuk
+> instalasi, training, evaluasi, quality gate, dan aktivasi endpoint. Jika ada
+> perbedaan nilai default setelah kode diperbarui, kode serta konfigurasi
+> runtime adalah sumber kebenaran; setelah itu kedua README wajib diselaraskan.
+
 ## 1. Jawaban singkat atas pertanyaan “input PPO cuma empat fitur?”
 
 Tidak. Input model PPO SmartTwin adalah vektor **25 angka**. Angka 4 yang terlihat

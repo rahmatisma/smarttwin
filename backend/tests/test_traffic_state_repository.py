@@ -13,6 +13,9 @@ from app.schemas.traffic import (
 )
 
 
+pytestmark = pytest.mark.integration
+
+
 def test_save_traffic_state():
     try:
         payload = settings.supabase_service_role_key.split(".")[1]

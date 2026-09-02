@@ -4,6 +4,7 @@ from fastapi.testclient import TestClient
 
 from app.main import app
 from app.api.routes import traffic as traffic_routes
+from app.services.traffic_service import TrafficServiceError
 
 
 client = TestClient(app)
@@ -22,7 +23,42 @@ def test_health():
     assert data["status"] == "ok"
 
 
-def test_get_latest_traffic():
+def _traffic_state_fixture():
+    return {
+        "trafficState": {
+            "id": 1,
+            "intersectionId": 1,
+            "windowStart": "2026-09-01T00:00:00+00:00",
+            "windowEnd": "2026-09-01T00:00:05+00:00",
+        },
+        "approaches": [
+            {
+                "trafficStateId": 1,
+                "approachId": index,
+                "approach": approach,
+                "volume": 1,
+                "carCount": 1,
+                "motorcycleCount": 0,
+                "busCount": 0,
+                "truckCount": 0,
+                "queueLengthVeh": 0,
+                "queueLengthMEst": 0.0,
+                "densityIndex": 1.0,
+                "avgSpeedKmh": None,
+            }
+            for index, approach in enumerate(
+                ("north", "south", "east", "west"), start=1
+            )
+        ],
+    }
+
+
+def test_get_latest_traffic(monkeypatch):
+    monkeypatch.setattr(
+        traffic_routes.traffic_service,
+        "get_latest_traffic",
+        lambda **_kwargs: [_traffic_state_fixture()],
+    )
     response = client.get(
         f"/api/traffic/{INTERSECTION_ID}",
         params={
@@ -41,7 +77,12 @@ def test_get_latest_traffic():
     assert len(data["data"]) <= 5
 
 
-def test_get_latest_traffic_contains_approaches():
+def test_get_latest_traffic_contains_approaches(monkeypatch):
+    monkeypatch.setattr(
+        traffic_routes.traffic_service,
+        "get_latest_traffic",
+        lambda **_kwargs: [_traffic_state_fixture()],
+    )
     response = client.get(
         f"/api/traffic/{INTERSECTION_ID}",
         params={
@@ -70,7 +111,15 @@ def test_get_latest_traffic_contains_approaches():
     assert len(approaches) == 4
 
 
-def test_get_invalid_intersection():
+def test_get_invalid_intersection(monkeypatch):
+    def not_found(**_kwargs):
+        raise TrafficServiceError("Intersection tidak ditemukan.")
+
+    monkeypatch.setattr(
+        traffic_routes.traffic_service,
+        "get_latest_traffic",
+        not_found,
+    )
     response = client.get(
         "/api/traffic/intersection-tidak-ada",
         params={
@@ -94,6 +143,26 @@ def test_get_latest_traffic_returns_controlled_503_on_connection_error(monkeypat
     response = client.get(
         f"/api/v1/traffic/{INTERSECTION_ID}",
         params={"limit": 12},
+        headers={"Origin": "http://localhost:3000"},
+    )
+
+    assert response.status_code == 503
+    assert response.json() == {"detail": "Data traffic sementara tidak tersedia."}
+    assert response.headers["access-control-allow-origin"] == "http://localhost:3000"
+
+
+def test_live_csv_returns_controlled_503_on_connection_error(monkeypatch):
+    def fail_temporarily(*_args, **_kwargs):
+        raise RuntimeError("temporary upstream disconnect")
+
+    monkeypatch.setattr(
+        traffic_routes.TrafficStateBuilder,
+        "buildFromSupabase",
+        fail_temporarily,
+    )
+
+    response = client.get(
+        "/api/v1/traffic/live-csv",
         headers={"Origin": "http://localhost:3000"},
     )
 

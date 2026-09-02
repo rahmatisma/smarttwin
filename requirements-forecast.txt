@@ -1,0 +1,2 @@
+# Untuk wheel CPU-only, install torch dari index resmi PyTorch terlebih dahulu.
+torch==2.13.0

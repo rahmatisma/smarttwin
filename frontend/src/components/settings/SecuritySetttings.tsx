@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import {
     Shield,
     Lock,
@@ -15,6 +16,7 @@ import {
 import { supabase } from "@/lib/supabaseClient";
 
 export default function SecuritySettings() {
+    const router = useRouter();
     const [showCurrentPassword, setShowCurrentPassword] =
         useState(false);
 
@@ -209,7 +211,8 @@ export default function SecuritySettings() {
                 throw error;
             }
 
-            window.location.href = "/login";
+            router.replace("/login");
+            router.refresh();
         } catch (error) {
             console.error(
                 "Failed to sign out from all devices:",

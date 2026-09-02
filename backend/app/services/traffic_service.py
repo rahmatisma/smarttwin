@@ -20,6 +20,12 @@ class TrafficServiceError(Exception):
     pass
 
 
+class TrafficServiceUnavailableError(TrafficServiceError):
+    """Sumber data traffic sedang tidak dapat dihubungi."""
+
+    pass
+
+
 # ============================================================
 # TRAFFIC SERVICE
 # ============================================================
@@ -90,7 +96,7 @@ class TrafficService:
             # httpx dapat melempar RemoteProtocolError ketika koneksi keep-alive
             # Supabase diputus server. Ubah menjadi error domain agar pemanggil
             # memakai fallback, bukan mencetak traceback panjang.
-            raise TrafficServiceError(
+            raise TrafficServiceUnavailableError(
                 "Koneksi sumber data traffic terputus sementara."
             ) from exc
 
@@ -161,7 +167,7 @@ class TrafficService:
             ) from exc
 
         except Exception as exc:
-            raise TrafficServiceError(
+            raise TrafficServiceUnavailableError(
                 "Koneksi sumber data traffic terputus sementara."
             ) from exc
 

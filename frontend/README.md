@@ -1,36 +1,54 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# SmartTwin Frontend
 
-## Getting Started
+Dashboard Next.js untuk monitoring CCTV, kondisi lalu lintas, forecast,
+rekomendasi lampu, dan visualisasi SUMO Digital Twin.
 
-First, run the development server:
+## Environment
 
-```bash
-npm run dev
-# or
-yarn dev a
-# or
-pnpm dev
-# or
-bun dev
+Buat `frontend/.env.local`:
+
+```env
+NEXT_PUBLIC_API_URL=http://127.0.0.1:8000
+NEXT_PUBLIC_SUPABASE_URL=
+NEXT_PUBLIC_SUPABASE_ANON_KEY=
+SUPABASE_SERVICE_ROLE_KEY=
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+`SUPABASE_SERVICE_ROLE_KEY` hanya digunakan Route Handler server-side dan tidak
+boleh diberi prefix `NEXT_PUBLIC_`.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Menjalankan
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```powershell
+npm install
+npm run dev
+```
 
-## Learn More
+Buka `http://localhost:3000`. Backend default berada di
+`http://127.0.0.1:8000`.
 
-To learn more about Next.js, take a look at the following resources:
+## Pemeriksaan kualitas
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+```powershell
+npm run lint
+npm test
+npm run build
+```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+Test menggunakan runner bawaan Node.js sehingga tidak menambah framework test
+baru. Production build tidak mengambil Google Fonts dan dapat dilakukan tanpa
+akses ke `fonts.googleapis.com`.
 
-## Deploy on Vercel
+## Struktur penting
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+| Lokasi | Fungsi |
+|---|---|
+| `src/app/` | Route dan halaman App Router |
+| `src/components/` | Komponen dashboard |
+| `src/context/` | State skenario lintas halaman |
+| `src/lib/` | Integrasi API/Supabase dan helper kontrak |
+| `src/types/` | Kontrak TypeScript |
+| `tests/` | Unit test helper murni |
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Perubahan field traffic atau recommendation harus diperiksa juga terhadap
+schema backend dan [`../docs/data-contract.md`](../docs/data-contract.md).

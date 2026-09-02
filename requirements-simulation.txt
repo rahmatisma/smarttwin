@@ -1,0 +1,4 @@
+# Binary SUMO dan client TraCI harus memiliki versi yang sama.
+eclipse-sumo==1.27.1
+traci==1.27.1
+sumolib==1.27.1

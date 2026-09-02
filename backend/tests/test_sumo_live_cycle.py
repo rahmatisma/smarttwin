@@ -102,6 +102,25 @@ def test_camera_clock_selects_yellow_phase_without_resetting_simulation_time():
     assert controller.last_simulation_time == 123
 
 
+def test_camera_clock_wraps_display_time_without_resetting_sumo():
+    controller = SumoController()
+    traffic_light = FakeTrafficLight()
+    controller.traci = SimpleNamespace(trafficlight=traffic_light)
+    controller.running = True
+    controller.last_simulation_time = 1130
+    controller.apply_cycle_plan({
+        "phases": [
+            {"approach": name, "greenSeconds": 20, "yellowSeconds": 4}
+            for name in ("north", "east", "south", "west")
+        ]
+    })
+
+    controller.sync_signal_clock(2.0, 1128.0)
+
+    assert 2.0 <= controller.get_display_time() < 2.1
+    assert controller.last_simulation_time == 1130
+
+
 def test_realtime_demand_is_replenished_after_vehicles_leave(monkeypatch):
     controller = SumoController()
     controller.current_demand = {

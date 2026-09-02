@@ -1,20 +1,42 @@
-# Docker Compose — belum aktif, dan itu memang sengaja
+# Deployment Docker SmartTwin
 
-Docker Compose statusnya "kalau sempat" dan boleh dilepas kalau waktu mepet — native run satu laptop tetap sah buat demo. Lihat `docs/STATUS-DAN-SISA-KERJA.md` bagian 5 (yang TIDAK dikerjakan).
+Konfigurasi ini menjalankan backend FastAPI dan frontend Next.js. SUMO headless
+tersedia melalui dependency backend. CV GPU tetap dijalankan terpisah karena
+passthrough CUDA pada Windows/WSL membutuhkan konfigurasi host khusus.
 
-Sampai saat itu, tiap modul jalan native (Python venv per folder + `npm run dev` buat frontend). Alasannya:
+## Persiapan
 
-- Requirements tiap modul belum stabil. Kalau Dockerfile ditulis sekarang, begitu Melpi/Yuli nambah dependency yang mereka butuhin, Dockerfile-nya harus direvisi ulang berkali-kali.
-- GPU passthrough justru nambah titik gagal buat modul CV. ultralytics/PyTorch butuh akses GPU biar deteksi real-time gak lemot. Di Windows, GPU passthrough ke Docker container butuh WSL2 backend + NVIDIA Container Toolkit dikonfigurasi bener — lapisan tambahan yang bisa jadi sumber masalah baru, bukan solusi, kalau belum familiar.
-- `backend/` sendiri masih kosong. Percuma nyusun compose file kalau service yang mau di-compose belum ada.
+1. Isi `.env` di root untuk backend.
+2. Sediakan variabel berikut pada shell atau file `docker/.env` untuk build
+   frontend:
 
-## Pas waktunya tiba (Fase 4)
+```env
+NEXT_PUBLIC_SUPABASE_URL=
+NEXT_PUBLIC_SUPABASE_ANON_KEY=
+SUPABASE_SERVICE_ROLE_KEY=
+```
 
-Checklist sebelum mulai nulis Dockerfile beneran:
+3. Pastikan user Supabase yang mengontrol simulasi mempunyai
+   `app_metadata.role=operator` atau `admin`. Compose mengaktifkan
+   `AUTH_REQUIRED=true` pada backend.
 
-- [ ] `backend/` sudah ada isinya dan `backend/requirements.txt` sudah dibuat
-- [ ] `cv/requirements.txt` dan `simulation/requirements.txt` sudah final (bukan draft lagi)
-- [ ] Cek dulu Melpi butuh GPU passthrough atau nggak — kalau ya, alokasikan waktu ekstra buat setup WSL2 + NVIDIA Container Toolkit, jangan diasumsikan otomatis jalan
-- [ ] Docker Desktop terinstall di semua laptop tim yang bakal jalanin compose-nya
+## Build dan run
 
-Catatan: PPO belum dikerjakan (nol kode RL) — lihat `docs/STATUS-DAN-SISA-KERJA.md` item P-1.
+```powershell
+Set-Location docker
+docker compose up --build
+```
+
+- Dashboard: `http://localhost:3000`
+- Backend: `http://localhost:8000`
+- API docs: `http://localhost:8000/docs`
+- Detailed health: `http://localhost:8000/api/v1/health/details`
+
+## Batasan
+
+- Container frontend menerima `NEXT_PUBLIC_*` ketika build; rebuild jika URL
+  publik berubah.
+- SUMO GUI tidak diekspos dari container. Gunakan `gui=false` untuk deployment.
+- Worker skenario dan CV GPU belum menjadi service compose agar tidak otomatis
+  menjalankan pekerjaan berat tanpa sumber data yang disiapkan operator.
+- Secret tidak boleh ditulis di `compose.yaml` atau di-commit.

@@ -5,13 +5,14 @@ import tempfile
 from pathlib import Path
 
 import httpx
-from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, Request, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, StreamingResponse
 
 from app.core.config import settings
 from app.services.cctv_service import CctvServiceError, get_video_hf_location, upload_camera_video
 from app.services.cv_trigger_service import trigger_cv_processing
+from app.core.auth import require_operator
 
 router = APIRouter(
     prefix="/api/v1/cctv",
@@ -181,7 +182,7 @@ async def populate_video_cache(
 # UPLOAD VIDEO
 # ============================================================
 
-@router.post("/upload")
+@router.post("/upload", dependencies=[Depends(require_operator)])
 async def upload_cctv_video(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
@@ -209,16 +210,34 @@ async def upload_cctv_video(
             detail="File yang diupload harus berupa video.",
         )
 
-    suffix = Path(file.filename or "video.mp4").suffix or ".mp4"
+    suffix = Path(file.filename or "video.mp4").suffix.lower() or ".mp4"
+    if suffix not in {".mp4", ".mov", ".avi", ".mkv", ".webm"}:
+        raise HTTPException(
+            status_code=400,
+            detail="Ekstensi video tidak didukung.",
+        )
+
+    content_length = file.headers.get("content-length")
+    if content_length and int(content_length) > settings.max_video_upload_bytes:
+        raise HTTPException(status_code=413, detail="Ukuran video melebihi batas upload.")
     temp_file = tempfile.NamedTemporaryFile(suffix=suffix, delete=False)
     file_size = 0
 
     try:
         while chunk := await file.read(CHUNK_SIZE):
-            temp_file.write(chunk)
             file_size += len(chunk)
+            if file_size > settings.max_video_upload_bytes:
+                break
+            temp_file.write(chunk)
     finally:
         temp_file.close()
+
+    if file_size > settings.max_video_upload_bytes:
+        Path(temp_file.name).unlink(missing_ok=True)
+        raise HTTPException(
+            status_code=413,
+            detail="Ukuran video melebihi batas upload.",
+        )
 
     if file_size == 0:
         Path(temp_file.name).unlink(missing_ok=True)
@@ -247,7 +266,7 @@ async def upload_cctv_video(
         Path(temp_file.name).unlink(missing_ok=True)
         raise HTTPException(
             status_code=502,
-            detail=f"Gagal mengupload video ke Hugging Face: {exc}",
+            detail="Gagal mengupload video ke penyimpanan eksternal.",
         ) from exc
 
     background_tasks.add_task(
