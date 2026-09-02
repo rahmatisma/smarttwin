@@ -116,6 +116,11 @@ class _FakeControllerWithLiveMetrics:
     def is_running(self):
         return True
 
+    def get_display_time(self):
+        # Tiru fallback SumoController.get_display_time(): tanpa camera clock,
+        # kembalikan last_simulation_time.
+        return self.last_simulation_time
+
 
 def test_get_simulation_state_exposes_live_traffic_metrics():
     service = SimulationService()
