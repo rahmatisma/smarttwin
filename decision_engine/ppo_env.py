@@ -20,7 +20,30 @@ from .rule_based_engine import FIXED_CYCLE_ORDER, RuleBasedEngine, YELLOW_SECOND
 from app.schemas.traffic import ApproachState, TrafficState
 
 ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_CONFIG = ROOT / "simulation/network/simpang4_pingit_live.sumocfg"
+# JARINGAN TRAINING TERPISAH (2 September 2026). Sengaja BUKAN
+# simpang4_pingit_live.sumocfg yang dipakai demo/digital twin
+# (backend/app/services/simulation_service.py) -- jaringan kanonik itu tidak
+# boleh berubah menjelang rekaman.
+#
+# Alasan pemisahan: di jaringan kanonik, koridor pendekat terpotong batas
+# ekstraksi OSM (north 62 m/16 kendaraan, east 57 m/14, vs south 522 m/138 --
+# timpang 9,86x). Kendaraan dilepas di awal EDGE_HULU, jadi lengan pendek
+# tidak bisa menampung antrean: kelebihan permintaan GAGAL MASUK simulasi,
+# tidak terlihat reward maupun observasi. Terukur (6 seed berpasangan,
+# selisih reward alokasi proporsional vs seragam, total hijau disamakan):
+# di jaringan kanonik alokasi TIDAK BERPENGARUH di skala 0,40/0,60/0,80 --
+# ketiganya derau. Itu sebabnya lima training sebelumnya gagal identik dan
+# lima percobaan reward-shaping tidak menolong; memang tidak ada gradien.
+#
+# Jaringan training memanjangkan koridor buntu ke 500 m (kapasitas
+# 138/136/140/136, timpang 1,03x) dengan seluruh ID edge/node, jumlah lajur,
+# dan 20 koneksi TLS dipertahankan. Dibangun ulang oleh
+# simulation/bangun_jaringan_training.py, yang gagal keras kalau ada kontrak
+# yang bergeser.
+#
+# Ini TIDAK menimbulkan ketidakcocokan sim-to-real: PPOEngine saat inference
+# tidak menyentuh SUMO sama sekali, cuma membaca TrafficState dari CV.
+DEFAULT_CONFIG = ROOT / "simulation/network/simpang4_pingit_training.sumocfg"
 DEFAULT_DATA = ROOT / "cv/output/crossing_simpang.csv"
 DEFAULT_DENSITY_DATA = ROOT / "cv/output/snapshot_zona.csv"
 FEATURE_WINDOW_SECONDS = 5
@@ -110,7 +133,17 @@ FAIRNESS_REWARD_WEIGHT = 0.10
 # ⚠️ UKUR ULANG setelah Bug H & I diperbaiki: cap injeksi dinaikkan dan profil
 # permintaan tidak lagi dibekukan, jadi laju yang terjadi akan berubah.
 THROUGHPUT_SATURATION_RATE = 1.0
-QUEUE_SATURATION_VEH = 100.0
+
+# DIUKUR ULANG 2 September 2026 (100,0 -> 330,0) di jaringan training +
+# SKALA_PERMINTAAN 0,60. Nilai 100,0 ditetapkan saat koridor pendekat masih
+# terpotong sehingga antrean fisik tidak bisa besar. Dengan koridor 500 m,
+# 100,0 MENTOK di 40,8% sampel (queue_norm rata-rata 0,688) -- komponen
+# antrean kehilangan gradien persis seperti kelas Bug E/G.
+#
+# Diukur 3 panjang rotasi (15/35/60) x 5 seed x 8 langkah = 120 sampel:
+#   antrean total: min 12 | p50 77 | p95 255 | maks 306 | rerata 100,1
+# 330 = p95 x 1,3, menyisakan kepala ruang di atas maksimum teramati.
+QUEUE_SATURATION_VEH = 330.0
 
 # BUG P (ditemukan 30 Agustus, training v5 dihentikan di 30k). Diukur, bukan
 # ditebak -- lihat catatan lengkap di FAIRNESS_REWARD_WEIGHT di atas.
@@ -127,7 +160,28 @@ QUEUE_SATURATION_VEH = 100.0
 MAX_QUEUE_LENGAN_SATURATION_VEH = 20.0  # tidak dipakai reward lagi, cuma diagnostik
 # Diukur (5 seed x 3 panjang rotasi): min 14, p50 76, p95 155, maks 347,
 # rata-rata 87,9. Kepala ruang ~44% di atas maksimum teramati.
-QUEUE_KUADRAT_SATURATION = 500.0
+#
+# DIUKUR ULANG 2 September 2026 (500,0 -> 29.000,0). Angka 500 di atas berasal
+# dari jaringan kanonik yang antrean per lengannya cuma belasan kendaraan;
+# karena besaran ini KUADRATIK, memperpanjang koridor menaikkannya jauh lebih
+# cepat daripada antrean total. Di jaringan training + skala 0,60, ambang 500
+# MENTOK di 78,3% sampel (fairness_norm rata-rata 0,899) -- artinya penalti
+# keadilan praktis konstan dan tidak lagi membedakan alokasi baik dari buruk.
+# Ini ironis: justru komponen yang ditambahkan untuk mengatasi Bug P yang
+# paling buta.
+#
+# Diukur 3 panjang rotasi x 5 seed x 8 langkah = 120 sampel:
+#   kuadrat antrean: min 50 | p50 2.269 | p95 22.235 | maks 31.758
+# 29.000 = p95 x 1,3. Pada ambang ini penalti keadilan bergerak ~0,008
+# (median) sampai ~0,077 (p95) -- rentang yang sebanding dengan efek alokasi
+# terukur (+0,0199), jadi cukup untuk memberi gradien.
+#
+# Catatan untuk perbaikan lanjutan kalau masih kurang tajam: besaran ini
+# berekor sangat panjang, jadi normalisasi LINIER selalu terjepit di bawah
+# atau mentok di atas. Memakai akar kuadratnya (norma L2 antrean per lengan,
+# skalanya sama dengan queue) akan jauh lebih landai. Sengaja TIDAK dilakukan
+# sekarang supaya perubahan kali ini tetap satu variabel dan bisa diatribusi.
+QUEUE_KUADRAT_SATURATION = 29000.0
 
 # BUG O (ditemukan 30 Agustus): `jumlah_crossing` di crossing_simpang.csv
 # menghitung kendaraan yang melintasi garis ke ARAH MANA PUN -- lihat
@@ -182,7 +236,30 @@ BAGI_ARUS_DUA_ARAH = 2.0
 # Catatan kejujuran: antrean simulasi pada skala ini (16,6) masih di atas
 # antrean nyata di lapangan (2,7 kendaraan, dari snapshot_zona.csv). Kalibrasi
 # ini mengejar lingkungan yang BISA DIPELAJARI, bukan replika lapangan.
-SKALA_PERMINTAAN = 0.40
+# DIKALIBRASI ULANG 2 September 2026 (0,40 -> 0,60) karena angka 0,40 di atas
+# disapu pada JARINGAN KANONIK, yang koridornya terlalu pendek. Di jaringan
+# training berkoridor 500 m batas "kendaraan nyangkut" bergeser jauh, jadi
+# kalibrasinya wajib diulang.
+#
+# Kriteria kalibrasi juga diganti. Sapu lama menilai "seberapa besar reward
+# BERBEDA antar-aksi" -- itu sebagian besar mengukur sensitivitas terhadap
+# PANJANG SIKLUS, bukan terhadap ALOKASI per lengan, padahal alokasi yang
+# tidak pernah terpelajari. Sapu baru membandingkan langsung alokasi
+# proporsional-permintaan vs seragam dengan TOTAL hijau disamakan, 6 seed
+# berpasangan (selisih per seed, bukan rerata terpisah):
+#
+#   jaringan  skala  selisih      sd   nyangkut  vonis
+#   kanonik    0,40  +0,0012  0,0073        23   derau
+#   kanonik    0,60  -0,0006  0,0171       265   derau
+#   kanonik    0,80  +0,0021  0,0145      1140   derau
+#   training   0,40  +0,0081  0,0233         8   derau
+#   training   0,60  +0,0199  0,0107        14   NYATA  <- dipilih
+#   training   0,80  +0,0111  0,0115       462   NYATA
+#
+# 0,60 dipilih karena efeknya terbesar (+0,0199, galat baku 0,0044, ~4,6
+# sigma) DAN kendaraan nyangkut masih minim (14). Di 0,80 efeknya menyusut
+# sekaligus nyangkut melonjak ke 462 -- jenuh permanen mulai kembali.
+SKALA_PERMINTAAN = 0.60
 
 
 def _floor_five_seconds(timestamp: str) -> str:

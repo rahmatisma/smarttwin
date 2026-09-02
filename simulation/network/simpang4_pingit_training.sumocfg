@@ -1,0 +1,32 @@
+<configuration>
+    <!-- KHUSUS TRAINING PPO. Jangan dipakai demo/digital twin.
+
+         Bedanya dengan simpang4_pingit_live.sumocfg cuma satu: net-file
+         menunjuk ke jaringan berkoridor panjang. Semua ID edge/node, jumlah
+         lajur, dan 20 koneksi TLS identik dengan jaringan kanonik, sehingga
+         tls_safe.add.xml, GREEN_STATE, EDGE_HULU/MASUK/KELUAR, dan pemetaan
+         garis CV tetap sahih di kedua jaringan.
+
+         Alasan keberadaannya: di jaringan kanonik, koridor pendekat terpotong
+         batas ekstraksi OSM (north 62 m, east 57 m, lawan south 522 m; timpang
+         9,86x) sehingga ALOKASI hijau per lengan terbukti tidak berpengaruh
+         ke reward di skala permintaan mana pun. Lihat catatan lengkap di
+         simulation/bangun_jaringan_training.py.
+
+         Inference PPO tidak memakai SUMO sama sekali (PPOEngine cuma membaca
+         TrafficState dari CV), jadi perbedaan jaringan training lawan demo
+         tidak menimbulkan ketidakcocokan di produksi.
+    -->
+    <input>
+        <net-file value="simpang4_pingit_training.net.xml.gz"/>
+        <!-- Demand live hanya dimasukkan melalui TraCI dari TrafficState. -->
+        <additional-files value="tls_safe.add.xml"/>
+    </input>
+    <time>
+        <begin value="0"/>
+        <end value="86400"/>
+    </time>
+    <report>
+        <no-warnings value="true"/>
+    </report>
+</configuration>
