@@ -52,19 +52,81 @@ cd "$REPO_DIR"
 # ---------------------------------------------------------------------------
 # 1. Paket sistem yang mungkin belum ada
 # ---------------------------------------------------------------------------
-log "Cek paket sistem (venv, ffmpeg, libGL untuk OpenCV)"
+log "Cek paket sistem (venv, ffmpeg, libGL untuk OpenCV, Xvfb untuk sumo-gui)"
 MISSING_APT=()
 "$PYTHON_BIN" -m venv --help >/dev/null 2>&1 || MISSING_APT+=("python3.12-venv")
 command -v ffmpeg >/dev/null 2>&1 || MISSING_APT+=("ffmpeg")
 # OpenCV headless butuh libGL + libglib walau tanpa GUI
 ldconfig -p 2>/dev/null | grep -q libGL.so.1 || MISSING_APT+=("libgl1")
 ldconfig -p 2>/dev/null | grep -q libglib-2.0 || MISSING_APT+=("libglib2.0-0")
+# Xvfb + Mesa software rendering (llvmpipe) -- dipakai sumo-gui buat
+# screenshot digital twin. Pod ini tidak punya display fisik ataupun setup
+# GLX/EGL untuk GPU compute, jadi pakai virtual display + software
+# rendering. CATATAN: llvmpipe jauh lebih lambat dari GPU asli -- screenshot
+# butuh belasan detik, bukan 0,25 detik yang diasumsikan kode live-view.
+# Fitur inti (rekomendasi sinyal) tidak kena karena itu jalan headless.
+command -v Xvfb >/dev/null 2>&1 || MISSING_APT+=("xvfb")
+dpkg -s libgl1-mesa-dri >/dev/null 2>&1 || MISSING_APT+=("libgl1-mesa-dri")
+dpkg -s libglx-mesa0 >/dev/null 2>&1 || MISSING_APT+=("libglx-mesa0")
 if [ "${#MISSING_APT[@]}" -gt 0 ]; then
     log "apt-get install: ${MISSING_APT[*]}"
     apt-get update -qq
     DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "${MISSING_APT[@]}"
 else
     echo "  semua sudah ada"
+fi
+
+# ---------------------------------------------------------------------------
+# 1b. Perbaikan IPv4/IPv6 untuk TraCI
+# ---------------------------------------------------------------------------
+# BUG BESAR (ditemukan 2 September 2026): traci.start() di pustaka SUMO
+# hardcode connect ke host "localhost". Di container Linux, getaddrinfo()
+# default mengembalikan IPv6 (::1) lebih dulu daripada IPv4 (127.0.0.1) --
+# tapi SUMO cuma listen di 0.0.0.0 (IPv4). Akibatnya SEMUA koneksi TraCI
+# gagal/timeout, bukan cuma sumo-gui: headless sumo (dipakai PPO env,
+# Scenario Generator) ikut terkena. /etc ada di container disk (bukan
+# /workspace), jadi hilang tiap container dibuat ulang -- makanya masuk
+# skrip setup, bukan cukup dijalankan sekali manual.
+log "Paksa IPv4 diutamakan untuk resolusi 'localhost' (bug TraCI)"
+if ! grep -q "precedence ::ffff:0:0/96" /etc/gai.conf 2>/dev/null; then
+    echo "precedence ::ffff:0:0/96  100" >> /etc/gai.conf
+    echo "  ditambahkan ke /etc/gai.conf"
+else
+    echo "  sudah ada"
+fi
+
+# ---------------------------------------------------------------------------
+# 1c. Display virtual (Xvfb) untuk sumo-gui
+# ---------------------------------------------------------------------------
+log "Pastikan Xvfb jalan di :99"
+if ! pgrep -x Xvfb >/dev/null 2>&1; then
+    Xvfb :99 -screen 0 1280x720x24 -nolisten tcp &
+    disown
+    sleep 2
+    echo "  Xvfb dimulai"
+else
+    echo "  sudah jalan"
+fi
+
+# ---------------------------------------------------------------------------
+# 1d. Node.js -- persisten di /workspace (bukan sistem) supaya tidak hilang
+#     tiap container dibuat ulang (mis. saat expose port diedit di RunPod)
+# ---------------------------------------------------------------------------
+NODE_VERSION="v24.13.0"
+NODE_DIR="/workspace/node-runtime"
+log "Pastikan Node.js ${NODE_VERSION} ada di ${NODE_DIR}"
+if [ ! -x "${NODE_DIR}/bin/node" ]; then
+    curl -fsSL -o /tmp/node.tar.xz \
+        "https://nodejs.org/dist/${NODE_VERSION}/node-${NODE_VERSION}-linux-x64.tar.xz"
+    mkdir -p "$NODE_DIR"
+    # --no-same-owner: network volume (MooseFS) menolak chown ke uid/gid
+    # asli dari tarball walau dijalankan sebagai root -- bukan bug, cuma
+    # beda kebijakan filesystem network volume RunPod.
+    tar --no-same-owner -xJf /tmp/node.tar.xz -C "$NODE_DIR" --strip-components=1
+    rm /tmp/node.tar.xz
+    echo "  terpasang: $("${NODE_DIR}/bin/node" --version)"
+else
+    echo "  sudah ada: $("${NODE_DIR}/bin/node" --version)"
 fi
 
 # ---------------------------------------------------------------------------
@@ -96,13 +158,19 @@ PY
 [ -d "$SUMO_HOME_DETECTED" ] || die "SUMO_HOME tidak terdeteksi setelah install eclipse-sumo"
 
 # Suntik export ke activate script supaya `source .venv/bin/activate` cukup
+# buat SEMUA env yang dibutuhkan: SUMO_HOME (traci/sumolib), Node.js
+# (frontend), DISPLAY + PROJ_DATA/PROJ_LIB (sumo-gui lewat Xvfb -- lihat
+# bagian 1b/1c di atas soal kenapa keduanya wajib).
 if ! grep -q "SUMO_HOME" "${VENV_ROOT}/bin/activate"; then
-    log "Tambah SUMO_HOME ke ${VENV_ROOT}/bin/activate"
+    log "Tambah SUMO_HOME + Node PATH + DISPLAY/PROJ ke ${VENV_ROOT}/bin/activate"
     cat >> "${VENV_ROOT}/bin/activate" <<EOF
 
 # --- ditambahkan runpod_setup.sh ---
 export SUMO_HOME="${SUMO_HOME_DETECTED}"
-export PATH="\$SUMO_HOME/bin:\$PATH"
+export PATH="\$SUMO_HOME/bin:${NODE_DIR}/bin:\$PATH"
+export DISPLAY=:99
+export PROJ_DATA="\$SUMO_HOME/data/proj"
+export PROJ_LIB="\$SUMO_HOME/data/proj"
 EOF
 fi
 export SUMO_HOME="$SUMO_HOME_DETECTED"
