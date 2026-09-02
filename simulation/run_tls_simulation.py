@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-import subprocess
+import shutil
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -176,70 +176,61 @@ def findSumo() -> tuple[Path, Path]:
             sumoHome
         )
 
-        executable = (
-            homePath
-            / "bin"
-            / "sumo.exe"
-        )
-
         toolsDirectory = (
             homePath
             / "tools"
         )
 
-        if executable.exists():
+        # Windows: sumo.exe; Linux/macOS (mis. wheel eclipse-sumo di
+        # RunPod): sumo tanpa ekstensi.
+        for binaryName in ("sumo.exe", "sumo"):
 
-            return (
-                executable,
-                toolsDirectory,
+            executable = (
+                homePath
+                / "bin"
+                / binaryName
             )
+
+            if executable.exists():
+
+                return (
+                    executable,
+                    toolsDirectory,
+                )
 
     # --------------------------------------------------------
     # SYSTEM PATH
     # --------------------------------------------------------
 
-    try:
+    # shutil.which lintas platform (menggantikan `where` yang khusus
+    # Windows -- di Linux command itu tidak ada sehingga findSumo selalu
+    # gagal walau SUMO ada di PATH venv).
+    executablePath = (
+        shutil.which("sumo")
+        or shutil.which("sumo.exe")
+    )
 
-        result = subprocess.run(
-            [
-                "where",
-                "sumo",
-            ],
-            capture_output=True,
-            text=True,
-            check=True,
+    if executablePath:
+
+        executable = Path(
+            executablePath
         )
 
-        lines = (
-            result.stdout
-            .strip()
-            .splitlines()
+        possibleHome = (
+            executable
+            .parent
+            .parent
         )
 
-        if lines:
+        toolsDirectory = (
+            possibleHome
+            / "tools"
+        )
 
-            executable = Path(
-                lines[0]
-            )
-
-            possibleHome = (
-                executable
-                .parent
-                .parent
-            )
-
-            toolsDirectory = (
-                possibleHome
-                / "tools"
-            )
-
-            return (
-                executable,
-                toolsDirectory,
-            )
-
-    except Exception:
-        pass
+        return (
+            executable,
+            toolsDirectory,
+        )
 
     raise RuntimeError(
         "SUMO tidak ditemukan."

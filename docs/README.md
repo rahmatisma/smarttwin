@@ -79,6 +79,7 @@ Dokumen "apa yang berubah di satu sesi kerja", supaya tidak perlu membaca diff m
 
 **Setup pertama kali:**
 - [`onboarding-notes.md`](onboarding-notes.md) — jebakan Windows, kebiasaan venv, cara set `SUMO_HOME`. Baca sebelum setup biar tidak mengulang debugging yang sama
+- [`runbook-runpod.md`](runbook-runpod.md) — **cara menyalakan ulang sistem penuh di pod RunPod setelah Stop Pod**: apa yang hilang vs persisten, `runpod_setup.sh` + 3 terminal (backend/frontend/worker), pod ID/URL proxy, dan troubleshooting SUMO (DISPLAY/Xvfb, `findSumo`, route file)
 
 ---
 

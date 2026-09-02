@@ -503,6 +503,57 @@ class SumoController:
         return Path("sumo-gui")
 
     # ============================================================
+    # X DISPLAY PREFLIGHT (sumo-gui, POSIX)
+    # ============================================================
+
+    @staticmethod
+    def _ensure_display_for_gui() -> None:
+        """Pastikan sumo-gui punya X display sebelum di-spawn.
+
+        Di pod RunPod headless, sumo-gui butuh virtual display Xvfb
+        (``DISPLAY=:99``, disiapkan ``scripts/runpod_setup.sh``). Kalau
+        backend dijalankan tanpa ``source .venv/bin/activate``, ``DISPLAY``
+        kosong -> sumo-gui langsung exit ("FXApp::openDisplay: unable to
+        open display") dan TraCI cuma melihat "TraCI server already
+        finished". Deteksi lebih awal: pakai X server yang sudah jalan bila
+        ketemu, kalau tidak lempar pesan yang jelas (bukan traceback TraCI).
+        """
+
+        if os.name == "nt":
+            return
+
+        if os.environ.get("DISPLAY"):
+            return
+
+        socket_dir = Path("/tmp/.X11-unix")
+        sockets = (
+            sorted(socket_dir.glob("X*"))
+            if socket_dir.is_dir()
+            else []
+        )
+
+        if sockets:
+
+            display = ":" + sockets[0].name[1:]
+            os.environ["DISPLAY"] = display
+
+            logger.warning(
+                "DISPLAY belum diset -- memakai X server yang terdeteksi "
+                "(%s). Jalankan `source .venv/bin/activate` sebelum uvicorn "
+                "supaya environment SUMO lengkap.",
+                display,
+            )
+
+            return
+
+        raise RuntimeError(
+            "sumo-gui butuh X display tapi DISPLAY tidak diset dan tidak "
+            "ada Xvfb yang jalan. Di pod RunPod: jalankan "
+            "`bash scripts/runpod_setup.sh` (menyalakan Xvfb :99), lalu "
+            "start backend dengan `source .venv/bin/activate` aktif."
+        )
+
+    # ============================================================
     # START
     # ============================================================
 
@@ -558,6 +609,8 @@ class SumoController:
         # ========================================================
 
         if gui:
+
+            self._ensure_display_for_gui()
 
             binary = (
                 self._default_sumo_gui_binary()
