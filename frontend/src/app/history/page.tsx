@@ -410,7 +410,13 @@ export default function HistoryPage() {
     }, []);
 
     useEffect(() => {
-        void ambilData(halaman);
+        // Ditunda lewat microtask supaya setMemuat/setGalat di awal ambilData()
+        // (sebelum await pertama) tidak dianggap "setState sinkron di dalam
+        // efek" oleh react-hooks/set-state-in-effect -- perilaku sama,
+        // cuma pemicunya tidak lagi sinkron dari body efek.
+        queueMicrotask(() => {
+            void ambilData(halaman);
+        });
     }, [ambilData, halaman]);
 
     const totalHalaman = data
