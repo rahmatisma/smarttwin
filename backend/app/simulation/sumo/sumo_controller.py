@@ -1425,10 +1425,11 @@ class SumoController:
             self.CAMERA_CLOCK_STALE_SECONDS,
             max(0.0, time.monotonic() - self._camera_clock_synced_at),
         )
-        display_time = self._camera_clock_time + elapsed
-        if self._camera_clock_duration:
-            display_time %= self._camera_clock_duration
-        return display_time
+        # TIDAK di-modulo oleh _camera_clock_duration: itu cuma dipakai
+        # _pick_camera_phase() (modulo sendiri oleh panjang siklus lampu).
+        # Kalau di sini ikut di-wrap, jam yang ditampilkan ke user mengulang
+        # ke 0 tiap durasi video CCTV padahal videonya sendiri belum berhenti.
+        return self._camera_clock_time + elapsed
 
     def _pick_camera_phase(self, clock_time: float) -> tuple[int, float]:
         """(phase_index, sisa_detik) untuk waktu video tertentu vs active_cycle_plan."""
@@ -1499,9 +1500,9 @@ class SumoController:
             if video_duration_seconds is not None
             else self._camera_clock_duration
         )
+        # Simpan apa adanya (tanpa modulo durasi) supaya get_display_time()
+        # tidak wrap ke 0 sebelum video CCTV sungguhan habis.
         self._camera_clock_time = max(0.0, float(video_time_seconds))
-        if self._camera_clock_duration:
-            self._camera_clock_time %= self._camera_clock_duration
         self._camera_clock_synced_at = time.monotonic()
 
         phase_index, remaining = self._pick_camera_phase(float(video_time_seconds))

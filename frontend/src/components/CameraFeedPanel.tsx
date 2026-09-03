@@ -46,10 +46,7 @@ type SourceType =
   | "rtsp";
 
 // Timeline bersama bertahan saat panel unmount/navigasi dalam tab yang sama.
-// Durasi disimpan per kamera supaya filter satu kamera tidak merusak patokan
-// durasi terpendek saat kembali ke tampilan semua kamera.
 const CAMERA_TIMELINE_KEY = "smarttwin.camera-timeline";
-const knownDurations = new Map<string, number>();
 
 type CameraTimeline = {
   time: number;
@@ -251,17 +248,17 @@ export default function CameraFeedPanel({
     );
     if (videos.length === 0) return;
 
-    for (const [cameraId, video] of videoRefs.current) {
-      if (Number.isFinite(video.duration) && video.duration > 0) {
-        knownDurations.set(cameraId, video.duration);
-      }
-    }
-    const durations = [...knownDurations.values()].filter(
-      (duration) => Number.isFinite(duration) && duration > 0
-    );
-    const cycleDuration = durations.length > 0 ? Math.min(...durations) : null;
+    // Durasi acuan HARUS dari video master (cameras[0]) saja -- bukan
+    // Math.min() lintas semua kamera yang pernah dibuka di tab ini. Video
+    // lain (klip lama/uji coba lebih pendek) tidak boleh memotong durasi
+    // acuan, karena itu membuat clock wrap jauh sebelum video sumber habis.
+    const masterVideo = master ?? (cameras[0] ? videoRefs.current.get(cameras[0].id) : undefined);
+    const masterDuration =
+      masterVideo && Number.isFinite(masterVideo.duration) && masterVideo.duration > 0
+        ? masterVideo.duration
+        : undefined;
     const sourceTime = master?.currentTime ?? getSharedTimelineTime();
-    const targetTime = cycleDuration ? sourceTime % cycleDuration : Math.max(0, sourceTime);
+    const targetTime = Math.max(0, sourceTime);
     anchorTimeline(timelineRef.current, targetTime);
     persistTimeline(
       targetTime,
@@ -291,37 +288,8 @@ export default function CameraFeedPanel({
       synchronizingVideos.current = false;
     });
 
-    onTimeUpdate?.(targetTime, cycleDuration ?? undefined);
-  }, [getSharedTimelineTime, onTimeUpdate]);
-
-  const restartVideosFromBeginning = useCallback(() => {
-    anchorTimeline(timelineRef.current, 0);
-    timelineRef.current.paused = false;
-    persistTimeline(
-      0,
-      false,
-      timelineRef.current.updatedAt,
-      timelineRef.current.backendInstanceId,
-    );
-
-    synchronizingVideos.current = true;
-    for (const video of videoRefs.current.values()) {
-      video.currentTime = 0;
-      if (video.paused) {
-        ignoredPlayEvents.current.add(video);
-        void video.play().catch(() => {
-          ignoredPlayEvents.current.delete(video);
-        });
-      }
-    }
-    queueMicrotask(() => {
-      synchronizingVideos.current = false;
-    });
-    const durations = [...knownDurations.values()].filter(
-      (duration) => Number.isFinite(duration) && duration > 0
-    );
-    onTimeUpdate?.(0, durations.length > 0 ? Math.min(...durations) : undefined);
-  }, [onTimeUpdate]);
+    onTimeUpdate?.(targetTime, masterDuration);
+  }, [cameras, getSharedTimelineTime, onTimeUpdate]);
 
   function initializeInspectionVideo(video: HTMLVideoElement) {
     if (!Number.isFinite(video.duration) || video.duration <= 0) return;
@@ -402,9 +370,9 @@ export default function CameraFeedPanel({
           timelineRef.current.backendInstanceId !== null &&
           timelineRef.current.backendInstanceId !== instanceId;
 
-        // Sesi simulasi baru saja berakhir (running -> berhenti). Selama
-        // idle terus-menerus video dibiarkan loop bebas lewat onEnded ->
-        // restartVideosFromBeginning; jangan seret balik ke 0 tiap poll.
+        // Sesi simulasi baru saja berakhir (running -> berhenti). Video
+        // dibiarkan beku di posisi terakhir saat idle; jangan seret balik
+        // ke 0 tiap poll.
         const sessionEnded = sessionWasRunningRef.current && !running;
 
         if (sessionEnded || backendChanged) {
@@ -471,18 +439,13 @@ export default function CameraFeedPanel({
       const master = cameras[0] ? videoRefs.current.get(cameras[0].id) : undefined;
       if (!master || !Number.isFinite(master.currentTime)) return;
 
-      for (const [cameraId, video] of videoRefs.current) {
-        if (Number.isFinite(video.duration) && video.duration > 0) {
-          knownDurations.set(cameraId, video.duration);
-        }
-      }
-      const durations = [...knownDurations.values()].filter(
-        (value) => Number.isFinite(value) && value > 0
-      );
-      const cycleDuration = durations.length > 0 ? Math.min(...durations) : null;
-      const targetTime = cycleDuration
-        ? master.currentTime % cycleDuration
-        : Math.max(0, master.currentTime);
+      // Durasi acuan = durasi video master itu sendiri, bukan Math.min()
+      // lintas kamera -- lihat catatan di syncVideos().
+      const masterDuration =
+        Number.isFinite(master.duration) && master.duration > 0
+          ? master.duration
+          : undefined;
+      const targetTime = Math.max(0, master.currentTime);
 
       timelineRef.current.paused = master.paused;
       anchorTimeline(timelineRef.current, targetTime);
@@ -492,7 +455,7 @@ export default function CameraFeedPanel({
         timelineRef.current.updatedAt,
         timelineRef.current.backendInstanceId
       );
-      onTimeUpdate?.(targetTime, cycleDuration ?? undefined);
+      onTimeUpdate?.(targetTime, masterDuration);
     };
 
     const interval = window.setInterval(tick, 700);
@@ -671,9 +634,6 @@ export default function CameraFeedPanel({
                     className="h-full w-full object-contain"
                     onLoadedMetadata={(event) => {
                       const video = event.currentTarget;
-                      if (Number.isFinite(video.duration) && video.duration > 0) {
-                        knownDurations.set(camera.id, video.duration);
-                      }
                       // Saat remount, currentTime elemen baru masih 0. Jangan
                       // jadikan angka itu master karena akan menimpa timeline
                       // yang disimpan sebelum pindah halaman.
@@ -685,7 +645,6 @@ export default function CameraFeedPanel({
                     onDurationChange={(event) => {
                       const duration = event.currentTarget.duration;
                       if (Number.isFinite(duration) && duration > 0) {
-                        knownDurations.set(camera.id, duration);
                         if (isInspectionMode) initializeInspectionVideo(event.currentTarget);
                         else syncVideos();
                       }
@@ -706,7 +665,20 @@ export default function CameraFeedPanel({
                         void event.currentTarget.play();
                         return;
                       }
-                      restartVideosFromBeginning();
+                      // Video sumber sudah habis -- bekukan timeline di posisi
+                      // akhir. JANGAN diputar ulang dari 0: itu yang bikin jam
+                      // durasi kelihatan "mengulang" padahal videonya belum
+                      // benar-benar selesai diputar ulang secara wajar.
+                      if (camera.id !== cameras[0]?.id) return;
+                      timelineRef.current.paused = true;
+                      anchorTimeline(timelineRef.current, event.currentTarget.currentTime);
+                      persistTimeline(
+                        timelineRef.current.time,
+                        true,
+                        timelineRef.current.updatedAt,
+                        timelineRef.current.backendInstanceId
+                      );
+                      syncVideos();
                     }}
                     onPause={(event) => {
                       if (isInspectionMode) return;
