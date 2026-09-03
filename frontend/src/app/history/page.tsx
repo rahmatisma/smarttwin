@@ -31,6 +31,9 @@ import {
 } from "recharts";
 
 import Sidebar from "@/components/Sidebar";
+import ForecastChart from "@/components/ForecastChart";
+import { fetchForecast, DEFAULT_INTERSECTION_ID } from "@/lib/supabaseData";
+import type { ForecastResponse } from "@/types/traffic";
 
 /*
  * =========================================================
@@ -375,6 +378,17 @@ export default function HistoryPage() {
     const [memuat, setMemuat] = useState(true);
     const [galat, setGalat] = useState<string | null>(null);
     const [dipilih, setDipilih] = useState<Siklus | null>(null);
+    const [forecastData, setForecastData] = useState<ForecastResponse | null>(null);
+
+    useEffect(() => {
+        if (dipilih) {
+            fetchForecast(DEFAULT_INTERSECTION_ID).then((res) => {
+                setForecastData(res);
+            });
+        } else {
+            setForecastData(null);
+        }
+    }, [dipilih]);
 
     // Filter cuma menyaring siklus yang SUDAH dimuat di halaman ini (client-
     // side) -- backend tidak diminta ulang. Tidak ada dropdown "Persimpangan"
@@ -996,32 +1010,100 @@ export default function HistoryPage() {
                             </button>
                         </div>
 
-                        {/* DURASI DIREKOMENDASIKAN */}
+                        {/* KONDISI PEMICU */}
                         <div className="mb-5">
                             <div className="mb-2 flex items-center gap-2">
-                                <TrafficCone size={15} className="text-text-secondary" />
-                                <h3 className="text-xs font-medium">Durasi Hijau Direkomendasikan</h3>
+                                <Clock3 size={15} className="text-text-secondary" />
+                                <h3 className="text-xs font-medium">
+                                    Kondisi Lalu Lintas Saat Itu
+                                </h3>
                             </div>
-                            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-                                {urutkanFase(dipilih.phases).map((fase) => (
-                                    <div
-                                        key={fase.approach}
-                                        className="rounded-lg border border-border bg-surface-2 p-3"
-                                    >
-                                        <p className="text-[11px] text-text-muted">
-                                            {labelLengan(fase.approach)}
-                                        </p>
-                                        <p className="mt-1 font-mono text-sm font-semibold">
-                                            {fase.greenSeconds}s
-                                        </p>
-                                        {fase.currentGreenSeconds != null && (
-                                            <p className="mt-0.5 text-[10px] text-text-muted">
-                                                eksisting {fase.currentGreenSeconds}s
+                            {dipilih.trafficConditions.length === 0 ? (
+                                <p className="text-xs text-text-muted">
+                                    Tidak ada data kondisi untuk keputusan ini.
+                                </p>
+                            ) : (
+                                <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                                    {dipilih.trafficConditions.map((kondisi) => (
+                                        <div
+                                            key={kondisi.approach}
+                                            className="rounded-lg border border-border bg-surface-2 p-3"
+                                        >
+                                            <p className="text-[11px] text-text-muted">
+                                                {labelLengan(kondisi.approach)}
                                             </p>
-                                        )}
-                                    </div>
-                                ))}
+                                            <p className="mt-1 font-mono text-xs">
+                                                {kondisi.volume ?? "—"} kendaraan
+                                            </p>
+                                            <p className="text-[10px] text-text-muted">
+                                                antrean {kondisi.queueLengthVeh ?? "—"} kend ·{" "}
+                                                {kondisi.queueLengthMEst ?? "—"}m
+                                            </p>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                        {/* TRAFFIC FORECAST */}
+                        <div className="mb-5">
+                            <ForecastChart data={forecastData} />
+                        </div>
+
+                        {/* KANDIDAT */}
+                        <div className="mb-5">
+                            <div className="mb-2 flex items-center gap-2">
+                                <Layers size={15} className="text-text-secondary" />
+                                <h3 className="text-xs font-medium">Kandidat yang Diuji di SUMO</h3>
                             </div>
+                            {dipilih.candidates.length === 0 ? (
+                                <p className="text-xs text-text-muted">
+                                    Tidak ada data kandidat — keputusan ini tidak melalui
+                                    Scenario Generator.
+                                </p>
+                            ) : (
+                                <div className="overflow-hidden rounded-lg border border-border">
+                                    <table className="w-full text-left text-xs">
+                                        <thead className="bg-surface-2 text-text-muted">
+                                            <tr>
+                                                <th className="px-3 py-2 font-medium">Kandidat</th>
+                                                <th className="px-3 py-2 font-medium">Delay</th>
+                                                <th className="px-3 py-2 font-medium">Antrean</th>
+                                                <th className="px-3 py-2 font-medium">Throughput</th>
+                                                <th className="px-3 py-2 font-medium">LOS</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {dipilih.candidates.map((kandidat) => (
+                                                <tr
+                                                    key={kandidat.candidateId}
+                                                    className={`border-t border-border ${
+                                                        kandidat.isWinner ? "bg-signal-green/5" : ""
+                                                    }`}
+                                                >
+                                                    <td className="px-3 py-2">
+                                                        {kandidat.candidateId}
+                                                        {kandidat.isWinner && (
+                                                            <span className="ml-2 text-signal-green">
+                                                                ✓ terpilih
+                                                            </span>
+                                                        )}
+                                                    </td>
+                                                    <td className="px-3 py-2 font-mono">
+                                                        {kandidat.avgDelaySeconds ?? "—"}s
+                                                    </td>
+                                                    <td className="px-3 py-2 font-mono">
+                                                        {kandidat.avgQueueLengthM ?? "—"}m
+                                                    </td>
+                                                    <td className="px-3 py-2 font-mono">
+                                                        {kandidat.throughputVeh ?? "—"}
+                                                    </td>
+                                                    <td className="px-3 py-2">{kandidat.los ?? "—"}</td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            )}
                         </div>
 
                         {/* DAMPAK: BEFORE / AFTER */}
@@ -1111,97 +1193,34 @@ export default function HistoryPage() {
                             </div>
                         )}
 
-                        {/* KANDIDAT */}
-                        <div className="mb-5">
-                            <div className="mb-2 flex items-center gap-2">
-                                <Layers size={15} className="text-text-secondary" />
-                                <h3 className="text-xs font-medium">Kandidat yang Diuji di SUMO</h3>
-                            </div>
-                            {dipilih.candidates.length === 0 ? (
-                                <p className="text-xs text-text-muted">
-                                    Tidak ada data kandidat — keputusan ini tidak melalui
-                                    Scenario Generator.
-                                </p>
-                            ) : (
-                                <div className="overflow-hidden rounded-lg border border-border">
-                                    <table className="w-full text-left text-xs">
-                                        <thead className="bg-surface-2 text-text-muted">
-                                            <tr>
-                                                <th className="px-3 py-2 font-medium">Kandidat</th>
-                                                <th className="px-3 py-2 font-medium">Delay</th>
-                                                <th className="px-3 py-2 font-medium">Antrean</th>
-                                                <th className="px-3 py-2 font-medium">Throughput</th>
-                                                <th className="px-3 py-2 font-medium">LOS</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody>
-                                            {dipilih.candidates.map((kandidat) => (
-                                                <tr
-                                                    key={kandidat.candidateId}
-                                                    className={`border-t border-border ${
-                                                        kandidat.isWinner ? "bg-signal-green/5" : ""
-                                                    }`}
-                                                >
-                                                    <td className="px-3 py-2">
-                                                        {kandidat.candidateId}
-                                                        {kandidat.isWinner && (
-                                                            <span className="ml-2 text-signal-green">
-                                                                ✓ terpilih
-                                                            </span>
-                                                        )}
-                                                    </td>
-                                                    <td className="px-3 py-2 font-mono">
-                                                        {kandidat.avgDelaySeconds ?? "—"}s
-                                                    </td>
-                                                    <td className="px-3 py-2 font-mono">
-                                                        {kandidat.avgQueueLengthM ?? "—"}m
-                                                    </td>
-                                                    <td className="px-3 py-2 font-mono">
-                                                        {kandidat.throughputVeh ?? "—"}
-                                                    </td>
-                                                    <td className="px-3 py-2">{kandidat.los ?? "—"}</td>
-                                                </tr>
-                                            ))}
-                                        </tbody>
-                                    </table>
-                                </div>
-                            )}
-                        </div>
-
-                        {/* KONDISI PEMICU */}
+                        {/* DURASI DIREKOMENDASIKAN */}
                         <div>
                             <div className="mb-2 flex items-center gap-2">
-                                <Clock3 size={15} className="text-text-secondary" />
-                                <h3 className="text-xs font-medium">
-                                    Kondisi Lalu Lintas Saat Itu
-                                </h3>
+                                <TrafficCone size={15} className="text-text-secondary" />
+                                <h3 className="text-xs font-medium">Durasi Hijau Direkomendasikan</h3>
                             </div>
-                            {dipilih.trafficConditions.length === 0 ? (
-                                <p className="text-xs text-text-muted">
-                                    Tidak ada data kondisi untuk keputusan ini.
-                                </p>
-                            ) : (
-                                <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-                                    {dipilih.trafficConditions.map((kondisi) => (
-                                        <div
-                                            key={kondisi.approach}
-                                            className="rounded-lg border border-border bg-surface-2 p-3"
-                                        >
-                                            <p className="text-[11px] text-text-muted">
-                                                {labelLengan(kondisi.approach)}
+                            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                                {urutkanFase(dipilih.phases).map((fase) => (
+                                    <div
+                                        key={fase.approach}
+                                        className="rounded-lg border border-border bg-surface-2 p-3"
+                                    >
+                                        <p className="text-[11px] text-text-muted">
+                                            {labelLengan(fase.approach)}
+                                        </p>
+                                        <p className="mt-1 font-mono text-sm font-semibold">
+                                            {fase.greenSeconds}s
+                                        </p>
+                                        {fase.currentGreenSeconds != null && (
+                                            <p className="mt-0.5 text-[10px] text-text-muted">
+                                                eksisting {fase.currentGreenSeconds}s
                                             </p>
-                                            <p className="mt-1 font-mono text-xs">
-                                                {kondisi.volume ?? "—"} kendaraan
-                                            </p>
-                                            <p className="text-[10px] text-text-muted">
-                                                antrean {kondisi.queueLengthVeh ?? "—"} kend ·{" "}
-                                                {kondisi.queueLengthMEst ?? "—"}m
-                                            </p>
-                                        </div>
-                                    ))}
-                                </div>
-                            )}
+                                        )}
+                                    </div>
+                                ))}
+                            </div>
                         </div>
+
                     </div>
                 </div>
             )}
