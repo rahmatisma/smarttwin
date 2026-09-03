@@ -743,13 +743,21 @@ class SumoController:
 
         print("=" * 70)
         
-        # Cleanup any stuck connection in the default label
+        # Bersihkan koneksi macet KHUSUS label context ini (sisa crash
+        # sebelumnya) -- BUKAN traci.close() global. traci.close() global
+        # menutup "current connection" modul TraCI siapa pun, jadi kalau
+        # context "dashboard" sedang jalan lalu context "digitaltwin" mau
+        # start, ini dulu yang mematikan simulasi dashboard. Baca lebih
+        # lengkap di komentar dekat `conn = traci.getConnection(...)` di
+        # bawah.
         try:
-            import traci
-            traci.close()
+            from traci import connection as traci_connection
+            if traci_connection.has(self.context):
+                traci_connection.get(self.context).close()
         except Exception:
             pass
-            
+
+        conn = None
         try:
             if gui and os.name == "nt":
                 import traci.main as traci_main
@@ -765,32 +773,52 @@ class SumoController:
 
                 traci_main.subprocess.Popen = hidden_popen
                 try:
-                    traci.start(command)
+                    traci.start(command, label=self.context)
                 finally:
                     traci_main.subprocess.Popen = original_popen
             else:
-                traci.start(command)
+                traci.start(command, label=self.context)
             logger.info("STEP 2: TraCI connected")
-            
-            tls_ids = traci.trafficlight.getIDList()
+
+            # Pegang koneksi milik context INI secara eksplisit lewat label,
+            # bukan modul `traci` bare -- modul cuma tahu satu "current
+            # connection" global yang gampang ketiban switch tiap kali
+            # context lain start()/simulationStep() di thread lain (tiap
+            # context punya thread loop-nya sendiri, lihat _simulation_loop).
+            # Semua panggilan TraCI controller ini sesudah titik ini WAJIB
+            # lewat conn (disimpan sebagai self.traci), tidak pernah lewat
+            # modul traci lagi, supaya dua context tidak saling menimpa
+            # koneksi satu sama lain.
+            conn = traci.getConnection(self.context)
+            # Banyak tempat lain di file ini menulis `self.traci.TraCIException`
+            # seolah self.traci adalah modul traci (yang punya atribut itu).
+            # Objek koneksi tidak otomatis punya atribut itu, jadi ditempel
+            # manual sekali di sini supaya titik-titik itu tidak perlu diubah.
+            conn.TraCIException = traci.TraCIException
+
+            tls_ids = conn.trafficlight.getIDList()
             logger.info(f"STEP 3: Traffic lights = {tls_ids}")
-            
-            traci.simulationStep()
+
+            conn.simulationStep()
             logger.info("STEP 4: Simulation step successful")
 
             if gui:
                 # Crop dilakukan oleh kamera SUMO, bukan CSS browser, sehingga
                 # area yang dipilih tetap dirender tajam pada resolusi stream.
-                traci.gui.setBoundary("View #0", *self._stream_view_boundary())
-                connection = traci.getConnection()
-                process = getattr(connection, "_process", None)
+                conn.gui.setBoundary("View #0", *self._stream_view_boundary())
+                process = getattr(conn, "_process", None)
                 if process is not None:
                     self._keep_renderer_window_hidden(process.pid)
-            
+
         except Exception as exc:
             logger.exception("Failed to start SUMO through TraCI")
             try:
-                traci.close()
+                if conn is not None:
+                    conn.close()
+                else:
+                    from traci import connection as traci_connection
+                    if traci_connection.has(self.context):
+                        traci_connection.get(self.context).close()
             except Exception:
                 pass
 
@@ -809,7 +837,7 @@ class SumoController:
         # SUCCESS
         # ========================================================
 
-        self.traci = traci
+        self.traci = conn
         self.running = True
         self.is_gui = gui
         self.last_error = None
@@ -1397,10 +1425,11 @@ class SumoController:
             self.CAMERA_CLOCK_STALE_SECONDS,
             max(0.0, time.monotonic() - self._camera_clock_synced_at),
         )
-        display_time = self._camera_clock_time + elapsed
-        if self._camera_clock_duration:
-            display_time %= self._camera_clock_duration
-        return display_time
+        # TIDAK di-modulo oleh _camera_clock_duration: itu cuma dipakai
+        # _pick_camera_phase() (modulo sendiri oleh panjang siklus lampu).
+        # Kalau di sini ikut di-wrap, jam yang ditampilkan ke user mengulang
+        # ke 0 tiap durasi video CCTV padahal videonya sendiri belum berhenti.
+        return self._camera_clock_time + elapsed
 
     def _pick_camera_phase(self, clock_time: float) -> tuple[int, float]:
         """(phase_index, sisa_detik) untuk waktu video tertentu vs active_cycle_plan."""
@@ -1471,9 +1500,9 @@ class SumoController:
             if video_duration_seconds is not None
             else self._camera_clock_duration
         )
+        # Simpan apa adanya (tanpa modulo durasi) supaya get_display_time()
+        # tidak wrap ke 0 sebelum video CCTV sungguhan habis.
         self._camera_clock_time = max(0.0, float(video_time_seconds))
-        if self._camera_clock_duration:
-            self._camera_clock_time %= self._camera_clock_duration
         self._camera_clock_synced_at = time.monotonic()
 
         phase_index, remaining = self._pick_camera_phase(float(video_time_seconds))
@@ -2194,8 +2223,9 @@ class SumoController:
         thread_still_alive = thread is not None and thread.is_alive()
         if thread_still_alive and self.traci is not None:
             try:
-                connection = self.traci.getConnection()
-                process = getattr(connection, "_process", None)
+                # self.traci SUDAH jadi objek koneksi milik context ini
+                # (bukan modul traci) -- lihat catatan di start().
+                process = getattr(self.traci, "_process", None)
                 if process is not None and process.poll() is None:
                     process.terminate()
                     process.wait(timeout=2.0)
