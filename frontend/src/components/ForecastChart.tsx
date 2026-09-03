@@ -4,13 +4,36 @@ import {
   ResponsiveContainer,
   AreaChart,
   Area,
+  LineChart,
+  Line,
   XAxis,
   YAxis,
   Tooltip,
+  Legend,
   CartesianGrid,
 } from "recharts";
 
-import type { ForecastResponse, TrafficState } from "@/types/traffic";
+import type { Approach, ForecastResponse, TrafficState } from "@/types/traffic";
+
+// Urutan TETAP (bukan hasil filter/sort) -- warna kategorikal harus konsisten
+// per lengan, tidak boleh "geser" kalau salah satu lengan hilang dari data.
+// Palet divalidasi lolos CVD-safety utk chart garis (lihat skill dataviz):
+// node scripts/validate_palette.js "#3987e5,#d95926,#199e70,#c98500" --mode dark
+const APPROACH_ORDER: Approach[] = ["north", "south", "east", "west"];
+
+const APPROACH_LABELS: Record<Approach, string> = {
+  north: "Utara",
+  south: "Selatan",
+  east: "Timur",
+  west: "Barat",
+};
+
+const APPROACH_COLORS: Record<Approach, string> = {
+  north: "#3987e5",
+  south: "#d95926",
+  east: "#199e70",
+  west: "#c98500",
+};
 
 function formatForecastData(data: ForecastResponse) {
   return data.predictions.map((prediction, index) => {
@@ -108,6 +131,43 @@ export default function ForecastChart({
   const maxQueue = Math.max(...series.map((s) => s.predictedQueueLengthMEst));
   const avgDensity = series.reduce((sum, s) => sum + s.predictedDensityIndex, 0) / (series.length || 1);
 
+  // Breakdown per lengan (kalau backend mengisi predictionsByApproach dengan
+  // >= 2 lengan) -- ini yang bikin grafik nampilin 4 garis Utara/Selatan/
+  // Timur/Barat, bukan cuma 1 garis total gabungan seperti sebelumnya.
+  type ApproachPoint = { horizonSeconds: number } & Partial<Record<Approach, number>>;
+
+  const approachKeys = APPROACH_ORDER.filter(
+    (approach) => (data.predictionsByApproach?.[approach]?.length ?? 0) > 0
+  );
+
+  let approachSeries: ApproachPoint[] = [];
+
+  if (approachKeys.length >= 2) {
+    const stepCount = Math.max(
+      ...approachKeys.map((approach) => data.predictionsByApproach![approach]!.length)
+    );
+
+    approachSeries = Array.from({ length: stepCount }, (_, index) => {
+      const point: ApproachPoint = { horizonSeconds: (index + 1) * 5 };
+      for (const approach of approachKeys) {
+        const prediction = data.predictionsByApproach?.[approach]?.[index];
+        if (prediction) point[approach] = prediction.predictedVehicleCount;
+      }
+      return point;
+    });
+
+    if (current?.approaches) {
+      const actualPoint: ApproachPoint = { horizonSeconds: 0 };
+      for (const approach of approachKeys) {
+        const match = current.approaches.find((a) => a.approach === approach);
+        if (match) actualPoint[approach] = match.volume;
+      }
+      approachSeries = [actualPoint, ...approachSeries];
+    }
+  }
+
+  const showPerApproach = approachSeries.length > 0;
+
   return (
     <div className="flex flex-col rounded-lg border border-border bg-surface p-4">
       <div className="mb-3 flex items-center justify-between">
@@ -116,87 +176,183 @@ export default function ForecastChart({
         </h2>
 
           <span className="text-xs text-text-muted">
-            {data.model} · 60 detik ke depan
+            {data.model} · 60 detik ke depan{showPerApproach ? " · per lengan" : ""}
           </span>
       </div>
 
       <div className="h-[220px] w-full">
         <ResponsiveContainer width="100%" height="100%">
-          <AreaChart
-            data={series}
-            margin={{
-              top: 4,
-              right: 8,
-              left: -20,
-              bottom: 0,
-            }}
-          >
-            <defs>
-              <linearGradient
-                id="forecastFill"
-                x1="0"
-                y1="0"
-                x2="0"
-                y2="1"
-              >
-                <stop
-                  offset="0%"
-                  stopColor="#38bdf8"
-                  stopOpacity={0.35}
+          {showPerApproach ? (
+            <LineChart
+              data={approachSeries}
+              margin={{
+                top: 4,
+                right: 8,
+                left: -20,
+                bottom: 0,
+              }}
+            >
+              <CartesianGrid
+                stroke="#232935"
+                vertical={false}
+              />
+
+              <XAxis
+                dataKey="horizonSeconds"
+                type="number"
+                domain={[0, 60]}
+                ticks={[0, 10, 20, 30, 40, 50, 60]}
+                tickFormatter={(seconds) => `+${seconds}s`}
+                tick={{
+                  fill: "#5b6472",
+                  fontSize: 11,
+                }}
+                axisLine={{
+                  stroke: "#232935",
+                }}
+                tickLine={false}
+              />
+
+              <YAxis
+                tick={{
+                  fill: "#5b6472",
+                  fontSize: 11,
+                }}
+                axisLine={false}
+                tickLine={false}
+                width={40}
+              />
+
+              <Tooltip
+                contentStyle={{
+                  background: "#171c27",
+                  border: "1px solid #232935",
+                  borderRadius: 8,
+                  fontSize: 12,
+                }}
+                labelFormatter={(seconds) => `+${seconds} detik`}
+                formatter={(value, name) => [
+                  `${value} kendaraan`,
+                  APPROACH_LABELS[name as Approach] ?? String(name),
+                ]}
+              />
+
+              <Legend
+                // content kustom -- recharts (v3) DIAM-DIAM MENGABAIKAN prop
+                // `payload` pada <Legend> dan selalu memakai urutan registrasi
+                // internalnya sendiri (LegendContent menimpa payload dari
+                // context, bukan dari props). Urutan itu tidak stabil/tidak
+                // sama dengan urutan <Line> dirender, jadi satu-satunya cara
+                // menjamin urutan warna kategorikal TETAP adalah me-render
+                // legend sendiri dari approachKeys, tidak lewat payload.
+                content={() => (
+                  <ul className="mt-1 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-[11px] text-text-muted">
+                    {approachKeys.map((approach) => (
+                      <li key={approach} className="flex items-center gap-1.5">
+                        <span
+                          className="inline-block h-0.5 w-3 shrink-0 rounded-full"
+                          style={{ backgroundColor: APPROACH_COLORS[approach] }}
+                        />
+                        {APPROACH_LABELS[approach]}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              />
+
+              {approachKeys.map((approach) => (
+                <Line
+                  key={approach}
+                  type="monotone"
+                  dataKey={approach}
+                  name={approach}
+                  stroke={APPROACH_COLORS[approach]}
+                  strokeWidth={2}
+                  dot={false}
+                  activeDot={{ r: 4, fill: APPROACH_COLORS[approach] }}
+                  connectNulls
+                  isAnimationActive
+                  animationDuration={500}
+                  animationEasing="ease-out"
                 />
-
-                <stop
-                  offset="100%"
-                  stopColor="#38bdf8"
-                  stopOpacity={0}
-                />
-              </linearGradient>
-            </defs>
-
-            <CartesianGrid
-              stroke="#232935"
-              vertical={false}
-            />
-
-            <XAxis
-              dataKey="horizonSeconds"
-              type="number"
-              domain={[0, 60]}
-              ticks={[0, 10, 20, 30, 40, 50, 60]}
-              tickFormatter={(seconds) => `+${seconds}s`}
-              tick={{
-                fill: "#5b6472",
-                fontSize: 11,
+              ))}
+            </LineChart>
+          ) : (
+            <AreaChart
+              data={series}
+              margin={{
+                top: 4,
+                right: 8,
+                left: -20,
+                bottom: 0,
               }}
-              axisLine={{
-                stroke: "#232935",
-              }}
-              tickLine={false}
-            />
+            >
+              <defs>
+                <linearGradient
+                  id="forecastFill"
+                  x1="0"
+                  y1="0"
+                  x2="0"
+                  y2="1"
+                >
+                  <stop
+                    offset="0%"
+                    stopColor="#38bdf8"
+                    stopOpacity={0.35}
+                  />
 
-            <YAxis
-              tick={{
-                fill: "#5b6472",
-                fontSize: 11,
-              }}
-              axisLine={false}
-              tickLine={false}
-              width={40}
-            />
+                  <stop
+                    offset="100%"
+                    stopColor="#38bdf8"
+                    stopOpacity={0}
+                  />
+                </linearGradient>
+              </defs>
 
-            <Tooltip
-              contentStyle={{
-                background: "#171c27",
-                border: "1px solid #232935",
-                borderRadius: 8,
-                fontSize: 12,
-              }}
-              labelFormatter={(seconds) => `+${seconds} detik`}
-              formatter={(value, name) => [
-                `${value} kendaraan`,
-                name,
-              ]}
-            />
+              <CartesianGrid
+                stroke="#232935"
+                vertical={false}
+              />
+
+              <XAxis
+                dataKey="horizonSeconds"
+                type="number"
+                domain={[0, 60]}
+                ticks={[0, 10, 20, 30, 40, 50, 60]}
+                tickFormatter={(seconds) => `+${seconds}s`}
+                tick={{
+                  fill: "#5b6472",
+                  fontSize: 11,
+                }}
+                axisLine={{
+                  stroke: "#232935",
+                }}
+                tickLine={false}
+              />
+
+              <YAxis
+                tick={{
+                  fill: "#5b6472",
+                  fontSize: 11,
+                }}
+                axisLine={false}
+                tickLine={false}
+                width={40}
+              />
+
+              <Tooltip
+                contentStyle={{
+                  background: "#171c27",
+                  border: "1px solid #232935",
+                  borderRadius: 8,
+                  fontSize: 12,
+                }}
+                labelFormatter={(seconds) => `+${seconds} detik`}
+                formatter={(value, name) => [
+                  `${value} kendaraan`,
+                  name,
+                ]}
+              />
 
               <Area
                 type="monotone"
@@ -206,6 +362,9 @@ export default function ForecastChart({
                 strokeDasharray="5 5"
                 fill="url(#forecastFill)"
                 name="Prediksi"
+                isAnimationActive
+                animationDuration={500}
+                animationEasing="ease-out"
               />
               {current && (
                 <Area
@@ -217,9 +376,13 @@ export default function ForecastChart({
                   name="Aktual"
                   dot={{ r: 4, fill: "#2ecc71" }}
                   activeDot={{ r: 6, fill: "#2ecc71" }}
+                  isAnimationActive
+                  animationDuration={500}
+                  animationEasing="ease-out"
                 />
               )}
-          </AreaChart>
+            </AreaChart>
+          )}
         </ResponsiveContainer>
       </div>
 
