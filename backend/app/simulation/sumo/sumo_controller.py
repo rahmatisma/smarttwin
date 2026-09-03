@@ -80,9 +80,20 @@ class SumoController:
     STREAM_FRAME_WIDTH = 1280
     STREAM_FRAME_HEIGHT = 720
 
-    # Area kamera cukup lebar agar antrean pada keempat ruas pendekat terlihat.
+    # Area kamera ketat di sekitar simpang supaya framing mirip CCTV asli.
     # Format override: xmin,ymin,xmax,ymax, contoh di .env.example (root repo).
+    # Kendaraan disisipkan dengan departPos="last" (lihat add_vehicle) supaya
+    # antrean menumpuk dari mulut simpang ke belakang dan tetap masuk crop --
+    # bukan tersebar jauh di ruas pendekat Selatan yang 515 m di peta OSM.
     DEFAULT_STREAM_VIEW_BOUNDARY = (240.63, 479.635, 380.63, 558.385)
+
+    # Berapa lama clock CCTV (dan penguncian fase TLS ke situ) masih dianggap
+    # sah setelah POST /sync-clock terakhir. Frontend mengirim tiap ~1 dtk;
+    # kalau berhenti (video buffering, tab background, pause) clock BEKU di
+    # posisi terakhir alih-alih lari di kecepatan wall-clock -- sebelumnya
+    # get_display_time() menambah (monotonic - synced_at) tanpa batas sehingga
+    # fase lampu SUMO ngebut jauh mendahului video.
+    CAMERA_CLOCK_STALE_SECONDS = 4.0
 
     @classmethod
     def _stream_view_boundary(cls) -> tuple[float, float, float, float]:
@@ -503,6 +514,57 @@ class SumoController:
         return Path("sumo-gui")
 
     # ============================================================
+    # X DISPLAY PREFLIGHT (sumo-gui, POSIX)
+    # ============================================================
+
+    @staticmethod
+    def _ensure_display_for_gui() -> None:
+        """Pastikan sumo-gui punya X display sebelum di-spawn.
+
+        Di pod RunPod headless, sumo-gui butuh virtual display Xvfb
+        (``DISPLAY=:99``, disiapkan ``scripts/runpod_setup.sh``). Kalau
+        backend dijalankan tanpa ``source .venv/bin/activate``, ``DISPLAY``
+        kosong -> sumo-gui langsung exit ("FXApp::openDisplay: unable to
+        open display") dan TraCI cuma melihat "TraCI server already
+        finished". Deteksi lebih awal: pakai X server yang sudah jalan bila
+        ketemu, kalau tidak lempar pesan yang jelas (bukan traceback TraCI).
+        """
+
+        if os.name == "nt":
+            return
+
+        if os.environ.get("DISPLAY"):
+            return
+
+        socket_dir = Path("/tmp/.X11-unix")
+        sockets = (
+            sorted(socket_dir.glob("X*"))
+            if socket_dir.is_dir()
+            else []
+        )
+
+        if sockets:
+
+            display = ":" + sockets[0].name[1:]
+            os.environ["DISPLAY"] = display
+
+            logger.warning(
+                "DISPLAY belum diset -- memakai X server yang terdeteksi "
+                "(%s). Jalankan `source .venv/bin/activate` sebelum uvicorn "
+                "supaya environment SUMO lengkap.",
+                display,
+            )
+
+            return
+
+        raise RuntimeError(
+            "sumo-gui butuh X display tapi DISPLAY tidak diset dan tidak "
+            "ada Xvfb yang jalan. Di pod RunPod: jalankan "
+            "`bash scripts/runpod_setup.sh` (menyalakan Xvfb :99), lalu "
+            "start backend dengan `source .venv/bin/activate` aktif."
+        )
+
+    # ============================================================
     # START
     # ============================================================
 
@@ -558,6 +620,8 @@ class SumoController:
         # ========================================================
 
         if gui:
+
+            self._ensure_display_for_gui()
 
             binary = (
                 self._default_sumo_gui_binary()
@@ -996,11 +1060,19 @@ class SumoController:
                 edges,
             )
 
+            # departPos="last" -> SUMO menyisipkan tepat di belakang kendaraan
+            # terakhir di lajur (atau di ujung lajur kalau kosong), bukan di
+            # pos 0. Tanpa ini, kendaraan lengan Selatan lahir 515 m dari
+            # simpang (ruas pendekat Jl. Tentara Pelajar sepanjang itu di peta
+            # OSM) lalu butuh ~45 detik sampai -- antreannya tersebar jauh di
+            # luar crop kamera. Dengan "last" antrean menumpuk dari mulut
+            # simpang ke belakang dan bagian depannya tetap masuk crop.
             self.traci.vehicle.add(
                 vehID=vehicle_id,
                 routeID=route_id,
                 typeID=vehicle_type,
                 depart="now",
+                departPos="last",
             )
 
             self._vehicle_approach[
@@ -1305,16 +1377,85 @@ class SumoController:
             self.traci.trafficlight.setPhase(tls_id, 0)
             self.active_cycle_plan = normalized_plan
 
+    def _camera_clock_is_fresh(self) -> bool:
+        """True kalau POST /sync-clock terakhir masih dalam jendela stale."""
+        if self._camera_clock_synced_at is None:
+            return False
+        return (
+            time.monotonic() - self._camera_clock_synced_at
+            <= self.CAMERA_CLOCK_STALE_SECONDS
+        )
+
     def get_display_time(self) -> float:
         """Kembalikan clock CCTV yang berjalan, atau clock mesin sebagai fallback."""
         if self._camera_clock_time is None or self._camera_clock_synced_at is None:
             return self.last_simulation_time
-        display_time = self._camera_clock_time + max(
-            0.0, time.monotonic() - self._camera_clock_synced_at
+        # Interpolasi maksimal CAMERA_CLOCK_STALE_SECONDS setelah POST terakhir.
+        # Lewat itu clock beku di posisi terakhir -- lebih baik lampu "macet"
+        # daripada lari sendiri jauh mendahului video CCTV.
+        elapsed = min(
+            self.CAMERA_CLOCK_STALE_SECONDS,
+            max(0.0, time.monotonic() - self._camera_clock_synced_at),
         )
+        display_time = self._camera_clock_time + elapsed
         if self._camera_clock_duration:
             display_time %= self._camera_clock_duration
         return display_time
+
+    def _pick_camera_phase(self, clock_time: float) -> tuple[int, float]:
+        """(phase_index, sisa_detik) untuk waktu video tertentu vs active_cycle_plan."""
+        durations: list[int] = []
+        for phase in self.active_cycle_plan["phases"]:
+            durations.extend([
+                max(1, int(phase.get("greenSeconds", 1))),
+                max(1, int(phase.get("yellowSeconds", 4))),
+            ])
+        cycle_seconds = sum(durations)
+        offset = max(0.0, float(clock_time)) % cycle_seconds
+        phase_index = 0
+        elapsed_in_phase = offset
+        for index, duration in enumerate(durations):
+            if elapsed_in_phase < duration:
+                phase_index = index
+                break
+            elapsed_in_phase -= duration
+        remaining = max(0.05, durations[phase_index] - elapsed_in_phase)
+        return phase_index, remaining
+
+    def _apply_tls_phase(self, phase_index: int, remaining: float) -> None:
+        """Set fase TLS kalau beda dari sekarang. Pemanggil WAJIB pegang _traci_lock."""
+        tls_ids = list(self.traci.trafficlight.getIDList())
+        if not tls_ids:
+            return
+        tls_id = tls_ids[0]
+        current_phase = self.traci.trafficlight.getPhase(tls_id)
+        current_remaining = max(
+            0.0,
+            self.traci.trafficlight.getNextSwitch(tls_id) - self.last_simulation_time,
+        )
+        # Toleransi 0.6 dtk (dulu 1.25): _enforce_camera_clock_phase() memanggil
+        # ini tiap step, jadi koreksi lebih ketat = lampu SUMO makin nempel ke
+        # video. Masih ada ambang supaya tidak setPhaseDuration tiap step (bikin
+        # countdown kedip).
+        if current_phase != phase_index or abs(current_remaining - remaining) > 0.6:
+            self.traci.trafficlight.setPhase(tls_id, phase_index)
+            self.traci.trafficlight.setPhaseDuration(tls_id, remaining)
+
+    def _enforce_camera_clock_phase(self) -> None:
+        """Kunci fase TLS ke clock CCTV tiap step loop.
+
+        Tanpa ini program TLS SUMO jalan sendiri di antara POST /sync-clock --
+        kalau POST-nya jarang/berhenti, fase lampu melenceng jauh dari video.
+        Pemanggil (loop simulasi) sudah pegang _traci_lock (RLock).
+        """
+        if (
+            self.traci is None
+            or not self.active_cycle_plan
+            or not self._camera_clock_is_fresh()
+        ):
+            return
+        phase_index, remaining = self._pick_camera_phase(self.get_display_time())
+        self._apply_tls_phase(phase_index, remaining)
 
     def sync_signal_clock(
         self,
@@ -1335,36 +1476,10 @@ class SumoController:
             self._camera_clock_time %= self._camera_clock_duration
         self._camera_clock_synced_at = time.monotonic()
 
-        durations: list[int] = []
-        for phase in self.active_cycle_plan["phases"]:
-            durations.extend([
-                max(1, int(phase.get("greenSeconds", 1))),
-                max(1, int(phase.get("yellowSeconds", 4))),
-            ])
-        cycle_seconds = sum(durations)
-        offset = max(0.0, float(video_time_seconds)) % cycle_seconds
-        phase_index = 0
-        elapsed_in_phase = offset
-        for index, duration in enumerate(durations):
-            if elapsed_in_phase < duration:
-                phase_index = index
-                break
-            elapsed_in_phase -= duration
-        remaining = max(0.05, durations[phase_index] - elapsed_in_phase)
+        phase_index, remaining = self._pick_camera_phase(float(video_time_seconds))
 
         with self._traci_lock:
-            tls_ids = list(self.traci.trafficlight.getIDList())
-            if not tls_ids:
-                raise RuntimeError("Traffic light SUMO tidak ditemukan.")
-            tls_id = tls_ids[0]
-            current_phase = self.traci.trafficlight.getPhase(tls_id)
-            current_remaining = max(
-                0.0,
-                self.traci.trafficlight.getNextSwitch(tls_id) - self.last_simulation_time,
-            )
-            if current_phase != phase_index or abs(current_remaining - remaining) > 1.25:
-                self.traci.trafficlight.setPhase(tls_id, phase_index)
-                self.traci.trafficlight.setPhaseDuration(tls_id, remaining)
+            self._apply_tls_phase(phase_index, remaining)
 
         return {
             "synced": True,
@@ -1431,6 +1546,14 @@ class SumoController:
                         self.last_simulation_time = (
                             self.traci.simulation.getTime()
                         )
+
+                        # ==========================================
+                        # KUNCI FASE TLS KE CLOCK CCTV
+                        # ==========================================
+                        # Program TLS SUMO jalan sendiri di antara POST
+                        # /sync-clock; ini menariknya balik ke posisi video
+                        # tiap step selama POST terakhir masih segar.
+                        self._enforce_camera_clock_phase()
 
                     # ==========================================
                     # DEPARTED

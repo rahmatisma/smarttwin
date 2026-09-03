@@ -1,0 +1,60 @@
+{
+  "checkpoint": "E:\\KMIPN 2026\\smarttwin\\decision_engine\\models\\checkpoints\\smarttwin_ppo_v6\\smarttwin_ppo_v6_20000_steps.zip",
+  "state_diuji": 538,
+  "sebaran": {
+    "15": 2152
+  },
+  "porsi_hijau_minimum": 1.0,
+  "opsi_terpakai": 1,
+  "korelasi_rerata": 0.0,
+  "korelasi_terdefinisi": 0,
+  "cocok_state_nyata": 0.31226765799256506,
+  "cocok_timpang": 1,
+  "rincian": [
+    {
+      "lengan_padat": "north",
+      "hijau": {
+        "north": 15,
+        "east": 15,
+        "south": 15,
+        "west": 15
+      },
+      "terpanjang": "north",
+      "benar": true
+    },
+    {
+      "lengan_padat": "east",
+      "hijau": {
+        "north": 15,
+        "east": 15,
+        "south": 15,
+        "west": 15
+      },
+      "terpanjang": "north",
+      "benar": false
+    },
+    {
+      "lengan_padat": "south",
+      "hijau": {
+        "north": 15,
+        "east": 15,
+        "south": 15,
+        "west": 15
+      },
+      "terpanjang": "north",
+      "benar": false
+    },
+    {
+      "lengan_padat": "west",
+      "hijau": {
+        "north": 15,
+        "east": 15,
+        "south": 15,
+        "west": 15
+      },
+      "terpanjang": "north",
+      "benar": false
+    }
+  ],
+  "lulus": false
+}

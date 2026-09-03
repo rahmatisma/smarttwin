@@ -24,6 +24,7 @@ sebelumnya) -- lihat TODO di app/api/routes/cctv.py.
 
 from __future__ import annotations
 
+import os
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
@@ -50,19 +51,38 @@ VIDEO_CACHE_DIR_ABSOLUTE = (
     else BACKEND_DIR / _video_cache_dir_setting
 )
 
-# venv CUDA terpisah DI LUAR repo (torch cu130, ~5.1x lebih cepat dari
-# CPU di cv/.venv). Ultralytics otomatis pakai GPU kalau torch.cuda
-# tersedia di interpreter yang menjalankannya -- tidak ada flag/kode
-# lain yang perlu diubah, cukup ganti python.exe yang dipakai di sini.
-# Fallback ke cv/.venv (CPU) kalau venv CUDA-nya tidak ada di mesin ini.
-_CV_VENV_CUDA_PYTHON = Path("E:/KMIPN 2026/venv-cuda/Scripts/python.exe")
-_CV_VENV_CPU_PYTHON = CV_DIR / ".venv" / "Scripts" / "python.exe"
+# venv CUDA terpisah untuk CV (torch cu13x, ~5.1x lebih cepat dari CPU).
+# Ultralytics otomatis pakai GPU kalau torch.cuda tersedia di interpreter
+# yang menjalankannya -- tidak ada flag/kode lain yang perlu diubah, cukup
+# arahkan ke python.exe/bin/python venv CUDA-nya.
+#
+# Lokasinya beda per mesin (di luar repo), jadi bisa dioverride lewat
+# SMARTTWIN_CV_PYTHON. Contoh:
+#   - PC Windows : E:\KMIPN 2026\venv-cuda\Scripts\python.exe
+#   - Pod RunPod : /workspace/venv-cuda/bin/python
+# Kalau env var tidak diisi, coba beberapa lokasi umum, lalu fallback ke
+# cv/.venv (CPU) supaya sistem tetap jalan walau tanpa venv CUDA.
+_CV_PYTHON_CANDIDATES = [
+    Path("/workspace/venv-cuda/bin/python"),
+    Path("E:/KMIPN 2026/venv-cuda/Scripts/python.exe"),
+    CV_DIR / ".venv" / "bin" / "python",
+    CV_DIR / ".venv" / "Scripts" / "python.exe",
+]
 
-CV_VENV_PYTHON = (
-    _CV_VENV_CUDA_PYTHON
-    if _CV_VENV_CUDA_PYTHON.exists()
-    else _CV_VENV_CPU_PYTHON
-)
+
+def _resolve_cv_python() -> Path:
+    override = os.getenv("SMARTTWIN_CV_PYTHON")
+    if override:
+        return Path(override)
+    for candidate in _CV_PYTHON_CANDIDATES:
+        if candidate.exists():
+            return candidate
+    # Terakhir: biarkan candidate CPU walau belum ada, supaya pesan errornya
+    # jelas menunjuk lokasi yang diharapkan.
+    return _CV_PYTHON_CANDIDATES[-1]
+
+
+CV_VENV_PYTHON = _resolve_cv_python()
 
 MODEL_NAME = "YOLO26s-ByteTrack"
 MODEL_VERSION = "ultralytics-track"

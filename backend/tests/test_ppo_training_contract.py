@@ -5,7 +5,13 @@ import pytest
 
 from app.schemas.traffic import ApproachState, TrafficState
 from decision_engine.ppo_engine import GREEN_OPTIONS, PPOEngine
-from decision_engine.ppo_env import SmartTwinSumoEnv, load_demand_profiles
+from decision_engine.ppo_env import (
+    BAGI_ARUS_DUA_ARAH,
+    FEATURE_WINDOW_SECONDS,
+    SKALA_PERMINTAAN,
+    SmartTwinSumoEnv,
+    load_demand_profiles,
+)
 from decision_engine.rule_based_engine import FIXED_CYCLE_ORDER, RuleBasedEngine
 
 
@@ -92,10 +98,22 @@ def test_demand_profiles_use_crossing_flow_and_current_snapshot_windows(tmp_path
     # BUG O: `jumlah_crossing` menghitung kedua arah lalu lintas (garis hitung CV
     # tidak memfilter arah, dan jalan pendekatnya dua arah), jadi angkanya dibagi
     # BAGI_ARUS_DUA_ARAH sebelum dipakai sebagai permintaan satu arah.
-    # Lalu dikalikan SKALA_PERMINTAAN (kalibrasi pemodelan, lihat ppo_env.py):
-    #   MAGELANG   2 / 2 * 0,40 = 0,4 per 5 detik -> 4,8 kend/menit (north)
-    #   DIPONEGORO 1 / 2 * 0,40 = 0,2 per 5 detik -> 2,4 kend/menit (east)
+    # Lalu dikalikan SKALA_PERMINTAAN (kalibrasi pemodelan, lihat ppo_env.py).
+    #
+    # Ekspektasi DITURUNKAN dari konstanta, bukan ditulis sebagai angka mati.
+    # SKALA_PERMINTAAN adalah kalibrasi yang memang dirancang berubah setiap
+    # kali lingkungan training berubah (0,40 -> 0,60 pada 2 September 2026
+    # ketika koridor pendekat dipanjangkan). Yang harus dikunci test ini
+    # adalah RUMUS-nya -- crossing / 2 arah * skala, lalu per-5-detik
+    # dijadikan per-menit -- bukan hasil satu kalibrasi tertentu.
+    per_menit = 60.0 / FEATURE_WINDOW_SECONDS
+    magelang = 2 / BAGI_ARUS_DUA_ARAH * SKALA_PERMINTAAN * per_menit
+    diponegoro = 1 / BAGI_ARUS_DUA_ARAH * SKALA_PERMINTAAN * per_menit
+
     assert len(profiles) == 1
     assert profiles[0] == pytest.approx(
-        {"north": 4.8, "east": 2.4, "south": 0.0, "west": 0.0}
+        {"north": magelang, "east": diponegoro, "south": 0.0, "west": 0.0}
     )
+    # DIPONEGORO tepat separuh MAGELANG -- mengunci proporsi antar-lengan
+    # supaya kalibrasi tidak bisa diam-diam mengubah bentuk permintaan.
+    assert profiles[0]["east"] == pytest.approx(profiles[0]["north"] / 2)

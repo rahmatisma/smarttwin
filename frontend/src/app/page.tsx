@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useMemo, useRef } from "react";
+import { useEffect, useState, useMemo, useRef, useCallback } from "react";
 
 import Sidebar from "@/components/Sidebar";
 import Header from "@/components/Header";
@@ -319,7 +319,44 @@ export default function DashboardPage() {
   
   const videoTimeRef = useRef<number>(0);
   const lastClockSyncSecondRef = useRef<number>(-1);
+  const lastClockPostAtRef = useRef<number>(0);
   const requestIdRef = useRef<number>(0);
+
+  /*
+   * Di-memo (semua isinya ref / konstanta modul) supaya identitasnya
+   * stabil lintas render. CameraFeedPanel memasukkan callback ini ke
+   * dependency array syncVideos/effect timeline-nya -- kalau dibuat ulang
+   * tiap render (dashboard re-render tiap 5 dtk + tiap pesan WebSocket),
+   * mesin timeline kamera terus di-teardown & re-fetch dan video ke-reset.
+   */
+  const handleCameraTimeUpdate = useCallback(
+    (time: number, duration?: number) => {
+      videoTimeRef.current = time;
+      const wholeSecond = Math.floor(time);
+      const now = Date.now();
+      // POST saat detik-video berganti ATAU sudah >2 dtk sejak POST terakhir.
+      // Heartbeat kedua ini penting: kalau video di-pause/buffer, detiknya tidak
+      // berganti tapi backend tetap butuh /sync-clock segar supaya fase lampu
+      // SUMO tidak lepas dan lari sendiri (lihat CAMERA_CLOCK_STALE_SECONDS).
+      if (
+        wholeSecond !== lastClockSyncSecondRef.current ||
+        now - lastClockPostAtRef.current > 1200
+      ) {
+        lastClockSyncSecondRef.current = wholeSecond;
+        lastClockPostAtRef.current = now;
+        void fetch(`${API_BASE_URL}/api/v1/simulation/sync-clock`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            context: "dashboard",
+            videoTimeSeconds: time,
+            videoDurationSeconds: duration,
+          }),
+        }).catch(() => undefined);
+      }
+    },
+    []
+  );
 
   /*
    * simpang4-pingit adalah SATU simpang 4 lengan, bukan 4 simpang
@@ -1027,22 +1064,7 @@ export default function DashboardPage() {
                 counts={hasTrafficData ? vehicleClassCounts : []}
                 selectedApproach={selectedApproach}
                 onApproachChange={setSelectedApproach}
-                onTimeUpdate={(time, duration) => {
-                  videoTimeRef.current = time;
-                  const wholeSecond = Math.floor(time);
-                  if (wholeSecond !== lastClockSyncSecondRef.current) {
-                    lastClockSyncSecondRef.current = wholeSecond;
-                    void fetch(`${API_BASE_URL}/api/v1/simulation/sync-clock`, {
-                      method: "POST",
-                      headers: { "Content-Type": "application/json" },
-                      body: JSON.stringify({
-                        context: "dashboard",
-                        videoTimeSeconds: time,
-                        videoDurationSeconds: duration,
-                      }),
-                    }).catch(() => undefined);
-                  }
-                }}
+                onTimeUpdate={handleCameraTimeUpdate}
               />
             </div>
 

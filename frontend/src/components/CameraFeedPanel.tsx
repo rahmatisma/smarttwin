@@ -233,6 +233,11 @@ export default function CameraFeedPanel({
   });
   const timelineRestoredRef = useRef(false);
   const backendFailureCountRef = useRef(0);
+  // Status "running" backend pada poll sebelumnya. Reset timeline hanya
+  // dilakukan saat TRANSISI (sesi simulasi berakhir / backend restart),
+  // bukan tiap poll -- kalau tidak, video ke-seek balik ke 0 tiap 2 detik
+  // selama tidak ada simulasi dan kelihatan mengulang terus.
+  const sessionWasRunningRef = useRef(false);
 
   const isInspectionMode = selectedApproach !== "all";
 
@@ -344,10 +349,12 @@ export default function CameraFeedPanel({
         timelineRef.current = state.running && sameBackend
           ? persisted
           : emptyTimeline(instanceId);
+        sessionWasRunningRef.current = Boolean(state.running);
       } catch {
         // Backend yang mati menutup sesi kamera. Jangan menghitung waktu
         // laptop sleep/offline sebagai waktu pemutaran video.
         timelineRef.current = emptyTimeline();
+        sessionWasRunningRef.current = false;
       }
 
       if (cancelled) return;
@@ -389,14 +396,20 @@ export default function CameraFeedPanel({
         backendFailureCountRef.current = 0;
         const instanceId =
           typeof state.backendInstanceId === "string" ? state.backendInstanceId : null;
+        const running = Boolean(state.running);
         const backendChanged =
           instanceId !== null &&
           timelineRef.current.backendInstanceId !== null &&
           timelineRef.current.backendInstanceId !== instanceId;
 
-        if (!state.running || backendChanged) {
+        // Sesi simulasi baru saja berakhir (running -> berhenti). Selama
+        // idle terus-menerus video dibiarkan loop bebas lewat onEnded ->
+        // restartVideosFromBeginning; jangan seret balik ke 0 tiap poll.
+        const sessionEnded = sessionWasRunningRef.current && !running;
+
+        if (sessionEnded || backendChanged) {
           resetTimeline(instanceId);
-        } else if (timelineRef.current.backendInstanceId === null) {
+        } else if (timelineRef.current.backendInstanceId === null && instanceId !== null) {
           timelineRef.current.backendInstanceId = instanceId;
           persistTimeline(
             timelineRef.current.time,
@@ -405,12 +418,19 @@ export default function CameraFeedPanel({
             instanceId
           );
         }
+
+        sessionWasRunningRef.current = running;
       } catch {
         if (cancelled) return;
         backendFailureCountRef.current += 1;
         // Dua kegagalan berturut-turut mencegah satu hiccup jaringan singkat
-        // menghapus posisi, tetapi backend yang benar-benar mati tetap terdeteksi.
-        if (backendFailureCountRef.current >= 2) resetTimeline(null);
+        // menghapus posisi, tetapi backend yang benar-benar mati tetap
+        // terdeteksi -- reset SEKALI di kegagalan kedua, lalu anggap sesi
+        // berakhir supaya poll berikutnya tidak reset berulang.
+        if (backendFailureCountRef.current === 2) {
+          resetTimeline(null);
+          sessionWasRunningRef.current = false;
+        }
       }
     }
 
@@ -435,6 +455,49 @@ export default function CameraFeedPanel({
       timelineRef.current.backendInstanceId
     );
   }, [cameras, getSharedTimelineTime, isInspectionMode]);
+
+  /*
+   * Heartbeat 1 Hz: baca currentTime video master LANGSUNG dan dorong ke
+   * onTimeUpdate. Sebelumnya clock cuma digerakkan oleh event DOM `timeupdate`
+   * video master -- kalau video nge-buffer / tab background / pause, event itu
+   * berhenti, POST /sync-clock berhenti, dan fase lampu SUMO lepas dari video.
+   * Timer ini jaminan: selama panel ter-mount, backend selalu dapat posisi
+   * video yang sebenarnya (termasuk saat pause -> posisi beku -> lampu ikut beku).
+   */
+  useEffect(() => {
+    if (isInspectionMode) return;
+    const tick = () => {
+      if (!timelineRestoredRef.current) return;
+      const master = cameras[0] ? videoRefs.current.get(cameras[0].id) : undefined;
+      if (!master || !Number.isFinite(master.currentTime)) return;
+
+      for (const [cameraId, video] of videoRefs.current) {
+        if (Number.isFinite(video.duration) && video.duration > 0) {
+          knownDurations.set(cameraId, video.duration);
+        }
+      }
+      const durations = [...knownDurations.values()].filter(
+        (value) => Number.isFinite(value) && value > 0
+      );
+      const cycleDuration = durations.length > 0 ? Math.min(...durations) : null;
+      const targetTime = cycleDuration
+        ? master.currentTime % cycleDuration
+        : Math.max(0, master.currentTime);
+
+      timelineRef.current.paused = master.paused;
+      anchorTimeline(timelineRef.current, targetTime);
+      persistTimeline(
+        targetTime,
+        master.paused,
+        timelineRef.current.updatedAt,
+        timelineRef.current.backendInstanceId
+      );
+      onTimeUpdate?.(targetTime, cycleDuration ?? undefined);
+    };
+
+    const interval = window.setInterval(tick, 700);
+    return () => window.clearInterval(interval);
+  }, [cameras, isInspectionMode, onTimeUpdate]);
 
   useEffect(() => {
     let cancelled = false;

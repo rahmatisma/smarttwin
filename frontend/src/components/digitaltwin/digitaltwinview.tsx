@@ -78,6 +78,9 @@ export default function DigitalTwinView() {
     // menampilkan crop kamera (~140x79m) -- jadi ini hitungan yang benar-
     // benar cocok dengan yang terlihat di layar.
     const [visibleVehicleCount, setVisibleVehicleCount] = useState(0);
+    // Target kendaraan hasil deteksi CV (snapshot demand terakhir) -- angka
+    // yang SEHARUSNYA ada di jaringan. Bandingkan dengan vehicles.length.
+    const [detectedVehicles, setDetectedVehicles] = useState(0);
     // Berapa kendaraan GAGAL disisipkan TraCI pada sinkronisasi demand
     // terakhir -- kalau > 0, itu penjelasan konkret kenapa "Total jaringan"
     // bisa lebih kecil dari target, bukan cuma dugaan drift alami.
@@ -177,6 +180,9 @@ export default function DigitalTwinView() {
                 }
                 if (data.visibleVehicleCount !== undefined) {
                     setVisibleVehicleCount(data.visibleVehicleCount);
+                }
+                if (data.detectedVehicles !== undefined) {
+                    setDetectedVehicles(data.detectedVehicles);
                 }
                 if (data.lastSyncFailedInsertions !== undefined) {
                     setLastSyncFailedInsertions(data.lastSyncFailedInsertions);
@@ -552,6 +558,48 @@ export default function DigitalTwinView() {
                             ) : (
                                 <div className="absolute inset-0 flex items-center justify-center">
                                     <p className="text-sm text-text-muted">Simulation Not Running</p>
+                                </div>
+                            )}
+
+                            {/* Label lengan + lampu per arah (sama seperti dashboard) */}
+                            {status === "running" && ([
+                                ["north", "UTARA · Jl. Magelang", "left-1/2 top-2 -translate-x-1/2"],
+                                ["east", "TIMUR · Jl. Diponegoro", "right-2 top-1/2 -translate-y-1/2"],
+                                ["south", "SELATAN · Jl. Tentara Pelajar", "bottom-2 left-1/2 -translate-x-1/2"],
+                                ["west", "BARAT · Jl. Kyai Mojo", "left-2 top-1/2 -translate-y-1/2"],
+                            ] as const).map(([approach, label, position]) => {
+                                const isActive = simSharedPhase === approach;
+                                const lampClass = !isActive
+                                    ? "bg-signal-red"
+                                    : simSharedState === "YELLOW"
+                                        ? "bg-signal-amber"
+                                        : "bg-signal-green";
+                                return (
+                                    <div key={approach} className={`absolute ${position} flex items-center gap-1 rounded bg-black/75 px-1.5 py-0.5 text-[9px] font-semibold text-white`}>
+                                        <i className={`h-2.5 w-2.5 shrink-0 rounded-full border border-white/40 ${lampClass}`} />
+                                        {label}
+                                    </div>
+                                );
+                            })}
+
+                            {/* Legenda warna lampu */}
+                            {status === "running" && (
+                                <div className="absolute right-3 top-3 flex gap-2 rounded-md border border-white/10 bg-black/55 px-2 py-1 text-[10px] text-white backdrop-blur-sm">
+                                    <span className="flex items-center gap-1"><i className="h-2 w-2 rounded-full bg-signal-red" />Merah</span>
+                                    <span className="flex items-center gap-1"><i className="h-2 w-2 rounded-full bg-signal-amber" />Kuning</span>
+                                    <span className="flex items-center gap-1"><i className="h-2 w-2 rounded-full bg-signal-green" />Hijau</span>
+                                </div>
+                            )}
+
+                            {/* Hitungan kendaraan (sama seperti dashboard) */}
+                            {status === "running" && (
+                                <div className="absolute bottom-2 left-2 rounded-lg border border-white/10 bg-black/50 px-2 py-1 backdrop-blur-sm">
+                                    <p className="font-mono text-xs font-medium text-white">
+                                        Deteksi: {detectedVehicles} · Terlihat: {visibleVehicleCount} · Total jaringan: {vehicles.length}
+                                        {lastSyncFailedInsertions > 0 && (
+                                            <span className="text-signal-amber"> · Gagal sisip: {lastSyncFailedInsertions}</span>
+                                        )}
+                                    </p>
                                 </div>
                             )}
 

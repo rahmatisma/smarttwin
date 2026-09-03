@@ -30,15 +30,19 @@ const SIGNAL_COLOR = {
   green: "#2ecc71",
 } as const;
 
-// Kalibrasi khusus SUMO live dari observasi durasi merah CCTV:
-// Selatan 177 dtk, Barat 180 dtk, Timur 163 dtk. Dengan kuning 4 dtk
-// dan siklus 227 dtk diperoleh hijau U/T/S/B = 62/60/46/43 dtk.
+// Kalibrasi SUMO live dari pengamatan frame video CCTV anotasi yang
+// diputar dashboard (video id 37-40, September 2026): antrean tiap
+// lengan mencair/menumpuk + penghitung crossing ditelusuri selama 2
+// putaran. Simpang Pingit fixed-time, urутan U -> T -> S -> B, video
+// mulai tepat saat Utara hijau (offset ~0). Hijau ~ U/T/S/B = 40/45/
+// 28/65 dtk, kuning 4 dtk, siklus ~194 dtk. Ketelitian +/- ~10 dtk --
+// setel ulang di sini kalau pas demo fase SUMO masih meleset dari video.
 // Nilai ini sengaja TIDAK dipakai oleh card rekomendasi/status sinyal.
 const LIVE_SUMO_PHASES = [
-  { approach: "north", greenSeconds: 62, yellowSeconds: 4 },
-  { approach: "east", greenSeconds: 60, yellowSeconds: 4 },
-  { approach: "south", greenSeconds: 46, yellowSeconds: 4 },
-  { approach: "west", greenSeconds: 43, yellowSeconds: 4 },
+  { approach: "north", greenSeconds: 40, yellowSeconds: 4 },
+  { approach: "east", greenSeconds: 45, yellowSeconds: 4 },
+  { approach: "south", greenSeconds: 28, yellowSeconds: 4 },
+  { approach: "west", greenSeconds: 65, yellowSeconds: 4 },
 ] as const;
 
 /*
@@ -392,7 +396,7 @@ export default function DigitalTwinPanel({
           phases: LIVE_SUMO_PHASES,
           candidateId: "observed-cctv-live",
           source: "observed-cctv",
-          totalCycleSeconds: 227,
+          totalCycleSeconds: 194,
         },
       }),
     })
