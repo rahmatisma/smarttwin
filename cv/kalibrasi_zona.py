@@ -20,6 +20,7 @@ Tombol:
 
 Jalankan:
     python cv/kalibrasi_zona.py --kamera CCTV_1
+    python cv/kalibrasi_zona.py --kamera CCTV_2 --detik 120   # frame saat merah
 """
 
 import argparse
@@ -93,6 +94,14 @@ def main():
         "--kamera", required=True,
         help="Nama file video tanpa ekstensi, mis. CCTV_1",
     )
+    parser.add_argument(
+        "--detik", type=float, default=0.0,
+        help=(
+            "Loncat ke detik ke-N video sebelum ambil frame. Default 0 "
+            "(frame pertama). Pakai ini untuk kalibrasi di frame saat "
+            "lengannya MERAH supaya antrean kelihatan penuh."
+        ),
+    )
     args = parser.parse_args()
 
     video_path = os.path.join(VIDEO_DIR, f"{args.kamera}.mp4")
@@ -105,11 +114,16 @@ def main():
     if not cap.isOpened():
         parser.error(f"Video '{video_path}' gagal dibuka.")
 
+    if args.detik > 0:
+        cap.set(cv2.CAP_PROP_POS_MSEC, args.detik * 1000.0)
+
     ok, frame_asli = cap.read()
     cap.release()
 
     if not ok:
-        parser.error(f"Frame pertama '{video_path}' gagal dibaca.")
+        parser.error(
+            f"Frame video '{video_path}' pada detik {args.detik} gagal dibaca."
+        )
 
     height, width = frame_asli.shape[:2]
 
