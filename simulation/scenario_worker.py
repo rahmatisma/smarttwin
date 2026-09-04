@@ -197,6 +197,13 @@ def evaluate_state(state, *, forecast=None, full_cycle: bool = False,
         recommendation_payload["cyclePlan"] = engine.last_cycle_plan.model_dump(
             mode="json"
         )
+    # LOS + delay per lengan dari kandidat pemenang. Disisipkan ke blob JSON
+    # rekomendasi (kolom `recommendation`), BUKAN sebagai kolom baru tabel
+    # liveScenarioCache -- supaya tidak perlu migrasi skema.
+    recommendation_payload["losByApproach"] = winner.get("losByApproach") or {}
+    recommendation_payload["delayByApproachSeconds"] = (
+        winner.get("delayByApproachSeconds") or {}
+    )
     payload = {
         "intersectionId": INTERSECTION_ID,
         "updatedAt": datetime.now(timezone.utc).isoformat(),

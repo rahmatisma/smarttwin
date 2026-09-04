@@ -223,6 +223,18 @@ def get_latest_traffic(
 
     except TrafficServiceError as exc:
 
+        # Simpang produksi yang sah tetapi belum mempunyai histori lengkap
+        # bukan resource yang tidak dikenal. Forecast menganggap data=[]
+        # sebagai "belum siap" lalu fallback, tanpa membanjiri log backend
+        # dengan 404. ID lain tetap 404 supaya typo tetap terdeteksi.
+        if intersectionId == "simpang4-pingit":
+            return {
+                "success": True,
+                "intersectionId": intersectionId,
+                "count": 0,
+                "data": [],
+            }
+
         raise HTTPException(
             status_code=404,
             detail=str(exc),

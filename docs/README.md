@@ -92,7 +92,8 @@ Jangan diubah. Ini yang dikutip di laporan dan dipakai menjawab juri.
 | [`hasil-studi-forecast.md`](hasil-studi-forecast.md) | Dampak forecast: delay −2,20s, antrean −7m, throughput +3 (satu snapshot) |
 | [`hasil-studi-forecast-multi-snapshot.md`](hasil-studi-forecast-multi-snapshot.md) | Dampak forecast pada 20 snapshot satu sesi dengan horizon identik: delay 20/20, antrean 17/20, throughput 19/20; ketiganya membaik 17/20 |
 | [`hasil-validasi-multisnapshot-multiseed.md`](hasil-validasi-multisnapshot-multiseed.md) | Kandidat `balanced` menang 7 dari 9 run (3 snapshot × 3 seed) |
-| [`hasil-kalibrasi-kandidat-agresif.md`](hasil-kalibrasi-kandidat-agresif.md) | Kenapa kandidat agresif jadi +1 detik, bukan +20% (sweep 28–34 detik) |
+| [`hasil-kalibrasi-kandidat-agresif.md`](hasil-kalibrasi-kandidat-agresif.md) | Kenapa kandidat agresif jadi +1 detik, bukan +20% (sweep 28–34 detik) — **digantikan rumus PKJI, lihat baris di bawah** |
+| [`hasil-implementasi-pkji-aggressive-balanced.md`](hasil-implementasi-pkji-aggressive-balanced.md) | 5 Sep: kandidat `aggressive`/`balanced` sekarang dihitung dari rumus PKJI 2023 (Flow Ratio + koreksi Degree of Saturation), bukan tempelan heuristik lama. Asumsi yang harus disebut jujur ke juri + kalimat siap-jawab |
 | [`hasil-run-antrean-25-agustus.md`](hasil-run-antrean-25-agustus.md) | Run CV 4 kamera × 43 menit, 538 jendela, data antrean asli |
 | [`hasil-validasi-akurasi-cv.md`](hasil-validasi-akurasi-cv.md) | Akurasi deteksi CV vs hitung manual: 48,7% rata-rata (8 sampel) — dilaporkan apa adanya, bukan dipoles |
 | [`audit-bug-ppo-sebelum-training-ke-5.md`](audit-bug-ppo-sebelum-training-ke-5.md) | Audit sistematis seluruh jalur PPO sebelum training v5: 11 bug terukur (E-P), termasuk 5 percobaan berbeda mengejar Bug P (fairness antar-lengan) yang akhirnya diterima sebagai keterbatasan terdokumentasi |

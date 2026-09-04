@@ -339,6 +339,40 @@ approachToPhase = {
 
 
 # ============================================================
+# APPROACH → BASE EDGE ID
+#
+# Base id (bagian sebelum "#segmen") dari koridor MASUK tiap lengan,
+# turunan dari EDGE_HULU/EDGE_MASUK di run_simulation.py. Dipakai untuk
+# memetakan posisi kendaraan (traci.vehicle.getRoadID) ke lengan supaya
+# delay bisa dihitung per lengan, bukan cuma rata-rata seluruh simpang.
+# Edge KELUAR punya base id berbeda, jadi kendaraan yang sudah terlayani
+# tidak ikut terhitung.
+# ============================================================
+
+approachByBaseEdge = {
+
+    "484349908": "north",
+
+    "134603786": "south",
+
+    "153857851": "east",
+
+    "590064461": "west",
+}
+
+
+def approachForRoad(roadId: str) -> str | None:
+    """Lengan dari edge SUMO; None untuk edge internal (":...") atau edge keluar."""
+
+    if not roadId or roadId.startswith(":"):
+        return None
+
+    baseId = roadId.split("#", 1)[0]
+
+    return approachByBaseEdge.get(baseId)
+
+
+# ============================================================
 # GLOBAL SUPABASE CLIENT
 # ============================================================
 
@@ -1207,6 +1241,16 @@ def runSimulation(
     # averageWaitingTimeSeconds di sini sepadan artinya.
     waitingTimeSamples: list[float] = []
 
+    # Sampel yang sama, dipecah per lengan berdasarkan edge tempat
+    # kendaraan berada. Dipakai untuk LOS per lengan (kotak 9) -- HCM
+    # menghitung LOS per lengan, bukan dari rata-rata seluruh simpang.
+    waitingTimeSamplesByApproach: dict[str, list[float]] = {
+        "north": [],
+        "south": [],
+        "east": [],
+        "west": [],
+    }
+
     while (
         steps
         < step_limit
@@ -1272,12 +1316,24 @@ def runSimulation(
 
             for vehicleId in vehicleIds:
 
-                waitingTimeSamples.append(
+                waitingTime = (
                     traci.vehicle
                     .getAccumulatedWaitingTime(
                         vehicleId
                     )
                 )
+
+                waitingTimeSamples.append(waitingTime)
+
+                approach = approachForRoad(
+                    traci.vehicle.getRoadID(vehicleId)
+                )
+
+                if approach is not None:
+
+                    waitingTimeSamplesByApproach[approach].append(
+                        waitingTime
+                    )
 
                 if (
                     traci.vehicle
@@ -1333,6 +1389,18 @@ def runSimulation(
         else 0.0
     )
 
+    # Rata-rata waktu tunggu per lengan. Lengan tanpa sampel (tidak ada
+    # kendaraan teramati di koridornya) dilaporkan None, bukan 0, supaya
+    # tidak salah dibaca sebagai "lancar sempurna".
+    averageWaitingTimeSecondsByApproach = {
+        approach: (
+            round(sum(samples) / len(samples), 2)
+            if samples
+            else None
+        )
+        for approach, samples in waitingTimeSamplesByApproach.items()
+    }
+
     return {
 
         "steps":
@@ -1362,6 +1430,9 @@ def runSimulation(
                 averageWaitingTimeSeconds,
                 2,
             ),
+
+        "averageWaitingTimeSecondsByApproach":
+            averageWaitingTimeSecondsByApproach,
     }
 
 

@@ -18,8 +18,21 @@ export default function SharedSignalPanels({
   selectedApproach?: ApproachSelection;
 }) {
   const { scenario } = useScenario();
+  const [loadingGraceElapsed, setLoadingGraceElapsed] = useState(false);
 
-  const isInitialLoading = activeSignal.source === "mock" && scenario === "Traffic Realtime" && !activeRecommendation;
+  // Beri backend 2,5 detik untuk mengirim rekomendasi pertama sebelum panel
+  // memutuskan menampilkan status "loading". Tanpa ini, satu poll yang telat
+  // sedikit langsung memunculkan spinner walau data sebenarnya segera datang.
+  useEffect(() => {
+    const timer = window.setTimeout(() => setLoadingGraceElapsed(true), 2500);
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  const isInitialLoading =
+    !loadingGraceElapsed &&
+    activeSignal.source === "mock" &&
+    scenario === "Traffic Realtime" &&
+    !activeRecommendation;
 
   const visualPhase = activeSignal.currentPhase || null;
   const [now, setNow] = useState<number | null>(null);

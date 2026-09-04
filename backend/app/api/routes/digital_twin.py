@@ -49,7 +49,9 @@ def get_latest_scenarios(
             
             engine = RuleBasedEngine()
             baseline_cycle = engine.recommend_cycle(traffic_state)
-            raw_candidates = generate_cycle_candidate_plans(baseline_cycle)
+            raw_candidates = generate_cycle_candidate_plans(
+                baseline_cycle, traffic_state=traffic_state
+            )
             
             candidates = [
                 DigitalTwinCandidate(**candidate, isWinner=candidate["candidateId"] == "baseline")

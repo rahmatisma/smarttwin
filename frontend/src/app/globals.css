@@ -54,6 +54,24 @@ body {
   transition: background-color 180ms ease, color 180ms ease;
 }
 
+/* LOGO -- dua file PNG berlatar transparan, satu untuk tema gelap (tulisan
+   putih) satu untuk tema terang (tulisan navy). Ditukar lewat CSS murni
+   (bukan JS/hook) supaya tidak ada logo salah tema yang sempat kelihatan
+   sebelum JavaScript jalan. Default (atribut data-theme belum ada) ikut
+   tema gelap, sama seperti default --color-bg di atas. */
+.brand-logo-dark {
+  display: block;
+}
+.brand-logo-light {
+  display: none;
+}
+:root[data-theme="light"] .brand-logo-dark {
+  display: none;
+}
+:root[data-theme="light"] .brand-logo-light {
+  display: block;
+}
+
 .compact-mode .settings-page main {
   padding-top: 1rem;
   padding-bottom: 1rem;

@@ -714,7 +714,9 @@ class SimulationService:
                     baseline_cycle = engine.recommend_cycle(traffic_state)
                     candidates = {
                         item["candidateId"]: item
-                        for item in generate_cycle_candidate_plans(baseline_cycle)
+                        for item in generate_cycle_candidate_plans(
+                            baseline_cycle, traffic_state=traffic_state
+                        )
                     }
                     selected_candidate = candidates[request.scenario.lower()]
                     phase_by_approach = {

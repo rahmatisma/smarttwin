@@ -116,6 +116,26 @@ def test_fresh_cache_flows_end_to_end_to_recommendation(monkeypatch):
     assert result.avgDelaySeconds == 13.37
 
 
+def test_fresh_cache_carries_los_per_approach(monkeypatch):
+    row = _valid_row()
+    row["recommendation"]["losByApproach"] = {
+        "north": "C", "south": "E", "east": "A", "west": "B",
+    }
+    row["recommendation"]["delayByApproachSeconds"] = {
+        "north": 24.0, "south": 61.5, "east": 8.0, "west": 15.0,
+    }
+    result = _request(monkeypatch, _Supabase([row]))
+    assert result.losByApproach == {
+        "north": "C", "south": "E", "east": "A", "west": "B",
+    }
+    assert result.delayByApproachSeconds["south"] == 61.5
+
+
+def test_fresh_cache_without_los_per_approach_is_none(monkeypatch):
+    result = _request(monkeypatch, _Supabase([_valid_row()]))
+    assert result.losByApproach is None
+
+
 def test_stale_cache_falls_back_end_to_end(monkeypatch):
     stale = datetime.now(timezone.utc) - timedelta(minutes=3)
     result = _request(monkeypatch, _Supabase([_valid_row(stale.isoformat())]))

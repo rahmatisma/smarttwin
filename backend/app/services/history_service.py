@@ -166,6 +166,7 @@ class HistoryService:
                 "pageSize": page_size,
                 "totalCycles": 0,
                 "items": [],
+                "olderCycleContext": None,
             }
 
         page = max(1, page)
@@ -175,7 +176,12 @@ class HistoryService:
         # Di sini rentangnya dihitung eksplisit dari nomor halaman supaya
         # tidak pernah bergantung pada batas bawaan itu.
         offset = (page - 1) * page_size * PHASES_PER_CYCLE
-        limit = page_size * PHASES_PER_CYCLE
+        # Ambil SATU siklus ekstra di luar halaman. Siklus ini tidak
+        # ditampilkan dan tidak dihitung di paginasi -- dipakai HANYA sebagai
+        # pembanding untuk baris terakhir halaman. Tanpa ini baris ke-N
+        # (terakhir) tidak punya "siklus sebelumnya" (ada di halaman
+        # berikutnya) sehingga frontend selalu menandainya "Tetap".
+        limit = (page_size + 1) * PHASES_PER_CYCLE
 
         result = (
             self.supabase.table("recommendations")
@@ -196,11 +202,18 @@ class HistoryService:
         for cycle in cycles:
             cycle["beforeAfter"] = _compute_before_after(cycle["candidates"])
 
+        visible = cycles[:page_size]
+        older_context = cycles[page_size] if len(cycles) > page_size else None
+
         return {
             "page": page,
             "pageSize": page_size,
             "totalCycles": math.ceil(total_rows / PHASES_PER_CYCLE),
-            "items": cycles,
+            "items": visible,
+            # Siklus tepat sebelum baris terakhir (kronologis), null kalau
+            # halaman ini memang menyentuh data paling lama. Frontend
+            # memakainya hanya untuk menghitung status baris terakhir.
+            "olderCycleContext": older_context,
         }
 
     # ------------------------------------------------------------------

@@ -13,6 +13,7 @@ import {
   Menu,
   X,
 } from "lucide-react";
+import Logo from "@/components/Logo";
 
 const NAV_ITEMS = [
   { icon: LayoutDashboard, label: "Dashboard", href: "/dashboard" },
@@ -40,18 +41,8 @@ export default function Sidebar() {
           isCollapsed ? "justify-center px-2" : "justify-between px-5"
         }`}
       >
-        {/* LOGO */}
-        {!isCollapsed && (
-          <div className="flex items-center gap-2.5">
-            <div className="flex h-7 w-7 items-center justify-center rounded-md bg-signal-green/10 ring-1 ring-signal-green/30">
-              <div className="h-2 w-2 rounded-full bg-signal-green" />
-            </div>
-
-            <span className="font-display text-base font-semibold tracking-tight">
-              SmartTwin
-            </span>
-          </div>
-        )}
+        {/* LOGO -- lockup ikon+tulisan, menggantikan placeholder titik hijau */}
+        {!isCollapsed && <Logo height={32} />}
 
         {/* COLLAPSE BUTTON */}
         <button

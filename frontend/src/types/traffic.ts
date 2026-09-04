@@ -210,4 +210,11 @@ export interface Recommendation {
   avgQueueLengthM?: number | null;
 
   los?: string | null;
+
+  // LOS HCM per lengan. `los` di atas rata-rata seluruh simpang; ini
+  // memecahnya per lengan supaya lengan yang macet tidak tersembunyi.
+  // Lengan tanpa data bernilai null.
+  losByApproach?: Record<string, string | null> | null;
+
+  delayByApproachSeconds?: Record<string, number | null> | null;
 }
