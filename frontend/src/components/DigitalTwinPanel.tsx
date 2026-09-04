@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import { Maximize2, Minimize2 } from "lucide-react";
 import type {
   ApproachState,
   SignalStatus,
@@ -309,10 +310,58 @@ export default function DigitalTwinPanel({
   const [frameVersion, setFrameVersion] = useState(0);
   const [simError, setSimError] = useState<string | null>(null);
   const [recoveryNonce, setRecoveryNonce] = useState(0);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const simulationViewRef = useRef<HTMLDivElement>(null);
+  const fullscreenViewWasRequestedRef = useRef(false);
   const wasRunningRef = useRef(false);
   const runRequestInFlightRef = useRef(false);
 
   const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
+
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      setIsFullscreen(document.fullscreenElement === simulationViewRef.current);
+    };
+
+    document.addEventListener("fullscreenchange", handleFullscreenChange);
+    return () => document.removeEventListener("fullscreenchange", handleFullscreenChange);
+  }, []);
+
+  const toggleFullscreen = async () => {
+    if (document.fullscreenElement === simulationViewRef.current) {
+      await document.exitFullscreen();
+      return;
+    }
+
+    await simulationViewRef.current?.requestFullscreen();
+  };
+
+  useEffect(() => {
+    if (!simRunning) return;
+    if (!isFullscreen && !fullscreenViewWasRequestedRef.current) return;
+
+    fullscreenViewWasRequestedRef.current = isFullscreen;
+    void fetch(
+      `${API_BASE_URL}/api/v1/simulation/view?context=${SIM_CONTEXT}&mode=${isFullscreen ? "wide" : "compact"}`,
+      { method: "POST" }
+    ).then(async (response) => {
+      if (!response.ok) {
+        const payload = await response.json().catch(() => null);
+        throw new Error(payload?.detail ?? "Gagal mengubah cakupan kamera SUMO.");
+      }
+    }).catch((error) => {
+      setSimError(error instanceof Error ? error.message : "Gagal mengubah cakupan kamera SUMO.");
+    });
+
+    return () => {
+      if (isFullscreen) {
+        void fetch(
+          `${API_BASE_URL}/api/v1/simulation/view?context=${SIM_CONTEXT}&mode=compact`,
+          { method: "POST" }
+        );
+      }
+    };
+  }, [API_BASE_URL, isFullscreen, simRunning]);
 
   useEffect(() => {
     const interval = setInterval(async () => {
@@ -539,7 +588,12 @@ export default function DigitalTwinPanel({
           SVG INTERSECTION OR LIVE STREAM
           ===================================================== */}
 
-      <div className="relative aspect-[16/11] w-full overflow-hidden rounded-md bg-[var(--color-canvas)]">
+      <div
+        ref={simulationViewRef}
+        className={`relative w-full overflow-hidden bg-[var(--color-canvas)] ${
+          isFullscreen ? "h-screen" : "aspect-[16/11] rounded-md"
+        }`}
+      >
         {simRunning ? (
           <>
             {/* Frame berubah terus dan tidak boleh masuk cache/optimizer Next Image. */}
@@ -573,6 +627,15 @@ export default function DigitalTwinPanel({
               <span className="flex items-center gap-1"><i className="h-2 w-2 rounded-full bg-signal-amber" />Kuning</span>
               <span className="flex items-center gap-1"><i className="h-2 w-2 rounded-full bg-signal-green" />Hijau</span>
             </div>
+            <button
+              type="button"
+              onClick={() => void toggleFullscreen()}
+              className="absolute right-2 top-2 z-10 flex h-9 w-9 items-center justify-center rounded-lg border border-white/20 bg-black/60 text-white shadow-sm backdrop-blur-sm transition hover:bg-black/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
+              aria-label={isFullscreen ? "Keluar dari layar penuh" : "Tampilkan SUMO dalam layar penuh"}
+              title={isFullscreen ? "Keluar dari layar penuh (Esc)" : "Layar penuh"}
+            >
+              {isFullscreen ? <Minimize2 size={18} /> : <Maximize2 size={18} />}
+            </button>
             <div className="absolute bottom-2 right-2 rounded-lg border border-white/10 bg-black/50 px-2 py-1 backdrop-blur-sm">
               <p className="font-mono text-xs font-medium text-white">
                 {Math.floor(simTime / 60).toString().padStart(2, '0')}:{(Math.floor(simTime) % 60).toString().padStart(2, '0')}

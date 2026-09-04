@@ -103,3 +103,180 @@ Metrik lain dihitung sebagai berikut:
 - Throughput: +3 kendaraan
 
 Nilai negatif untuk delay/antrean berarti hasil dengan forecast lebih baik. Ini satu eksperimen pada satu snapshot, sehingga belum cukup untuk klaim signifikansi statistik.
+
+## Audit dasar ilmiah kandidat Baseline, Aggressive, dan Balanced
+
+Bagian ini ditambahkan setelah penelusuran ulang terhadap rujukan FHWA,
+SUMO-RL, dan penelitian deep reinforcement learning. Kesimpulan utamanya:
+literatur mendukung **prinsip** pembatasan waktu hijau, respons terhadap demand,
+dan pemilihan tindakan berdasarkan kinerja. Literatur tersebut tidak menetapkan
+rumus kandidat SmartTwin secara persis.
+
+| Kandidat | Implementasi aktif | Status dasar ilmiah |
+|---|---|---|
+| Baseline | `RuleBasedEngine.recommend_cycle()` | Durasi berbasis demand dengan batas minimum/maksimum; prinsipnya sejalan dengan actuated control, tetapi formula internal SmartTwin tetap perlu dikalibrasi lokal. |
+| Aggressive | Lengan dengan `demandScore` tertinggi mendapat `min(60, baseline + 1)` | `+1 detik` bukan formula FHWA. Ini perturbasi eksperimen yang dipilih dari sweep lokal 28--34 detik karena merupakan penambahan dengan degradasi terkecil. |
+| Balanced | Setiap lengan memakai `round((baseline + 15) / 2)` | Interpolasi 50% menuju minimum green. Rumus dan bobot 50% bukan formula baku FHWA maupun SUMO-RL; ini heuristik pencarian SmartTwin. |
+
+FHWA menyatakan bahwa durasi hijau pada pengendali actuated dipengaruhi oleh
+minimum green, maximum green, passage/gap time, detector demand, dan kebutuhan
+membersihkan antrean. FHWA juga menjelaskan bahwa maximum green dapat ditaksir
+dari waktu hijau minimum-delay yang dikalikan sekitar 1,25--1,50, tetapi itu
+adalah cara menetapkan **maximum green**, bukan pembenaran untuk kandidat
+`baseline + 1` atau `(baseline + 15) / 2`.
+
+SUMO-RL memakai perubahan cumulative delay sebagai reward bawaan. Penelitian
+DRL yang dirujuk juga memodelkan perubahan timing sebagai action dan selisih
+cumulative waiting time antarsiklus sebagai reward. Keduanya mendukung pola
+"uji tindakan lalu nilai dampaknya", bukan formula tetap untuk kandidat
+Aggressive atau Balanced.
+
+Konsekuensi pelaporan:
+
+- Jangan menyebut rumus Aggressive/Balanced sebagai "rumus FHWA".
+- Sebut keduanya **kandidat heuristik yang diuji secara empiris di SUMO**.
+- Dasar pemilihannya adalah hasil delay, antrean, dan throughput pada horizon
+  yang sama, bukan nama kandidatnya.
+- Validitas eksternal masih terbatas karena sweep agresif berasal dari satu
+  snapshot dan studi multi-snapshot masih berasal dari satu sesi rekaman.
+
+Rujukan audit:
+
+- [FHWA Traffic Signal Timing Manual, Chapter 5](https://ops.fhwa.dot.gov/publications/fhwahop08024/chapter5.htm)
+- [FHWA Traffic Signal Timing and Operations Strategies](https://ops.fhwa.dot.gov/arterial_mgmt/tst_ops.htm)
+- [SUMO-RL reward documentation](https://lucasalegre.github.io/sumo-rl/mdp/reward/)
+- [Deep Reinforcement Learning for Traffic Light Control](https://arxiv.org/abs/1803.11115)
+
+## Rencana pembuktian kesesuaian SUMO terhadap PKJI 2023
+
+Tujuan studi yang dapat dipertanggungjawabkan dirumuskan sebagai berikut:
+
+> Membandingkan kapasitas dan tundaan per pendekat yang dihasilkan model
+> mikrosimulasi SUMO dengan hasil perhitungan analitis PKJI 2023 pada geometri,
+> arus, komposisi kendaraan, dan waktu sinyal yang sama; kemudian mengukur
+> besar selisih keduanya menggunakan kriteria penerimaan yang ditetapkan
+> sebelum pengujian.
+
+Kata **sesuai** di sini berarti hasil SUMO berada dalam toleransi benchmark
+PKJI yang ditetapkan penelitian. PKJI 2023 tidak menetapkan ambang resmi untuk
+"akurasi simulator", sehingga toleransi tidak boleh diklaim sebagai ketentuan
+PKJI. Pernyataan "memenuhi standar Indonesia" hanya boleh dipakai untuk
+parameter kinerja yang memang memiliki kriteria PKJI, misalnya kriteria desain
+umum `DJ <= 0,85`, bukan untuk menyatakan dua perangkat hitung identik.
+
+### 1. Data masukan yang wajib dikumpulkan
+
+Gunakan periode survei representatif satu jam dan catat per pendekat:
+
+- geometri: lebar efektif, jumlah/lajur masuk, median, gradien, jarak parkir,
+  dan tipe pendekat terlindung atau terlawan;
+- lingkungan: ukuran kota dan kelas hambatan samping;
+- arus gerakan lurus, belok kiri, dan belok kanan menurut jenis kendaraan;
+- komposisi Mobil Penumpang (MP), Kendaraan Sedang (KS), dan Sepeda Motor
+  (SM), lalu konversi `kend/jam` menjadi `SMP/jam` memakai EMP PKJI untuk tipe
+  pendekat yang sesuai;
+- fase, urutan fase, waktu hijau, kuning, merah-semua, dan waktu siklus aktual;
+- antrean serta tundaan perjalanan lapangan sebagai data kalibrasi independen.
+
+Data CV SmartTwin belum otomatis mencukupi semua butir ini. Khususnya, hitungan
+crossing perlu dipisahkan menurut pendekat, gerakan, dan kelas PKJI; lebar
+efektif serta faktor lingkungan harus diukur atau ditetapkan melalui survei.
+
+### 2. Perhitungan benchmark PKJI 2023
+
+Lakukan per pendekat menggunakan formulir/prosedur Simpang APILL PKJI:
+
+```text
+J  = J0 x FHS x FUK x FG x FP x FBKi x FBKa
+C  = J x (wH / s)
+DJ = q / C
+T  = TLL + TG
+TI = sum(q_i x T_i) / q_total
+```
+
+Keterangan ringkas: `J` arus jenuh terkoreksi, `C` kapasitas pendekat,
+`wH` waktu hijau, `s` waktu siklus, `q` arus dalam SMP/jam, `DJ` derajat
+kejenuhan, `TLL` tundaan lalu lintas, `TG` tundaan geometri, dan `TI` tundaan
+rata-rata simpang. Lengkapi pula panjang antrean dan jumlah kendaraan terhenti
+agar diagnosis tidak hanya bergantung pada satu angka.
+
+### 3. Menyamakan eksperimen SUMO
+
+- Bangun geometri, jumlah lajur, gerakan belok, kecepatan, dan program sinyal
+  yang sama dengan input PKJI.
+- Masukkan demand per pendekat dalam `SMP/jam` yang sudah dipetakan kembali ke
+  komposisi kendaraan SUMO; jangan memasukkan total hitungan dua arah sebagai
+  demand satu pendekat.
+- Jalankan minimal 15 menit warm-up lalu satu jam pengukuran.
+- Gunakan sekurangnya 10 seed acak untuk setiap periode agar hasil tidak
+  bergantung pada satu pola keberangkatan kendaraan.
+- Ukur kapasitas SUMO dari arus kendaraan yang melewati garis henti. Untuk uji
+  kapasitas, berikan demand cukup tinggi dan hitung `J_SUMO` saat hijau, lalu
+  `C_SUMO = J_SUMO x (wH/s)`.
+- Hitung seluruh hasil per pendekat dan dalam satuan SMP, bukan hanya jumlah
+  kendaraan mentah seluruh jaringan.
+
+### 4. Menyamakan definisi tundaan
+
+Metrik aktif studi ini memakai
+`traci.vehicle.getAccumulatedWaitingTime()`. Nilai tersebut terutama mengukur
+waktu berhenti dan **belum ekuivalen** dengan tundaan total PKJI yang terdiri
+dari tundaan lalu lintas dan tundaan geometri. Karena itu, angka delay pada
+tabel lama di atas belum dapat langsung dipakai sebagai bukti kesesuaian PKJI.
+
+Untuk studi PKJI, simpan sekurangnya:
+
+- `timeLoss` SUMO per kendaraan sebagai selisih terhadap perjalanan bebas;
+- waiting time sebagai metrik tambahan, bukan pengganti tundaan total;
+- waktu masuk/keluar dan pendekat asal setiap kendaraan;
+- rerata tertimbang SMP per pendekat dan seluruh simpang.
+
+Definisi operasional tundaan SUMO harus ditulis sebelum pengujian dan digunakan
+secara konsisten pada semua scenario.
+
+### 5. Analisis kesesuaian
+
+Untuk setiap pendekat, periode, dan scenario, laporkan:
+
+| Parameter | PKJI | Rerata SUMO | 95% CI SUMO | Selisih absolut | Selisih relatif |
+|---|---:|---:|---:|---:|---:|
+| Kapasitas (SMP/jam) |  |  |  |  |  |
+| Derajat kejenuhan |  |  |  |  |  |
+| Tundaan (det/SMP) |  |  |  |  |  |
+| Panjang antrean (m) |  |  |  |  |  |
+
+Tetapkan kriteria penerimaan **sebelum** melihat hasil. Contoh kriteria proyek
+yang dapat diuji, tetapi bukan ambang resmi PKJI: galat relatif kapasitas paling
+besar 10%, galat tundaan paling besar 15% atau 5 det/SMP, serta kesimpulan
+`DJ <= 0,85`/`DJ > 0,85` yang sama antara SUMO dan PKJI. Gunakan juga MAE,
+MAPE (hindari pembagi mendekati nol), bias, dan interval kepercayaan antar-seed.
+
+### 6. Validasi lapangan dan bentuk klaim akhir
+
+PKJI adalah benchmark analitis, sedangkan data lapangan adalah acuan empiris.
+Pembuktian terkuat menggunakan tiga sisi:
+
+```text
+observasi lapangan
+       |          \
+       v           v
+     PKJI <-----> SUMO
+```
+
+Kalibrasikan parameter SUMO dengan satu bagian data lapangan, lalu validasikan
+pada periode lain yang tidak dipakai saat kalibrasi. Jangan mengubah parameter
+setelah melihat hasil periode validasi.
+
+Jika kriteria terpenuhi, klaim yang aman adalah:
+
+> Pada periode dan kondisi yang diuji, keluaran kapasitas dan tundaan model
+> SUMO berada dalam toleransi penelitian terhadap perhitungan PKJI 2023, dan
+> klasifikasi pemenuhan kriteria derajat kejenuhan konsisten.
+
+Jika hanya PKJI dan SUMO yang dibandingkan tanpa data lapangan, gunakan istilah
+**verifikasi silang terhadap benchmark PKJI**, bukan "validasi kondisi nyata".
+
+Rujukan utama PKJI:
+
+- [Direktorat Jenderal Bina Marga -- PKJI 2023 (09/P/BM/2023)](https://binamarga.pu.go.id/index.php/nspk/detail/09pbm2023-pedoman-kapasitas-jalan-indonesia-)
+- [Dokumen resmi PKJI 2023](https://binamarga.pu.go.id/uploads/files/1942/09pbm2023-pedoman-kapasitas-jalan-indonesia-.pdf)

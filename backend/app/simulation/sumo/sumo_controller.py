@@ -77,8 +77,10 @@ class SumoController:
     # Screenshot harus dibuat langsung pada rasio card dashboard. Mengandalkan
     # ukuran window SUMO-GUI menghasilkan viewport sekitar 950x278 di Windows;
     # ketika di-stretch oleh browser hasilnya terlihat pecah.
-    STREAM_FRAME_WIDTH = 1280
-    STREAM_FRAME_HEIGHT = 720
+    # 1080p menjaga marka, kendaraan, dan tepi jalan tetap tajam ketika
+    # frame dibentangkan ke monitor fullscreen. Rasio tetap 16:9.
+    STREAM_FRAME_WIDTH = 1920
+    STREAM_FRAME_HEIGHT = 1080
 
     # Area kamera ketat di sekitar simpang supaya framing mirip CCTV asli.
     # Format override: xmin,ymin,xmax,ymax, contoh di .env.example (root repo).
@@ -86,6 +88,10 @@ class SumoController:
     # antrean menumpuk dari mulut simpang ke belakang dan tetap masuk crop --
     # bukan tersebar jauh di ruas pendekat Selatan yang 515 m di peta OSM.
     DEFAULT_STREAM_VIEW_BOUNDARY = (240.63, 479.635, 380.63, 558.385)
+    # Cukup lebar untuk memperlihatkan ruas pendekat, tetapi tidak sampai
+    # Zoom fullscreen 70%: boundary diperbesar 1/0,70 agar jaringan tampak
+    # sekitar 70% dari ukuran compact, sementara frame tetap memenuhi layar.
+    FULLSCREEN_VIEW_SCALE = 1.43
 
     # Berapa lama clock CCTV (dan penguncian fase TLS ke situ) masih dianggap
     # sah setelah POST /sync-clock terakhir. Frontend mengirim tiap ~1 dtk;
@@ -119,6 +125,35 @@ class SumoController:
             return cls.DEFAULT_STREAM_VIEW_BOUNDARY
 
         return boundary
+
+    @classmethod
+    def _fullscreen_view_boundary(cls) -> tuple[float, float, float, float]:
+        """Perluas kamera dari titik tengah crop card tanpa mengubah rasio."""
+        xmin, ymin, xmax, ymax = cls._stream_view_boundary()
+        center_x = (xmin + xmax) / 2
+        center_y = (ymin + ymax) / 2
+        half_width = (xmax - xmin) * cls.FULLSCREEN_VIEW_SCALE / 2
+        half_height = (ymax - ymin) * cls.FULLSCREEN_VIEW_SCALE / 2
+        return (
+            center_x - half_width,
+            center_y - half_height,
+            center_x + half_width,
+            center_y + half_height,
+        )
+
+    def set_stream_view(self, wide: bool) -> None:
+        """Ganti cakupan kamera stream aktif untuk card atau fullscreen."""
+        if self.traci is None or not self.running or not self.is_gui:
+            raise RuntimeError("Renderer SUMO belum berjalan.")
+
+        boundary = (
+            self._fullscreen_view_boundary()
+            if wide
+            else self._stream_view_boundary()
+        )
+        with self._traci_lock:
+            self.traci.gui.setBoundary("View #0", *boundary)
+            self._stream_view_wide = wide
 
     # ============================================================
     # EDGE CONFIGURATION
@@ -344,6 +379,7 @@ class SumoController:
         self.running = False
         self.paused = False
         self.is_gui = False
+        self._stream_view_wide = False
 
         self._stop_event = (
             threading.Event()

@@ -61,6 +61,15 @@ def get_simulation_state(context: str = "default"):
 		raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
+@router.post("/view", dependencies=[Depends(require_operator)])
+def set_simulation_view(mode: str, context: str = "default"):
+	"""Perluas crop kamera SUMO saat frontend masuk fullscreen."""
+	try:
+		return simulation_service.set_stream_view(mode, context)
+	except SimulationServiceError as exc:
+		raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
 @router.post("/sync-clock", dependencies=[Depends(require_operator)])
 def sync_simulation_clock(request: SimulationClockRequest):
 	# Sinkronisasi bersifat best-effort. Saat video lebih dulu siap daripada

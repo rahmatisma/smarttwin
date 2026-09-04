@@ -1069,6 +1069,22 @@ class SimulationService:
             "startedAt": self.started_at.get(context),
         }
 
+    def set_stream_view(self, mode: str, context: str = "default") -> dict[str, Any]:
+        """Ubah crop renderer tanpa me-restart atau mengganggu waktu simulasi."""
+        if mode not in {"compact", "wide"}:
+            raise SimulationServiceError("Mode tampilan harus 'compact' atau 'wide'.")
+
+        controller = self.controllers.get(context)
+        if controller is None or not controller.is_running():
+            raise SimulationServiceError("Simulasi SUMO belum berjalan.")
+
+        try:
+            controller.set_stream_view(wide=mode == "wide")
+        except Exception as exc:
+            raise SimulationServiceError(str(exc)) from exc
+
+        return {"context": context, "mode": mode}
+
     def sync_clock(
         self,
         video_time_seconds: float,
