@@ -14,6 +14,8 @@ import {
     ChevronDown,
     Circle,
     TrafficCone,
+    Maximize2,
+    Minimize2,
 } from "lucide-react";
 import {
     ResponsiveContainer,
@@ -70,6 +72,27 @@ interface SimHistoryPoint {
 }
 
 export default function DigitalTwinView() {
+    const simulationViewRef = useRef<HTMLDivElement>(null);
+    const [isFullscreen, setIsFullscreen] = useState(false);
+    const fullscreenViewWasRequestedRef = useRef(false);
+
+    useEffect(() => {
+        const handleFullscreenChange = () => {
+            setIsFullscreen(document.fullscreenElement === simulationViewRef.current);
+        };
+
+        document.addEventListener("fullscreenchange", handleFullscreenChange);
+        return () => document.removeEventListener("fullscreenchange", handleFullscreenChange);
+    }, []);
+
+    const toggleFullscreen = async () => {
+        if (document.fullscreenElement === simulationViewRef.current) {
+            await document.exitFullscreen();
+            return;
+        }
+
+        await simulationViewRef.current?.requestFullscreen();
+    };
     const [status, setStatus] =
         useState<SimulationStatus>("idle");
     const [loading, setLoading] = useState(false);
@@ -102,6 +125,27 @@ export default function DigitalTwinView() {
     const boundsRef = useRef({ minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity });
 
     const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
+
+    useEffect(() => {
+        if (status === "idle") return;
+        if (!isFullscreen && !fullscreenViewWasRequestedRef.current) return;
+
+        const context = contextForScenario(scenario);
+        fullscreenViewWasRequestedRef.current = isFullscreen;
+        void fetch(
+            `${API_BASE_URL}/api/v1/simulation/view?context=${context}&mode=${isFullscreen ? "wide" : "compact"}`,
+            { method: "POST" }
+        );
+
+        return () => {
+            if (isFullscreen) {
+                void fetch(
+                    `${API_BASE_URL}/api/v1/simulation/view?context=${context}&mode=compact`,
+                    { method: "POST" }
+                );
+            }
+        };
+    }, [API_BASE_URL, isFullscreen, scenario, status]);
 
     interface SignalData {
         trafficLightId: string;
@@ -506,7 +550,12 @@ export default function DigitalTwinView() {
                     {/* DIGITAL TWIN CANVAS */}
                     {/* =============================== */}
 
-                    <div className="overflow-hidden rounded-2xl border border-border bg-surface shadow-sm">
+                    <div
+                        ref={simulationViewRef}
+                        className={`overflow-hidden border border-border bg-surface shadow-sm ${
+                            isFullscreen ? "flex h-screen flex-col" : "rounded-2xl"
+                        }`}
+                    >
 
                         {/* Canvas header */}
 
@@ -535,16 +584,21 @@ export default function DigitalTwinView() {
 
                             <button
                                 type="button"
-                                className="rounded-lg border border-border p-2 text-text-secondary transition hover:bg-surface-2"
+                                onClick={() => void toggleFullscreen()}
+                                className="rounded-lg border border-border p-2 text-text-secondary transition hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-text-secondary"
+                                aria-label={isFullscreen ? "Keluar dari layar penuh" : "Tampilkan SUMO dalam layar penuh"}
+                                title={isFullscreen ? "Keluar dari layar penuh (Esc)" : "Layar penuh"}
                             >
-                                <Settings2 size={17} />
+                                {isFullscreen ? <Minimize2 size={17} /> : <Maximize2 size={17} />}
                             </button>
 
                         </div>
 
                         {/* Simulation area */}
 
-                        <div className="relative aspect-[16/11] w-full overflow-hidden bg-[var(--color-canvas)]">
+                        <div className={`relative w-full overflow-hidden bg-[var(--color-canvas)] ${
+                            isFullscreen ? "min-h-0 flex-1" : "aspect-[16/11]"
+                        }`}>
 
                             {/* SUMO-GUI Live Stream */}
                             {status === "running" ? (
