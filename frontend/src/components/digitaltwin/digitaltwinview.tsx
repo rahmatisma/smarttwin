@@ -553,7 +553,7 @@ export default function DigitalTwinView() {
                     <div
                         ref={simulationViewRef}
                         className={`overflow-hidden border border-border bg-surface shadow-sm ${
-                            isFullscreen ? "flex h-screen flex-col" : "rounded-2xl"
+                            isFullscreen ? "flex h-screen flex-col" : "flex flex-col h-full rounded-2xl"
                         }`}
                     >
 
@@ -697,7 +697,7 @@ export default function DigitalTwinView() {
                     {/* SIMULATION STATUS */}
                     {/* =============================== */}
 
-                    <div className="space-y-5">
+                    <div className="flex flex-col gap-5 h-full">
 
                         {/* Status */}
 
@@ -791,7 +791,7 @@ export default function DigitalTwinView() {
                         {/* SIMULATION CONTROLS */}
                         {/* =============================== */}
 
-                        <div className="rounded-2xl border border-border bg-surface p-5 shadow-sm">
+                        <div className="flex flex-col flex-1 rounded-2xl border border-border bg-surface p-5 shadow-sm">
 
                             <div className="mb-5 flex items-center gap-3">
 

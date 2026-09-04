@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, useMemo } from "react";
 import {
     Activity,
     ChevronDown,
@@ -33,7 +33,7 @@ import {
 import Sidebar from "@/components/Sidebar";
 import ForecastChart from "@/components/ForecastChart";
 import { fetchForecast, DEFAULT_INTERSECTION_ID } from "@/lib/supabaseData";
-import type { ForecastResponse } from "@/types/traffic";
+import type { ForecastResponse, TrafficState } from "@/types/traffic";
 
 /*
  * =========================================================
@@ -386,8 +386,33 @@ export default function HistoryPage() {
                 setForecastData(res);
             });
         } else {
-            setForecastData(null);
+            queueMicrotask(() => {
+                setForecastData(null);
+            });
         }
+    }, [dipilih]);
+
+    // Map `dipilih.trafficConditions` into a TrafficState object to provide
+    // the "current" context (horizon 0s) to the ForecastChart component.
+    const currentTrafficState: TrafficState | null = useMemo(() => {
+        if (!dipilih) return null;
+        return {
+            intersectionId: DEFAULT_INTERSECTION_ID,
+            windowStart: dipilih.timestamp,
+            windowEnd: dipilih.timestamp,
+            approaches: dipilih.trafficConditions.map(kondisi => ({
+                approach: kondisi.approach as "north" | "south" | "east" | "west",
+                volume: kondisi.volume ?? 0,
+                carCount: 0,
+                motorcycleCount: 0,
+                busCount: 0,
+                truckCount: 0,
+                queueLengthVeh: kondisi.queueLengthVeh ?? 0,
+                queueLengthMEst: kondisi.queueLengthMEst ?? 0,
+                densityIndex: kondisi.densityIndex ?? 0,
+                avgSpeedKmh: null,
+            }))
+        };
     }, [dipilih]);
 
     // Filter cuma menyaring siklus yang SUDAH dimuat di halaman ini (client-
@@ -1064,7 +1089,7 @@ export default function HistoryPage() {
                         </div>
                         {/* TRAFFIC FORECAST */}
                         <div className="mb-5">
-                            <ForecastChart data={forecastData} />
+                            <ForecastChart data={forecastData} current={currentTrafficState} />
                         </div>
 
                         {/* KANDIDAT */}
