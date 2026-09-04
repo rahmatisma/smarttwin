@@ -22,7 +22,7 @@ Dokumen lain di `docs/` sekarang cuma 2 jenis: **cara kerja** (rujukan teknis) d
 | 6 | Traffic Forecast (LSTM) | 92% | Terlatih, tersambung, studi dampak ada |
 | 7 | Scenario Generator | 90% | **Sudah live** lewat cache |
 | 8 | Traffic Simulation | 92% | **Sudah live**, sudah divalidasi multi-seed |
-| 9 | Performance Analysis (LOS) | 90% | 4 metrik nyata, tampil di dashboard |
+| 9 | Performance Analysis (LOS) | 95% | 4 metrik nyata, tampil di dashboard. **LOS per lengan selesai 4 Sep (P-3)** — HCM per lengan, bukan lagi rata-rata simpang |
 | 10 | Adaptive Decision Engine | 70% / 90% | **Berubah 30 Agustus:** v4 (100k) dievaluasi lalu dikoreksi dua kali (Bug F/G); 11 bug tambahan (E–P) ditemukan & diperbaiki sebelum training v5. **v5 (checkpoint 60k, `smarttwin_ppo_v5.zip`) sekarang menang/seri di 9/9 perbandingan metrik lalu lintas 3-seed** — lihat P-1f. Tapi Bug P (respons per-lengan ke permintaan) diterima sebagai keterbatasan terdokumentasi, bukan diselesaikan — PPO **belum** diaktifkan sebagai default, peran tetap diisi Scenario Generator |
 | 11 | Signal Timing Recommendation | 90% | S-1 selesai — `/signal/status` sekarang baca cache skenario. Tapi lihat kotak 12: panel yang menampilkannya sedang tidak ter-build |
 | 12 | Dashboard | 92% | ✅ Build hijau lagi (S-8 diperbaiki 29 Agustus malam), badge `source` + LOS ada |
@@ -63,6 +63,9 @@ Bagian ini ada supaya tidak ada yang mengerjakan hal yang sudah beres. Beberapa 
 | P-1c: baseline pembanding PPO bukan RuleBasedEngine asli | ✅ **Selesai** | `ppo_env.py:177,439` — `rule_based_action()` panggil `RuleBasedEngine().recommend_cycle()` yang asli |
 | Kartu "Skenario Berubah" & "Rata-rata Perbaikan Delay" di halaman Riwayat dihitung dari `apakahBerubah` (beda dari siklus sebelumnya) padahal caption-nya soal "kalahkan baseline" — dua populasi beda, angka dilusi ke 0% seperti yang komentar aslinya klaim sudah dicegah | ✅ **Selesai** (4 September) | `history/page.tsx` — kedua kartu sekarang pakai `siklusKalahkanBaseline` (`beforeAfter.changed === true`), bukan `siklusBerubah` |
 | Badge "kondisi sama/kondisi baru" di halaman Riwayat salah kalau lagi difilter/dicari — banding ke tetangga hasil filter, bukan tetangga kronologis sebenarnya | ✅ **Selesai** (4 September) | `history/page.tsx` — `kondisiSama` dipindah masuk `itemDenganStatus`, dihitung dari `data.items` mentah sebelum `itemTersaring` |
+| P-3: LOS dihitung dari delay rata-rata seluruh simpang, bukan per lengan (HCM aslinya per lengan) — lengan macet bisa tersembunyi | ✅ **Selesai** (4 September) | `run_tls_simulation.py::runSimulation()` sampel waktu tunggu dipecah per lengan lewat `getRoadID` → `approachForRoad`; `scenario_generator.py::los_by_approach()`; mengalir lewat `recommendation` jsonb (tanpa migrasi tabel) → `SignalRecommendation.losByApproach`/`delayByApproachSeconds` → strip "LOS per lengan" di `RecommendationPanel.tsx`. Uji SUMO nyata: overall LOS C menyembunyikan north/west = D. +4 test |
+| P-6: baris terakhir tiap halaman Riwayat selalu ditandai "tetap" (pembanding ada di halaman berikutnya yang belum di-fetch) | ✅ **Selesai** (4 September) | `history_service.list_cycles()` fetch `page_size + 1` siklus; siklus ekstra keluar dari `items`/`totalCycles`, dikirim sebagai `olderCycleContext`; `history/page.tsx` memakainya sebagai `sebelumnya` hanya untuk baris terakhir. +2 test |
+| Kandidat "aggressive"/"balanced" cuma tempelan heuristik (+1 detik / rata-rata ke minimum), tidak berlandaskan rumus apa pun — proposal tim menjanjikan evaluasi PKJI 2023 | ✅ **Selesai** (5 September, diperbarui hari yang sama) | `scenario_generator.py` — dihitung dari rumus PKJI 2023 (SMP → Flow Ratio → siklus optimum Webster → hijau proporsional untuk "balanced"; + koreksi Degree of Saturation ≤0,85 untuk "aggressive"). `baseline` SENGAJA tidak diubah (dipakai sebagai pembanding before/after di tempat lain). **Lebar efektif pendekat sekarang data survei lapangan Simpang Pingit per lengan** (8,2/7,6/7,0/7,5 m — sumber diberikan pengguna, belum diverifikasi independen, akses PDF 403), menggantikan asumsi rata 6 meter — satu-satunya asumsi yang tersisa adalah faktor penyesuaian lanjutan PKJI (=1,0). Asumsi lengkap + kalimat siap-jawab: `docs/hasil-implementasi-pkji-aggressive-balanced.md`. Diuji SUMO nyata + 8 test PKJI, `pytest backend/tests` 122 passed |
 
 ---
 
@@ -390,11 +393,18 @@ Perbaikan: bagi ulang data supaya test set lebih besar; ulang `scenario_worker.p
 > generalisasi lintas hari/lokasi. Rincian reproduksinya ada di
 > `docs/hasil-studi-forecast-multi-snapshot.md`.
 
-### P-3. LOS per lengan — Rahmat, 2–3 jam
+### ✅ P-3. LOS per lengan — SELESAI (4 September)
 
-`calculate_los()` menghitung dari delay **rata-rata seluruh simpang**. HCM aslinya per lengan. Akibatnya kalau selatan macet parah (LOS E) tapi 3 lengan lain lancar (LOS A), sistem melaporkan LOS B — **masalah di selatan tidak terlihat**.
+Dulu `calculate_los()` cuma menerima satu skalar (delay rata-rata seluruh simpang), sehingga satu lengan macet bisa tersembunyi di balik rata-rata. Sekarang:
 
-Bonus: demo jadi lebih meyakinkan — bisa menunjuk satu lengan dan bilang "yang ini LOS E, karena itu diberi hijau lebih lama".
+- `runSimulation()` (`run_tls_simulation.py`) memecah sampel `getAccumulatedWaitingTime` per lengan berdasarkan edge kendaraan (`approachForRoad`, base id koridor masuk dari `EDGE_HULU`/`EDGE_MASUK`), lalu mengembalikan `averageWaitingTimeSecondsByApproach`.
+- `los_by_approach()` (`scenario_generator.py`) menghitung LOS HCM tiap lengan; lengan tanpa sampel = `null` (bukan 0).
+- Mengalir ke dashboard **lewat blob `recommendation` (jsonb)** — `losByApproach` + `delayByApproachSeconds` — jadi **tidak perlu migrasi kolom** `liveScenarioCache`. Ditambahkan ke `SignalRecommendation` (backend schema) + `Recommendation` (frontend type).
+- `RecommendationPanel.tsx` menampilkan strip "LOS per lengan (HCM)" 4 sel, warna hijau/kuning/merah, tooltip berisi delay.
+
+Uji SUMO nyata (`recommend_full_cycle` offline): overall LOS **C** (delay 26,89 s) menyembunyikan **north 43 s = D** dan **west 42 s = D**; kandidat `balanced` meratakan jadi semua B/C. `pytest backend/tests` **112 passed** (+4 test baru), `simulation/tests` **25 passed**, `npm run build` **13/13 route**.
+
+**Untuk demo:** tunjuk strip ini — "north dan west LOS D walau simpang rata-rata C, karena itu kandidat balanced menaikkan hijau ke sana".
 
 ### P-4. Rapi-rapi — siapa saja senggang
 
@@ -430,19 +440,13 @@ Supabase dan HuggingFace sekarang bersih, tidak ada sisa dari eksperimen P-5.
 
 ---
 
-### P-6. Baris terakhir tiap halaman Riwayat selalu ditandai "tetap" — belum diperbaiki, sengaja ditunda
+### ✅ P-6. Baris terakhir tiap halaman Riwayat selalu ditandai "tetap" — SELESAI (4 September)
 
-Ditemukan saat audit halaman Riwayat 4 September (lihat 2 baris "Selesai" di atas soal kartu ringkasan & badge kondisi — ini temuan ke-4 dari audit yang sama, sengaja TIDAK ikut diperbaiki).
+Dipilih **Opsi 1** (fetch 1 siklus ekstra). `history_service.list_cycles()` sekarang mengambil `(page_size + 1)` siklus; siklus ke-21 dikeluarkan dari `items` dan tidak dihitung di `totalCycles`, dikembalikan terpisah sebagai `olderCycleContext`. `history/page.tsx` memakainya sebagai `sebelumnya` **hanya** saat `items[indeks + 1]` tidak ada (yaitu baris terakhir) — jadi status Berubah/Tetap **dan** badge "kondisi sama/baru" baris terakhir kini benar, tanpa info hilang.
 
-**Masalahnya:** kolom Status (berubah/tetap) butuh siklus SEBELUMNYA untuk dibandingkan (`apakahBerubah()` di `history/page.tsx`). Untuk baris TERAKHIR di tiap halaman (baris ke-20 dari 20), siklus sebelumnya yang sebenarnya ada di HALAMAN BERIKUTNYA yang belum di-fetch — jadi dianggap tidak ada pembanding dan selalu ditandai "tetap", padahal belum tentu benar.
+`pytest backend/tests` **114 passed** (+2 test: `olderCycleContext` terisi & null di tepi data; test paginasi range diperbarui 160..239 → 160..243). `npm run build` 13/13.
 
-**Dampak:** ±1 dari 20 baris (5%) per halaman salah label. Ikut menggeser kartu "Skenario Berubah" (dikit, karena kartu itu sudah dipindah ke `beforeAfter.changed` yang tidak kena bug ini) dan filter Status=Berubah/Tetap untuk baris itu spesifik.
-
-**Opsi perbaikan (belum dipilih siapa pun):**
-1. Fetch `pageSize + 1` siklus dari backend; siklus ke-21 cuma dipakai untuk pembanding baris ke-20, tidak ditampilkan di tabel/paginasi.
-2. Tandai "—" (tidak diketahui) untuk baris itu alih-alih memaksa "tetap" — lebih jujur, tanpa fetch tambahan, tapi info baris itu jadi hilang.
-
-**File terkait:** `frontend/src/app/history/page.tsx` — fungsi `apakahBerubah()` (dipanggil dari `itemDenganStatus`).
+**File:** `backend/app/services/history_service.py`, `backend/app/api/routes/history.py` (tak berubah, cuma meneruskan), `frontend/src/app/history/page.tsx`.
 
 ---
 
@@ -517,11 +521,11 @@ SETIAP REKAM: backend → worker --once --full-cycle (smoke test)
 | Siapa | Status Fase 1 | Sisa kerja sekarang |
 |---|---|---|
 | **Yuli** | ✅ S-1, S-2 selesai | Setelah training v4 selesai: jalankan `evaluate_ppo.py` di 3 seed, dan kalau lulus gerbang kualitas, commit checkpoint v4 (memperbaiki test integrasi yang sekarang gagal). P-2 bukti LSTM (2–3j) masih terbuka |
-| **Melpi** | ✅ S-3, S-6 selesai | Refactor signal-recommendation-nya (commit `2d2d08d`) sudah diperbaiki Rahmat supaya build hijau lagi (S-8) — kalau ada niat/konteks lanjutan dari refactor itu yang belum kesampaikan, cek diff S-8 dulu sebelum lanjut. Setelah itu: LOS per lengan (dukung P-3) |
-| **Rahmat** | ✅ S-4, S-5, S-8 selesai | Memantau training v4 (checkpoint selanjutnya), **P-1e skenario Digital Twin** (diambil alih dari Melpi, lihat `rencana-perbaikan-digital-twin-scenario.md`), P-3 LOS per lengan, P-4 rapi-rapi. **P-5 tetap dikembalikan** (lihat catatan) |
+| **Melpi** | ✅ S-3, S-6 selesai | Refactor signal-recommendation-nya (commit `2d2d08d`) sudah diperbaiki Rahmat supaya build hijau lagi (S-8) — kalau ada niat/konteks lanjutan dari refactor itu yang belum kesampaikan, cek diff S-8 dulu sebelum lanjut. |
+| **Rahmat** | ✅ S-4, S-5, S-8 selesai | ✅ P-3 LOS per lengan + P-6 label baris Riwayat selesai (4 Sep). Sisa: **P-1e skenario Digital Twin** (verifikasi manual + commit), P-4 rapi-rapi. **P-5 tetap dikembalikan** (lihat catatan) |
 | Siapa saja | — | S-7 verifikasi browser (30m) — **sudah bisa dikerjakan** |
 
-**Prioritas sekarang, dalam urutan:** (1) S-7 verifikasi browser (build sudah hijau), (2) training v4 selesai + dievaluasi, (3) P-2/P-3 kalau masih ada waktu sebelum tanggal 6–7 September.
+**Prioritas sekarang, dalam urutan:** (1) S-7 verifikasi browser (build sudah hijau), (2) P-1e verifikasi manual + commit, (3) P-4 rapi-rapi kalau masih ada waktu sebelum lomba 10 September. (P-3 & P-6 sudah selesai 4 Sep.)
 
 ---
 

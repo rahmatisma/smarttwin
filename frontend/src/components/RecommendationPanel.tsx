@@ -11,6 +11,23 @@ function approachLabel(approach: string): string {
   return option ? option.name : approach;
 }
 
+const APPROACH_SHORT: Record<string, string> = {
+  north: "Utara",
+  east: "Timur",
+  south: "Selatan",
+  west: "Barat",
+};
+
+// Warna kelas LOS: A-B lancar (hijau), C-D sedang (kuning), E-F buruk (merah).
+const LOS_TONE: Record<string, string> = {
+  A: "text-emerald-500",
+  B: "text-emerald-500",
+  C: "text-amber-500",
+  D: "text-amber-500",
+  E: "text-red-500",
+  F: "text-red-500",
+};
+
 const APPROACH_NAMES = APPROACH_OPTIONS.reduce((acc, opt) => {
   if (opt.id === "all") return acc;
   const match = opt.name.match(/^(.*?)\s*\((.*?)\)$/);
@@ -161,9 +178,9 @@ export default function RecommendationPanel({
   layout?: "grid" | "cross";
 }) {
   const displayRec = recommendation ?? null;
-  const showLoading = Boolean(isLoading || !displayRec);
+  const showLoading = Boolean(isLoading);
 
-  if (showLoading || !displayRec) {
+  if (showLoading) {
     return (
       <div className="rounded-lg border border-border bg-surface p-4">
         <div className="mb-3 flex items-center justify-between">
@@ -176,6 +193,30 @@ export default function RecommendationPanel({
           <div className="flex flex-col items-center justify-center space-y-3">
             <div className="h-5 w-5 animate-spin rounded-full border-2 border-text-muted border-t-transparent"></div>
             <p className="text-xs text-text-muted">Mengambil data rekomendasi...</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Loading sudah selesai tapi backend belum mengirim rekomendasi apa pun.
+  // Tampilkan status eksplisit, jangan spinner tanpa batas -- dashboard
+  // tetap bisa dipakai dan data akan menyusul otomatis saat poll berikutnya.
+  if (!displayRec) {
+    return (
+      <div className="rounded-lg border border-border bg-surface p-4">
+        <div className="mb-3 flex items-center justify-between">
+          <h2 className="font-display text-sm font-semibold text-text">
+            Signal Recommendation
+          </h2>
+          <span className="text-xs text-amber-500">Menunggu backend</span>
+        </div>
+        <div className="flex min-h-[320px] items-center justify-center rounded-md border border-border bg-surface-2 px-6 text-center">
+          <div>
+            <p className="text-sm font-medium text-text">Rekomendasi belum tersedia</p>
+            <p className="mt-2 text-xs text-text-muted">
+              Dashboard tetap dapat digunakan. Data akan diperbarui otomatis saat backend kembali merespons.
+            </p>
           </div>
         </div>
       </div>
@@ -400,6 +441,44 @@ export default function RecommendationPanel({
                 <div className="mt-1 font-mono text-xs font-bold text-text">
                   {displayRec.avgQueueLengthM?.toFixed(1) ?? "-"}m
                 </div>
+              </div>
+            </div>
+          )}
+
+          {displayRec.losByApproach &&
+            Object.keys(displayRec.losByApproach).length > 0 && (
+            <div className="mt-2">
+              <div className="mb-1 text-[9px] uppercase tracking-wider text-text-muted">
+                LOS per lengan (HCM)
+              </div>
+              <div className="grid grid-cols-4 gap-1">
+                {CYCLE_ORDER.map((approach) => {
+                  const grade = displayRec.losByApproach?.[approach] ?? null;
+                  const delay =
+                    displayRec.delayByApproachSeconds?.[approach] ?? null;
+                  return (
+                    <div
+                      key={approach}
+                      className="rounded border border-border bg-surface-2 p-1.5 text-center"
+                      title={
+                        typeof delay === "number"
+                          ? `${approachLabel(approach)} — delay ${delay.toFixed(1)}s`
+                          : `${approachLabel(approach)} — tidak ada data`
+                      }
+                    >
+                      <div className="text-[8px] uppercase tracking-wider text-text-muted">
+                        {APPROACH_SHORT[approach] ?? approach}
+                      </div>
+                      <div
+                        className={`mt-0.5 font-mono text-xs font-bold ${
+                          grade ? LOS_TONE[grade] ?? "text-text" : "text-text-muted"
+                        }`}
+                      >
+                        {grade ?? "–"}
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             </div>
           )}

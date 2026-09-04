@@ -154,6 +154,11 @@ interface ResponRiwayat {
     pageSize: number;
     totalCycles: number;
     items: Siklus[];
+    // Siklus tepat sebelum baris terakhir halaman (kronologis). TIDAK
+    // ditampilkan di tabel -- dipakai hanya sebagai pembanding supaya baris
+    // terakhir tidak selalu tampil "Tetap". null kalau halaman menyentuh
+    // data paling lama.
+    olderCycleContext?: Siklus | null;
 }
 
 function labelLengan(approach: string): string {
@@ -499,7 +504,11 @@ export default function HistoryPage() {
     // tetangga kronologis sebenarnya -- baik status "berubah" maupun
     // "kondisi sama/baru" jadi salah begitu user mengetik di kotak cari.
     const itemDenganStatus = (data?.items ?? []).map((siklus, indeks) => {
-        const sebelumnya = (data?.items ?? [])[indeks + 1];
+        // Untuk baris terakhir, "siklus sebelumnya" ada di halaman
+        // berikutnya -- backend mengirimkannya terpisah sebagai
+        // olderCycleContext supaya baris itu tidak otomatis dianggap "Tetap".
+        const sebelumnya =
+            (data?.items ?? [])[indeks + 1] ?? data?.olderCycleContext ?? undefined;
         return {
             siklus,
             berubah: apakahBerubah(siklus, sebelumnya),

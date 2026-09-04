@@ -136,6 +136,14 @@ class SignalRecommendation(
 
     los: str | None = None
 
+    # LOS HCM per lengan (north/south/east/west -> "A".."F"). HCM menilai
+    # LOS per lengan; `los` di atas adalah rata-rata seluruh simpang yang
+    # bisa menyembunyikan satu lengan macet. Lengan tanpa data -> null.
+    losByApproach: dict[str, str | None] | None = None
+
+    # Rata-rata delay (detik) per lengan, sumber angka losByApproach.
+    delayByApproachSeconds: dict[str, float | None] | None = None
+
     candidateId: str | None = None
 
 

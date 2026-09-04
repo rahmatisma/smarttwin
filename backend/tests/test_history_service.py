@@ -84,8 +84,77 @@ def test_paginasi_dikirim_eksplisit_ke_postgrest():
     assert rentang, "range() wajib dipanggil -- tanpa itu PostgREST memotong diam-diam"
 
     _, start, end = rentang[0]
-    # Halaman 3, 20 siklus/halaman, 4 baris per siklus -> baris 160..239
-    assert (start, end) == (160, 239)
+    # Halaman 3, 20 siklus/halaman, 4 baris per siklus -> mulai di baris 160.
+    # Diambil 21 siklus (bukan 20): 1 siklus ekstra hanya jadi pembanding
+    # baris terakhir, tidak ditampilkan. 21 * 4 = 84 baris -> 160..243.
+    assert (start, end) == (160, 243)
+
+
+def test_siklus_ekstra_dikirim_sebagai_pembanding_baris_terakhir():
+    # Baris terakhir halaman butuh "siklus sebelumnya" untuk menentukan
+    # status Berubah/Tetap. Siklus itu ada di halaman berikutnya, jadi
+    # backend mengirimnya terpisah sebagai olderCycleContext -- TIDAK
+    # dihitung di items maupun totalCycles.
+    store = {
+        "intersections": [{"id": 1}],
+        "recommendations": [
+            {
+                "id": 1,
+                "timestamp": "2026-09-01T10:01:00+00:00",
+                "recommendedPhase": "north",
+                "recommendedGreenSeconds": 26,
+                "currentGreenSeconds": 15,
+                "confidence": 0.8,
+                "expectedDelayReductionPercent": 3.5,
+                "source": "scenario-generator",
+            },
+            {
+                "id": 2,
+                "timestamp": "2026-09-01T10:00:00+00:00",
+                "recommendedPhase": "north",
+                "recommendedGreenSeconds": 24,
+                "currentGreenSeconds": 15,
+                "confidence": 0.7,
+                "expectedDelayReductionPercent": 2.0,
+                "source": "scenario-generator",
+            },
+        ],
+    }
+    service, _ = _service(store)
+
+    hasil = service.list_cycles(
+        intersection_id="simpang4-pingit", page=1, page_size=1
+    )
+
+    assert len(hasil["items"]) == 1
+    assert hasil["items"][0]["timestamp"] == "2026-09-01T10:01:00+00:00"
+    assert hasil["olderCycleContext"]["timestamp"] == "2026-09-01T10:00:00+00:00"
+
+
+def test_oldercyclecontext_null_saat_menyentuh_data_paling_lama():
+    store = {
+        "intersections": [{"id": 1}],
+        "recommendations": [
+            {
+                "id": 1,
+                "timestamp": "2026-09-01T10:00:00+00:00",
+                "recommendedPhase": "north",
+                "recommendedGreenSeconds": 26,
+                "currentGreenSeconds": 15,
+                "confidence": 0.8,
+                "expectedDelayReductionPercent": 3.5,
+                "source": "scenario-generator",
+            }
+        ],
+    }
+    service, _ = _service(store)
+
+    hasil = service.list_cycles(
+        intersection_id="simpang4-pingit", page=1, page_size=20
+    )
+
+    assert len(hasil["items"]) == 1
+    assert hasil["olderCycleContext"] is None
 
 
 def test_intersection_tidak_dikenal_mengembalikan_kosong():

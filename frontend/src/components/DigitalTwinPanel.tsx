@@ -397,9 +397,12 @@ export default function DigitalTwinPanel({
 
   useEffect(() => {
     if (!simRunning) return;
+    // Backend menulis gambar SUMO baru tiap 0,25 detik (4 gambar/detik).
+    // Ambil gambar dengan irama yang sama supaya video tidak patah-patah;
+    // sebelumnya 500 ms (2 gambar/detik) -- separuh dari yang tersedia.
     const interval = window.setInterval(
       () => setFrameVersion((version) => version + 1),
-      500
+      250
     );
     return () => window.clearInterval(interval);
   }, [simRunning]);

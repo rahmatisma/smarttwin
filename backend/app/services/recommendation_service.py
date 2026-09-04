@@ -208,6 +208,16 @@ class RecommendationService:
                 avgDelaySeconds=cached.get("avgDelaySeconds") if cached else None,
                 avgQueueLengthM=cached.get("avgQueueLengthM") if cached else None,
                 los=cached.get("los") if cached else None,
+                losByApproach=(
+                    cached_payload.get("losByApproach")
+                    if isinstance(cached_payload, dict)
+                    else None
+                ),
+                delayByApproachSeconds=(
+                    cached_payload.get("delayByApproachSeconds")
+                    if isinstance(cached_payload, dict)
+                    else None
+                ),
                 candidateId=cached.get("candidateId") if cached else None,
             )
 

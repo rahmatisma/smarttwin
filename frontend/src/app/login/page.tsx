@@ -6,6 +6,7 @@ import Link from "next/link";
 import { Lock, Mail } from "lucide-react";
 
 import { supabase } from "@/lib/supabaseClient";
+import Logo from "@/components/Logo";
 
 export default function LoginPage() {
     const router = useRouter();
@@ -49,16 +50,11 @@ export default function LoginPage() {
 
             <div className="w-full max-w-md">
 
-                {/* LOGO */}
+                {/* LOGO -- lockup sudah memuat tulisan "SmartTwin", jadi
+                    menggantikan ikon placeholder DAN <h1> teks sekaligus */}
                 <div className="mb-8 text-center">
 
-                    <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-signal-green/10 ring-1 ring-signal-green/30">
-                        <div className="h-3 w-3 rounded-full bg-signal-green" />
-                    </div>
-
-                    <h1 className="font-display text-2xl font-semibold text-text">
-                        SmartTwin
-                    </h1>
+                    <Logo height={96} className="mx-auto mb-4 justify-center" />
 
                     <p className="mt-2 text-sm text-text-muted">
                         Sign in to your SmartTwin account

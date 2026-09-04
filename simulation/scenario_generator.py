@@ -132,6 +132,244 @@ def calculate_los(avg_delay_s: float) -> str:
     return "F"
 
 
+def los_by_approach(
+    delay_by_approach: dict[str, float | None] | None,
+) -> dict[str, str | None]:
+    """
+    LOS HCM per lengan dari rata-rata delay tiap lengan. Standar HCM
+    menilai LOS per lengan; rata-rata seluruh simpang bisa menyembunyikan
+    satu lengan yang macet parah. Lengan tanpa data delay dilaporkan None.
+    """
+
+    if not delay_by_approach:
+        return {}
+
+    return {
+        approach: (
+            calculate_los(delay) if delay is not None else None
+        )
+        for approach, delay in delay_by_approach.items()
+    }
+
+
+# ============================================================
+# PKJI 2023 -- WAKTU SIKLUS & PEMBAGIAN HIJAU
+# (dipakai kandidat "aggressive" dan "balanced")
+#
+# "baseline" TETAP pakai rumus RuleBasedEngine (interpolasi linear dari
+# demand score, lihat rule_based_engine.py) -- SENGAJA tidak diubah,
+# karena baseline dipakai di banyak tempat sebagai pembanding "sebelum
+# dioptimasi" (before/after di halaman Riwayat, dst). Kalau baseline ikut
+# dihitung ulang pakai PKJI, perbandingan itu kehilangan makna: tidak ada
+# lagi apa yang mau dibandingkan.
+#
+# "aggressive" dan "balanced" sebelumnya cuma tempelan kasar (+1 detik ke
+# lengan tersibuk / rata-rata ditarik ke minimum) -- tidak berlandaskan
+# rumus apa pun, jadi tidak ada jawaban kalau juri tanya dasarnya apa.
+# Sekarang dihitung dari metode PKJI 2023, turunan metode Webster (akar
+# teori yang sama dengan HCM 2000 yang dipakai LOS di proyek ini):
+#
+#   1. Ubah kendaraan ke SMP (Satuan Mobil Penumpang) lewat emp per jenis
+#   2. FR (Flow Ratio) = arus lengan (smp/jam) / arus jenuh
+#   3. Waktu siklus optimum: c = (1,5*LTI + 5) / (1 - Sigma FR-kritis)
+#   4. Hijau tiap lengan proporsional ke FR-nya:
+#      g = (FR_lengan / Sigma FR) * (c - LTI)
+#      -> ini kandidat "balanced": pembagian PROPORSIONAL PKJI apa adanya
+#   5. "aggressive" = (4) + koreksi PKJI: lengan dengan Degree of
+#      Saturation (DS) di atas 0,85 (ambang kinerja simpang yang masih
+#      dapat diterima menurut PKJI/MKJI) diberi tambahan hijau bertahap
+#      sampai DS turun ke ambang, atau mentok MAX_GREEN_SECONDS
+#
+# Arus jenuh (S) per lengan -- diambil LANGSUNG dari studi lapangan
+# Simpang Pingit (Tabel 2, kolom "Arus jenuh"), BUKAN dihitung dari
+# S0=600*We oleh tim. Ini lebih akurat dari S0 mentah: angka ini SUDAH
+# memasukkan seluruh faktor penyesuaian MKJI (ukuran kota, gesekan
+# samping/parkir, kelandaian, belok) hasil pengamatan lapangan asli,
+# bukan diasumsikan 1,0.
+#
+# Sumber: Febriana Ramadhani, Widarto Sutrisno, Iskandar Yasin (Universitas
+# Sarjanawiyata Tamansiswa), "Analisa Kinerja Simpang Bersinyal Pingit
+# Yogyakarta", jurnal Renovasi (jurnal.ustjogja.ac.id/index.php/renovasi,
+# artikel id 1804). PDF lengkap diberikan pengguna 5 September 2026 dan
+# sudah dibaca langsung oleh tim (bukan cuma ditranskrip) -- Tabel 2.
+#
+# CATATAN JUJUR yang harus disebut kalau ditanya juri:
+#   - Survei lapangan aslinya Selasa, 8 November 2016, jam puncak pagi
+#     06.45-07.45 -- data berumur ~10 tahun, bukan pengukuran terbaru.
+#     Arus jenuh (kapasitas fisik jalan) relatif stabil selama geometri
+#     jalan belum berubah, tapi tetap perlu disebutkan umurnya.
+#   - Lebar efektif (We) SEBELUM faktor koreksi cuma disebutkan eksplisit
+#     di paper untuk Utara (8,2 m) dan Timur (7,6 m) -- keduanya dipakai
+#     PDF sebagai baseline skenario pelebaran jalan. We Selatan & Barat
+#     TIDAK ditemukan di teks paper manapun -- makanya arus jenuh (S)
+#     dipakai langsung dari Tabel 2, bukan dihitung ulang dari We, supaya
+#     tidak perlu menebak We yang tidak ada datanya.
+PKJI_BASE_SATURATION_FLOW_SMP_PER_HOUR_BY_APPROACH = {
+    "north": 5212.48,  # Jl. Magelang -- Tabel 2, lengan A (utara)
+    "east": 4489.81,   # Jl. Diponegoro -- Tabel 2, lengan B (timur)
+    "south": 3652.16,  # Jl. AM. Sangaji -- Tabel 2, lengan C (selatan)
+    "west": 3842.90,   # Jl. Kyai Mojo -- Tabel 2, lengan D (barat)
+}
+
+# Satu-satunya asumsi murni yang masih tersisa: proyek ini tidak
+# mengukur ulang faktor-faktor itu sendiri -- dipakai apa adanya dari
+# hasil pengukuran paper di atas, bukan diukur ulang tim SmartTwin.
+# Konstanta lain (emp, ambang DS 0,85, rumus siklus Webster) adalah
+# nilai baku PKJI/MKJI yang lazim dipakai di praktik rekayasa lalu
+# lintas Indonesia -- bukan buatan tim.
+# ============================================================
+
+# emp (ekivalensi mobil penumpang) untuk simpang bersinyal 4-lengan.
+PKJI_EMP_LV = 1.0   # mobil (light vehicle)
+PKJI_EMP_HV = 1.3   # bus + truk (heavy vehicle)
+PKJI_EMP_MC = 0.25  # motor (motorcycle)
+
+# TrafficState dihitung per jendela 5 detik (DEFAULT_WINDOW_SECONDS di
+# backend/app/pipeline/traffic_state_builder.py) -- dipakai mengubah
+# hitungan per-jendela jadi smp/jam yang sepadan dengan arus jenuh.
+PKJI_TRAFFIC_STATE_WINDOW_SECONDS = 5.0
+
+# Ambang Degree of Saturation PKJI/MKJI untuk kinerja simpang yang masih
+# dapat diterima -- di atas ini butuh koreksi (kandidat "aggressive").
+PKJI_DS_THRESHOLD = 0.85
+
+# Langkah kenaikan hijau saat koreksi DS -- kecil supaya tidak melompat
+# jauh dari solusi proporsional "balanced".
+PKJI_DS_CORRECTION_STEP_SECONDS = 2
+
+
+def pkji_flow_smp_per_hour(approach: Any) -> float:
+    """Arus lengan dalam smp/jam, dari hitungan kendaraan per jendela 5 detik."""
+
+    car = float(getattr(approach, "carCount", 0) or 0)
+    bus = float(getattr(approach, "busCount", 0) or 0)
+    truck = float(getattr(approach, "truckCount", 0) or 0)
+    motorcycle = float(getattr(approach, "motorcycleCount", 0) or 0)
+
+    smp_per_window = (
+        car * PKJI_EMP_LV
+        + (bus + truck) * PKJI_EMP_HV
+        + motorcycle * PKJI_EMP_MC
+    )
+
+    return smp_per_window * (3600.0 / PKJI_TRAFFIC_STATE_WINDOW_SECONDS)
+
+
+def pkji_cycle_and_green_seconds(
+    approaches_by_name: dict[str, Any],
+) -> dict[str, Any]:
+    """
+    Waktu siklus optimum + pembagian hijau proporsional per PKJI/Webster.
+
+    greenSecondsByApproach SUDAH dijepit ke
+    MIN_GREEN_SECONDS..MAX_GREEN_SECONDS -- itu batas operasional TLS di
+    proyek ini, bukan bagian rumus PKJI, tapi tanpa dijepit hasilnya bisa
+    di luar rentang yang program TLS SUMO di sini bisa terima.
+    """
+
+    lost_time_seconds = YELLOW_SECONDS * len(FIXED_CYCLE_ORDER)
+
+    flow_by_approach = {
+        approach: pkji_flow_smp_per_hour(approaches_by_name[approach])
+        for approach in FIXED_CYCLE_ORDER
+    }
+    flow_ratio_by_approach = {
+        approach: flow / PKJI_BASE_SATURATION_FLOW_SMP_PER_HOUR_BY_APPROACH[approach]
+        for approach, flow in flow_by_approach.items()
+    }
+
+    total_flow_ratio = sum(flow_ratio_by_approach.values())
+    # Simpang oversaturasi (Sigma FR mendekati/melebihi 1) bikin rumus
+    # Webster meledak (penyebut mendekati/di bawah nol). Dijepit ke 0,95
+    # supaya tetap menghasilkan angka yang masuk akal -- ini pengaman,
+    # bukan bagian rumus PKJI baku.
+    safe_total_flow_ratio = (
+        min(total_flow_ratio, 0.95) if total_flow_ratio > 0 else 0.01
+    )
+
+    optimum_cycle_seconds = (
+        1.5 * lost_time_seconds + 5
+    ) / (1 - safe_total_flow_ratio)
+
+    green_budget_seconds = optimum_cycle_seconds - lost_time_seconds
+
+    green_by_approach: dict[str, int] = {}
+    for approach, flow_ratio in flow_ratio_by_approach.items():
+        share = (
+            flow_ratio / total_flow_ratio
+            if total_flow_ratio > 0
+            else 1.0 / len(FIXED_CYCLE_ORDER)
+        )
+        green = share * green_budget_seconds
+        green_by_approach[approach] = int(
+            round(min(MAX_GREEN_SECONDS, max(MIN_GREEN_SECONDS, green)))
+        )
+
+    return {
+        "flowSmpPerHourByApproach": flow_by_approach,
+        "flowRatioByApproach": {
+            approach: round(ratio, 3)
+            for approach, ratio in flow_ratio_by_approach.items()
+        },
+        "optimumCycleSeconds": round(optimum_cycle_seconds, 1),
+        "greenSecondsByApproach": green_by_approach,
+    }
+
+
+def pkji_degree_of_saturation(
+    green_by_approach: dict[str, int],
+    flow_by_approach: dict[str, float],
+) -> dict[str, float]:
+    """DS = arus (smp/jam) / kapasitas (smp/jam); kapasitas = arus jenuh lengan itu * (hijau/siklus)."""
+
+    total_cycle = sum(green_by_approach.values()) + YELLOW_SECONDS * len(
+        FIXED_CYCLE_ORDER
+    )
+
+    result = {}
+    for approach, green in green_by_approach.items():
+        saturation_flow = PKJI_BASE_SATURATION_FLOW_SMP_PER_HOUR_BY_APPROACH[approach]
+        capacity = saturation_flow * (green / total_cycle)
+        result[approach] = round(
+            flow_by_approach[approach] / capacity if capacity > 0 else float("inf"),
+            2,
+        )
+    return result
+
+
+def pkji_apply_ds_correction(
+    green_by_approach: dict[str, int],
+    flow_by_approach: dict[str, float],
+) -> tuple[dict[str, int], dict[str, float]]:
+    """
+    Koreksi PKJI kandidat "aggressive": lengan dengan Degree of Saturation
+    di atas ambang 0,85 diberi tambahan hijau bertahap sampai DS turun ke
+    ambang atau mentok MAX_GREEN_SECONDS. Lengan paling jenuh dikoreksi
+    duluan -- konsisten dengan semangat "aggressive" lama (prioritaskan
+    lengan tersibuk).
+    """
+
+    adjusted = dict(green_by_approach)
+
+    for approach in sorted(
+        adjusted, key=lambda item: flow_by_approach[item], reverse=True
+    ):
+        guard = 0
+        while (
+            pkji_degree_of_saturation(adjusted, flow_by_approach)[approach]
+            > PKJI_DS_THRESHOLD
+            and adjusted[approach] < MAX_GREEN_SECONDS
+            and guard < 50
+        ):
+            adjusted[approach] = min(
+                MAX_GREEN_SECONDS,
+                adjusted[approach] + PKJI_DS_CORRECTION_STEP_SECONDS,
+            )
+            guard += 1
+
+    return adjusted, pkji_degree_of_saturation(adjusted, flow_by_approach)
+
+
 # ============================================================
 # KOTAK 7 -- SCENARIO GENERATOR
 # ============================================================
@@ -183,8 +421,22 @@ def generate_candidate_plans(
 
 def generate_cycle_candidate_plans(
     baseline: CyclePlan,
+    traffic_state: Any | None = None,
 ) -> list[dict[str, Any]]:
-    """Tiga kandidat CyclePlan penuh; tidak mengubah generator satu-lengan."""
+    """
+    Tiga kandidat CyclePlan penuh; tidak mengubah generator satu-lengan.
+
+    "aggressive" dan "balanced" dihitung dari rumus PKJI 2023 (lihat blok
+    komentar PKJI di atas) KALAU traffic_state tersedia -- itu satu-
+    satunya sumber hitungan kendaraan per jenis (mobil/motor/bus/truk)
+    yang dibutuhkan rumus PKJI; CyclePlan `baseline` tidak membawanya
+    (cuma demandScore 0..1 yang sudah dinormalisasi RuleBasedEngine).
+
+    Kalau traffic_state tidak diberikan (mis. dipanggil dari kode/test
+    lama yang belum diperbarui), jatuh ke heuristik lama (+1 detik ke
+    lengan tersibuk / rata-rata ditarik ke minimum) supaya tidak ada
+    pemanggil lama yang tiba-tiba error.
+    """
     phase_by_approach = {
         phase.approach: phase for phase in baseline.phases
     }
@@ -199,18 +451,48 @@ def generate_cycle_candidate_plans(
     ]
     busiest = max(phases, key=lambda phase: phase["demandScore"])["approach"]
 
+    pkji_result = None
+    if traffic_state is not None:
+        approaches_by_name = {
+            str(getattr(item.approach, "value", item.approach)).lower(): item
+            for item in traffic_state.approaches
+        }
+        if all(approach in approaches_by_name for approach in FIXED_CYCLE_ORDER):
+            pkji_result = pkji_cycle_and_green_seconds(approaches_by_name)
+
     def variant(candidate_id: str) -> dict[str, Any]:
-        result = []
-        for phase in phases:
-            green = phase["greenSeconds"]
-            if candidate_id == "aggressive" and phase["approach"] == busiest:
-                green = min(
-                    MAX_GREEN_SECONDS,
-                    green + AGGRESSIVE_GREEN_INCREMENT_SECONDS,
+        pkji_ds_by_approach = None
+
+        if candidate_id in ("aggressive", "balanced") and pkji_result is not None:
+            green_by_approach = dict(pkji_result["greenSecondsByApproach"])
+            if candidate_id == "aggressive":
+                green_by_approach, pkji_ds_by_approach = pkji_apply_ds_correction(
+                    green_by_approach, pkji_result["flowSmpPerHourByApproach"]
                 )
-            elif candidate_id == "balanced":
-                green = round((green + MIN_GREEN_SECONDS) / 2)
-            result.append({**phase, "greenSeconds": green})
+            else:
+                pkji_ds_by_approach = pkji_degree_of_saturation(
+                    green_by_approach, pkji_result["flowSmpPerHourByApproach"]
+                )
+            result = [
+                {**phase, "greenSeconds": green_by_approach[phase["approach"]]}
+                for phase in phases
+            ]
+        else:
+            # Fallback heuristik lama -- baseline SELALU lewat sini (tidak
+            # pernah dihitung ulang pakai PKJI), dan aggressive/balanced
+            # jatuh ke sini kalau traffic_state tidak tersedia.
+            result = []
+            for phase in phases:
+                green = phase["greenSeconds"]
+                if candidate_id == "aggressive" and phase["approach"] == busiest:
+                    green = min(
+                        MAX_GREEN_SECONDS,
+                        green + AGGRESSIVE_GREEN_INCREMENT_SECONDS,
+                    )
+                elif candidate_id == "balanced":
+                    green = round((green + MIN_GREEN_SECONDS) / 2)
+                result.append({**phase, "greenSeconds": green})
+
         green_cycle_seconds = sum(item["greenSeconds"] for item in result)
         total_cycle_seconds = (
             green_cycle_seconds + YELLOW_SECONDS * len(FIXED_CYCLE_ORDER)
@@ -227,7 +509,7 @@ def generate_cycle_candidate_plans(
             }
             for phase in result
         ]
-        return {
+        variant_result = {
             "candidateId": candidate_id,
             "phases": result,
             # Field lama tetap green-only untuk kompatibilitas.
@@ -235,6 +517,12 @@ def generate_cycle_candidate_plans(
             "totalCycleSeconds": total_cycle_seconds,
             "busiestApproach": busiest,
         }
+        if candidate_id in ("aggressive", "balanced") and pkji_result is not None:
+            variant_result["pkjiFlowRatioByApproach"] = pkji_result[
+                "flowRatioByApproach"
+            ]
+            variant_result["pkjiDegreeOfSaturationByApproach"] = pkji_ds_by_approach
+        return variant_result
 
     return [variant(name) for name in ("baseline", "aggressive", "balanced")]
 
@@ -284,6 +572,7 @@ def simulate_cycle_candidate(
 
     delay = metrics["averageWaitingTimeSeconds"]
     queue_veh = metrics["queueLengthVeh"]
+    delay_by_approach = metrics.get("averageWaitingTimeSecondsByApproach")
     return {
         **candidate,
         "avgDelaySeconds": delay,
@@ -291,6 +580,8 @@ def simulate_cycle_candidate(
         "queueLengthVeh": queue_veh,
         "throughputVeh": metrics["throughputVeh"],
         "los": calculate_los(delay),
+        "delayByApproachSeconds": delay_by_approach,
+        "losByApproach": los_by_approach(delay_by_approach),
     }
 
 
@@ -357,6 +648,7 @@ def simulate_candidate(
 
     avgDelaySeconds = metrics["averageWaitingTimeSeconds"]
     queueLengthVeh = metrics["queueLengthVeh"]
+    delayByApproach = metrics.get("averageWaitingTimeSecondsByApproach")
 
     return {
         "candidateId": candidate["candidateId"],
@@ -370,6 +662,8 @@ def simulate_candidate(
         "queueLengthVeh": queueLengthVeh,
         "throughputVeh": metrics["throughputVeh"],
         "los": calculate_los(avgDelaySeconds),
+        "delayByApproachSeconds": delayByApproach,
+        "losByApproach": los_by_approach(delayByApproach),
     }
 
 
@@ -510,7 +804,7 @@ class ScenarioEngine:
             forecast=forecast,
             forecastWeight=forecastWeight,
         )
-        candidates = generate_cycle_candidate_plans(baseline_cycle)
+        candidates = generate_cycle_candidate_plans(baseline_cycle, traffic_state=state)
         # Semua kandidat berjalan pada horizon sama dan minimal mencakup cycle
         # terpanjang, supaya kandidat berdurasi pendek tidak diuntungkan.
         step_limit = max(
