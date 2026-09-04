@@ -123,7 +123,42 @@ Hasil yang wajib terlihat:
 - [ ] Satu run SUMO penuh terakhir menghasilkan `STATUS: SUCCESS`.
 - [ ] Terminal backend dan worker tidak menampilkan error berulang.
 
-## 9. Pemulihan cepat
+## 9. Pemulihan koneksi Supabase di Windows
+
+Jika login sangat lambat, `proxy.ts` menunggu sekitar 10 detik, atau console
+browser menampilkan error berikut:
+
+```text
+net::ERR_CONNECTION_RESET
+...supabase.co/auth/v1/token?grant_type=password
+```
+
+masalah berada pada koneksi HTTPS ke Supabase, bukan pada `frontend/src/proxy.ts`
+atau kredensial login. Buka **PowerShell as Administrator**, lalu jalankan:
+
+```powershell
+ipconfig /flushdns
+netsh winsock reset
+netsh int ip reset
+```
+
+Setelah ketiga perintah berhasil, **restart Windows**, kemudian jalankan kembali
+backend, worker, dan frontend sesuai urutan SOP ini. Jangan menjalankan perintah
+reset tersebut dari terminal proses aplikasi karena terminal harus ditutup saat
+komputer direstart.
+
+Verifikasi koneksi sebelum mencoba login kembali:
+
+```text
+https://<project-ref>.supabase.co/auth/v1/health
+```
+
+Ganti `<project-ref>` dengan project reference dari `SUPABASE_URL`. Respons HTTP
+atau JSON menandakan koneksi sudah tersambung. Jika masih muncul
+`ERR_CONNECTION_RESET`, coba hotspot/jaringan lain dan periksa VPN, antivirus
+dengan HTTPS scanning, atau pembatasan jaringan kampus/kantor.
+
+## 10. Pemulihan cepat
 
 - Worker gagal sekali: tunggu iterasi berikutnya; backend tetap tersedia lewat
   fallback.
@@ -131,5 +166,5 @@ Hasil yang wajib terlihat:
   dan exit code yang jelas.
 - Backend gagal start: periksa port 8000 dan nilai boolean `DEBUG` di environment.
 - Forecast tidak tersedia: sistem otomatis memakai TrafficState aktual.
-- Supabase tidak tersedia: jangan merombak frontend; pulihkan koneksi dan ulangi
-  smoke test.
+- Supabase tidak tersedia: jangan merombak frontend. Untuk
+  `ERR_CONNECTION_RESET` di Windows, ikuti langkah 9, lalu ulangi smoke test.
