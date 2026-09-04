@@ -61,6 +61,8 @@ Bagian ini ada supaya tidak ada yang mengerjakan hal yang sudah beres. Beberapa 
 | S-3: Angka palsu "32 detik" di Digital Twin | ✅ **Selesai** (Melpi) | `digitaltwinview.tsx` sekarang tampil "Memuat status simulasi..." sebelum data asli masuk |
 | S-6: 3 kalimat scope untuk laporan | ✅ **Selesai** (Melpi) | Sudah ada di `docs/penjelasan-progres-per-modul.md` |
 | P-1c: baseline pembanding PPO bukan RuleBasedEngine asli | ✅ **Selesai** | `ppo_env.py:177,439` — `rule_based_action()` panggil `RuleBasedEngine().recommend_cycle()` yang asli |
+| Kartu "Skenario Berubah" & "Rata-rata Perbaikan Delay" di halaman Riwayat dihitung dari `apakahBerubah` (beda dari siklus sebelumnya) padahal caption-nya soal "kalahkan baseline" — dua populasi beda, angka dilusi ke 0% seperti yang komentar aslinya klaim sudah dicegah | ✅ **Selesai** (4 September) | `history/page.tsx` — kedua kartu sekarang pakai `siklusKalahkanBaseline` (`beforeAfter.changed === true`), bukan `siklusBerubah` |
+| Badge "kondisi sama/kondisi baru" di halaman Riwayat salah kalau lagi difilter/dicari — banding ke tetangga hasil filter, bukan tetangga kronologis sebenarnya | ✅ **Selesai** (4 September) | `history/page.tsx` — `kondisiSama` dipindah masuk `itemDenganStatus`, dihitung dari `data.items` mentah sebelum `itemTersaring` |
 
 ---
 
@@ -425,6 +427,22 @@ Supabase dan HuggingFace sekarang bersih, tidak ada sisa dari eksperimen P-5.
 **⚠️ Untuk siapa pun yang menjalankan `vehicle_counter_pingit.py` untuk eksperimen ke depannya:** proses ini SELALU upload ke HuggingFace di akhir (bukan cuma tulis CSV lokal) kecuali kamera itu tidak terdaftar di `CAMERA_ID_MAP`. Backup lokal CSV **tidak cukup** — pertimbangkan juga risiko ke Supabase/HuggingFace. Lihat `cv/CATATAN.md`.
 
 **Bukan blocker demo** — nomor akurasi (48,7%) sudah ada dan jujur dilaporkan di S-4. Kalau nanti ada waktu setelah 31 Agustus untuk investigasi ulang, mulai dari pertanyaan "kenapa MAGELANG regresi" sebelum mencoba perbaikan lain.
+
+---
+
+### P-6. Baris terakhir tiap halaman Riwayat selalu ditandai "tetap" — belum diperbaiki, sengaja ditunda
+
+Ditemukan saat audit halaman Riwayat 4 September (lihat 2 baris "Selesai" di atas soal kartu ringkasan & badge kondisi — ini temuan ke-4 dari audit yang sama, sengaja TIDAK ikut diperbaiki).
+
+**Masalahnya:** kolom Status (berubah/tetap) butuh siklus SEBELUMNYA untuk dibandingkan (`apakahBerubah()` di `history/page.tsx`). Untuk baris TERAKHIR di tiap halaman (baris ke-20 dari 20), siklus sebelumnya yang sebenarnya ada di HALAMAN BERIKUTNYA yang belum di-fetch — jadi dianggap tidak ada pembanding dan selalu ditandai "tetap", padahal belum tentu benar.
+
+**Dampak:** ±1 dari 20 baris (5%) per halaman salah label. Ikut menggeser kartu "Skenario Berubah" (dikit, karena kartu itu sudah dipindah ke `beforeAfter.changed` yang tidak kena bug ini) dan filter Status=Berubah/Tetap untuk baris itu spesifik.
+
+**Opsi perbaikan (belum dipilih siapa pun):**
+1. Fetch `pageSize + 1` siklus dari backend; siklus ke-21 cuma dipakai untuk pembanding baris ke-20, tidak ditampilkan di tabel/paginasi.
+2. Tandai "—" (tidak diketahui) untuk baris itu alih-alih memaksa "tetap" — lebih jujur, tanpa fetch tambahan, tapi info baris itu jadi hilang.
+
+**File terkait:** `frontend/src/app/history/page.tsx` — fungsi `apakahBerubah()` (dipanggil dari `itemDenganStatus`).
 
 ---
 

@@ -451,10 +451,25 @@ export default function HistoryPage() {
           )
         : [];
 
-    const itemDenganStatus = (data?.items ?? []).map((siklus, indeks) => ({
-        siklus,
-        berubah: apakahBerubah((data?.items ?? [])[indeks], (data?.items ?? [])[indeks + 1]),
-    }));
+    // "berubah" (dibanding SIKLUS SEBELUMNYA di daftar ini) dan "kondisiSama"
+    // (trafficStateId sama dengan siklus sebelumnya) SAMA-SAMA dihitung di
+    // sini, dari data mentah (data?.items) yang urutannya utuh -- BUKAN dari
+    // itemTersaring (hasil filter/cari) di bawah. Kalau dihitung dari daftar
+    // yang sudah difilter, "sebelumnya" jadi tetangga hasil filter (yang
+    // bisa jadi bukan siklus yang benar-benar berurutan waktu), bukan
+    // tetangga kronologis sebenarnya -- baik status "berubah" maupun
+    // "kondisi sama/baru" jadi salah begitu user mengetik di kotak cari.
+    const itemDenganStatus = (data?.items ?? []).map((siklus, indeks) => {
+        const sebelumnya = (data?.items ?? [])[indeks + 1];
+        return {
+            siklus,
+            berubah: apakahBerubah(siklus, sebelumnya),
+            kondisiSama:
+                sebelumnya != null &&
+                siklus.trafficStateId != null &&
+                siklus.trafficStateId === sebelumnya.trafficStateId,
+        };
+    });
 
     const itemTersaring = itemDenganStatus.filter(({ siklus, berubah }) => {
         if (
@@ -472,15 +487,23 @@ export default function HistoryPage() {
         return true;
     });
 
-    // Ringkasan dihitung dari siklus BERUBAH di halaman ini saja -- rata-rata
-    // dampak siklus yang "tetap" akan selalu 0% dan menenggelamkan angka
-    // sebenarnya. Tidak ada skor komposit ("Overall Performance") seperti
-    // mockup awal -- itu angka tanpa rumus jelas, tidak bisa dipertanggung-
-    // jawabkan kalau ditanya "12,4% itu dari mana?".
-    const siklusBerubah = itemDenganStatus.filter((x) => x.berubah);
+    // PENTING: "siklus BERUBAH" (apakahBerubah, dibanding siklus sebelumnya)
+    // BUKAN hal yang sama dengan "siklus MENGALAHKAN baseline"
+    // (beforeAfter.changed). Siklus bisa saja "berubah" dari siklus
+    // sebelumnya (kondisi lalu lintas beda -> durasi baseline ikut beda)
+    // TAPI baseline tetap yang menang di siklus itu sendiri. Kalau
+    // "Skenario Berubah" dan "Rata-rata Perbaikan Delay" di bawah dihitung
+    // dari siklusBerubah (apakahBerubah), banyak siklus changePercent=0
+    // (baseline menang) ikut ketarik masuk rata-rata -- persis dilusi yang
+    // komentar di bawah klaim sudah dicegah. Makanya dua kartu ringkasan
+    // itu pakai siklusKalahkanBaseline, bukan siklusBerubah.
+    const siklusKalahkanBaseline = (data?.items ?? []).filter(
+        (siklus) => siklus.beforeAfter?.changed === true
+    );
+
     const rataRataPerbaikanDelay = (() => {
-        const nilai = siklusBerubah
-            .map((x) => x.siklus.beforeAfter?.metrics.find((m) => m.metric === "avgDelaySeconds")?.changePercent)
+        const nilai = siklusKalahkanBaseline
+            .map((siklus) => siklus.beforeAfter?.metrics.find((m) => m.metric === "avgDelaySeconds")?.changePercent)
             .filter((v): v is number => v != null);
         if (nilai.length === 0) return null;
         return nilai.reduce((a, b) => a + b, 0) / nilai.length;
@@ -574,7 +597,7 @@ export default function HistoryPage() {
                                     <div>
                                         <p className="text-xs text-text-muted">Skenario Berubah</p>
                                         <p className="mt-2 font-display text-xl font-semibold">
-                                            {siklusBerubah.length}
+                                            {siklusKalahkanBaseline.length}
                                             <span className="text-sm font-normal text-text-muted">
                                                 {" "}
                                                 / {data.items.length}
@@ -616,8 +639,8 @@ export default function HistoryPage() {
                                     }`}
                                 >
                                     {rataRataPerbaikanDelay != null
-                                        ? `dari ${siklusBerubah.length} siklus yang berubah`
-                                        : "belum ada siklus yang berubah"}
+                                        ? `dari ${siklusKalahkanBaseline.length} siklus yang mengalahkan baseline`
+                                        : "belum ada siklus yang mengalahkan baseline"}
                                 </p>
                             </div>
                         </div>
@@ -801,12 +824,7 @@ export default function HistoryPage() {
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        {itemTersaring.map(({ siklus, berubah }, indeks) => {
-                                            const sebelumnya = itemTersaring[indeks + 1]?.siklus;
-                                            const kondisiSama =
-                                                sebelumnya != null &&
-                                                siklus.trafficStateId != null &&
-                                                siklus.trafficStateId === sebelumnya.trafficStateId;
+                                        {itemTersaring.map(({ siklus, berubah, kondisiSama }) => {
                                             const kepadatan = tingkatKepadatan(siklus.trafficConditions);
                                             const dampakDelay = siklus.beforeAfter?.metrics.find(
                                                 (m) => m.metric === "avgDelaySeconds"

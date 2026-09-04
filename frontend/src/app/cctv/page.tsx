@@ -784,9 +784,10 @@ export default function CCTVPage() {
                                                         key={videoSource}
                                                         src={videoSource}
                                                         controls
+                                                        autoPlay
                                                         muted
                                                         playsInline
-                                                        preload="metadata"
+                                                        preload="auto"
                                                         className="h-full w-full object-cover"
                                                         onError={(event) => {
                                                             console.error(

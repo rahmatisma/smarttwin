@@ -35,6 +35,31 @@ const APPROACH_COLORS: Record<Approach, string> = {
   west: "#c98500",
 };
 
+type ApproachPoint = { horizonSeconds: number } & Partial<Record<Approach, number>>;
+
+// Titik +0s = nilai AKTUAL saat ini (bukan prediksi), jadi ditandai bulatan
+// solid supaya kelihatan beda dari sisa garis prediksi -- dot={false} biasa
+// bikin titik ini polos, tidak beda dengan titik prediksi lainnya.
+function renderActualDot(color: string) {
+  return function ActualDot(dotProps: { cx?: number; cy?: number; payload?: ApproachPoint }) {
+    const { cx, cy, payload } = dotProps;
+    if (!payload || payload.horizonSeconds !== 0 || cx == null || cy == null) {
+      return null;
+    }
+    return (
+      <circle
+        key="actual-dot"
+        cx={cx}
+        cy={cy}
+        r={4}
+        fill={color}
+        stroke="#12161f"
+        strokeWidth={2}
+      />
+    );
+  };
+}
+
 function formatForecastData(data: ForecastResponse) {
   return data.predictions.map((prediction, index) => {
     return {
@@ -59,9 +84,9 @@ function formatForecastData(data: ForecastResponse) {
  * Titik pada grafik = hasil formatForecastData DITAMBAH dua field
  * yang cuma ada di sisi grafik, bukan di kontrak ForecastPrediction:
  *
- *   actualVehicleCount -> dataKey garis "aktual" (lihat <Line> di
- *                         bawah). Hanya terisi di titik horizon 0.
- *   isActual           -> penanda titik aktual vs prediksi.
+ *   actualQueueLengthVeh -> dataKey garis "aktual" (lihat <Area> di
+ *                           bawah). Hanya terisi di titik horizon 0.
+ *   isActual              -> penanda titik aktual vs prediksi.
  *
  * Sebelumnya tipe ini tidak pernah dideklarasikan, jadi TypeScript
  * menyimpulkan bentuk deret dari formatForecastData saja dan
@@ -70,7 +95,7 @@ function formatForecastData(data: ForecastResponse) {
  */
 type TitikDeret = ReturnType<typeof formatForecastData>[number] & {
   isActual: boolean;
-  actualVehicleCount?: number;
+  actualQueueLengthVeh?: number;
 };
 
 export default function ForecastChart({
@@ -108,15 +133,15 @@ export default function ForecastChart({
   }));
 
   if (current && current.approaches) {
-    const currentVolume = current.approaches.reduce((sum, app) => sum + app.volume, 0);
+    const currentQueueVeh = current.approaches.reduce((sum, app) => sum + app.queueLengthVeh, 0);
     // Prepend the actual point at horizon 0
     // To make a continuous line, the actual point is also the start of the prediction
     series = [
       {
         horizonSeconds: 0,
-        actualVehicleCount: currentVolume,
-        predictedVehicleCount: currentVolume,
-        predictedQueueLengthVeh: 0,
+        actualQueueLengthVeh: currentQueueVeh,
+        predictedVehicleCount: 0,
+        predictedQueueLengthVeh: currentQueueVeh,
         predictedQueueLengthMEst: 0,
         predictedDensityIndex: 0,
         predictedSpeedKmh: null,
@@ -126,16 +151,14 @@ export default function ForecastChart({
     ];
   }
 
-  const maxVehicle = Math.max(...series.map((s) => s.predictedVehicleCount));
-  const peakTime = series.find((s) => s.predictedVehicleCount === maxVehicle)?.horizonSeconds ?? 0;
+  const maxQueueVeh = Math.max(...series.map((s) => s.predictedQueueLengthVeh));
+  const peakTime = series.find((s) => s.predictedQueueLengthVeh === maxQueueVeh)?.horizonSeconds ?? 0;
   const maxQueue = Math.max(...series.map((s) => s.predictedQueueLengthMEst));
   const avgDensity = series.reduce((sum, s) => sum + s.predictedDensityIndex, 0) / (series.length || 1);
 
   // Breakdown per lengan (kalau backend mengisi predictionsByApproach dengan
   // >= 2 lengan) -- ini yang bikin grafik nampilin 4 garis Utara/Selatan/
   // Timur/Barat, bukan cuma 1 garis total gabungan seperti sebelumnya.
-  type ApproachPoint = { horizonSeconds: number } & Partial<Record<Approach, number>>;
-
   const approachKeys = APPROACH_ORDER.filter(
     (approach) => (data.predictionsByApproach?.[approach]?.length ?? 0) > 0
   );
@@ -151,7 +174,7 @@ export default function ForecastChart({
       const point: ApproachPoint = { horizonSeconds: (index + 1) * 5 };
       for (const approach of approachKeys) {
         const prediction = data.predictionsByApproach?.[approach]?.[index];
-        if (prediction) point[approach] = prediction.predictedVehicleCount;
+        if (prediction) point[approach] = prediction.predictedQueueLengthVeh;
       }
       return point;
     });
@@ -160,7 +183,7 @@ export default function ForecastChart({
       const actualPoint: ApproachPoint = { horizonSeconds: 0 };
       for (const approach of approachKeys) {
         const match = current.approaches.find((a) => a.approach === approach);
-        if (match) actualPoint[approach] = match.volume;
+        if (match) actualPoint[approach] = match.queueLengthVeh;
       }
       approachSeries = [actualPoint, ...approachSeries];
     }
@@ -230,9 +253,11 @@ export default function ForecastChart({
                   borderRadius: 8,
                   fontSize: 12,
                 }}
-                labelFormatter={(seconds) => `+${seconds} detik`}
+                labelFormatter={(seconds) =>
+                  seconds === 0 ? "Sekarang (aktual)" : `+${seconds} detik`
+                }
                 formatter={(value, name) => [
-                  `${value} kendaraan`,
+                  `${value} kendaraan mengantre`,
                   APPROACH_LABELS[name as Approach] ?? String(name),
                 ]}
               />
@@ -268,7 +293,7 @@ export default function ForecastChart({
                   name={approach}
                   stroke={APPROACH_COLORS[approach]}
                   strokeWidth={2}
-                  dot={false}
+                  dot={renderActualDot(APPROACH_COLORS[approach])}
                   activeDot={{ r: 4, fill: APPROACH_COLORS[approach] }}
                   connectNulls
                   isAnimationActive
@@ -347,16 +372,18 @@ export default function ForecastChart({
                   borderRadius: 8,
                   fontSize: 12,
                 }}
-                labelFormatter={(seconds) => `+${seconds} detik`}
+                labelFormatter={(seconds) =>
+                  seconds === 0 ? "Sekarang (aktual)" : `+${seconds} detik`
+                }
                 formatter={(value, name) => [
-                  `${value} kendaraan`,
+                  `${value} kendaraan mengantre`,
                   name,
                 ]}
               />
 
               <Area
                 type="monotone"
-                dataKey="predictedVehicleCount"
+                dataKey="predictedQueueLengthVeh"
                 stroke="#38bdf8"
                 strokeWidth={2}
                 strokeDasharray="5 5"
@@ -369,7 +396,7 @@ export default function ForecastChart({
               {current && (
                 <Area
                   type="monotone"
-                  dataKey="actualVehicleCount"
+                  dataKey="actualQueueLengthVeh"
                   stroke="#2ecc71"
                   strokeWidth={2}
                   fill="none"
@@ -392,8 +419,8 @@ export default function ForecastChart({
           <div className="mb-2 font-medium text-text">Ringkasan Prediksi</div>
           <div className="flex flex-col gap-2">
             <div className="flex items-center justify-between text-text-secondary">
-              <span>Puncak Volume</span>
-              <span className="font-mono text-text">{maxVehicle.toFixed(1)} <span className="text-text-muted">(+{peakTime}s)</span></span>
+              <span>Puncak Antrean</span>
+              <span className="font-mono text-text">{maxQueueVeh.toFixed(1)} kendaraan <span className="text-text-muted">(+{peakTime}s)</span></span>
             </div>
             <div className="flex items-center justify-between text-text-secondary">
               <span>Antrean Terpanjang</span>

@@ -591,10 +591,14 @@ export default function DigitalTwinView() {
                                 </div>
                             )}
 
-                            {/* Hitungan kendaraan (sama seperti dashboard) */}
+                            {/* Hitungan kendaraan (sama seperti dashboard). max-w FIXED (bukan
+                                persentase) supaya lebar box gak ikut lebar kartu -- lebar
+                                label lengan SELATAN itu tetap (font-size tetap), jadi cuma
+                                batas lebar tetap yang menjamin box ini tidak pernah menembus
+                                area SELATAN (bottom-center) di kartu sempit maupun lebar. */}
                             {status === "running" && (
-                                <div className="absolute bottom-2 left-2 rounded-lg border border-white/10 bg-black/50 px-2 py-1 backdrop-blur-sm">
-                                    <p className="font-mono text-xs font-medium text-white">
+                                <div className="absolute bottom-2 left-2 max-w-[130px] rounded-lg border border-white/10 bg-black/50 px-2 py-1 backdrop-blur-sm">
+                                    <p className="font-mono text-[10px] font-medium leading-snug text-white">
                                         Deteksi: {detectedVehicles} · Terlihat: {visibleVehicleCount} · Total jaringan: {vehicles.length}
                                         {lastSyncFailedInsertions > 0 && (
                                             <span className="text-signal-amber"> · Gagal sisip: {lastSyncFailedInsertions}</span>
