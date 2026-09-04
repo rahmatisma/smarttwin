@@ -111,6 +111,8 @@ app.add_middleware(
     allow_methods=["*"],
 
     allow_headers=["*"],
+    
+    expose_headers=["Content-Range", "Accept-Ranges", "Content-Length"],
 
     # Chrome mengirim Access-Control-Request-Private-Network di preflight
     # saat halaman publik (localhost dianggap begitu di beberapa konteks)

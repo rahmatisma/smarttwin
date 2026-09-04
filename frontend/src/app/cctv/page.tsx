@@ -737,7 +737,7 @@ export default function CCTVPage() {
                                             {/* VIDEO */}
                                             <div className="relative aspect-video bg-black">
 
-                                                {!videoSource ? (
+                                                {!videoSource || videoSource.startsWith("blob:") ? (
 
                                                     <div className="flex h-full flex-col items-center justify-center px-8 text-center">
 
@@ -789,13 +789,19 @@ export default function CCTVPage() {
                                                         playsInline
                                                         preload="auto"
                                                         className="h-full w-full object-cover"
+                                                        onLoadStart={() => console.log(`[Video] onLoadStart: ${videoSource}`)}
+                                                        onLoadedMetadata={(e) => {
+                                                            const target = e.currentTarget;
+                                                            console.log(`[Video] onLoadedMetadata: ${videoSource}\nDimensi: ${target.videoWidth}x${target.videoHeight}\nDurasi: ${target.duration}s`);
+                                                        }}
+                                                        onCanPlay={() => console.log(`[Video] onCanPlay: ${videoSource}`)}
+                                                        onPlaying={() => console.log(`[Video] onPlaying: ${videoSource}`)}
+                                                        onWaiting={() => console.log(`[Video] onWaiting: ${videoSource}`)}
+                                                        onStalled={() => console.log(`[Video] onStalled: ${videoSource}`)}
+                                                        onAbort={() => console.log(`[Video] onAbort: ${videoSource}`)}
                                                         onError={(event) => {
-                                                            console.error(
-                                                                "Video gagal diputar:",
-                                                                event
-                                                                    .currentTarget
-                                                                    .error
-                                                            );
+                                                            const target = event.currentTarget as HTMLVideoElement;
+                                                            console.error(`Video gagal diputar\nsrc: ${target.src}\ncurrentSrc: ${target.currentSrc}\nerrorCode: ${target.error?.code}\nerrorMessage: ${target.error?.message}\nreadyState: ${target.readyState}\nnetworkState: ${target.networkState}`);
                                                         }}
                                                     />
 
@@ -1227,6 +1233,7 @@ export default function CCTVPage() {
                                                     accept="video/*"
                                                     onChange={handleFileChange}
                                                     className="hidden"
+                                                    disabled={!!editingId}
                                                 />
 
                                             </label>
@@ -1243,6 +1250,10 @@ export default function CCTVPage() {
                                                         playsInline
                                                         preload="metadata"
                                                         className="max-h-64 w-full object-contain"
+                                                        onError={(event) => {
+                                                            const target = event.currentTarget as HTMLVideoElement;
+                                                            console.error(`Preview video gagal diputar\nsrc: ${target.src}\nerrorCode: ${target.error?.code}\nerrorMessage: ${target.error?.message}\nreadyState: ${target.readyState}\nnetworkState: ${target.networkState}`);
+                                                        }}
                                                     />
 
                                                 </div>

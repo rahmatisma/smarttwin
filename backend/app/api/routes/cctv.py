@@ -292,6 +292,7 @@ async def upload_cctv_video(
 
 
 @router.get("/videos/{video_id}/stream")
+@router.head("/videos/{video_id}/stream", include_in_schema=False)
 async def stream_cctv_video(video_id: int, request: Request):
     """
     Kirim video ke client. Urutan prioritas:
@@ -342,7 +343,7 @@ async def stream_cctv_video(video_id: int, request: Request):
     client = await get_hf_client()
 
     upstream_request = client.build_request(
-        "GET", hf_url, headers=request_headers
+        request.method, hf_url, headers=request_headers
     )
     upstream_response = await client.send(upstream_request, stream=True)
 
