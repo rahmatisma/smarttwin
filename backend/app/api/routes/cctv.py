@@ -291,7 +291,8 @@ async def upload_cctv_video(
 
 
 
-@router.api_route("/videos/{video_id}/stream", methods=["GET", "HEAD"])
+@router.get("/videos/{video_id}/stream")
+@router.head("/videos/{video_id}/stream", include_in_schema=False)
 async def stream_cctv_video(video_id: int, request: Request):
     """
     Kirim video ke client. Urutan prioritas:
