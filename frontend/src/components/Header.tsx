@@ -30,15 +30,20 @@ export default function Header({
 
   return (
     <header className="app-header flex items-center justify-between gap-6 border-b border-border px-6 py-4">
-      <div className="min-w-0"><h2 className="text-xl font-semibold tracking-tight text-text">{pageTitle}</h2><div className="header-location flex items-center gap-1.5 text-xs">
-        <MapPin className="h-4 w-4 text-text-secondary" />
-        <span className="font-medium text-text">{locationName}</span>
-        <span className="text-text-muted">· {coords}</span>
-      </div></div>
+      <div className="header-identity min-w-0">
+        <span className="header-eyebrow">SMARTTWIN / PUSAT PEMANTAUAN</span>
+        <h2 className="header-title">{pageTitle}</h2>
+        <div className="header-location">
+          <span className="header-location-badge"><MapPin size={15} aria-hidden="true" /><span>Lokasi: <strong>{locationName}</strong></span></span>
+          <span className="header-coordinates">{coords}</span>
+        </div>
+      </div>
 
-      <div className="hidden max-w-md flex-1 md:flex">
+      <div className="header-filter">
+        <label htmlFor="header-approach">Lengan simpang</label>
         {selectedApproach && onApproachChange ? (
           <select
+            id="header-approach"
             value={selectedApproach}
             onChange={(event) =>
               onApproachChange(
@@ -55,19 +60,19 @@ export default function Header({
             ))}
           </select>
         ) : (
-          <div className="w-full rounded-md border border-border bg-surface px-3 py-2 text-sm text-text-muted">
-            Pilih lengan...
-          </div>
+          <select id="header-approach" disabled className="w-full rounded-md border border-border px-3 py-2 text-sm">
+            <option>Semua lengan</option>
+          </select>
         )}
       </div>
 
-      <div className="flex shrink-0 items-center gap-3">
+      <div className="header-actions flex shrink-0 items-center gap-3">
         {lastUpdated !== undefined ? (
           <span className="header-timestamp text-xs tabular-nums text-text-secondary">
             {typeof lastUpdated === "number" ? (
-              `Last Updated: ${Math.floor(lastUpdated / 60).toString().padStart(2, "0")}:${(lastUpdated % 60).toFixed(2).padStart(5, "0")}`
+              `Diperbarui: ${Math.floor(lastUpdated / 60).toString().padStart(2, "0")}:${(lastUpdated % 60).toFixed(2).padStart(5, "0")}`
             ) : (
-              `Last Updated: ${new Date(lastUpdated).toLocaleTimeString("id-ID", {
+              `Diperbarui: ${new Date(lastUpdated).toLocaleTimeString("id-ID", {
                 hour: "2-digit",
                 minute: "2-digit",
                 second: "2-digit",
@@ -75,7 +80,7 @@ export default function Header({
             )}
           </span>
         ) : (
-          <span className="font-mono text-sm tabular-nums text-text-secondary">
+          <span className="header-timestamp text-xs tabular-nums text-text-secondary">
             Data belum tersedia
           </span>
         )}

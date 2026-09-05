@@ -36,6 +36,8 @@ import type {
   VehicleClassCount,
 } from "@/types/traffic";
 
+import { fetchOptional, fetchOptionalWithin } from "@/lib/optionalData";
+
 import { useScenario } from "@/context/ScenarioContext";
 
 // Database produksi saat ini hanya memiliki satu simpang nyata. Jangan tahan
@@ -43,29 +45,6 @@ import { useScenario } from "@/context/ScenarioContext";
 const DASHBOARD_INTERSECTIONS = ALL_INTERSECTIONS.filter(
   (intersection) => intersection.databaseId === DEFAULT_INTERSECTION_ID
 );
-
-async function fetchOptional<T>(label: string, request: Promise<T>): Promise<T | null> {
-  try {
-    return await request;
-  } catch (error) {
-    console.warn(`${label} tidak tersedia:`, error);
-    return null;
-  }
-}
-
-async function fetchOptionalWithin<T>(
-  label: string,
-  request: Promise<T>,
-  timeoutMs = 1500
-): Promise<T | null> {
-  let timeoutId: ReturnType<typeof setTimeout> | undefined;
-  const timeout = new Promise<null>((resolve) => {
-    timeoutId = setTimeout(() => resolve(null), timeoutMs);
-  });
-  const result = await Promise.race([fetchOptional(label, request), timeout]);
-  if (timeoutId) clearTimeout(timeoutId);
-  return result;
-}
 
 function candidateToRecommendation(
   candidate: DigitalTwinCandidate,
@@ -148,7 +127,7 @@ function DashboardSkeleton() {
             {[1, 2, 3, 4].map((item) => (
               <div
                 key={item}
-                className="rounded-lg border border-border bg-surface p-4"
+                className="stat-card rounded-lg border border-border bg-surface p-4"
               >
                 <div className="h-3 w-24 animate-pulse rounded bg-surface-2" />
 
@@ -168,7 +147,7 @@ function DashboardSkeleton() {
 
             {/* DIGITAL TWIN SKELETON */}
 
-            <div className="min-h-[400px] rounded-lg border border-border bg-surface p-4">
+            <div className="min-h-[400px] dashboard-card rounded-lg border border-border bg-surface p-4">
 
               <div className="flex items-center justify-between">
 
@@ -188,7 +167,7 @@ function DashboardSkeleton() {
 
               {/* CAMERA */}
 
-              <div className="rounded-lg border border-border bg-surface p-4">
+              <div className="dashboard-card rounded-lg border border-border bg-surface p-4">
 
                 <div className="flex items-center justify-between">
 
@@ -219,7 +198,7 @@ function DashboardSkeleton() {
 
               {/* SIGNAL STATUS */}
 
-              <div className="rounded-lg border border-border bg-surface p-4">
+              <div className="dashboard-card rounded-lg border border-border bg-surface p-4">
 
                 <div className="h-4 w-32 animate-pulse rounded bg-surface-2" />
 
@@ -252,7 +231,7 @@ function DashboardSkeleton() {
 
             {/* RECOMMENDATION */}
 
-            <div className="min-h-[220px] rounded-lg border border-border bg-surface p-4">
+            <div className="min-h-[220px] dashboard-card rounded-lg border border-border bg-surface p-4">
 
               <div className="h-4 w-36 animate-pulse rounded bg-surface-2" />
 
@@ -272,7 +251,7 @@ function DashboardSkeleton() {
 
             {/* FORECAST */}
 
-            <div className="min-h-[220px] rounded-lg border border-border bg-surface p-4">
+            <div className="min-h-[220px] dashboard-card rounded-lg border border-border bg-surface p-4">
 
               <div className="flex items-center justify-between">
 
@@ -512,12 +491,22 @@ export default function DashboardPage() {
 
   useEffect(() => {
 
+    let cancelled = false;
+    const applyLateRecommendation = (recommendation: Recommendation | null) => {
+      if (cancelled || !recommendation) return;
+      setAllRecommendations((previous) => {
+        if (!recommendation.cyclePlan && previous.intersection4?.cyclePlan) return previous;
+        return { ...previous, intersection4: recommendation };
+      });
+    };
+
     async function loadDashboardData() {
 
       try {
 
         setLoading(true);
         setError(null);
+        setAllRecommendations({});
 
         const results = await Promise.all(
           DASHBOARD_INTERSECTIONS.map(async (inter) => {
@@ -539,11 +528,11 @@ export default function DashboardPage() {
                     : null,
                   hasLiveBackend
                     ? (scenario === "Traffic Realtime"
-                        ? fetchOptionalWithin(`Rekomendasi ${inter.name}`, fetchRecommendation(inter.databaseId))
+                        ? fetchOptionalWithin(`Rekomendasi ${inter.name}`, fetchRecommendation(inter.databaseId), 1500, applyLateRecommendation)
                         : fetchOptionalWithin(`Digital Twin Scenario ${inter.name}`, fetchDigitalTwinScenarios(inter.databaseId).then(data => {
                         const candidate = data?.candidates?.find((c) => c.candidateId === scenario.toLowerCase());
                         return candidate ? candidateToRecommendation(candidate, data?.updatedAt ?? null) : null;
-                      })))
+                      }), 1500, applyLateRecommendation))
                     : null,
                 ]);
                 return {
@@ -578,9 +567,13 @@ export default function DashboardPage() {
           newForecasts[res.id] = res.forecast;
         });
 
+        if (cancelled) return;
         setAllTrafficStates(newTrafficStates);
         setAllSignalStatuses(newSignalStatuses);
-        setAllRecommendations(newRecommendations);
+        setAllRecommendations((previous) => ({
+          ...newRecommendations,
+          intersection4: newRecommendations.intersection4 ?? previous.intersection4 ?? null,
+        }));
         setAllForecasts(newForecasts);
 
         // Forecast bukan syarat untuk menampilkan dashboard utama. Inferensi
@@ -590,7 +583,7 @@ export default function DashboardPage() {
           "Forecast Simpang Pingit",
           fetchForecast(DEFAULT_INTERSECTION_ID)
         ).then((forecast) => {
-          if (forecast) {
+          if (forecast && !cancelled) {
             setAllForecasts((previous) => ({
               ...previous,
               intersection4: forecast,
@@ -613,7 +606,7 @@ export default function DashboardPage() {
 
       } finally {
 
-        setLoading(false);
+        if (!cancelled) setLoading(false);
 
       }
     }
@@ -622,7 +615,6 @@ export default function DashboardPage() {
 
     let socket: WebSocket | null = null;
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-    let cancelled = false;
     ++requestIdRef.current;
 
     async function refetchAllData() {
@@ -651,11 +643,11 @@ export default function DashboardPage() {
                   : null,
                 hasLiveBackend
                   ? (scenario === "Traffic Realtime"
-                      ? fetchOptionalWithin(`Rekomendasi ${inter.name}`, fetchRecommendation(inter.databaseId), 2500)
+                      ? fetchOptionalWithin(`Rekomendasi ${inter.name}`, fetchRecommendation(inter.databaseId), 2500, applyLateRecommendation)
                       : fetchOptionalWithin(`Digital Twin Scenario ${inter.name}`, fetchDigitalTwinScenarios(inter.databaseId).then(data => {
                         const candidate = data?.candidates?.find((c) => c.candidateId === scenario.toLowerCase());
                         return candidate ? candidateToRecommendation(candidate, data?.updatedAt ?? null) : null;
-                      }), 2500))
+                      }), 2500, applyLateRecommendation))
                   : null,
                 hasLiveBackend
                   ? fetchOptionalWithin(`Forecast ${inter.name}`, fetchForecast(inter.databaseId), 2500)

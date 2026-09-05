@@ -5,148 +5,61 @@ import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
 import {
-  LayoutDashboard,
-  Radar,
-  Video,
-  History,
-  Settings,
-  User,
-  Menu,
-  X,
+  LayoutDashboard, Radar, Video, History, Settings, User,
+  PanelLeftClose, PanelLeftOpen, ChevronRight,
 } from "lucide-react";
-
 
 const NAV_ITEMS = [
   { icon: LayoutDashboard, label: "Dashboard", href: "/dashboard" },
   { icon: Radar, label: "Digital Twin", href: "/digitaltwin" },
   { icon: Video, label: "CCTV", href: "/cctv" },
-  // "History" terlalu kabur -- histori apa? Diperjelas jadi riwayat
-  // keputusan sistem (rekomendasi durasi lampu yang pernah dikeluarkan).
   { icon: History, label: "Riwayat Keputusan", href: "/history" },
-  { icon: Settings, label: "Pengaturan", href: "/settings" },
 ];
 
 export default function Sidebar() {
   const pathname = usePathname();
   const [isCollapsed, setIsCollapsed] = useState(false);
+  const isActive = (href: string) => pathname === href || pathname.startsWith(href + "/") || (href === "/dashboard" && pathname === "/");
 
   return (
-    <aside
-      className={`app-sidebar sticky top-0 flex h-dvh shrink-0 flex-col border-r border-border bg-surface transition-all duration-300 ${
-        isCollapsed ? "is-collapsed w-16" : "w-56"
-      }`}
-    >
-      {/* HEADER / LOGO */}
-      <div className="sidebar-brand-header relative flex shrink-0 items-center justify-center border-b border-border">
-        {/* Brand lockup on the blue navigation rail. */}
-        <Link href="/dashboard" className="sidebar-logo-link" aria-label="SmartTwin — buka dashboard">
-          <Image
-            src="/logo-dark.png"
-            alt="SmartTwin"
-            width={88}
-            height={88}
-            loading="eager"
-            className="sidebar-logo-image"
-          />
+    <aside className={`app-sidebar sticky top-0 flex h-dvh shrink-0 flex-col ${isCollapsed ? "is-collapsed" : ""}`}>
+      <div className="sidebar-brand-header">
+        <Link href="/dashboard" className="sidebar-logo-link" aria-label="SmartTwin - buka dashboard">
+          <Image src="/logo-dark.png" alt="SmartTwin" width={104} height={104} loading="eager" className="sidebar-logo-image" />
         </Link>
-
-        {/* COLLAPSE BUTTON */}
-        <button
-          type="button"
-          onClick={() => setIsCollapsed((prev) => !prev)}
-          aria-expanded={!isCollapsed}
-          aria-label={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
-          title={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
-          className="sidebar-collapse-button absolute right-3 top-3 flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-text-secondary transition-colors hover:bg-surface-2 hover:text-text"
-        >
-          {isCollapsed ? (
-            <Menu className="h-4 w-4" />
-          ) : (
-            <X className="h-4 w-4" />
-          )}
+        <span className="sidebar-brand-caption">TRAFFIC MANAGEMENT</span>
+        <button type="button" onClick={() => setIsCollapsed((prev) => !prev)}
+          aria-expanded={!isCollapsed} aria-controls="sidebar-navigation"
+          aria-label={isCollapsed ? "Perluas sidebar" : "Perkecil sidebar"}
+          title={isCollapsed ? "Perluas sidebar" : "Perkecil sidebar"}
+          className="sidebar-collapse-button">
+          {isCollapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
         </button>
       </div>
-
-      {/* NAVIGATION */}
-      <nav aria-label="Navigasi utama" className="flex min-h-0 flex-1 flex-col space-y-1 overflow-y-auto px-2 py-3">
-        {NAV_ITEMS.map((item) => {
-          const Icon = item.icon;
-
-          if (item.href) {
-            const isActive = (pathname.startsWith(item.href) || (item.href === "/dashboard" && pathname === "/"));
-
-            return (
-              <Link
-                key={item.label}
-                href={item.href}
-                aria-label={item.label}
-                aria-current={isActive ? "page" : undefined}
-                title={item.label}
-                className={`flex w-full shrink-0 items-center rounded-md py-2 text-left text-sm transition-all duration-200 ${
-                  isCollapsed
-                    ? "justify-center px-2"
-                    : "gap-3 px-3"
-                } ${
-                  isActive
-                    ? "bg-accent-dim text-accent"
-                    : "text-text-secondary hover:bg-surface-2 hover:text-text"
-                }`}
-              >
-                <Icon className="h-4 w-4 shrink-0" />
-
-                {!isCollapsed && (
-                  <span className="truncate">{item.label}</span>
-                )}
-              </Link>
-            );
-          }
-
-          return (
-            <button
-              key={item.label}
-              type="button"
-              title={item.label}
-              className={`flex w-full shrink-0 items-center rounded-md py-2 text-left text-sm text-text-secondary transition-all duration-200 hover:bg-surface-2 hover:text-text ${
-                isCollapsed
-                  ? "justify-center px-2"
-                  : "gap-3 px-3"
-              }`}
-            >
-              <Icon className="h-4 w-4 shrink-0" />
-
-              {!isCollapsed && (
-                <span className="truncate">{item.label}</span>
-              )}
-            </button>
-          );
-        })}
+      <nav id="sidebar-navigation" aria-label="Navigasi utama" className="sidebar-navigation">
+        <p className="sidebar-section-label">RUANG KERJA</p>
+        {NAV_ITEMS.map(({ icon: Icon, label, href }) => (
+          <Link key={href} href={href} aria-label={label} title={label}
+            aria-current={isActive(href) ? "page" : undefined} className="sidebar-nav-link">
+            <span className="sidebar-nav-icon"><Icon size={19} strokeWidth={1.7} aria-hidden="true" /></span>
+            <span className="sidebar-link-label">{label}</span>
+            {isActive(href) && <ChevronRight size={14} className="sidebar-active-arrow" aria-hidden="true" />}
+          </Link>
+        ))}
       </nav>
-
-      {/* BOTTOM MENU */}
-      <div className="shrink-0 space-y-1 border-t border-border px-2 py-3">
-
-        {/* ACCOUNT */}
-        <Link
-          href="/account"
-          aria-label="Akun saya"
-          title={isCollapsed ? "Account" : undefined}
-          className={`flex w-full items-center rounded-md py-2 text-left text-sm transition-all duration-200 ${
-            isCollapsed
-              ? "justify-center px-2"
-              : "gap-3 px-3"
-          } ${
-            pathname.startsWith("/account")
-              ? "bg-accent-dim text-accent"
-              : "text-text-secondary hover:bg-surface-2 hover:text-text"
-          }`}
-        >
-          <User className="h-4 w-4 shrink-0" />
-
-          {!isCollapsed && (
-            <span className="truncate">Account</span>
-          )}
+      <div className="sidebar-bottom">
+        <p className="sidebar-section-label">PREFERENSI</p>
+        <Link href="/settings" aria-label="Pengaturan" title="Pengaturan"
+          aria-current={isActive("/settings") ? "page" : undefined} className="sidebar-nav-link">
+          <span className="sidebar-nav-icon"><Settings size={19} strokeWidth={1.7} aria-hidden="true" /></span>
+          <span className="sidebar-link-label">Pengaturan</span>
         </Link>
-
+        <Link href="/account" aria-label="Akun saya" title="Akun saya"
+          aria-current={isActive("/account") ? "page" : undefined} className="sidebar-account">
+          <span className="sidebar-account-avatar"><User size={19} strokeWidth={1.7} aria-hidden="true" /></span>
+          <span className="sidebar-account-copy"><strong>Akun saya</strong><span>Profil & keamanan</span></span>
+          <ChevronRight size={15} className="sidebar-account-arrow" aria-hidden="true" />
+        </Link>
       </div>
     </aside>
   );
