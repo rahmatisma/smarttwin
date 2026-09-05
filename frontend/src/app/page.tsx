@@ -4,6 +4,7 @@ import { useEffect, useState, useMemo, useRef, useCallback } from "react";
 
 import Sidebar from "@/components/Sidebar";
 import Header from "@/components/Header";
+import DashboardWelcome from "@/components/DashboardWelcome";
 import StatsRow from "@/components/StatsRow";
 import DigitalTwinPanel from "@/components/DigitalTwinPanel";
 import CameraFeedPanel from "@/components/CameraFeedPanel";
@@ -113,7 +114,7 @@ function candidateToRecommendation(
 
 function DashboardSkeleton() {
   return (
-    <div className="flex min-h-screen bg-bg">
+    <div className="dashboard-shell flex min-h-screen bg-bg">
 
       {/* SIDEBAR */}
       <Sidebar />
@@ -382,6 +383,31 @@ export default function DashboardPage() {
   const [allCoords, setAllCoords] =
     useState<Record<string, { latitude: number | null; longitude: number | null } | null>>({});
 
+  // Metadata lokasi tetap dimuat walau melewati timeout panel dashboard.
+  useEffect(() => {
+    let cancelled = false;
+    let retryTimer: ReturnType<typeof setTimeout> | undefined;
+
+    async function loadCoords() {
+      const coords = await fetchOptional(
+        "Koordinat Simpang Pingit",
+        fetchIntersectionCoords(DEFAULT_INTERSECTION_ID),
+      );
+      if (cancelled) return;
+      if (coords?.latitude != null && coords?.longitude != null) {
+        setAllCoords((previous) => ({ ...previous, intersection4: coords }));
+      } else {
+        retryTimer = setTimeout(() => { void loadCoords(); }, 30_000);
+      }
+    }
+
+    void loadCoords();
+    return () => {
+      cancelled = true;
+      if (retryTimer) clearTimeout(retryTimer);
+    };
+  }, []);
+
   const [liveSumoSignal, setLiveSumoSignal] = useState<SignalStatus | null>(null);
 
   const [loading, setLoading] =
@@ -495,7 +521,6 @@ export default function DashboardPage() {
                   trafficState,
                   signalStatus,
                   recommendation,
-                  coords,
                 ] = await Promise.all([
                   fetchOptionalWithin(
                     `Traffic ${inter.name}`,
@@ -513,7 +538,6 @@ export default function DashboardPage() {
                         return candidate ? candidateToRecommendation(candidate, data?.updatedAt ?? null) : null;
                       })))
                     : null,
-                  fetchOptionalWithin(`Koordinat ${inter.name}`, fetchIntersectionCoords(inter.databaseId)),
                 ]);
                 return {
                   id: inter.id,
@@ -521,7 +545,6 @@ export default function DashboardPage() {
                   signalStatus,
                   recommendation,
                   forecast: null,
-                  coords,
                 };
             } catch (err) {
               console.error(`Gagal mengambil data untuk ${inter.name}:`, err);
@@ -531,7 +554,6 @@ export default function DashboardPage() {
                 signalStatus: null,
                 recommendation: null,
                 forecast: null,
-                coords: null,
               };
             }
           })
@@ -541,21 +563,18 @@ export default function DashboardPage() {
         const newSignalStatuses: Record<string, SignalStatus | null> = {};
         const newRecommendations: Record<string, Recommendation | null> = {};
         const newForecasts: Record<string, ForecastResponse | null> = {};
-        const newCoords: Record<string, { latitude: number | null; longitude: number | null } | null> = {};
 
         results.forEach((res) => {
           newTrafficStates[res.id] = res.trafficState;
           newSignalStatuses[res.id] = res.signalStatus;
           newRecommendations[res.id] = res.recommendation;
           newForecasts[res.id] = res.forecast;
-          newCoords[res.id] = res.coords;
         });
 
         setAllTrafficStates(newTrafficStates);
         setAllSignalStatuses(newSignalStatuses);
         setAllRecommendations(newRecommendations);
         setAllForecasts(newForecasts);
-        setAllCoords(newCoords);
 
         // Forecast bukan syarat untuk menampilkan dashboard utama. Inferensi
         // LSTM dimuat setelah traffic/sinyal/rekomendasi tampil agar request
@@ -885,49 +904,6 @@ export default function DashboardPage() {
     Object.values(allRecommendations).some((state) => state !== null) ||
     Object.values(allForecasts).some((state) => state !== null);
 
-  if (error || !hasLoadedAnyData) {
-
-    return (
-      <div className="flex min-h-screen bg-bg">
-
-        <Sidebar />
-
-        <div className="flex min-w-0 flex-1 flex-col">
-
-          <Header
-            locationName="Semua Simpang"
-            coords="Koordinat belum tersedia"
-          />
-
-          <main className="flex flex-1 items-center justify-center px-6">
-
-            <div className="rounded-lg border border-border bg-surface p-6">
-
-              <div className="text-sm font-semibold text-text">
-                Gagal mengambil data traffic
-              </div>
-
-              <div className="mt-2 text-xs text-text-secondary">
-                {error ??
-                  "Traffic state tidak tersedia untuk persimpangan yang dipilih."}
-              </div>
-
-              <div className="mt-4 text-xs text-text-muted">
-                Pastikan koneksi ke Supabase aktif dan
-                tabel trafficStates/trafficApproachStates
-                sudah terisi untuk simpang4-pingit.
-              </div>
-
-            </div>
-
-          </main>
-
-        </div>
-
-      </div>
-    );
-  }
-
   /*
    * =========================================================
    * VEHICLE CLASS COUNTS
@@ -1000,7 +976,7 @@ export default function DashboardPage() {
 
   return (
 
-    <div className="flex min-h-screen bg-bg">
+    <div className="dashboard-shell flex min-h-screen bg-bg">
 
       <Sidebar />
 
@@ -1013,10 +989,10 @@ export default function DashboardPage() {
         <Header
           selectedApproach={selectedApproach}
           onApproachChange={setSelectedApproach}
-          locationName="simpang4-pingit"
+          locationName={DASHBOARD_INTERSECTIONS[0]?.name ?? "Simpang Pingit"}
           coords={(() => {
             const c = allCoords["intersection4"];
-            if (c?.latitude && c?.longitude) {
+            if (c?.latitude != null && c?.longitude != null) {
               return `${c.latitude}, ${c.longitude}`;
             }
             return "Koordinat belum tersedia";
@@ -1032,12 +1008,16 @@ export default function DashboardPage() {
             STATISTICS
             =================================================== */}
 
+        {(error || !hasLoadedAnyData) && <div role="status" className="mx-6 mt-5 rounded-xl border border-border bg-surface p-4 text-sm text-text-secondary">{error ? "Data lalu lintas belum berhasil dimuat. Periksa koneksi lalu coba muat ulang halaman." : "Menunggu data lalu lintas. Ringkasan akan diperbarui otomatis saat data tersedia."}</div>}
+
+        <DashboardWelcome dateLabel={weather.dateLabel} />
+
         <StatsRow
           approaches={lenganFilteredApproaches}
           weather={weather}
         />
 
-        <div className="flex flex-col gap-4 px-6 pb-6">
+        <div className="dashboard-panels flex flex-col gap-5 px-6 pb-6">
 
           {/* =================================================
               DIGITAL TWIN + CAMERA

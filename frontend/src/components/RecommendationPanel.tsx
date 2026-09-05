@@ -182,7 +182,7 @@ export default function RecommendationPanel({
 
   if (showLoading) {
     return (
-      <div className="rounded-lg border border-border bg-surface p-4">
+      <div className="dashboard-card rounded-lg border border-border bg-surface p-4">
         <div className="mb-3 flex items-center justify-between">
           <h2 className="font-display text-sm font-semibold text-text">
             Signal Recommendation
@@ -204,7 +204,7 @@ export default function RecommendationPanel({
   // tetap bisa dipakai dan data akan menyusul otomatis saat poll berikutnya.
   if (!displayRec) {
     return (
-      <div className="rounded-lg border border-border bg-surface p-4">
+      <div className="dashboard-card rounded-lg border border-border bg-surface p-4">
         <div className="mb-3 flex items-center justify-between">
           <h2 className="font-display text-sm font-semibold text-text">
             Signal Recommendation
@@ -292,7 +292,7 @@ export default function RecommendationPanel({
   });
 
   return (
-    <div className="flex h-full flex-col rounded-lg border border-border bg-surface p-4 shadow-sm">
+    <div className="flex h-full flex-col dashboard-card rounded-lg border border-border bg-surface p-4 shadow-sm">
       <div className="mb-4 flex items-center justify-between">
         <h2 className="font-display text-sm font-semibold text-text">Signal Recommendation</h2>
         <span className="text-xs text-signal-green">Available</span>

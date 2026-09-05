@@ -92,7 +92,7 @@ export async function fetchIntersectionCoords(
     .maybeSingle();
 
   if (error) {
-    console.error(`Gagal mengambil koordinat: ${error.message}`);
+    console.warn(`Koordinat sementara tidak tersedia: ${error.message}`);
     return null;
   }
   return data;

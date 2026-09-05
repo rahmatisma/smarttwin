@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { THEME_INIT_SCRIPT } from "@/lib/theme";
 import "./globals.css";
 import LanguageProvider from "@/components/LanguageProvider";
 import { ScenarioProvider } from "@/context/ScenarioContext";
@@ -14,16 +15,6 @@ export const metadata: Metadata = {
 // menyetel atribut di useEffect (sesudah paint pertama) -- pengguna yang
 // sebelumnya memilih tema terang akan melihat kedipan gelap->terang tiap
 // reload.
-const THEME_INIT_SCRIPT = `
-(function () {
-  try {
-    var stored = window.localStorage.getItem("smarttwin.theme");
-    if (stored === "light" || stored === "dark") {
-      document.documentElement.dataset.theme = stored;
-    }
-  } catch (e) {}
-})();
-`;
 
 export default function RootLayout({
   children,
@@ -36,7 +27,7 @@ export default function RootLayout({
   // memang disengaja. Hanya meredam warning utk atribut di elemen <html>
   // ini, bukan children-nya.
   return (
-    <html lang="id" suppressHydrationWarning>
+    <html lang="id" data-theme="light" suppressHydrationWarning>
       <head>
         <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
       </head>

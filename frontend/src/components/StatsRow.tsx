@@ -12,8 +12,6 @@ import {
 
 import type { ApproachState } from "@/types/traffic";
 
-import DonutRing from "./DonutRing";
-
 /*
  * =========================================================
  * CONGESTION CLASSIFICATION
@@ -133,11 +131,13 @@ function StatCard({
   unit,
   caption,
   progress,
+  featured = false,
 }: {
   icon: React.ReactNode;
   // bg + text tetap (bukan token tema) -- dipakai sebagai aksen warna kartu,
   // bukan warna semantik status, jadi sengaja sama di tema gelap/terang.
   iconClassName?: string;
+  featured?: boolean;
   label: string;
   value: string;
   unit?: string;
@@ -146,42 +146,37 @@ function StatCard({
   // tidak selalu punya progress bar.
   caption?: string;
   // 0-100. Cuma diisi kalau ada basis yang sudah dipercaya di tempat lain
-  // (mis. congestionPct dipakai juga oleh DonutRing) -- tidak dibikin-bikin
+  // (mis. congestionPct dipakai juga oleh gauge) -- tidak dibikin-bikin
   // dari "kapasitas" yang tidak pernah didefinisikan mana pun di codebase.
   progress?: { value: number; colorHex: string };
 }) {
   return (
-    <div className="flex flex-1 flex-col gap-2.5 rounded-lg border border-border bg-surface px-4 py-3">
-      <div className="flex items-center gap-3">
+    <div className={`stat-card ${featured ? "stat-card-featured" : ""} flex flex-1 flex-col gap-3 rounded-xl border border-border bg-surface p-5`}>
+      <div className="stat-heading">
+        <div className="stat-label">{label}</div>
         <div
-          className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${
+          className={`stat-icon flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${
             iconClassName ?? "bg-surface-2 text-text-secondary"
           }`}
         >
           {icon}
         </div>
 
-        <div className="min-w-0">
-          <div className="text-xs text-text-secondary">
-            {label}
-          </div>
+      </div>
+      <div className="stat-value text-text">
+        {value}
 
-          <div className="font-mono text-lg font-semibold tabular-nums text-text">
-            {value}
-
-            {unit && (
-              <span className="ml-1 text-xs font-normal text-text-muted">
-                {unit}
-              </span>
-            )}
-          </div>
-        </div>
+        {unit && (
+          <span className="ml-1 text-xs font-normal text-text-muted">
+            {unit}
+          </span>
+        )}
       </div>
 
       {progress && (
-        <div className="h-1.5 w-full overflow-hidden rounded-full bg-surface-2">
+        <div className="stat-progress w-full overflow-hidden rounded-lg bg-surface-2">
           <div
-            className="h-full rounded-full transition-all duration-500"
+            className="stat-progress-fill h-full rounded-lg transition-all duration-500"
             style={{
               width: `${Math.min(100, Math.max(0, progress.value))}%`,
               backgroundColor: progress.colorHex,
@@ -191,7 +186,7 @@ function StatCard({
       )}
 
       {caption && (
-        <div className="truncate text-[10px] text-text-muted">
+        <div className="stat-caption text-text-muted">
           {caption}
         </div>
       )}
@@ -331,7 +326,7 @@ export default function StatsRow({
    * VISUAL DENSITY PERCENTAGE
    * =========================================================
    *
-   * Ini hanya normalisasi visual untuk DonutRing.
+   * Ini hanya normalisasi visual untuk gauge kepadatan.
    *
    * BUKAN occupancy fisik.
    *
@@ -352,13 +347,14 @@ export default function StatsRow({
   ) : 0;
 
   return (
-    <div className="grid grid-cols-2 gap-3 px-6 py-4 md:grid-cols-3 xl:grid-cols-5">
+    <div className="dashboard-stats grid grid-cols-1 gap-4 px-6 py-5 sm:grid-cols-2 xl:grid-cols-5">
 
       {/* =====================================================
           TOTAL VEHICLES
           ===================================================== */}
 
       <StatCard
+        featured
         icon={<Car className="h-4 w-4" />}
         iconClassName="bg-blue-500/15 text-blue-500"
         label="Total Kendaraan"
@@ -376,7 +372,7 @@ export default function StatsRow({
 
       <StatCard
         icon={<Milestone className="h-4 w-4" />}
-        iconClassName="bg-orange-500/15 text-orange-500"
+        iconClassName="bg-cyan-500/10 text-cyan-600"
         label="Antrean Terpanjang"
         value={hasData ? maxQueue.toFixed(1) : "No data"}
         unit={hasData ? "m" : undefined}
@@ -393,10 +389,10 @@ export default function StatsRow({
 
       <StatCard
         icon={<PieChart className="h-4 w-4" />}
-        iconClassName="bg-purple-500/15 text-purple-500"
+        iconClassName="bg-teal-500/10 text-teal-600"
         label="Indeks Kepadatan"
         value={hasData ? avgDensity.toFixed(1) : "No data"}
-        progress={hasData ? { value: congestionPct, colorHex: c.hex } : undefined}
+        progress={hasData ? { value: congestionPct, colorHex: "#34c7c4" } : undefined}
         caption={hasData ? `Status: ${congestion.label}` : undefined}
       />
 
@@ -404,30 +400,24 @@ export default function StatsRow({
           WEATHER
           ===================================================== */}
 
-      <div className="flex flex-1 items-center gap-3 rounded-lg border border-border bg-surface px-4 py-3">
-        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-surface-2 text-text-secondary">
+      <div className="stat-card stat-weather flex flex-1 flex-col gap-3 rounded-xl border border-border bg-surface p-5">
+        <div className="stat-heading">
+          <div className="stat-label">Cuaca</div>
+          <div className="stat-icon flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-cyan-500/10 text-cyan-600">
           {getWeatherIcon(weather.condition)}
+          </div>
         </div>
 
         <div className="min-w-0">
-          <div className="truncate text-xs text-text-secondary">
-            {weather.dateLabel}
-          </div>
-
-          <div className="text-sm font-medium text-text">
+          <div className="stat-value text-text">
             {weather.tempC !== null
               ? `${weather.tempC}°C`
               : "N/A"}
 
-            <span className="ml-1 text-xs font-normal text-text-muted">
-              {weather.condition}
-            </span>
           </div>
-
-          <div className="text-[10px] text-text-muted opacity-70">
-            Sumber: BMKG
-          </div>
+          <div className="stat-weather-condition text-text-secondary">{weather.condition}</div>
         </div>
+        <div className="stat-caption text-text-muted">{weather.dateLabel} · BMKG</div>
       </div>
 
       {/* =====================================================
@@ -435,40 +425,28 @@ export default function StatsRow({
           ===================================================== */}
 
       <div
-        className="flex flex-1 items-center gap-3 rounded-lg border border-border bg-surface px-4 py-3"
+        className="stat-card stat-congestion flex flex-1 flex-col gap-3 rounded-xl border border-border bg-surface p-5"
       >
-        <div className="relative shrink-0">
-          <DonutRing
-            size={40}
-            thickness={5}
-            segments={[
-              {
-                value: congestionPct,
-                color: c.hex,
-              },
-              {
-                value: 100 - congestionPct,
-                color: "#232935",
-              },
-            ]}
-          />
-
-          <div className="pointer-events-none absolute inset-0 flex items-center justify-center font-mono text-[9px] font-semibold text-text">
-            {congestionPct}%
-          </div>
+        <div className="stat-label">Tingkat Kepadatan</div>
+        <div className="stat-gauge">
+          <svg viewBox="0 0 200 110" aria-hidden="true">
+            {Array.from({ length: 24 }, (_, index) => {
+              const angle = Math.PI - (index / 23) * Math.PI;
+              const active = hasData && index < Math.round(congestionPct * 24 / 100);
+              return <line key={index}
+                x1={100 + 72 * Math.cos(angle)} y1={99 - 72 * Math.sin(angle)}
+                x2={100 + 91 * Math.cos(angle)} y2={99 - 91 * Math.sin(angle)}
+                stroke={active ? (congestion.color === "green" ? `hsl(${185 - index * 1.8} 58% 65%)` : c.hex) : "var(--color-surface-2)"}
+                strokeWidth={8} strokeLinecap="round" />;
+            })}
+          </svg>
+          <div className="stat-gauge-value text-text">{hasData ? `${congestionPct}%` : "N/A"}</div>
         </div>
-
-        <div>
-          <div className="text-xs text-text-secondary">
-            Tingkat Kepadatan
-          </div>
-
           <div
-            className={`font-display text-sm font-semibold ${c.text}`}
+            className={`stat-gauge-status text-xs font-semibold ${c.text}`}
           >
             {congestion.label}
           </div>
-        </div>
       </div>
     </div>
   );

@@ -514,7 +514,7 @@ export default function CameraFeedPanel({
   // ===================================================
 
   return (
-    <div className="flex h-full flex-col rounded-lg border border-border bg-surface p-4">
+    <div className="flex h-full flex-col dashboard-card rounded-lg border border-border bg-surface p-4">
 
       {/* =================================================
           HEADER

@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
 import {
@@ -13,7 +14,7 @@ import {
   Menu,
   X,
 } from "lucide-react";
-import Logo from "@/components/Logo";
+
 
 const NAV_ITEMS = [
   { icon: LayoutDashboard, label: "Dashboard", href: "/dashboard" },
@@ -31,28 +32,32 @@ export default function Sidebar() {
 
   return (
     <aside
-      className={`sticky top-0 flex h-dvh shrink-0 flex-col border-r border-border bg-surface transition-all duration-300 ${
-        isCollapsed ? "w-16" : "w-56"
+      className={`app-sidebar sticky top-0 flex h-dvh shrink-0 flex-col border-r border-border bg-surface transition-all duration-300 ${
+        isCollapsed ? "is-collapsed w-16" : "w-56"
       }`}
     >
       {/* HEADER / LOGO */}
-      <div
-        className={`relative flex shrink-0 items-center border-b border-border ${
-          isCollapsed ? "h-[73px] justify-center px-2" : "h-24 justify-center px-12"
-        }`}
-      >
-        {/* LOGO -- lockup ikon+tulisan, menggantikan placeholder titik hijau */}
-        {!isCollapsed && <Logo height={56} className="justify-center" />}
+      <div className="sidebar-brand-header relative flex shrink-0 items-center justify-center border-b border-border">
+        {/* Brand lockup on the blue navigation rail. */}
+        <Link href="/dashboard" className="sidebar-logo-link" aria-label="SmartTwin — buka dashboard">
+          <Image
+            src="/logo-dark.png"
+            alt="SmartTwin"
+            width={88}
+            height={88}
+            loading="eager"
+            className="sidebar-logo-image"
+          />
+        </Link>
 
         {/* COLLAPSE BUTTON */}
         <button
           type="button"
           onClick={() => setIsCollapsed((prev) => !prev)}
+          aria-expanded={!isCollapsed}
           aria-label={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
           title={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
-          className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-text-secondary transition-colors hover:bg-surface-2 hover:text-text ${
-            isCollapsed ? "" : "absolute right-3"
-          }`}
+          className="sidebar-collapse-button absolute right-3 top-3 flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-text-secondary transition-colors hover:bg-surface-2 hover:text-text"
         >
           {isCollapsed ? (
             <Menu className="h-4 w-4" />
@@ -63,18 +68,20 @@ export default function Sidebar() {
       </div>
 
       {/* NAVIGATION */}
-      <nav className="flex min-h-0 flex-1 flex-col space-y-1 overflow-y-auto px-2 py-3">
+      <nav aria-label="Navigasi utama" className="flex min-h-0 flex-1 flex-col space-y-1 overflow-y-auto px-2 py-3">
         {NAV_ITEMS.map((item) => {
           const Icon = item.icon;
 
           if (item.href) {
-            const isActive = pathname.startsWith(item.href);
+            const isActive = (pathname.startsWith(item.href) || (item.href === "/dashboard" && pathname === "/"));
 
             return (
               <Link
                 key={item.label}
                 href={item.href}
-                title={isCollapsed ? item.label : undefined}
+                aria-label={item.label}
+                aria-current={isActive ? "page" : undefined}
+                title={item.label}
                 className={`flex w-full shrink-0 items-center rounded-md py-2 text-left text-sm transition-all duration-200 ${
                   isCollapsed
                     ? "justify-center px-2"
@@ -98,7 +105,7 @@ export default function Sidebar() {
             <button
               key={item.label}
               type="button"
-              title={isCollapsed ? item.label : undefined}
+              title={item.label}
               className={`flex w-full shrink-0 items-center rounded-md py-2 text-left text-sm text-text-secondary transition-all duration-200 hover:bg-surface-2 hover:text-text ${
                 isCollapsed
                   ? "justify-center px-2"
@@ -121,6 +128,7 @@ export default function Sidebar() {
         {/* ACCOUNT */}
         <Link
           href="/account"
+          aria-label="Akun saya"
           title={isCollapsed ? "Account" : undefined}
           className={`flex w-full items-center rounded-md py-2 text-left text-sm transition-all duration-200 ${
             isCollapsed

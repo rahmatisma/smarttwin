@@ -1,51 +1,77 @@
 "use client";
 
-import React, { createContext, useContext, useEffect, useState, ReactNode } from "react";
+import { createContext, useContext, useSyncExternalStore, type ReactNode } from "react";
+import {
+  APPEARANCE_EVENT, readThemePreference, resolveTheme, writeThemePreference,
+  type Theme, type ThemePreference,
+} from "@/lib/theme";
 
-export type Theme = "dark" | "light";
-
-const THEME_STORAGE_KEY = "smarttwin.theme";
+export type { Theme } from "@/lib/theme";
 
 interface ThemeContextType {
   theme: Theme;
+  preference: ThemePreference;
+  setTheme: (preference: ThemePreference) => void;
   toggleTheme: () => void;
 }
 
 const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
+const MEDIA_QUERY = "(prefers-color-scheme: dark)";
+let sessionPreference: ThemePreference | null = null;
 
-// Default gelap dipertahankan (tampilan yang sudah dipakai selama ini) --
-// terang cuma opsi tambahan lewat toggle, bukan pengganti default. Skrip
-// inline di layout.tsx sudah menerapkan data-theme sebelum React hydrate,
-// jadi state awal di sini disamakan lewat baca DOM, bukan selalu "dark",
-// supaya tidak ada flash balik ke gelap sesaat sebelum effect jalan.
-function readInitialTheme(): Theme {
-  if (typeof document === "undefined") return "dark";
-  return document.documentElement.dataset.theme === "light" ? "light" : "dark";
+function getPreference(): ThemePreference {
+  if (sessionPreference) return sessionPreference;
+  try { return readThemePreference(window.localStorage); } catch { return "light"; }
+}
+
+function getSnapshot() {
+  const preference = getPreference();
+  return preference + ":" + resolveTheme(preference, window.matchMedia(MEDIA_QUERY).matches);
+}
+
+function applyTheme() {
+  const theme = resolveTheme(getPreference(), window.matchMedia(MEDIA_QUERY).matches);
+  document.documentElement.dataset.theme = theme;
+  document.documentElement.style.colorScheme = theme;
+}
+
+function subscribe(onChange: () => void) {
+  const media = window.matchMedia(MEDIA_QUERY);
+  const update = () => { applyTheme(); onChange(); };
+  window.addEventListener(APPEARANCE_EVENT, update);
+  window.addEventListener("storage", update);
+  media.addEventListener("change", update);
+  // Read persisted settings directly, never write the SSR fallback to storage.
+  applyTheme();
+  return () => {
+    window.removeEventListener(APPEARANCE_EVENT, update);
+    window.removeEventListener("storage", update);
+    media.removeEventListener("change", update);
+  };
+}
+
+function setTheme(preference: ThemePreference) {
+  try {
+    writeThemePreference(window.localStorage, preference);
+    sessionPreference = null;
+  } catch { sessionPreference = preference; }
+  applyTheme();
+  window.dispatchEvent(new Event(APPEARANCE_EVENT));
+}
+
+function toggleTheme() {
+  const current = resolveTheme(getPreference(), window.matchMedia(MEDIA_QUERY).matches);
+  setTheme(current === "dark" ? "light" : "dark");
 }
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
-  const [theme, setTheme] = useState<Theme>(readInitialTheme);
-
-  useEffect(() => {
-    document.documentElement.dataset.theme = theme;
-    window.localStorage.setItem(THEME_STORAGE_KEY, theme);
-  }, [theme]);
-
-  const toggleTheme = () => {
-    setTheme((prev) => (prev === "dark" ? "light" : "dark"));
-  };
-
-  return (
-    <ThemeContext.Provider value={{ theme, toggleTheme }}>
-      {children}
-    </ThemeContext.Provider>
-  );
+  const snapshot = useSyncExternalStore(subscribe, getSnapshot, () => "light:light");
+  const [preference, theme] = snapshot.split(":") as [ThemePreference, Theme];
+  return <ThemeContext.Provider value={{ theme, preference, setTheme, toggleTheme }}>{children}</ThemeContext.Provider>;
 }
 
 export function useTheme() {
   const context = useContext(ThemeContext);
-  if (!context) {
-    return { theme: "dark" as Theme, toggleTheme: () => {} };
-  }
+  if (!context) throw new Error("useTheme must be used within ThemeProvider");
   return context;
 }
