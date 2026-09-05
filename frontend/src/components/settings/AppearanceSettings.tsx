@@ -6,11 +6,12 @@ import {
     useState,
 } from "react";
 import { Sun, Moon, Monitor, Languages, Layout } from "lucide-react";
-import { APPEARANCE_EVENT } from "@/components/LanguageProvider";
+import { APPEARANCE_EVENT, readThemePreference, type ThemePreference } from "@/lib/theme";
+import { useTheme } from "@/context/ThemeContext";
 
 const STORAGE_KEY = "smarttwin.appearance.settings";
 const DEFAULT_SETTINGS = {
-    theme: "system",
+    theme: "light",
     language: "id",
     compactMode: false,
 } as const;
@@ -27,18 +28,13 @@ function readSettings(): AppearanceSettingsData {
         const parsed: unknown = stored ? JSON.parse(stored) : null;
 
         if (typeof parsed !== "object" || parsed === null) {
-            return { ...DEFAULT_SETTINGS };
+            return { ...DEFAULT_SETTINGS, theme: readThemePreference(localStorage) };
         }
 
         const values = parsed as Record<string, unknown>;
 
         return {
-            theme:
-                values.theme === "light" ||
-                values.theme === "dark" ||
-                values.theme === "system"
-                    ? values.theme
-                    : DEFAULT_SETTINGS.theme,
+            theme: readThemePreference(localStorage),
             language:
                 values.language === "en" || values.language === "id"
                     ? values.language
@@ -49,20 +45,12 @@ function readSettings(): AppearanceSettingsData {
                     : DEFAULT_SETTINGS.compactMode,
         };
     } catch {
-        return { ...DEFAULT_SETTINGS };
+        return { ...DEFAULT_SETTINGS, theme: readThemePreference(localStorage) };
     }
 }
 
 function applySettings(settings: AppearanceSettingsData) {
     const root = document.documentElement;
-    const prefersDark = window.matchMedia(
-        "(prefers-color-scheme: dark)"
-    ).matches;
-    const isDark =
-        settings.theme === "dark" ||
-        (settings.theme === "system" && prefersDark);
-
-    root.dataset.theme = isDark ? "dark" : "light";
     root.lang = settings.language;
     document.body.classList.toggle(
         "compact-mode",
@@ -71,6 +59,7 @@ function applySettings(settings: AppearanceSettingsData) {
 }
 
 export default function AppearanceSettings() {
+    const { preference, setTheme } = useTheme();
     const [settings, setSettings] = useState<AppearanceSettingsData>(
         DEFAULT_SETTINGS
     );
@@ -92,6 +81,7 @@ export default function AppearanceSettings() {
         key: K,
         value: AppearanceSettingsData[K]
     ) {
+        if (key === "theme") setTheme(value as ThemePreference);
         setSettings((current) => ({
             ...current,
             [key]: value,
@@ -100,7 +90,7 @@ export default function AppearanceSettings() {
     }
 
     function handleSave() {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
+        localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...settings, theme: preference }));
         window.dispatchEvent(new CustomEvent(APPEARANCE_EVENT));
         setSaved(true);
     }
@@ -132,7 +122,7 @@ export default function AppearanceSettings() {
                         icon={<Sun size={20} />}
                         label="Light"
                         value="light"
-                        selected={settings.theme === "light"}
+                        selected={preference === "light"}
                         onClick={() => updateSetting("theme", "light")}
                     />
 
@@ -140,7 +130,7 @@ export default function AppearanceSettings() {
                         icon={<Moon size={20} />}
                         label="Dark"
                         value="dark"
-                        selected={settings.theme === "dark"}
+                        selected={preference === "dark"}
                         onClick={() => updateSetting("theme", "dark")}
                     />
 
@@ -148,7 +138,7 @@ export default function AppearanceSettings() {
                         icon={<Monitor size={20} />}
                         label="System"
                         value="system"
-                        selected={settings.theme === "system"}
+                        selected={preference === "system"}
                         onClick={() => updateSetting("theme", "system")}
                     />
                 </div>

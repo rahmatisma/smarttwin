@@ -532,7 +532,7 @@ export default function DigitalTwinPanel({
   );
 
   return (
-    <div className="flex h-full flex-col rounded-lg border border-border bg-surface p-4">
+    <div className="flex h-full flex-col dashboard-card rounded-lg border border-border bg-surface p-4">
       {/* =====================================================
           HEADER
           ===================================================== */}
@@ -594,7 +594,7 @@ export default function DigitalTwinPanel({
       <div
         ref={simulationViewRef}
         className={`relative w-full overflow-hidden bg-[var(--color-canvas)] ${
-          isFullscreen ? "h-screen" : "aspect-[16/11] rounded-md"
+          isFullscreen ? "h-screen" : "aspect-[4/3] rounded-md"
         }`}
       >
         {simRunning ? (

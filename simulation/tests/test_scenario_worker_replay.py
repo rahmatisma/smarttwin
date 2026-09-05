@@ -11,6 +11,8 @@ Dua sifat yang dijaga di sini:
      mencapai akhir daftar -- replay tidak boleh berhenti.
   2. Urutannya deterministik: dua ReplaySource baru dengan builder yang
      sama menghasilkan urutan identik (reproducible untuk latihan).
+  3. Data yang ditambahkan ketika worker hidup langsung masuk ke urutan,
+     tanpa harus me-restart backend/worker.
 """
 
 import sys
@@ -156,3 +158,19 @@ def test_step_nol_atau_negatif_dianggap_minimal_satu():
     _, posisi2, _ = replay.next()
 
     assert posisi2 != posisi1
+
+
+def test_data_baru_diikuti_sebelum_replay_kembali_ke_awal():
+    rows = _lima_baris_trafficstates()
+    builder = _FakeBuilder(rows)
+    replay = ReplaySource(builder, "simpang4-pingit", step=1)
+
+    ids_awal = [replay.next()[0].trafficStateId for _ in range(5)]
+    rows.extend([
+        {"id": 105, "intersectionId": 1, "windowStart": "2026-08-15T16:35:00+00:00"},
+        {"id": 106, "intersectionId": 1, "windowStart": "2026-08-15T16:36:00+00:00"},
+    ])
+    ids_lanjutan = [replay.next()[0].trafficStateId for _ in range(3)]
+
+    assert ids_awal == [100, 101, 102, 103, 104]
+    assert ids_lanjutan == [105, 106, 100]

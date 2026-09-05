@@ -58,6 +58,19 @@ class Settings(BaseSettings):
 
     auth_required: bool = False
 
+    scenario_worker_autostart: bool = Field(
+        default=False,
+        description=(
+            "Jalankan scenario worker replay bersama backend (opt-in)."
+        ),
+    )
+
+    scenario_worker_interval_seconds: int = Field(
+        default=60,
+        ge=10,
+        description="Jeda antar-evaluasi Scenario Generator.",
+    )
+
     operator_roles: str = "operator,admin,service_role"
 
     max_video_upload_bytes: int = Field(

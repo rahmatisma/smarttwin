@@ -117,6 +117,12 @@ berjalan di background selama proses backend tidak ditutup. Durasi rekaman
 CCTV yang berulang tidak menghentikan SUMO; kendaraan tetap diperbarui dan
 fase Signal Status mengikuti clock CCTV.
 
+Secara default scenario worker tidak ikut dimulai ketika backend hidup, sehingga
+SUMO baru berjalan saat UI memintanya. Timeline dashboard tetap mengulang sumber
+rekaman ketika habis. Autostart Scenario Generator dapat diaktifkan secara
+opsional dengan `SCENARIO_WORKER_AUTOSTART=true`; mode ini langsung menjalankan
+tiga kandidat SUMO di background.
+
 Untuk pengembangan kode backend, hot reload dapat diaktifkan secara terpisah:
 
 ```powershell
@@ -140,12 +146,13 @@ npm run dev
 
 Dashboard dapat dibuka melalui `http://localhost:3000`.
 
-## Menjalankan scenario worker
+## Menjalankan scenario worker secara manual
 
-Backend dan SUMO harus sudah dapat berjalan. Dari root repository:
+Worker dapat dijalankan dari root repository bila hasil perbandingan tiga
+kandidat Scenario Generator memang diperlukan:
 
 ```powershell
-backend\.venv\Scripts\python.exe simulation\scenario_worker.py --full-cycle --interval 60
+backend\.venv\Scripts\python.exe simulation\scenario_worker.py --replay --full-cycle --interval 60
 ```
 
 Untuk urutan demo lengkap, gunakan

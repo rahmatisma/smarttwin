@@ -107,7 +107,7 @@ export default function ForecastChart({
 }) {
   if (!data || !data.predictions || data.predictions.length === 0) {
     return (
-      <div className="flex flex-col rounded-lg border border-border bg-surface p-4">
+      <div className="flex flex-col dashboard-card rounded-lg border border-border bg-surface p-4">
         <div className="mb-3 flex items-center justify-between">
           <h2 className="font-display text-sm font-semibold text-text">
             Traffic Forecast
@@ -192,7 +192,7 @@ export default function ForecastChart({
   const showPerApproach = approachSeries.length > 0;
 
   return (
-    <div className="flex flex-col rounded-lg border border-border bg-surface p-4">
+    <div className="flex flex-col dashboard-card rounded-lg border border-border bg-surface p-4">
       <div className="mb-3 flex items-center justify-between">
         <h2 className="font-display text-sm font-semibold text-text">
           Traffic Forecast
@@ -216,7 +216,7 @@ export default function ForecastChart({
               }}
             >
               <CartesianGrid
-                stroke="#232935"
+                stroke="var(--color-border)"
                 vertical={false}
               />
 
@@ -227,18 +227,18 @@ export default function ForecastChart({
                 ticks={[0, 10, 20, 30, 40, 50, 60]}
                 tickFormatter={(seconds) => `+${seconds}s`}
                 tick={{
-                  fill: "#5b6472",
+                  fill: "var(--color-text-muted)",
                   fontSize: 11,
                 }}
                 axisLine={{
-                  stroke: "#232935",
+                  stroke: "var(--color-border)",
                 }}
                 tickLine={false}
               />
 
               <YAxis
                 tick={{
-                  fill: "#5b6472",
+                  fill: "var(--color-text-muted)",
                   fontSize: 11,
                 }}
                 axisLine={false}
@@ -248,8 +248,8 @@ export default function ForecastChart({
 
               <Tooltip
                 contentStyle={{
-                  background: "#171c27",
-                  border: "1px solid #232935",
+                  background: "var(--color-surface)",
+                  border: "1px solid var(--color-border)",
                   borderRadius: 8,
                   fontSize: 12,
                 }}
@@ -322,20 +322,20 @@ export default function ForecastChart({
                 >
                   <stop
                     offset="0%"
-                    stopColor="#38bdf8"
+                    stopColor="#25b7cc"
                     stopOpacity={0.35}
                   />
 
                   <stop
                     offset="100%"
-                    stopColor="#38bdf8"
+                    stopColor="#25b7cc"
                     stopOpacity={0}
                   />
                 </linearGradient>
               </defs>
 
               <CartesianGrid
-                stroke="#232935"
+                stroke="var(--color-border)"
                 vertical={false}
               />
 
@@ -346,18 +346,18 @@ export default function ForecastChart({
                 ticks={[0, 10, 20, 30, 40, 50, 60]}
                 tickFormatter={(seconds) => `+${seconds}s`}
                 tick={{
-                  fill: "#5b6472",
+                  fill: "var(--color-text-muted)",
                   fontSize: 11,
                 }}
                 axisLine={{
-                  stroke: "#232935",
+                  stroke: "var(--color-border)",
                 }}
                 tickLine={false}
               />
 
               <YAxis
                 tick={{
-                  fill: "#5b6472",
+                  fill: "var(--color-text-muted)",
                   fontSize: 11,
                 }}
                 axisLine={false}
@@ -367,8 +367,8 @@ export default function ForecastChart({
 
               <Tooltip
                 contentStyle={{
-                  background: "#171c27",
-                  border: "1px solid #232935",
+                  background: "var(--color-surface)",
+                  border: "1px solid var(--color-border)",
                   borderRadius: 8,
                   fontSize: 12,
                 }}
@@ -384,7 +384,7 @@ export default function ForecastChart({
               <Area
                 type="monotone"
                 dataKey="predictedQueueLengthVeh"
-                stroke="#38bdf8"
+                stroke="#25b7cc"
                 strokeWidth={2}
                 strokeDasharray="5 5"
                 fill="url(#forecastFill)"

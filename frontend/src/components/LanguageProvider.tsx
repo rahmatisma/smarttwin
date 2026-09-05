@@ -2,10 +2,11 @@
 
 import { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
+import { APPEARANCE_EVENT } from "@/lib/theme";
 
 const STORAGE_KEY = "smarttwin.appearance.settings";
 const LANGUAGE_EVENT = "smarttwin-language-updated";
-const APPEARANCE_EVENT = "smarttwin-appearance-updated";
+
 
 type Language = "id" | "en";
 
@@ -354,14 +355,6 @@ function getStoredAppearance(): AppearanceSettings {
 }
 
 function applyAppearance(settings: AppearanceSettings) {
-    const prefersDark = window.matchMedia(
-        "(prefers-color-scheme: dark)"
-    ).matches;
-    const isDark =
-        settings.theme === "dark" ||
-        (settings.theme === "system" && prefersDark);
-
-    document.documentElement.dataset.theme = isDark ? "dark" : "light";
     document.documentElement.lang = settings.language;
     document.body.classList.toggle("compact-mode", settings.compactMode);
 }

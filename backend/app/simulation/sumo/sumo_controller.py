@@ -47,6 +47,18 @@ class SumoController:
     SIMULATION_DIR = PROJECT_ROOT / "simulation"
     SIMULATION_VENV_DIR = SIMULATION_DIR / ".venv"
 
+    # Diexport manual dari SUMO-GUI (View Settings -> Save), bukan
+    # ditulis tangan -- kalau file ini belum ada (mis. belum di-pull di
+    # komputer lain), sumo-gui tetap jalan pakai skema default, bukan
+    # gagal start.
+    GUI_VIEW_SETTINGS_FILE = SIMULATION_DIR / "network" / "gui-view-settings.xml"
+
+    # SENGAJA pakai sys.prefix (venv Python yang lagi jalan), bukan
+    # hardcode ke simulation/.venv -- sejak backend, simulation, dan
+    # decision_engine digabung jadi satu venv di root repo (30 Agustus
+    # 2026), requirements.txt root sudah mendeklarasikan
+    # traci/sumolib/eclipse-sumo, jadi sys.prefix selalu benar tidak
+    # peduli dari venv mana proses ini dijalankan.
     SUMO_VENV_DIR = Path(sys.prefix)
 
     SUMO_SCRIPTS_DIR = SUMO_VENV_DIR / "Scripts"
@@ -68,8 +80,11 @@ class SumoController:
         / "simpang4_pingit.sumocfg"
     )
 
-    STREAM_FRAME_WIDTH = 1920
-    STREAM_FRAME_HEIGHT = 1080
+    # Screenshot harus dibuat langsung pada rasio card dashboard. Mengandalkan
+    # ukuran window SUMO-GUI menghasilkan viewport sekitar 950x278 di Windows;
+    # ketika di-stretch oleh browser hasilnya terlihat pecah.
+    STREAM_FRAME_WIDTH = 1280
+    STREAM_FRAME_HEIGHT = 720
 
     DEFAULT_STREAM_VIEW_BOUNDARY = (240.63, 479.635, 380.63, 558.385)
     FULLSCREEN_VIEW_SCALE = 1.43
@@ -731,6 +746,17 @@ class SumoController:
             # oleh dashboard melalui endpoint stream.
             command.extend(["--window-pos", "-32000,-32000", "--window-size", "960,540"])
 
+            # Tampilan kendaraan/jalan yang sudah diatur manual lewat SUMO-GUI
+            # (View Settings -> Save) supaya screenshot dashboard ikut lebih
+            # bagus, bukan skema default. Dicek exists() dulu -- kalau belum
+            # ada (repo baru di-clone di komputer lain), jangan sampai bikin
+            # sumo-gui gagal start gara-gara --gui-settings-file menunjuk ke
+            # file yang tidak ada.
+            if self.GUI_VIEW_SETTINGS_FILE.exists():
+                command.extend(
+                    ["--gui-settings-file", str(self.GUI_VIEW_SETTINGS_FILE)]
+                )
+
         # ========================================================
         # PATH RESOLUTION & LOGGING
         # ========================================================
@@ -971,6 +997,15 @@ class SumoController:
                 continue
 
             traci.vehicletype.setVehicleClass(
+                vehicle_type,
+                config["vclass"],
+            )
+
+            # vClass (aturan lajur/rute) tidak otomatis mengubah bentuk
+            # gambar -- tanpa ini, tipe hasil copy() dari DEFAULT_VEHTYPE
+            # (mobil) tetap tergambar sebagai mobil, cuma diperkecil
+            # ukurannya, bukan bentuk motor/bus/truk yang sesungguhnya.
+            traci.vehicletype.setShapeClass(
                 vehicle_type,
                 config["vclass"],
             )

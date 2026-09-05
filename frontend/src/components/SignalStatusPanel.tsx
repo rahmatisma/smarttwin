@@ -87,7 +87,7 @@ export default function SignalStatusPanel({
 
   if (showLoading) {
     return (
-      <div className="rounded-lg border border-border bg-surface p-4">
+      <div className="dashboard-card rounded-lg border border-border bg-surface p-4">
         <div className="mb-3 flex items-center justify-between">
           <h2 className="flex items-center gap-2 font-display text-sm font-semibold text-text">
             Signal Status
@@ -194,7 +194,7 @@ export default function SignalStatusPanel({
   }
 
   return (
-    <div className="flex h-full flex-col rounded-lg border border-border bg-surface p-4">
+    <div className="flex h-full flex-col dashboard-card rounded-lg border border-border bg-surface p-4">
       {/* HEADER */}
       <div className="mb-4 flex items-center justify-between">
         <h2 className="flex items-center gap-2 font-display text-sm font-semibold text-text">

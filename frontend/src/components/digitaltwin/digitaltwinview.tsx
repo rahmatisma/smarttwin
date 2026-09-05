@@ -120,7 +120,7 @@ export default function DigitalTwinView() {
     const [simSharedPhase, setSimSharedPhase] = useState<string>("north");
     const [simSharedState, setSimSharedState] = useState<"GREEN" | "YELLOW" | "RED">("RED");
     const [simSharedRemaining, setSimSharedRemaining] = useState<number>(0);
-
+    
     // Auto-calibration bounds
     const boundsRef = useRef({ minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity });
 
@@ -196,7 +196,7 @@ export default function DigitalTwinView() {
                 const res = await fetch(`${API_BASE_URL}/api/v1/simulation/state?context=${context}`);
                 if (!res.ok) return;
                 const data = await res.json();
-
+                
                 setIsSimStateLoaded(true);
 
                 if (data.running) {
@@ -258,7 +258,7 @@ export default function DigitalTwinView() {
                         setSimSharedPhase(active.approach);
                         setSimSharedState(active.state);
                         setSimSharedRemaining(remaining);
-
+                        
                     }
                 }
                 if (data.simulationTimeSeconds !== undefined) {
@@ -326,7 +326,7 @@ export default function DigitalTwinView() {
                     if (v.y < minY) { minY = v.y; changed = true; }
                     if (v.y > maxY) { maxY = v.y; changed = true; }
                 });
-
+                
                 // Add some padding to bounds so cars don't hit the absolute edge
                 if (changed && minX !== Infinity) {
                     boundsRef.current = { minX, maxX, minY, maxY };
@@ -492,443 +492,200 @@ export default function DigitalTwinView() {
             <main className="min-w-0 flex-1 bg-background px-5 py-6 md:px-7">
                 <div className="mx-auto w-full max-w-[1400px]">
 
-                    {/* ================================================= */}
-                    {/* HEADER */}
-                    {/* ================================================= */}
+                {/* ================================================= */}
+                {/* HEADER */}
+                {/* ================================================= */}
 
-                    <div className="mb-6 flex flex-col justify-between gap-4 md:flex-row md:items-end">
+                <div className="mb-6 flex flex-col justify-between gap-4 md:flex-row md:items-end">
 
-                        <div>
-                            <div className="mb-2 flex items-center gap-2">
+                    <div>
+                        <div className="mb-2 flex items-center gap-2">
 
-                                <span className="h-2.5 w-2.5 rounded-full bg-signal-green" />
+                            <span className="h-2.5 w-2.5 rounded-full bg-signal-green" />
 
-                                <h1 className="font-display text-2xl font-semibold">
-                                    Digital Twin
-                                </h1>
+                            <h1 className="font-display text-2xl font-semibold">
+                                Digital Twin
+                            </h1>
 
-                            </div>
-
-                            <p className="text-sm text-text-muted">
-                                Simulasi digital persimpangan dan optimasi traffic signal.
-                            </p>
                         </div>
 
-                        {/* Simulation status */}
+                        <p className="text-sm text-text-muted">
+                            Simulasi digital persimpangan dan optimasi traffic signal.
+                        </p>
+                    </div>
 
-                        <div className="flex items-center gap-2 rounded-xl border border-border bg-surface px-4 py-2.5">
+                    {/* Simulation status */}
 
-                            <span
-                                className={`h-2 w-2 rounded-full ${status === "running"
-                                        ? "bg-signal-green"
-                                        : status === "paused"
-                                            ? "bg-yellow-400"
-                                            : "bg-text-muted"
-                                    }`}
-                            />
+                    <div className="flex items-center gap-2 rounded-xl border border-border bg-surface px-4 py-2.5">
 
-                            <span className="text-xs font-medium">
-                                {status === "running"
-                                    ? "Simulation Running"
+                        <span
+                            className={`h-2 w-2 rounded-full ${
+                                status === "running"
+                                    ? "bg-signal-green"
                                     : status === "paused"
-                                        ? "Simulation Paused"
-                                        : "Simulation Ready"}
-                            </span>
+                                    ? "bg-yellow-400"
+                                    : "bg-text-muted"
+                            }`}
+                        />
 
-                        </div>
+                        <span className="text-xs font-medium">
+                            {status === "running"
+                                ? "Simulation Running"
+                                : status === "paused"
+                                ? "Simulation Paused"
+                                : "Simulation Ready"}
+                        </span>
 
                     </div>
 
-                    {/* ================================================= */}
-                    {/* MAIN SIMULATION */}
-                    {/* ================================================= */}
+                </div>
 
-                    <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_300px]">
+                {/* ================================================= */}
+                {/* MAIN SIMULATION */}
+                {/* ================================================= */}
 
-                        {/* =============================== */}
-                        {/* DIGITAL TWIN CANVAS */}
-                        {/* =============================== */}
+                <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_300px]">
 
-                        <div
-                            ref={simulationViewRef}
-                            className={`overflow-hidden border border-border bg-surface shadow-sm ${isFullscreen ? "flex h-screen flex-col" : "flex h-full flex-col rounded-2xl"
-                                }`}
-                        >
+                    {/* =============================== */}
+                    {/* DIGITAL TWIN CANVAS */}
+                    {/* =============================== */}
 
-                            {/* Canvas header */}
+                    <div
+                        ref={simulationViewRef}
+                        className={`overflow-hidden border border-border bg-surface shadow-sm ${
+                            isFullscreen ? "flex h-screen flex-col" : "rounded-2xl"
+                        }`}
+                    >
 
-                            <div className="flex items-center justify-between border-b border-border px-5 py-4">
+                        {/* Canvas header */}
 
-                                <div className="flex items-center gap-3">
+                        <div className="flex items-center justify-between border-b border-border px-5 py-4">
 
-                                    <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-surface-2">
-                                        <Map
-                                            size={18}
-                                            className="text-text-secondary"
-                                        />
-                                    </div>
+                            <div className="flex items-center gap-3">
 
-                                    <div>
-                                        <h2 className="text-sm font-semibold">
-                                            Intersection Simulation
-                                        </h2>
-
-                                        <p className="text-xs text-text-muted">
-                                            Simpang 4 Pingit
-                                        </p>
-                                    </div>
-
+                                <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-surface-2">
+                                    <Map
+                                        size={18}
+                                        className="text-text-secondary"
+                                    />
                                 </div>
 
-                                <button
-                                    type="button"
-                                    onClick={() => void toggleFullscreen()}
-                                    className="rounded-lg border border-border p-2 text-text-secondary transition hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-text-secondary"
-                                    aria-label={isFullscreen ? "Keluar dari layar penuh" : "Tampilkan SUMO dalam layar penuh"}
-                                    title={isFullscreen ? "Keluar dari layar penuh (Esc)" : "Layar penuh"}
-                                >
-                                    {isFullscreen ? <Minimize2 size={17} /> : <Maximize2 size={17} />}
-                                </button>
+                                <div>
+                                    <h2 className="text-sm font-semibold">
+                                        Intersection Simulation
+                                    </h2>
+
+                                    <p className="text-xs text-text-muted">
+                                        Simpang 4 Pingit
+                                    </p>
+                                </div>
 
                             </div>
 
-                            {/* Simulation area */}
+                            <button
+                                type="button"
+                                onClick={() => void toggleFullscreen()}
+                                className="rounded-lg border border-border p-2 text-text-secondary transition hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-text-secondary"
+                                aria-label={isFullscreen ? "Keluar dari layar penuh" : "Tampilkan SUMO dalam layar penuh"}
+                                title={isFullscreen ? "Keluar dari layar penuh (Esc)" : "Layar penuh"}
+                            >
+                                {isFullscreen ? <Minimize2 size={17} /> : <Maximize2 size={17} />}
+                            </button>
 
-                            <div className={`relative w-full overflow-hidden bg-[var(--color-canvas)] ${isFullscreen ? "min-h-0 flex-1" : "aspect-[16/11]"
-                                }`}>
+                        </div>
 
-                                {/* SUMO-GUI Live Stream */}
-                                {status === "running" ? (
-                                    // Frame berubah terus dan tidak boleh masuk cache/optimizer Next Image.
-                                    // eslint-disable-next-line @next/next/no-img-element
-                                    <img
-                                        src={`${API_BASE_URL}/api/v1/simulation/frame?context=${contextForScenario(scenario)}&v=${Math.floor(simulationTime)}`}
-                                        alt="Live SUMO Simulation Stream"
-                                        className="absolute inset-0 h-full w-full object-cover object-center"
-                                    />
-                                ) : (
-                                    <div className="absolute inset-0 flex items-center justify-center">
-                                        <p className="text-sm text-text-muted">Simulation Not Running</p>
+                        {/* Simulation area */}
+
+                        <div className={`relative w-full overflow-hidden bg-[var(--color-canvas)] ${
+                            isFullscreen ? "min-h-0 flex-1" : "aspect-[4/3]"
+                        }`}>
+
+                            {/* SUMO-GUI Live Stream */}
+                            {status === "running" ? (
+                                // Frame berubah terus dan tidak boleh masuk cache/optimizer Next Image.
+                                // eslint-disable-next-line @next/next/no-img-element
+                                <img
+                                    src={`${API_BASE_URL}/api/v1/simulation/frame?context=${contextForScenario(scenario)}&v=${Math.floor(simulationTime)}`}
+                                    alt="Live SUMO Simulation Stream"
+                                    className="absolute inset-0 h-full w-full object-cover object-center"
+                                />
+                            ) : (
+                                <div className="absolute inset-0 flex items-center justify-center">
+                                    <p className="text-sm text-text-muted">Simulation Not Running</p>
+                                </div>
+                            )}
+
+                            {/* Label lengan + lampu per arah (sama seperti dashboard) */}
+                            {status === "running" && ([
+                                ["north", "UTARA · Jl. Magelang", "left-1/2 top-2 -translate-x-1/2"],
+                                ["east", "TIMUR · Jl. Diponegoro", "right-2 top-1/2 -translate-y-1/2"],
+                                ["south", "SELATAN · Jl. Tentara Pelajar", "bottom-2 left-1/2 -translate-x-1/2"],
+                                ["west", "BARAT · Jl. Kyai Mojo", "left-2 top-1/2 -translate-y-1/2"],
+                            ] as const).map(([approach, label, position]) => {
+                                const isActive = simSharedPhase === approach;
+                                const lampClass = !isActive
+                                    ? "bg-signal-red"
+                                    : simSharedState === "YELLOW"
+                                        ? "bg-signal-amber"
+                                        : "bg-signal-green";
+                                return (
+                                    <div key={approach} className={`absolute ${position} flex items-center gap-1 rounded bg-black/75 px-1.5 py-0.5 text-[9px] font-semibold text-white`}>
+                                        <i className={`h-2.5 w-2.5 shrink-0 rounded-full border border-white/40 ${lampClass}`} />
+                                        {label}
                                     </div>
-                                )}
+                                );
+                            })}
 
-                                {/* Label lengan + lampu per arah (sama seperti dashboard) */}
-                                {status === "running" && ([
-                                    ["north", "UTARA · Jl. Magelang", "left-1/2 top-2 -translate-x-1/2"],
-                                    ["east", "TIMUR · Jl. Diponegoro", "right-2 top-1/2 -translate-y-1/2"],
-                                    ["south", "SELATAN · Jl. Tentara Pelajar", "bottom-2 left-1/2 -translate-x-1/2"],
-                                    ["west", "BARAT · Jl. Kyai Mojo", "left-2 top-1/2 -translate-y-1/2"],
-                                ] as const).map(([approach, label, position]) => {
-                                    const isActive = simSharedPhase === approach;
-                                    const lampClass = !isActive
-                                        ? "bg-signal-red"
-                                        : simSharedState === "YELLOW"
-                                            ? "bg-signal-amber"
-                                            : "bg-signal-green";
-                                    return (
-                                        <div key={approach} className={`absolute ${position} flex items-center gap-1 rounded bg-black/75 px-1.5 py-0.5 text-[9px] font-semibold text-white`}>
-                                            <i className={`h-2.5 w-2.5 shrink-0 rounded-full border border-white/40 ${lampClass}`} />
-                                            {label}
-                                        </div>
-                                    );
-                                })}
+                            {/* Legenda warna lampu */}
+                            {status === "running" && (
+                                <div className="absolute right-3 top-3 flex gap-2 rounded-md border border-white/10 bg-black/55 px-2 py-1 text-[10px] text-white backdrop-blur-sm">
+                                    <span className="flex items-center gap-1"><i className="h-2 w-2 rounded-full bg-signal-red" />Merah</span>
+                                    <span className="flex items-center gap-1"><i className="h-2 w-2 rounded-full bg-signal-amber" />Kuning</span>
+                                    <span className="flex items-center gap-1"><i className="h-2 w-2 rounded-full bg-signal-green" />Hijau</span>
+                                </div>
+                            )}
 
-                                {/* Legenda warna lampu */}
-                                {status === "running" && (
-                                    <div className="absolute right-3 top-3 flex gap-2 rounded-md border border-white/10 bg-black/55 px-2 py-1 text-[10px] text-white backdrop-blur-sm">
-                                        <span className="flex items-center gap-1"><i className="h-2 w-2 rounded-full bg-signal-red" />Merah</span>
-                                        <span className="flex items-center gap-1"><i className="h-2 w-2 rounded-full bg-signal-amber" />Kuning</span>
-                                        <span className="flex items-center gap-1"><i className="h-2 w-2 rounded-full bg-signal-green" />Hijau</span>
-                                    </div>
-                                )}
-
-                                {/* Hitungan kendaraan (sama seperti dashboard). max-w FIXED (bukan
+                            {/* Hitungan kendaraan (sama seperti dashboard). max-w FIXED (bukan
                                 persentase) supaya lebar box gak ikut lebar kartu -- lebar
                                 label lengan SELATAN itu tetap (font-size tetap), jadi cuma
                                 batas lebar tetap yang menjamin box ini tidak pernah menembus
                                 area SELATAN (bottom-center) di kartu sempit maupun lebar. */}
-                                {status === "running" && (
-                                    <div className="absolute bottom-2 left-2 max-w-[130px] rounded-lg border border-white/10 bg-black/50 px-2 py-1 backdrop-blur-sm">
-                                        <p className="font-mono text-[10px] font-medium leading-snug text-white">
-                                            Deteksi: {detectedVehicles} · Terlihat: {visibleVehicleCount} · Total jaringan: {vehicles.length}
-                                            {lastSyncFailedInsertions > 0 && (
-                                                <span className="text-signal-amber"> · Gagal sisip: {lastSyncFailedInsertions}</span>
-                                            )}
-                                        </p>
-                                    </div>
-                                )}
-
-                                {/* Simulation label */}
-
-                                <div className="absolute left-5 top-5 rounded-lg border border-white/10 bg-black/50 px-3 py-2 backdrop-blur-sm">
-
-                                    <p className="text-[10px] uppercase tracking-wider text-white/50">
-                                        Scenario
+                            {status === "running" && (
+                                <div className="absolute bottom-2 left-2 max-w-[130px] rounded-lg border border-white/10 bg-black/50 px-2 py-1 backdrop-blur-sm">
+                                    <p className="font-mono text-[10px] font-medium leading-snug text-white">
+                                        Deteksi: {detectedVehicles} · Terlihat: {visibleVehicleCount} · Total jaringan: {vehicles.length}
+                                        {lastSyncFailedInsertions > 0 && (
+                                            <span className="text-signal-amber"> · Gagal sisip: {lastSyncFailedInsertions}</span>
+                                        )}
                                     </p>
-
-                                    <p className="mt-0.5 text-xs font-medium text-white">
-                                        {scenario}
-                                    </p>
-
-                                </div>
-
-                                {/* Simulation time */}
-
-                                <div className="absolute bottom-5 right-5 rounded-lg border border-white/10 bg-black/50 px-3 py-2 backdrop-blur-sm">
-
-                                    <p className="text-[10px] uppercase tracking-wider text-white/50">
-                                        Simulation Time
-                                    </p>
-
-                                    <p className="mt-0.5 font-mono text-sm font-medium text-white">
-                                        {Math.floor(simulationTime / 60).toString().padStart(2, '0')}:{(Math.floor(simulationTime) % 60).toString().padStart(2, '0')}
-                                    </p>
-
-                                </div>
-
-                            </div>
-
-                        </div>
-
-                        {/* =============================== */}
-                        {/* SIMULATION STATUS */}
-                        {/* =============================== */}
-
-                        <div className="flex h-full flex-col gap-5">
-
-                            {/* Status */}
-
-                            <div className="rounded-2xl border border-border bg-surface p-5 shadow-sm">
-
-                                <div className="mb-5 flex items-center gap-3">
-
-                                    <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-surface-2">
-                                        <Activity
-                                            size={18}
-                                            className="text-text-secondary"
-                                        />
-                                    </div>
-
-                                    <div>
-                                        <h2 className="text-sm font-semibold">
-                                            Simulation Status
-                                        </h2>
-
-                                        <p className="text-xs text-text-muted">
-                                            Real-time simulation metrics
-                                        </p>
-                                    </div>
-
-                                </div>
-
-                                {!isSimStateLoaded ? (
-                                    <div className="py-6 text-center">
-                                        <div className="mx-auto h-5 w-5 animate-spin rounded-full border-2 border-text-muted border-t-transparent"></div>
-                                        <p className="mt-3 text-xs text-text-muted">Memuat status simulasi...</p>
-                                    </div>
-                                ) : status === "idle" ? (
-                                    <div className="py-6 text-center">
-                                        <p className="text-xs font-medium text-text">Stopped / Ready</p>
-                                        <p className="mt-1 text-[10px] text-text-muted">Mulai simulasi untuk melihat metrik.</p>
-                                    </div>
-                                ) : (
-                                    <div className="space-y-4">
-                                        <MetricRow
-                                            label="Current State"
-                                            value={status === "paused" ? "Paused" : "Running"}
-                                            icon={<Activity size={15} />}
-                                        />
-                                        <MetricRow
-                                            label="Simulation Time"
-                                            value={`${Math.floor(simulationTime / 60).toString().padStart(2, '0')}:${(Math.floor(simulationTime) % 60).toString().padStart(2, '0')}`}
-                                            icon={<Clock3 size={15} />}
-                                        />
-                                        <MetricRow
-                                            label="Kendaraan Terlihat"
-                                            value={`${visibleVehicleCount} (${vehicles.length} di jaringan)`}
-                                            icon={<Car size={15} />}
-                                        />
-                                    </div>
-                                )}
-
-                            </div>
-
-                            {/* Current phase */}
-
-                            {signals.length > 0 && (
-                                <div className="rounded-2xl border border-border bg-surface p-5 shadow-sm">
-                                    <div className="mb-4 flex items-center justify-between">
-                                        <div>
-                                            <h2 className="text-sm font-semibold">
-                                                Phase {signals[0].phase}
-                                            </h2>
-                                            <p className="mt-1 text-xs text-text-muted">
-                                                Traffic Light: {signals[0].trafficLightId}
-                                            </p>
-                                        </div>
-                                        <span className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] font-medium ${signals[0].state === 'GREEN' ? 'bg-signal-green/10 text-signal-green' : signals[0].state === 'YELLOW' ? 'bg-signal-amber/10 text-signal-amber' : 'bg-signal-red/10 text-signal-red'}`}>
-                                            <Circle
-                                                size={7}
-                                                fill="currentColor"
-                                            />
-                                            {signals[0].state}
-                                        </span>
-                                    </div>
-                                    <div className="h-2 overflow-hidden rounded-full bg-surface-2">
-                                        <div className={`h-full rounded-full transition-all duration-500 ${signals[0].state === 'GREEN' ? 'bg-signal-green' : signals[0].state === 'YELLOW' ? 'bg-signal-amber' : 'bg-signal-red'}`} style={{ width: `${Math.min(100, Math.max(0, (signals[0].remainingSeconds / 60) * 100))}%` }} />
-                                    </div>
-                                    <div className="mt-2 flex justify-between text-[10px] text-text-muted">
-                                        <span className="font-mono">{Math.floor(signals[0].remainingSeconds)}s</span>
-                                        <span>Remaining</span>
-                                    </div>
                                 </div>
                             )}
 
-                            {/* =============================== */}
-                            {/* SIMULATION CONTROLS */}
-                            {/* =============================== */}
+                            {/* Simulation label */}
 
-                            <div className="flex flex-1 flex-col rounded-2xl border border-border bg-surface p-5 shadow-sm">
+                            <div className="absolute left-5 top-5 rounded-lg border border-white/10 bg-black/50 px-3 py-2 backdrop-blur-sm">
 
-                                <div className="mb-5 flex items-center gap-3">
+                                <p className="text-[10px] uppercase tracking-wider text-white/50">
+                                    Scenario
+                                </p>
 
-                                    <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-surface-2">
-                                        <Settings2
-                                            size={18}
-                                            className="text-text-secondary"
-                                        />
-                                    </div>
+                                <p className="mt-0.5 text-xs font-medium text-white">
+                                    {scenario}
+                                </p>
 
-                                    <div>
-                                        <h2 className="text-sm font-semibold">
-                                            Simulation Controls
-                                        </h2>
-                                    </div>
+                            </div>
 
-                                </div>
+                            {/* Simulation time */}
 
-                                {/* Scenario */}
+                            <div className="absolute bottom-5 right-5 rounded-lg border border-white/10 bg-black/50 px-3 py-2 backdrop-blur-sm">
 
-                                <div>
-                                    <label className="mb-1.5 flex items-center justify-between text-[11px] font-medium text-text-secondary">
-                                        <span>Traffic Scenario</span>
-                                        {scenario !== "Traffic Realtime" && (
-                                            <span className="text-[9px] text-accent-blue">Simulated</span>
-                                        )}
-                                    </label>
+                                <p className="text-[10px] uppercase tracking-wider text-white/50">
+                                    Simulation Time
+                                </p>
 
-                                    <div className="relative">
-
-                                        <select
-                                            value={scenario}
-                                            onChange={async (e) => {
-                                                const newScenario = e.target.value as ScenarioType;
-                                                const oldContext = contextForScenario(scenario);
-                                                const newContext = contextForScenario(newScenario);
-                                                setScenario(newScenario);
-
-                                                if (newScenario === runningScenario) {
-                                                    // Sudah ini yang aktif -- tidak ada yang perlu diterapkan.
-                                                    setRecommendationLoading(false);
-                                                    return;
-                                                }
-
-                                                if (status === "idle") {
-                                                    // Belum ada simulasi jalan -- tombol "Start Simulation"
-                                                    // yang akan memicu, sesuai perilaku lama.
-                                                    setRecommendationLoading(true);
-                                                    return;
-                                                }
-
-                                                // Simulasi lagi jalan/paused dan skenario benar-benar
-                                                // ganti -- terapkan sekarang juga, jangan nyangkut loading
-                                                // selamanya menunggu tombol yang sudah tidak dirender.
-                                                setRecommendationLoading(true);
-
-                                                if (oldContext !== newContext && oldContext === "digitaltwin") {
-                                                    // Sandbox lama ditinggal -- matikan supaya tidak nganggur
-                                                    // nyala sia-sia. TIDAK PERNAH mematikan context "dashboard"
-                                                    // dari sini -- itu bukan milik halaman ini.
-                                                    await fetch(
-                                                        `${API_BASE_URL}/api/v1/simulation/stop?context=digitaltwin`,
-                                                        { method: "POST" }
-                                                    ).catch(() => undefined);
-                                                }
-
-                                                await handleStartSimulation(newScenario);
-                                            }}
-                                            className="w-full appearance-none rounded-lg border border-border bg-surface px-2.5 py-1.5 pr-8 text-xs outline-none transition focus:border-text-muted"
-                                        >
-                                            {Object.keys(SCENARIO_CONFIG).map((key) => (
-                                                <option key={key} value={key}>
-                                                    {key}
-                                                </option>
-                                            ))}
-                                        </select>
-
-                                        <ChevronDown
-                                            size={14}
-                                            className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-text-muted"
-                                        />
-
-                                    </div>
-
-                                    <p className="mt-1.5 text-[10px] text-text-muted">
-                                        {loading
-                                            ? `Menerapkan skenario ${scenario} ke SUMO…`
-                                            : status === "idle"
-                                                ? `Dipilih: ${scenario} · tekan Start Simulation`
-                                                : runningScenario
-                                                    ? `Aktif di SUMO: ${runningScenario}`
-                                                    : "Pilih skenario untuk menjalankan SUMO."}
-                                    </p>
-
-                                </div>
-
-                                {/* Buttons */}
-
-                                <div className="mt-4 flex gap-2">
-
-                                    {scenario === "Traffic Realtime" && status !== "idle" ? (
-                                        // Ini instance SUMO yang SAMA dengan dashboard -- Pause/Stop
-                                        // dari sini akan ikut menghentikan tampilan live di dashboard
-                                        // (bukan bug, memang instance-nya sama). Supaya tidak tidak
-                                        // sengaja mematikan demo live orang lain, kendali pause/stop
-                                        // sengaja tidak ditawarkan di sini untuk skenario ini.
-                                        <div className="rounded-lg border border-border bg-surface-2 px-4 py-1.5 text-[11px] text-text-muted">
-                                            Live dari dashboard -- kendalikan dari halaman Dashboard
-                                        </div>
-                                    ) : status === "running" ? (
-                                        <button
-                                            type="button"
-                                            onClick={handlePause}
-                                            className="flex items-center gap-1.5 rounded-lg bg-accent px-4 py-1.5 text-[11px] font-medium text-bg transition hover:opacity-90"
-                                        >
-                                            <Pause size={13} />
-                                            Pause Simulation
-                                        </button>
-                                    ) : status === "paused" ? (
-                                        <button
-                                            type="button"
-                                            onClick={handleResume}
-                                            className="flex items-center gap-1.5 rounded-lg bg-accent px-4 py-1.5 text-[11px] font-medium text-bg transition hover:opacity-90"
-                                        >
-                                            <Play size={13} />
-                                            Resume Simulation
-                                        </button>
-                                    ) : (
-                                        <button
-                                            type="button"
-                                            onClick={() => handleStartSimulation()}
-                                            disabled={loading}
-                                            className="flex items-center gap-1.5 rounded-lg bg-accent px-4 py-1.5 text-[11px] font-medium text-bg transition hover:opacity-90 disabled:opacity-50"
-                                        >
-                                            <Play size={13} />
-                                            {loading ? "Starting..." : "Start Simulation"}
-                                        </button>
-                                    )}
-
-                                </div>
+                                <p className="mt-0.5 font-mono text-sm font-medium text-white">
+                                    {Math.floor(simulationTime / 60).toString().padStart(2, '0')}:{(Math.floor(simulationTime) % 60).toString().padStart(2, '0')}
+                                </p>
 
                             </div>
 
@@ -936,264 +693,511 @@ export default function DigitalTwinView() {
 
                     </div>
 
-                    {/* ================================================= */}
-                    {/* VEHICLE INFORMATION / METRICS */}
-                    {/* ================================================= */}
+                    {/* =============================== */}
+                    {/* SIMULATION STATUS */}
+                    {/* =============================== */}
 
-                    <div className="mt-5 grid grid-cols-1 gap-4 sm:grid-cols-3">
+                    <div className="space-y-5">
 
-                        {!isSimStateLoaded ? (
-                            <div className="col-span-full rounded-2xl border border-border bg-surface p-8 text-center shadow-sm">
-                                <div className="mx-auto h-6 w-6 animate-spin rounded-full border-2 border-text-muted border-t-transparent"></div>
-                                <p className="mt-3 text-xs text-text-muted">Memuat informasi kendaraan...</p>
+                        {/* Status */}
+
+                        <div className="rounded-2xl border border-border bg-surface p-5 shadow-sm">
+
+                            <div className="mb-5 flex items-center gap-3">
+
+                                <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-surface-2">
+                                    <Activity
+                                        size={18}
+                                        className="text-text-secondary"
+                                    />
+                                </div>
+
+                                <div>
+                                    <h2 className="text-sm font-semibold">
+                                        Simulation Status
+                                    </h2>
+
+                                    <p className="text-xs text-text-muted">
+                                        Real-time simulation metrics
+                                    </p>
+                                </div>
+
                             </div>
-                        ) : (
-                            <>
-                                <StatCard
-                                    label="Kendaraan Terlihat"
-                                    value={status === "idle" ? "0" : visibleVehicleCount.toString()}
-                                    change={status === "idle" ? "" : `${vehicles.length} total di jaringan`}
-                                    warning={
-                                        lastSyncFailedInsertions > 0
-                                            ? `${lastSyncFailedInsertions} gagal disisipkan (ruas padat)`
-                                            : undefined
-                                    }
-                                    icon={<Car size={18} />}
-                                />
 
-                                <StatCard
-                                    label="Queue Length"
-                                    value={
-                                        status === "idle"
-                                            ? "0"
-                                            : queueBusiestApproach
-                                                ? `${APPROACH_SHORT_LABEL[queueBusiestApproach] ?? queueBusiestApproach}: ${queueLengthVeh}`
-                                                : `${queueLengthVeh}`
-                                    }
-                                    change={status === "idle" ? "" : "Lengan terpadat"}
-                                    icon={<List size={18} />}
-                                />
+                            {!isSimStateLoaded ? (
+                                <div className="py-6 text-center">
+                                    <div className="mx-auto h-5 w-5 animate-spin rounded-full border-2 border-text-muted border-t-transparent"></div>
+                                    <p className="mt-3 text-xs text-text-muted">Memuat status simulasi...</p>
+                                </div>
+                            ) : status === "idle" ? (
+                                <div className="py-6 text-center">
+                                    <p className="text-xs font-medium text-text">Stopped / Ready</p>
+                                    <p className="mt-1 text-[10px] text-text-muted">Mulai simulasi untuk melihat metrik.</p>
+                                </div>
+                            ) : (
+                                <div className="space-y-4">
+                                    <MetricRow
+                                        label="Current State"
+                                        value={status === "paused" ? "Paused" : "Running"}
+                                        icon={<Activity size={15} />}
+                                    />
+                                    <MetricRow
+                                        label="Simulation Time"
+                                        value={`${Math.floor(simulationTime / 60).toString().padStart(2, '0')}:${(Math.floor(simulationTime) % 60).toString().padStart(2, '0')}`}
+                                        icon={<Clock3 size={15} />}
+                                    />
+                                    <MetricRow
+                                        label="Kendaraan Terlihat"
+                                        value={`${visibleVehicleCount} (${vehicles.length} di jaringan)`}
+                                        icon={<Car size={15} />}
+                                    />
+                                </div>
+                            )}
 
-                                <StatCard
-                                    label="Traffic Flow"
-                                    value={status === "idle" ? "0" : `${throughputVehPerMin}/menit`}
-                                    change={status === "idle" ? "" : "Live snapshot"}
-                                    icon={<Zap size={18} />}
-                                />
-                            </>
+                        </div>
+
+                        {/* Current phase */}
+
+                        {signals.length > 0 && (
+                            <div className="rounded-2xl border border-border bg-surface p-5 shadow-sm">
+                                <div className="mb-4 flex items-center justify-between">
+                                    <div>
+                                        <h2 className="text-sm font-semibold">
+                                            Phase {signals[0].phase}
+                                        </h2>
+                                        <p className="mt-1 text-xs text-text-muted">
+                                            Traffic Light: {signals[0].trafficLightId}
+                                        </p>
+                                    </div>
+                                    <span className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] font-medium ${signals[0].state === 'GREEN' ? 'bg-signal-green/10 text-signal-green' : signals[0].state === 'YELLOW' ? 'bg-signal-amber/10 text-signal-amber' : 'bg-signal-red/10 text-signal-red'}`}>
+                                        <Circle
+                                            size={7}
+                                            fill="currentColor"
+                                        />
+                                        {signals[0].state}
+                                    </span>
+                                </div>
+                                <div className="h-2 overflow-hidden rounded-full bg-surface-2">
+                                    <div className={`h-full rounded-full transition-all duration-500 ${signals[0].state === 'GREEN' ? 'bg-signal-green' : signals[0].state === 'YELLOW' ? 'bg-signal-amber' : 'bg-signal-red'}`} style={{width: `${Math.min(100, Math.max(0, (signals[0].remainingSeconds / 60) * 100))}%`}} />
+                                </div>
+                                <div className="mt-2 flex justify-between text-[10px] text-text-muted">
+                                    <span className="font-mono">{Math.floor(signals[0].remainingSeconds)}s</span>
+                                    <span>Remaining</span>
+                                </div>
+                            </div>
                         )}
+
+                        {/* =============================== */}
+                        {/* SIMULATION CONTROLS */}
+                        {/* =============================== */}
+
+                        <div className="rounded-2xl border border-border bg-surface p-5 shadow-sm">
+
+                            <div className="mb-5 flex items-center gap-3">
+
+                                <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-surface-2">
+                                    <Settings2
+                                        size={18}
+                                        className="text-text-secondary"
+                                    />
+                                </div>
+
+                                <div>
+                                    <h2 className="text-sm font-semibold">
+                                        Simulation Controls
+                                    </h2>
+                                </div>
+
+                            </div>
+
+                            {/* Scenario */}
+
+                            <div>
+                                <label className="mb-1.5 flex items-center justify-between text-[11px] font-medium text-text-secondary">
+                                    <span>Traffic Scenario</span>
+                                    {scenario !== "Traffic Realtime" && (
+                                        <span className="text-[9px] text-accent-blue">Simulated</span>
+                                    )}
+                                </label>
+
+                                <div className="relative">
+
+                                    <select
+                                        value={scenario}
+                                        onChange={async (e) => {
+                                            const newScenario = e.target.value as ScenarioType;
+                                            const oldContext = contextForScenario(scenario);
+                                            const newContext = contextForScenario(newScenario);
+                                            setScenario(newScenario);
+
+                                            if (newScenario === runningScenario) {
+                                                // Sudah ini yang aktif -- tidak ada yang perlu diterapkan.
+                                                setRecommendationLoading(false);
+                                                return;
+                                            }
+
+                                            if (status === "idle") {
+                                                // Belum ada simulasi jalan -- tombol "Start Simulation"
+                                                // yang akan memicu, sesuai perilaku lama.
+                                                setRecommendationLoading(true);
+                                                return;
+                                            }
+
+                                            // Simulasi lagi jalan/paused dan skenario benar-benar
+                                            // ganti -- terapkan sekarang juga, jangan nyangkut loading
+                                            // selamanya menunggu tombol yang sudah tidak dirender.
+                                            setRecommendationLoading(true);
+
+                                            if (oldContext !== newContext && oldContext === "digitaltwin") {
+                                                // Sandbox lama ditinggal -- matikan supaya tidak nganggur
+                                                // nyala sia-sia. TIDAK PERNAH mematikan context "dashboard"
+                                                // dari sini -- itu bukan milik halaman ini.
+                                                await fetch(
+                                                    `${API_BASE_URL}/api/v1/simulation/stop?context=digitaltwin`,
+                                                    { method: "POST" }
+                                                ).catch(() => undefined);
+                                            }
+
+                                            await handleStartSimulation(newScenario);
+                                        }}
+                                        className="w-full appearance-none rounded-lg border border-border bg-surface px-2.5 py-1.5 pr-8 text-xs outline-none transition focus:border-text-muted"
+                                    >
+                                        {Object.keys(SCENARIO_CONFIG).map((key) => (
+                                            <option key={key} value={key}>
+                                                {key}
+                                            </option>
+                                        ))}
+                                    </select>
+
+                                    <ChevronDown
+                                        size={14}
+                                        className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-text-muted"
+                                    />
+
+                                </div>
+
+                                <p className="mt-1.5 text-[10px] text-text-muted">
+                                    {loading
+                                        ? `Menerapkan skenario ${scenario} ke SUMO…`
+                                        : status === "idle"
+                                          ? `Dipilih: ${scenario} · tekan Start Simulation`
+                                        : runningScenario
+                                          ? `Aktif di SUMO: ${runningScenario}`
+                                          : "Pilih skenario untuk menjalankan SUMO."}
+                                </p>
+
+                            </div>
+
+                            {/* Buttons */}
+
+                            <div className="mt-4 flex gap-2">
+
+                                {scenario === "Traffic Realtime" && status !== "idle" ? (
+                                    // Ini instance SUMO yang SAMA dengan dashboard -- Pause/Stop
+                                    // dari sini akan ikut menghentikan tampilan live di dashboard
+                                    // (bukan bug, memang instance-nya sama). Supaya tidak tidak
+                                    // sengaja mematikan demo live orang lain, kendali pause/stop
+                                    // sengaja tidak ditawarkan di sini untuk skenario ini.
+                                    <div className="rounded-lg border border-border bg-surface-2 px-4 py-1.5 text-[11px] text-text-muted">
+                                        Live dari dashboard -- kendalikan dari halaman Dashboard
+                                    </div>
+                                ) : status === "running" ? (
+                                    <button
+                                        type="button"
+                                        onClick={handlePause}
+                                        className="flex items-center gap-1.5 rounded-lg bg-accent px-4 py-1.5 text-[11px] font-medium text-bg transition hover:opacity-90"
+                                    >
+                                        <Pause size={13} />
+                                        Pause Simulation
+                                    </button>
+                                ) : status === "paused" ? (
+                                    <button
+                                        type="button"
+                                        onClick={handleResume}
+                                        className="flex items-center gap-1.5 rounded-lg bg-accent px-4 py-1.5 text-[11px] font-medium text-bg transition hover:opacity-90"
+                                    >
+                                        <Play size={13} />
+                                        Resume Simulation
+                                    </button>
+                                ) : (
+                                    <button
+                                        type="button"
+                                        onClick={() => handleStartSimulation()}
+                                        disabled={loading}
+                                        className="flex items-center gap-1.5 rounded-lg bg-accent px-4 py-1.5 text-[11px] font-medium text-bg transition hover:opacity-90 disabled:opacity-50"
+                                    >
+                                        <Play size={13} />
+                                        {loading ? "Starting..." : "Start Simulation"}
+                                    </button>
+                                )}
+
+                            </div>
+
+                        </div>
 
                     </div>
 
-                    {/* ================================================= */}
-                    {/* BOTTOM SECTION */}
-                    {/* ================================================= */}
+                </div>
 
-                    <div className="mt-5">
+                {/* ================================================= */}
+                {/* VEHICLE INFORMATION / METRICS */}
+                {/* ================================================= */}
 
-                        {/* =============================== */}
-                        {/* HASIL SIMULASI */}
-                        {/* =============================== */}
-                        {/* Dihitung LANGSUNG dari SUMO yang sedang jalan di
+                <div className="mt-5 grid grid-cols-1 gap-4 sm:grid-cols-3">
+
+                    {!isSimStateLoaded ? (
+                        <div className="col-span-full rounded-2xl border border-border bg-surface p-8 text-center shadow-sm">
+                            <div className="mx-auto h-6 w-6 animate-spin rounded-full border-2 border-text-muted border-t-transparent"></div>
+                            <p className="mt-3 text-xs text-text-muted">Memuat informasi kendaraan...</p>
+                        </div>
+                    ) : (
+                        <>
+                            <StatCard
+                                label="Kendaraan Terlihat"
+                                value={status === "idle" ? "0" : visibleVehicleCount.toString()}
+                                change={status === "idle" ? "" : `${vehicles.length} total di jaringan`}
+                                warning={
+                                    lastSyncFailedInsertions > 0
+                                        ? `${lastSyncFailedInsertions} gagal disisipkan (ruas padat)`
+                                        : undefined
+                                }
+                                icon={<Car size={18} />}
+                            />
+
+                            <StatCard
+                                label="Queue Length"
+                                value={
+                                    status === "idle"
+                                        ? "0"
+                                        : queueBusiestApproach
+                                          ? `${APPROACH_SHORT_LABEL[queueBusiestApproach] ?? queueBusiestApproach}: ${queueLengthVeh}`
+                                          : `${queueLengthVeh}`
+                                }
+                                change={status === "idle" ? "" : "Lengan terpadat"}
+                                icon={<List size={18} />}
+                            />
+
+                            <StatCard
+                                label="Traffic Flow"
+                                value={status === "idle" ? "0" : `${throughputVehPerMin}/menit`}
+                                change={status === "idle" ? "" : "Live snapshot"}
+                                icon={<Zap size={18} />}
+                            />
+                        </>
+                    )}
+
+                </div>
+
+                {/* ================================================= */}
+                {/* BOTTOM SECTION */}
+                {/* ================================================= */}
+
+                <div className="mt-5">
+
+                    {/* =============================== */}
+                    {/* HASIL SIMULASI */}
+                    {/* =============================== */}
+                    {/* Dihitung LANGSUNG dari SUMO yang sedang jalan di
                         halaman ini (get_metrics()/get_simulation_state()),
                         BUKAN dari liveScenarioCache produksi -- supaya beda
                         skenario (Baseline/Aggressive/Balanced/Traffic
                         Realtime) benar-benar menghasilkan angka berbeda. */}
 
-                        <div className="rounded-2xl border border-border bg-surface p-5 shadow-sm">
+                    <div className="rounded-2xl border border-border bg-surface p-5 shadow-sm">
 
-                            <div className="mb-5 flex items-center justify-between">
+                        <div className="mb-5 flex items-center justify-between">
 
-                                <div className="flex items-center gap-3">
+                            <div className="flex items-center gap-3">
 
-                                    <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-surface-2">
-                                        <Activity
-                                            size={18}
-                                            className="text-text-secondary"
-                                        />
-                                    </div>
-
-                                    <div>
-                                        <h2 className="text-sm font-semibold">
-                                            Hasil Simulasi
-                                        </h2>
-                                        <p className="text-xs text-text-muted">
-                                            {isSimulating
-                                                ? `Skenario aktif: ${runningScenario ?? scenario}`
-                                                : "Belum ada simulasi jalan"}
-                                        </p>
-                                    </div>
-
+                                <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-surface-2">
+                                    <Activity
+                                        size={18}
+                                        className="text-text-secondary"
+                                    />
                                 </div>
 
-                                {isSimulating && los && (
-                                    <span
-                                        className={`rounded-full px-3 py-1 text-xs font-semibold ${los === "A" || los === "B"
-                                                ? "bg-signal-green/10 text-signal-green"
-                                                : los === "C" || los === "D"
-                                                    ? "bg-signal-amber/10 text-signal-amber"
-                                                    : "bg-signal-red/10 text-signal-red"
-                                            }`}
-                                    >
-                                        LOS {los}
-                                    </span>
-                                )}
+                                <div>
+                                    <h2 className="text-sm font-semibold">
+                                        Hasil Simulasi
+                                    </h2>
+                                    <p className="text-xs text-text-muted">
+                                        {isSimulating
+                                            ? `Skenario aktif: ${runningScenario ?? scenario}`
+                                            : "Belum ada simulasi jalan"}
+                                    </p>
+                                </div>
 
                             </div>
 
-                            {!isSimulating ? (
-                                <div className="py-8 text-center">
-                                    <p className="text-xs text-text-muted">
-                                        Mulai simulasi untuk melihat delay, antrean, dan LOS simpang.
-                                    </p>
-                                </div>
-                            ) : (
-                                <div className="grid grid-cols-2 gap-x-6 gap-y-4 sm:grid-cols-4">
-                                    <MetricRow
-                                        label="Avg Delay"
-                                        value={`${avgDelaySeconds}s`}
-                                        icon={<Clock3 size={15} />}
-                                    />
-                                    <MetricRow
-                                        label="Avg Queue"
-                                        value={`${avgQueueLengthM}m (${avgQueueLengthVeh} kend.)`}
-                                        icon={<List size={15} />}
-                                    />
-                                    <MetricRow
-                                        label="Throughput"
-                                        value={`${throughputVehPerMin}/menit`}
-                                        icon={<Zap size={15} />}
-                                    />
-                                    <MetricRow
-                                        label="Fase Aktif"
-                                        value={
-                                            mappedPhase
-                                                ? `${APPROACH_SHORT_LABEL[mappedPhase] ?? mappedPhase} · ${mappedState} · ${Math.floor(mappedRemaining)}s`
-                                                : "-"
-                                        }
-                                        icon={<Circle size={15} />}
-                                    />
-                                </div>
+                            {isSimulating && los && (
+                                <span
+                                    className={`rounded-full px-3 py-1 text-xs font-semibold ${
+                                        los === "A" || los === "B"
+                                            ? "bg-signal-green/10 text-signal-green"
+                                            : los === "C" || los === "D"
+                                              ? "bg-signal-amber/10 text-signal-amber"
+                                              : "bg-signal-red/10 text-signal-red"
+                                    }`}
+                                >
+                                    LOS {los}
+                                </span>
                             )}
 
                         </div>
 
-                        {/* =============================== */}
-                        {/* DURASI SINYAL PER LENGAN */}
-                        {/* =============================== */}
-                        {/* Ini satu-satunya hal yang benar-benar beda antar
+                        {!isSimulating ? (
+                            <div className="py-8 text-center">
+                                <p className="text-xs text-text-muted">
+                                    Mulai simulasi untuk melihat delay, antrean, dan LOS simpang.
+                                </p>
+                            </div>
+                        ) : (
+                            <div className="grid grid-cols-2 gap-x-6 gap-y-4 sm:grid-cols-4">
+                                <MetricRow
+                                    label="Avg Delay"
+                                    value={`${avgDelaySeconds}s`}
+                                    icon={<Clock3 size={15} />}
+                                />
+                                <MetricRow
+                                    label="Avg Queue"
+                                    value={`${avgQueueLengthM}m (${avgQueueLengthVeh} kend.)`}
+                                    icon={<List size={15} />}
+                                />
+                                <MetricRow
+                                    label="Throughput"
+                                    value={`${throughputVehPerMin}/menit`}
+                                    icon={<Zap size={15} />}
+                                />
+                                <MetricRow
+                                    label="Fase Aktif"
+                                    value={
+                                        mappedPhase
+                                            ? `${APPROACH_SHORT_LABEL[mappedPhase] ?? mappedPhase} · ${mappedState} · ${Math.floor(mappedRemaining)}s`
+                                            : "-"
+                                    }
+                                    icon={<Circle size={15} />}
+                                />
+                            </div>
+                        )}
+
+                    </div>
+
+                    {/* =============================== */}
+                    {/* DURASI SINYAL PER LENGAN */}
+                    {/* =============================== */}
+                    {/* Ini satu-satunya hal yang benar-benar beda antar
                         skenario (Baseline/Aggressive/Balanced cuma beda di
                         detik hijau per lengan, demand-nya sama) -- ditulis
                         eksplisit sebagai angka supaya beda skenario kerasa,
                         tidak cuma tersirat dari video yang jalan. */}
 
-                        {isSimulating && cyclePlan && cyclePlan.phases.length > 0 && (
-                            <div className="mt-5 rounded-2xl border border-border bg-surface p-5 shadow-sm">
+                    {isSimulating && cyclePlan && cyclePlan.phases.length > 0 && (
+                        <div className="mt-5 rounded-2xl border border-border bg-surface p-5 shadow-sm">
 
-                                <div className="mb-4 flex items-center justify-between">
-                                    <div className="flex items-center gap-3">
-                                        <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-surface-2">
-                                            <TrafficCone size={18} className="text-text-secondary" />
-                                        </div>
-                                        <div>
-                                            <h2 className="text-sm font-semibold">Durasi Sinyal Per Lengan</h2>
-                                            <p className="text-xs text-text-muted">
-                                                {cyclePlan.candidateId ? `Skenario: ${cyclePlan.candidateId}` : "Program TLS aktif"}
-                                            </p>
+                            <div className="mb-4 flex items-center justify-between">
+                                <div className="flex items-center gap-3">
+                                    <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-surface-2">
+                                        <TrafficCone size={18} className="text-text-secondary" />
+                                    </div>
+                                    <div>
+                                        <h2 className="text-sm font-semibold">Durasi Sinyal Per Lengan</h2>
+                                        <p className="text-xs text-text-muted">
+                                            {cyclePlan.candidateId ? `Skenario: ${cyclePlan.candidateId}` : "Program TLS aktif"}
+                                        </p>
+                                    </div>
+                                </div>
+                                {cyclePlan.totalCycleSeconds !== undefined && (
+                                    <span className="text-xs text-text-muted">
+                                        Total siklus: <span className="font-mono text-text">{cyclePlan.totalCycleSeconds}s</span>
+                                    </span>
+                                )}
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                                {cyclePlan.phases.map((phase) => (
+                                    <div
+                                        key={phase.approach}
+                                        className="rounded-lg border border-border bg-surface-2 p-3"
+                                    >
+                                        <p className="mb-2 text-xs font-medium text-text">
+                                            {APPROACH_SHORT_LABEL[phase.approach] ?? phase.approach}
+                                        </p>
+                                        <div className="space-y-1 text-[11px]">
+                                            <div className="flex items-center justify-between">
+                                                <span className="flex items-center gap-1.5 text-text-muted">
+                                                    <Circle size={7} fill="currentColor" className="text-signal-green" />
+                                                    Hijau
+                                                </span>
+                                                <span className="font-mono text-text">{phase.greenSeconds}s</span>
+                                            </div>
+                                            <div className="flex items-center justify-between">
+                                                <span className="flex items-center gap-1.5 text-text-muted">
+                                                    <Circle size={7} fill="currentColor" className="text-signal-amber" />
+                                                    Kuning
+                                                </span>
+                                                <span className="font-mono text-text">{phase.yellowSeconds}s</span>
+                                            </div>
+                                            {phase.redSeconds !== undefined && (
+                                                <div className="flex items-center justify-between">
+                                                    <span className="flex items-center gap-1.5 text-text-muted">
+                                                        <Circle size={7} fill="currentColor" className="text-signal-red" />
+                                                        Merah
+                                                    </span>
+                                                    <span className="font-mono text-text">{phase.redSeconds}s</span>
+                                                </div>
+                                            )}
                                         </div>
                                     </div>
-                                    {cyclePlan.totalCycleSeconds !== undefined && (
-                                        <span className="text-xs text-text-muted">
-                                            Total siklus: <span className="font-mono text-text">{cyclePlan.totalCycleSeconds}s</span>
-                                        </span>
-                                    )}
-                                </div>
-
-                                <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-                                    {cyclePlan.phases.map((phase) => (
-                                        <div
-                                            key={phase.approach}
-                                            className="rounded-lg border border-border bg-surface-2 p-3"
-                                        >
-                                            <p className="mb-2 text-xs font-medium text-text">
-                                                {APPROACH_SHORT_LABEL[phase.approach] ?? phase.approach}
-                                            </p>
-                                            <div className="space-y-1 text-[11px]">
-                                                <div className="flex items-center justify-between">
-                                                    <span className="flex items-center gap-1.5 text-text-muted">
-                                                        <Circle size={7} fill="currentColor" className="text-signal-green" />
-                                                        Hijau
-                                                    </span>
-                                                    <span className="font-mono text-text">{phase.greenSeconds}s</span>
-                                                </div>
-                                                <div className="flex items-center justify-between">
-                                                    <span className="flex items-center gap-1.5 text-text-muted">
-                                                        <Circle size={7} fill="currentColor" className="text-signal-amber" />
-                                                        Kuning
-                                                    </span>
-                                                    <span className="font-mono text-text">{phase.yellowSeconds}s</span>
-                                                </div>
-                                                {phase.redSeconds !== undefined && (
-                                                    <div className="flex items-center justify-between">
-                                                        <span className="flex items-center gap-1.5 text-text-muted">
-                                                            <Circle size={7} fill="currentColor" className="text-signal-red" />
-                                                            Merah
-                                                        </span>
-                                                        <span className="font-mono text-text">{phase.redSeconds}s</span>
-                                                    </div>
-                                                )}
-                                            </div>
-                                        </div>
-                                    ))}
-                                </div>
-
+                                ))}
                             </div>
-                        )}
 
-                        {/* =============================== */}
-                        {/* TREN SIMULASI */}
-                        {/* =============================== */}
+                        </div>
+                    )}
 
-                        {isSimulating && (
-                            <div className="mt-5 rounded-2xl border border-border bg-surface p-5 shadow-sm">
+                    {/* =============================== */}
+                    {/* TREN SIMULASI */}
+                    {/* =============================== */}
 
-                                <div className="mb-4">
-                                    <h2 className="text-sm font-semibold">Tren Simulasi</h2>
-                                    <p className="text-xs text-text-muted">
-                                        {simHistory.length < 2
-                                            ? "Mengumpulkan data…"
-                                            : `${simHistory.length} titik sejak skenario ini diterapkan`}
-                                    </p>
-                                </div>
+                    {isSimulating && (
+                        <div className="mt-5 rounded-2xl border border-border bg-surface p-5 shadow-sm">
 
-                                <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-                                    <MiniTrendChart
-                                        title="Avg Delay"
-                                        unit="s"
-                                        data={simHistory}
-                                        dataKey="delay"
-                                        color="#3987e5"
-                                    />
-                                    <MiniTrendChart
-                                        title="Avg Queue"
-                                        unit="m"
-                                        data={simHistory}
-                                        dataKey="queue"
-                                        color="#d95926"
-                                    />
-                                    <MiniTrendChart
-                                        title="Throughput"
-                                        unit="/menit"
-                                        data={simHistory}
-                                        dataKey="throughput"
-                                        color="#199e70"
-                                    />
-                                </div>
-
+                            <div className="mb-4">
+                                <h2 className="text-sm font-semibold">Tren Simulasi</h2>
+                                <p className="text-xs text-text-muted">
+                                    {simHistory.length < 2
+                                        ? "Mengumpulkan data…"
+                                        : `${simHistory.length} titik sejak skenario ini diterapkan`}
+                                </p>
                             </div>
-                        )}
 
-                    </div>
+                            <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+                                <MiniTrendChart
+                                    title="Avg Delay"
+                                    unit="s"
+                                    data={simHistory}
+                                    dataKey="delay"
+                                    color="#3987e5"
+                                />
+                                <MiniTrendChart
+                                    title="Avg Queue"
+                                    unit="m"
+                                    data={simHistory}
+                                    dataKey="queue"
+                                    color="#d95926"
+                                />
+                                <MiniTrendChart
+                                    title="Throughput"
+                                    unit="/menit"
+                                    data={simHistory}
+                                    dataKey="throughput"
+                                    color="#199e70"
+                                />
+                            </div>
+
+                        </div>
+                    )}
+
+                </div>
 
                 </div>
             </main>

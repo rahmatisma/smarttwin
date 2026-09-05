@@ -1,12 +1,13 @@
 "use client";
 
-import { useRouter } from "next/navigation";
-import { Bell, MapPin } from "lucide-react";
+import { useRouter, usePathname } from "next/navigation";
+import { Bell, MapPin, Sun, Moon } from "lucide-react";
 import { useNotifications } from "@/hooks/useNotifications";
 import {
   APPROACH_OPTIONS,
   type ApproachSelection,
 } from "@/lib/intersections";
+import { useTheme } from "@/context/ThemeContext";
 
 export default function Header({
   locationName,
@@ -23,16 +24,19 @@ export default function Header({
 }) {
   const router = useRouter();
   const { unreadCount } = useNotifications();
+  const pathname = usePathname();
+  const pageTitle = pathname === "/" || pathname.startsWith("/dashboard") ? "Dashboard" : pathname.startsWith("/digitaltwin") ? "Digital Twin" : pathname.startsWith("/cctv") ? "Pemantauan CCTV" : pathname.startsWith("/history") ? "Riwayat Keputusan" : "SmartTwin";
+  const { theme, toggleTheme } = useTheme();
 
   // Local clock removed in favor of CV data Last Updated timestamp
 
   return (
-    <header className="flex items-center justify-between gap-6 border-b border-border px-6 py-4">
-      <div className="flex items-center gap-1.5 text-sm">
+    <header className="app-header flex items-center justify-between gap-6 border-b border-border px-6 py-4">
+      <div className="min-w-0"><h2 className="text-xl font-semibold tracking-tight text-text">{pageTitle}</h2><div className="header-location flex items-center gap-1.5 text-xs">
         <MapPin className="h-4 w-4 text-text-secondary" />
         <span className="font-medium text-text">{locationName}</span>
         <span className="text-text-muted">· {coords}</span>
-      </div>
+      </div></div>
 
       <div className="hidden max-w-md flex-1 md:flex">
         {selectedApproach && onApproachChange ? (
@@ -59,9 +63,9 @@ export default function Header({
         )}
       </div>
 
-      <div className="flex items-center gap-4">
+      <div className="flex shrink-0 items-center gap-3">
         {lastUpdated !== undefined ? (
-          <span className="font-mono text-sm tabular-nums text-text-secondary">
+          <span className="header-timestamp text-xs tabular-nums text-text-secondary">
             {typeof lastUpdated === "number" ? (
               `Last Updated: ${Math.floor(lastUpdated / 60).toString().padStart(2, "0")}:${(lastUpdated % 60).toFixed(2).padStart(5, "0")}`
             ) : (
@@ -77,6 +81,15 @@ export default function Header({
             Data belum tersedia
           </span>
         )}
+        <button
+          type="button"
+          onClick={toggleTheme}
+          className="flex h-8 w-8 items-center justify-center rounded-md border border-border text-text-secondary hover:text-text"
+          aria-label={theme === "dark" ? "Aktifkan tema terang" : "Aktifkan tema gelap"}
+          title={theme === "dark" ? "Tema terang" : "Tema gelap"}
+        >
+          {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+        </button>
         <button
           type="button"
           onClick={() => router.push("/settings?section=notifications")}
