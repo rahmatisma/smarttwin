@@ -360,7 +360,7 @@ export default function DigitalTwinView() {
                     intersectionId: "simpang4-pingit",
                     durationSeconds: 60,
                     gui: true,
-                    guiDelayMs: 100,
+                    guiDelayMs: context === "dashboard" ? 0 : 100,
                     seed: 42,
                     scenario: effectiveScenario
                 }),

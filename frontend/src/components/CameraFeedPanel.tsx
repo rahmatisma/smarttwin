@@ -229,12 +229,6 @@ export default function CameraFeedPanel({
     backendInstanceId: null,
   });
   const timelineRestoredRef = useRef(false);
-  const backendFailureCountRef = useRef(0);
-  // Status "running" backend pada poll sebelumnya. Reset timeline hanya
-  // dilakukan saat TRANSISI (sesi simulasi berakhir / backend restart),
-  // bukan tiap poll -- kalau tidak, video ke-seek balik ke 0 tiap 2 detik
-  // selama tidak ada simulasi dan kelihatan mengulang terus.
-  const sessionWasRunningRef = useRef(false);
 
   const isInspectionMode = selectedApproach !== "all";
 
@@ -305,24 +299,25 @@ export default function CameraFeedPanel({
     async function restoreTimeline() {
       const persisted = readPersistedTimeline();
       try {
-        const response = await fetch(`${API_BASE_URL}/api/v1/simulation/state`, {
+        const response = await fetch(`${API_BASE_URL}/api/v1/simulation/state?context=dashboard`, {
           cache: "no-store",
         });
         if (!response.ok) throw new Error("Backend tidak tersedia");
         const state = await response.json();
+        if (cancelled) return;
         const instanceId =
           typeof state.backendInstanceId === "string" ? state.backendInstanceId : null;
         const sameBackend =
           instanceId !== null && persisted.backendInstanceId === instanceId;
-        timelineRef.current = state.running && sameBackend
-          ? persisted
-          : emptyTimeline(instanceId);
-        sessionWasRunningRef.current = Boolean(state.running);
+        timelineRef.current = sameBackend ? persisted : emptyTimeline(instanceId);
+        if (state.running && Number.isFinite(state.simulationTimeSeconds)) {
+          anchorTimeline(timelineRef.current, state.simulationTimeSeconds);
+          timelineRef.current.paused = Boolean(state.paused);
+        }
       } catch {
-        // Backend yang mati menutup sesi kamera. Jangan menghitung waktu
-        // laptop sleep/offline sebagai waktu pemutaran video.
-        timelineRef.current = emptyTimeline();
-        sessionWasRunningRef.current = false;
+        // Pertahankan posisi sampai backend mengonfirmasi instance baru.
+        if (cancelled) return;
+        timelineRef.current = persisted;
       }
 
       if (cancelled) return;
@@ -354,28 +349,22 @@ export default function CameraFeedPanel({
     async function checkBackendSession() {
       if (!timelineRestoredRef.current) return;
       try {
-        const response = await fetch(`${API_BASE_URL}/api/v1/simulation/state`, {
+        const response = await fetch(`${API_BASE_URL}/api/v1/simulation/state?context=dashboard`, {
           cache: "no-store",
         });
         if (!response.ok) throw new Error("Backend tidak tersedia");
         const state = await response.json();
         if (cancelled) return;
 
-        backendFailureCountRef.current = 0;
         const instanceId =
           typeof state.backendInstanceId === "string" ? state.backendInstanceId : null;
-        const running = Boolean(state.running);
         const backendChanged =
           instanceId !== null &&
           timelineRef.current.backendInstanceId !== null &&
           timelineRef.current.backendInstanceId !== instanceId;
 
-        // Sesi simulasi baru saja berakhir (running -> berhenti). Video
-        // dibiarkan beku di posisi terakhir saat idle; jangan seret balik
-        // ke 0 tiap poll.
-        const sessionEnded = sessionWasRunningRef.current && !running;
-
-        if (sessionEnded || backendChanged) {
+        // Navigasi/idle bukan sesi baru. Reset hanya ketika backend restart.
+        if (backendChanged) {
           resetTimeline(instanceId);
         } else if (timelineRef.current.backendInstanceId === null && instanceId !== null) {
           timelineRef.current.backendInstanceId = instanceId;
@@ -387,18 +376,9 @@ export default function CameraFeedPanel({
           );
         }
 
-        sessionWasRunningRef.current = running;
       } catch {
         if (cancelled) return;
-        backendFailureCountRef.current += 1;
-        // Dua kegagalan berturut-turut mencegah satu hiccup jaringan singkat
-        // menghapus posisi, tetapi backend yang benar-benar mati tetap
-        // terdeteksi -- reset SEKALI di kegagalan kedua, lalu anggap sesi
-        // berakhir supaya poll berikutnya tidak reset berulang.
-        if (backendFailureCountRef.current === 2) {
-          resetTimeline(null);
-          sessionWasRunningRef.current = false;
-        }
+        // Gangguan jaringan bukan bukti backend restart. Tunggu instance ID baru.
       }
     }
 
@@ -437,7 +417,7 @@ export default function CameraFeedPanel({
     const tick = () => {
       if (!timelineRestoredRef.current) return;
       const master = cameras[0] ? videoRefs.current.get(cameras[0].id) : undefined;
-      if (!master || !Number.isFinite(master.currentTime)) return;
+      if (!master || master.readyState < 2 || master.seeking || !Number.isFinite(master.currentTime)) return;
 
       // Durasi acuan = durasi video master itu sendiri, bukan Math.min()
       // lintas kamera -- lihat catatan di syncVideos().
@@ -644,7 +624,7 @@ export default function CameraFeedPanel({
                     }}
                     onDurationChange={(event) => {
                       const duration = event.currentTarget.duration;
-                      if (Number.isFinite(duration) && duration > 0) {
+                      if (timelineRestoredRef.current && Number.isFinite(duration) && duration > 0) {
                         if (isInspectionMode) initializeInspectionVideo(event.currentTarget);
                         else syncVideos();
                       }
@@ -654,6 +634,8 @@ export default function CameraFeedPanel({
                         timelineRestoredRef.current &&
                         !isInspectionMode &&
                         !synchronizingVideos.current &&
+                        !e.currentTarget.seeking &&
+                        e.currentTarget.readyState >= 2 &&
                         camera.id === cameras[0]?.id
                       ) {
                         syncVideos(e.currentTarget);

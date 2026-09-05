@@ -3,6 +3,9 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from dotenv import load_dotenv
+from app.core.shutdown_logging import install_shutdown_logging
+
+install_shutdown_logging()
 
 # Harus dilakukan sebelum import routes/services karena singleton decision
 # engine dibuat ketika modul service di-import.

@@ -69,6 +69,7 @@ Dokumen "apa yang berubah di satu sesi kerja", supaya tidak perlu membaca diff m
 **Simulasi / SUMO:**
 - [`rencana-scenario-generator.md`](rencana-scenario-generator.md) — arsitektur kotak 7-9, batasan yang sengaja ada. **Dokumen desain, bukan status**
 - [`../simulation/README.md`](../simulation/README.md) — cara jalanin skrip simulasi
+- [`data-lebar-ruas-simpang-pingit.md`](data-lebar-ruas-simpang-pingit.md) — lebar efektif (We) 4 lengan dari studi lapangan Simpang Pingit, dan cara dipakai kalibrasi lebar edge MASUK di network SUMO
 
 **Decision Engine / PPO:**
 - [`../decision_engine/README-PPO.md`](../decision_engine/README-PPO.md) — penjelasan konseptual: beda LSTM vs PPO vs Rule-Based vs Scenario Generator. Baca ini dulu kalau belum pernah menyentuh reinforcement learning

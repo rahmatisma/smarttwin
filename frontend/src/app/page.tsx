@@ -323,6 +323,7 @@ export default function DashboardPage() {
   const videoTimeRef = useRef<number>(0);
   const lastClockSyncSecondRef = useRef<number>(-1);
   const lastClockPostAtRef = useRef<number>(0);
+  const clockSyncInFlightRef = useRef(false);
   const requestIdRef = useRef<number>(0);
 
   /*
@@ -342,20 +343,26 @@ export default function DashboardPage() {
       // berganti tapi backend tetap butuh /sync-clock segar supaya fase lampu
       // SUMO tidak lepas dan lari sendiri (lihat CAMERA_CLOCK_STALE_SECONDS).
       if (
-        wholeSecond !== lastClockSyncSecondRef.current ||
-        now - lastClockPostAtRef.current > 1200
+        !clockSyncInFlightRef.current && (
+          wholeSecond !== lastClockSyncSecondRef.current ||
+          now - lastClockPostAtRef.current > 1200
+        )
       ) {
         lastClockSyncSecondRef.current = wholeSecond;
         lastClockPostAtRef.current = now;
+        clockSyncInFlightRef.current = true;
         void fetch(`${API_BASE_URL}/api/v1/simulation/sync-clock`, {
           method: "POST",
+          signal: AbortSignal.timeout(4000),
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             context: "dashboard",
             videoTimeSeconds: time,
             videoDurationSeconds: duration,
           }),
-        }).catch(() => undefined);
+        }).catch(() => undefined).finally(() => {
+          clockSyncInFlightRef.current = false;
+        });
       }
     },
     []

@@ -198,12 +198,17 @@ def los_by_approach(
 #     06.45-07.45 -- data berumur ~10 tahun, bukan pengukuran terbaru.
 #     Arus jenuh (kapasitas fisik jalan) relatif stabil selama geometri
 #     jalan belum berubah, tapi tetap perlu disebutkan umurnya.
-#   - Lebar efektif (We) SEBELUM faktor koreksi cuma disebutkan eksplisit
-#     di paper untuk Utara (8,2 m) dan Timur (7,6 m) -- keduanya dipakai
-#     PDF sebagai baseline skenario pelebaran jalan. We Selatan & Barat
-#     TIDAK ditemukan di teks paper manapun -- makanya arus jenuh (S)
-#     dipakai langsung dari Tabel 2, bukan dihitung ulang dari We, supaya
-#     tidak perlu menebak We yang tidak ada datanya.
+#   - Lebar efektif (We) SEBELUM faktor koreksi: Utara 8,2 m, Timur
+#     7,6 m, Selatan 7,0 m (Jl. AM. Sangaji), Barat 7,5 m (Jl. Kyai
+#     Mojo) -- keempat lengan dikonfirmasi 6 September 2026 dari paper
+#     yang sama (link download langsung diberikan pengguna). We tetap
+#     TIDAK dipakai untuk menghitung ulang S di sini -- arus jenuh (S)
+#     tetap dari Tabel 2 langsung, karena S sudah termasuk seluruh
+#     faktor koreksi MKJI (gesekan samping, parkir, dst), sedangkan
+#     S0=600*We mentah tidak. We dipakai untuk kalibrasi geometri
+#     network SUMO (lihat docs/hasil-implementasi-pkji-aggressive-balanced.md
+#     bagian 4.2 dan docs/data-lebar-ruas-simpang-pingit.md), bukan
+#     untuk rumus di file ini.
 PKJI_BASE_SATURATION_FLOW_SMP_PER_HOUR_BY_APPROACH = {
     "north": 5212.48,  # Jl. Magelang -- Tabel 2, lengan A (utara)
     "east": 4489.81,   # Jl. Diponegoro -- Tabel 2, lengan B (timur)
