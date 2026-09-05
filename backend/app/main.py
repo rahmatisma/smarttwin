@@ -33,6 +33,7 @@ from app.api.routes.simulation import router as simulation_router
 from app.api.routes.health import router as health_router
 from app.api.routes.history import router as history_router
 from app.api.routes.digital_twin import router as digital_twin_router
+from app.api.routes.notifications import router as notifications_router
 from app.services.simulation_service import simulation_service
 from app.services.scenario_worker_service import scenario_worker_service
 
@@ -191,6 +192,8 @@ app.include_router(digital_twin_router)
 # Riwayat keputusan
 app.include_router(history_router)
 
+# Notifications
+app.include_router(notifications_router)
 
 # Health
 app.include_router(health_router)
@@ -226,3 +229,4 @@ async def shutdown_services():
     # setelah Ctrl+C, baru tutup koneksi HTTP eksternal.
     simulation_service.stop_all()
     await close_hf_client()
+

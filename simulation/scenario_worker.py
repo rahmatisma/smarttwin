@@ -467,6 +467,42 @@ def evaluate_once(
 
     write_cache(supabase, payload)
     write_history(supabase, payload, state)
+    
+    # ------------------------------------------------------------------
+    # Notification Generation
+    # ------------------------------------------------------------------
+    try:
+        from app.services.notification_service import notification_service
+        
+        timestamp = payload["updatedAt"]
+        winner_id = payload.get("candidateId", "unknown")
+        rec_phase = payload.get("recommendation", {}).get("recommendedPhase", "unknown")
+        
+        # 1. Recommendation Notification
+        if winner_id != "unknown":
+            notification_service.create_notification(
+                type="recommendation",
+                title="Rekomendasi Sinyal Diperbarui",
+                message=f"Sistem menyarankan prioritas lampu hijau untuk lengan {str(rec_phase).upper()} berdasarkan data trafik terbaru.",
+                severity="info",
+                reference_id=f"recommendation-{timestamp}"
+            )
+            
+        # 2. Congestion Notification (from forecast)
+        if forecast and hasattr(forecast, "predictions"):
+            for p in forecast.predictions:
+                if getattr(p, "predictedDensityIndex", 0) >= 10:
+                    approach_name = str(getattr(p.approach, "value", p.approach)).upper() if hasattr(p, "approach") else str(p.approach).upper()
+                    notification_service.create_notification(
+                        type="congestion",
+                        title="Peringatan Kepadatan",
+                        message=f"Kemacetan tinggi terdeteksi di lengan {approach_name} (Index: {p.predictedDensityIndex:.2f})",
+                        severity="warning",
+                        reference_id=f"congestion-{timestamp}-{approach_name}"
+                    )
+    except Exception as exc:
+        print(f"[WARN] Gagal membuat notifikasi otomatis: {exc}")
+
     return payload
 
 

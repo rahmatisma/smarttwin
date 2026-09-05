@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState, useMemo } from "react";
 import {
     Activity,
+    Car,
     ChevronDown,
     ChevronLeft,
     ChevronRight,
@@ -1062,12 +1063,12 @@ export default function HistoryPage() {
                             </button>
                         </div>
 
-                        {/* KONDISI PEMICU */}
+                        {/* KONDISI LALU LINTAS TERKINI */}
                         <div className="mb-5">
                             <div className="mb-2 flex items-center gap-2">
                                 <Clock3 size={15} className="text-text-secondary" />
                                 <h3 className="text-xs font-medium">
-                                    Kondisi Lalu Lintas Saat Itu
+                                    Kondisi Lalu Lintas Terkini
                                 </h3>
                             </div>
                             {dipilih.trafficConditions.length === 0 ? (
@@ -1084,17 +1085,40 @@ export default function HistoryPage() {
                                             <p className="text-[11px] text-text-muted">
                                                 {labelLengan(kondisi.approach)}
                                             </p>
-                                            <p className="mt-1 font-mono text-xs">
-                                                {kondisi.volume ?? "—"} kendaraan
+                                            <p className="mt-1 font-mono text-xs text-text">
+                                                {kondisi.queueLengthVeh ?? "—"} kendaraan
                                             </p>
                                             <p className="text-[10px] text-text-muted">
-                                                antrean {kondisi.queueLengthVeh ?? "—"} kend ·{" "}
-                                                {kondisi.queueLengthMEst ?? "—"}m
+                                                {kondisi.volume ?? "—"} melintas · antrean {kondisi.queueLengthMEst ?? "—"}m
                                             </p>
                                         </div>
                                     ))}
                                 </div>
                             )}
+                        </div>
+                        {/* DURASI LAMPU HIJAU REALTIME */}
+                        <div className="mb-5">
+                            <div className="mb-2 flex items-center gap-2">
+                                <TrafficCone size={15} className="text-text-secondary" />
+                                <h3 className="text-xs font-medium">Durasi Lampu Hijau Realtime</h3>
+                            </div>
+                            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                                {urutkanFase(dipilih.phases).map((fase) => (
+                                    <div
+                                        key={fase.approach}
+                                        className="rounded-lg border border-border bg-surface-2 p-3"
+                                    >
+                                        <p className="text-[11px] text-text-muted">
+                                            {labelLengan(fase.approach)}
+                                        </p>
+                                        <div className="mt-1 flex items-baseline justify-between">
+                                            <p className="font-mono text-sm font-medium">
+                                                {fase.currentGreenSeconds ?? "—"}s
+                                            </p>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
                         </div>
                         {/* TRAFFIC FORECAST */}
                         <div className="mb-5">
@@ -1158,29 +1182,19 @@ export default function HistoryPage() {
                             )}
                         </div>
 
-                        {/* DAMPAK: BEFORE / AFTER */}
-                        {/*
-                            Panel ini yang paling langsung menjawab "apa gunanya
-                            program ini" -- baseline (before) dan pemenang (after)
-                            SAMA-SAMA disimulasikan sungguhan di SUMO, bukan
-                            diperkirakan, jadi selisihnya angka yang bisa
-                            dipertanggungjawabkan.
-                        */}
+                        {/* DAMPAK REKOMENDASI */}
                         {dipilih.beforeAfter && (
-                            <div className="mb-5">
+                            <div>
                                 <div className="mb-2 flex items-center gap-2">
                                     <TrendingUp size={15} className="text-text-secondary" />
                                     <h3 className="text-xs font-medium">
-                                        Dampak: Baseline vs Rekomendasi
+                                        Dampak Rekomendasi Durasi Lampu Hijau
                                     </h3>
                                 </div>
 
                                 {!dipilih.beforeAfter.changed && (
                                     <p className="mb-3 rounded-lg border border-border bg-surface-2 px-3 py-2 text-[11px] text-text-muted">
-                                        Sistem menyimpulkan pengaturan{" "}
-                                        <strong>baseline</strong> sudah paling baik untuk
-                                        kondisi ini — bukan kegagalan sistem, ini keputusan
-                                        yang sah.
+                                        Sistem menyimpulkan pengaturan <strong>realtime</strong> saat ini sudah paling baik untuk kondisi ini — bukan kegagalan sistem, ini keputusan yang sah.
                                     </p>
                                 )}
 
@@ -1189,13 +1203,9 @@ export default function HistoryPage() {
                                         <thead className="bg-surface-2 text-text-muted">
                                             <tr>
                                                 <th className="px-3 py-2 font-medium">Metrik</th>
-                                                <th className="px-3 py-2 font-medium">
-                                                    Before ({dipilih.beforeAfter.baselineCandidateId})
-                                                </th>
-                                                <th className="px-3 py-2 font-medium">
-                                                    After ({dipilih.beforeAfter.winnerCandidateId})
-                                                </th>
-                                                <th className="px-3 py-2 font-medium">Change</th>
+                                                <th className="px-3 py-2 font-medium">Realtime</th>
+                                                <th className="px-3 py-2 font-medium">Setelah Rekomendasi</th>
+                                                <th className="px-3 py-2 font-medium">Dampak</th>
                                             </tr>
                                         </thead>
                                         <tbody>
@@ -1245,34 +1255,45 @@ export default function HistoryPage() {
                             </div>
                         )}
 
-                        {/* DURASI DIREKOMENDASIKAN */}
-                        <div>
+                        {/* DURASI LAMPU HIJAU REKOMENDASI */}
+                        <div className="mb-5">
                             <div className="mb-2 flex items-center gap-2">
-                                <TrafficCone size={15} className="text-text-secondary" />
-                                <h3 className="text-xs font-medium">Durasi Hijau Direkomendasikan</h3>
+                                <TrafficCone size={15} className="text-signal-green" />
+                                <h3 className="text-xs font-medium">Durasi Lampu Hijau Rekomendasi</h3>
                             </div>
                             <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
                                 {urutkanFase(dipilih.phases).map((fase) => (
                                     <div
                                         key={fase.approach}
-                                        className="rounded-lg border border-border bg-surface-2 p-3"
+                                        className="rounded-lg border border-signal-green/30 bg-surface-2 p-3"
                                     >
                                         <p className="text-[11px] text-text-muted">
                                             {labelLengan(fase.approach)}
                                         </p>
-                                        <p className="mt-1 font-mono text-sm font-semibold">
-                                            {fase.greenSeconds}s
-                                        </p>
-                                        {fase.currentGreenSeconds != null && (
-                                            <p className="mt-0.5 text-[10px] text-text-muted">
-                                                eksisting {fase.currentGreenSeconds}s
+                                        <div className="mt-1 flex items-baseline justify-between">
+                                            <p className="font-mono text-sm font-bold text-signal-green">
+                                                {fase.greenSeconds ?? "—"}s
                                             </p>
-                                        )}
+                                        </div>
                                     </div>
                                 ))}
                             </div>
                         </div>
-
+                        {/* KONDISI LALU LINTAS SETELAH REKOMENDASI DITERAPKAN */}
+                        <div className="mb-5">
+                            <div className="mb-2 flex items-center gap-2">
+                                <Car size={15} className="text-text-secondary" />
+                                <h3 className="text-xs font-medium">
+                                    Kondisi Lalu Lintas Setelah Rekomendasi Diterapkan
+                                </h3>
+                            </div>
+                            <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-border bg-surface-2 py-8 text-center">
+                                <p className="mb-1 text-xs font-medium text-text-muted">Data aktual belum tersedia</p>
+                                <p className="max-w-[300px] text-[10px] text-text-muted opacity-70">
+                                    Menunggu hasil observasi siklus berikutnya setelah rekomendasi ini diterapkan di lapangan.
+                                </p>
+                            </div>
+                        </div>
                     </div>
                 </div>
             )}
