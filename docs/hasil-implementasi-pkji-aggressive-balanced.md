@@ -283,14 +283,34 @@ kode kami sebelumnya).
 | Selatan (Jl. AM. Sangaji) | 3.652,16 |
 | Barat (Jl. Kyai Mojo) | 3.842,90 |
 
-**Soal lebar jalan (We) — cuma 2 dari 4 lengan yang bisa dikonfirmasi
-di teks paper:** paper ini secara eksplisit menyebut *"lebar efektif
-(We) untuk lengan Utara yang semula **8,2 meter**... untuk lengan
-Timur yang semula **7,6 meter**"* (di bagian skenario pelebaran
-jalan). **We Selatan dan Barat tidak disebutkan di teks manapun** di
-paper ini. Karena itu tim memakai **S langsung dari Tabel 2** (bukan
-menghitung ulang dari We) — supaya tidak perlu menebak We yang
-memang tidak ada datanya.
+**Soal lebar jalan (We) — sekarang lengkap untuk 4 lengan.** Paper
+secara eksplisit menyebut *"lebar efektif (We) untuk lengan Utara yang
+semula **8,2 meter**... untuk lengan Timur yang semula **7,6
+meter**"* (di bagian skenario pelebaran jalan) — dua angka ini sudah
+dikutip sejak revisi dokumen ini yang pertama. **We Selatan (7,0 m) dan
+Barat (7,5 m) dikonfirmasi 6 September 2026**, dari halaman/tabel data
+kondisi geometrik paper yang sama (link download PDF diberikan
+langsung oleh pengguna):
+
+| Lengan | We — lebar efektif eksisting (meter) |
+|---|--:|
+| Utara (Jl. Magelang) | 8,2 |
+| Timur (Jl. Diponegoro) | 7,6 |
+| Selatan (Jl. AM. Sangaji) | 7,0 |
+| Barat (Jl. Kyai Mojo) | 7,5 |
+
+Detail sumber & rincian cara dipakai untuk kalibrasi network SUMO ada
+di `docs/data-lebar-ruas-simpang-pingit.md`.
+
+**We ini TETAP TIDAK dipakai untuk menghitung ulang S di rumus PKJI**
+proyek ini (tabel S di atas tidak berubah) — S dari Tabel 2 paper sudah
+termasuk seluruh faktor koreksi MKJI (gesekan samping, parkir,
+kelandaian, dst), sedangkan `S0 = 600 × We` mentah tidak memasukkan
+faktor-faktor itu sama sekali, jadi tetap kurang akurat walau We-nya
+sekarang lengkap. Kegunaan We yang baru lengkap ini murni untuk
+**kalibrasi lebar jalan di network SUMO** (`simulation/network/`),
+supaya lebar ruas digital twin cocok dengan kondisi lapangan asli —
+bukan untuk mengubah hasil kandidat balanced/aggressive.
 
 ### 4.3 Data pembanding: Q, kapasitas (C), dan DS hasil studi lapangan
 

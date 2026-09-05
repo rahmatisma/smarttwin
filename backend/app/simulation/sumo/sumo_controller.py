@@ -1478,13 +1478,9 @@ class SumoController:
         """Kembalikan clock CCTV yang berjalan, atau clock mesin sebagai fallback."""
         if self._camera_clock_time is None or self._camera_clock_synced_at is None:
             return self.last_simulation_time
-        # Interpolasi maksimal CAMERA_CLOCK_STALE_SECONDS setelah POST terakhir.
-        # Lewat itu clock beku di posisi terakhir -- lebih baik lampu "macet"
-        # daripada lari sendiri jauh mendahului video CCTV.
-        elapsed = min(
-            self.CAMERA_CLOCK_STALE_SECONDS,
-            max(0.0, time.monotonic() - self._camera_clock_synced_at),
-        )
+        # Backend owns continuity while no dashboard video is mounted.
+        # A page change must not freeze this clock after the heartbeat expires.
+        elapsed = max(0.0, time.monotonic() - self._camera_clock_synced_at)
         # TIDAK di-modulo oleh _camera_clock_duration: itu cuma dipakai
         # _pick_camera_phase() (modulo sendiri oleh panjang siklus lampu).
         # Kalau di sini ikut di-wrap, jam yang ditampilkan ke user mengulang
@@ -1540,7 +1536,7 @@ class SumoController:
         if (
             self.traci is None
             or not self.active_cycle_plan
-            or not self._camera_clock_is_fresh()
+            or self._camera_clock_synced_at is None
         ):
             return
         phase_index, remaining = self._pick_camera_phase(self.get_display_time())
@@ -1592,12 +1588,9 @@ class SumoController:
         )
 
         last_debug_second = -1
+        next_step_at = time.perf_counter()
 
         while not self._stop_event.is_set():
-
-            started_at = (
-                time.perf_counter()
-            )
 
             try:
 
@@ -1991,15 +1984,12 @@ class SumoController:
             # REALTIME CLOCK
             # ====================================================
 
-            elapsed = (
-                time.perf_counter()
-                - started_at
-            )
-
-            sleep_time = max(
-                0.0,
-                1.0 - elapsed,
-            )
+            # Use an absolute deadline: occasional slow frames must not add
+            # permanent drift to the one-second SUMO simulation steps.
+            if self.paused:
+                next_step_at = time.perf_counter()
+            next_step_at += 1.0
+            sleep_time = max(0.0, next_step_at - time.perf_counter())
 
             if self._stop_event.wait(
                 sleep_time

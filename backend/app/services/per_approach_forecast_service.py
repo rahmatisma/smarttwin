@@ -6,9 +6,6 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-import numpy as np
-import torch
-import torch.nn as nn
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -25,32 +22,6 @@ TRAFFIC_FEATURES = (
     "queueLengthMEst",
     "densityIndex",
 )
-
-
-class SharedApproachLSTM(nn.Module):
-    """Arsitektur serving yang sama dengan script training per-approach."""
-
-    def __init__(self, config: dict[str, Any]) -> None:
-        super().__init__()
-        self.output_steps = int(config["outputSteps"])
-        self.output_size = int(config["outputSize"])
-        num_layers = int(config["numLayers"])
-        self.lstm = nn.LSTM(
-            input_size=int(config["inputSize"]),
-            hidden_size=int(config["hiddenSize"]),
-            num_layers=num_layers,
-            batch_first=True,
-            dropout=float(config.get("dropout", 0.0)) if num_layers > 1 else 0.0,
-        )
-        self.fc = nn.Linear(
-            int(config["hiddenSize"]),
-            self.output_steps * self.output_size,
-        )
-
-    def forward(self, values: torch.Tensor) -> torch.Tensor:
-        sequence, _ = self.lstm(values)
-        prediction = self.fc(sequence[:, -1, :])
-        return prediction.view(-1, self.output_steps, self.output_size)
 
 
 class PerApproachForecastService:
@@ -75,6 +46,9 @@ class PerApproachForecastService:
                     "Artefak LSTM per-approach belum lengkap: "
                     + ", ".join(str(path) for path in missing)
                 )
+            import torch
+            from app.services.approach_lstm_model import SharedApproachLSTM
+
             checkpoint = torch.load(MODEL_PATH, map_location="cpu", weights_only=True)
             model = SharedApproachLSTM(checkpoint["modelConfig"])
             model.load_state_dict(checkpoint["state_dict"])
@@ -127,6 +101,9 @@ class PerApproachForecastService:
         )
 
     def predict_records(self, records: list[dict[str, Any]]) -> dict[str, Any]:
+        import numpy as np
+        import torch
+
         self._load()
         assert self._model is not None
         assert self._checkpoint is not None
