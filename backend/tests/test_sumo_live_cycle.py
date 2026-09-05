@@ -121,6 +121,29 @@ def test_camera_clock_wraps_display_time_without_resetting_sumo():
     assert controller.last_simulation_time == 1130
 
 
+def test_camera_clock_continues_while_dashboard_is_unmounted(monkeypatch):
+    controller = SumoController()
+    controller._camera_clock_time = 180.0
+    controller._camera_clock_synced_at = 100.0
+    monkeypatch.setattr("app.simulation.sumo.sumo_controller.time.monotonic", lambda: 160.0)
+    assert controller.get_display_time() == 240.0
+
+
+def test_signal_stays_on_shared_clock_after_heartbeat_expires(monkeypatch):
+    controller = SumoController()
+    controller.traci = object()
+    controller.active_cycle_plan = {"phases": [
+        {"greenSeconds": 20, "yellowSeconds": 4} for _ in range(4)
+    ]}
+    controller._camera_clock_time = 180.0
+    controller._camera_clock_synced_at = 100.0
+    monkeypatch.setattr("app.simulation.sumo.sumo_controller.time.monotonic", lambda: 160.0)
+    applied = []
+    monkeypatch.setattr(controller, "_apply_tls_phase", lambda phase, remaining: applied.append((phase, remaining)))
+    controller._enforce_camera_clock_phase()
+    assert applied == [controller._pick_camera_phase(240.0)]
+
+
 def test_realtime_demand_is_replenished_after_vehicles_leave(monkeypatch):
     controller = SumoController()
     controller.current_demand = {

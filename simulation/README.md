@@ -139,3 +139,51 @@ Smart App Control Windows memblokir binary baru. Lihat
 SUMO, padahal SUMO_HOME sudah benar**
 PATH belum menyertakan `$SUMO_HOME/bin`. Lihat bagian Setup Environment
 di atas.
+
+**Kendaraan diam total (speed 0) di hampir semua lengan setelah
+dibiarkan jalan beberapa menit, padahal jam simulasi tetap berjalan
+(gridlock)**
+Ditemukan & diverifikasi 6 September 2026, saat mengetes tampilan
+kendaraan lewat `sumo-gui` manual pakai rute demo bagian 3 di atas
+(`demo_motor.rou.xml` dkk).
+
+**Bukan bug jaringan atau geometri** — sudah dibuktikan langsung: rute
+yang sama dijalankan di versi network *sebelum* kalibrasi lebar jalan 6
+September (`git show HEAD:simulation/network/simpang4_pingit.net.xml.gz`,
+commit terakhir sebelum perubahan We ditulis ke working tree)
+menghasilkan gridlock **identik** (108 kendaraan aktif, 100 macet total
+di step ke-400) — jadi bukan efek samping perubahan lebar jalan.
+
+**Akar masalahnya: laju kemunculan rute demo terlalu agresif untuk
+network sekecil ini.** `-p 1` untuk motor artinya 1 kendaraan baru
+setiap 1 detik, terus-menerus, tanpa henti — sementara ruas MASUK
+(sebelum garis stop) di network ini cuma 7-12 meter dan hanya ada satu
+titik simpang berlampu (`SIMPANG_CENTER`). Dibiarkan jalan ratusan
+detik, kendaraan yang masuk jauh lebih banyak dari yang bisa dihabiskan
+satu siklus lampu — antrean menumpuk sampai saling mengunci
+(deadlock). SUMO sendiri tidak berhenti/error saat gridlock, cuma
+kendaraannya yang diam sementara jam simulasi tetap maju.
+
+**Solusi kalau mau tes visual lebih lama tanpa macet** — generate ulang
+rute dengan `-p` (periode kemunculan, detik) lebih besar = kendaraan
+lebih jarang muncul:
+
+```powershell
+python "$env:SUMO_HOME\tools\randomTrips.py" -n network\simpang4_pingit.net.xml.gz -r outputs\demo_motor.rou.xml -e 600 -p 3 --vehicle-class motorcycle --prefix m --validate
+python "$env:SUMO_HOME\tools\randomTrips.py" -n network\simpang4_pingit.net.xml.gz -r outputs\demo_mobil.rou.xml -e 600 -p 8 --vehicle-class passenger --prefix c --validate
+```
+
+Atau lebih simpel: untuk sekadar melihat bentuk/warna kendaraan, tutup
+dan buka ulang (reload) `sumo-gui` sebelum sempat gridlock — tidak
+perlu dibiarkan jalan sampai ratusan detik.
+
+**Tidak memengaruhi dashboard web sungguhan** — simulasi live yang
+dipakai dashboard **tidak** memakai rute demo ini sama sekali. Ia
+memakai `SumoController.sync_demand()`
+(`backend/app/simulation/sumo/sumo_controller.py:1309`), yang
+merekonsiliasi jumlah kendaraan ke `targetVehicleCount` dari
+`TrafficState` asli (menghapus kelebihan, menambah kekurangan) —
+berbeda dari `inject_demand()` yang cuma menambah terus tanpa batas.
+Karena volume asli dari kamera jauh di bawah 1 kendaraan/detik terus-
+menerus, gridlock jenis ini secara struktural tidak terjadi di jalur
+produksi.

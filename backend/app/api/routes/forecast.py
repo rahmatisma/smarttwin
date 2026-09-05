@@ -6,7 +6,6 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-from app.services.forecast_service import forecast_service
 from app.services.per_approach_forecast_service import per_approach_forecast_service
 
 
@@ -105,6 +104,8 @@ def predict_forecast(
             for record in request.records
         ]
 
+        from app.services.forecast_service import forecast_service
+
         result = forecast_service.predict_records(
             records
         )
@@ -141,6 +142,8 @@ def predict_forecast(
 def forecast_health() -> dict[str, Any]:
 
     try:
+        from app.services.forecast_service import forecast_service
+
         return forecast_service.health()
 
     except Exception as exc:
@@ -167,6 +170,8 @@ def predict_approach_forecast(
         try:
             return per_approach_forecast_service.predict_records(records)
         except Exception as primary_exc:
+            from app.services.forecast_service import forecast_service
+
             result = forecast_service.predict_approach_records(records)
             result["forecastSource"] = "aggregate-recent-share-fallback"
             result["fallbackUsed"] = True
