@@ -42,7 +42,7 @@ function CrossApproachCard({
   }
 
   return (
-    <div className={`rounded-md border p-3 text-center transition-colors ring-1 ${borderColor}`}>
+    <div className={`dashboard-approach-card rounded-md border p-3 text-center transition-colors ring-1 ${borderColor}`}>
       <div className="mb-1 font-display font-bold text-text">{data.name.dir}</div>
       <div className="text-xs text-text-muted">{data.name.street}</div>
       
@@ -88,16 +88,16 @@ export default function SignalStatusPanel({
   if (showLoading) {
     return (
       <div className="dashboard-card rounded-lg border border-border bg-surface p-4">
-        <div className="mb-3 flex items-center justify-between">
+        <div className="dashboard-card-header mb-3 flex items-center justify-between">
           <h2 className="flex items-center gap-2 font-display text-sm font-semibold text-text">
             Signal Status
-            <span className="rounded-full bg-accent-blue/10 px-2 py-0.5 text-[10px] font-medium text-accent-blue ring-1 ring-accent-blue/20">
+            <span className="rounded-full bg-accent/10 px-2 py-0.5 text-[10px] font-medium text-accent ring-1 ring-accent/20">
               Live
             </span>
           </h2>
           <span className="text-xs text-text-muted">Memuat...</span>
         </div>
-        <div className="flex min-h-[320px] items-center justify-center rounded-md border border-border bg-surface-2 px-4 text-center">
+        <div className="dashboard-detail-card flex min-h-[320px] items-center justify-center rounded-md border border-border bg-surface-2 px-4 text-center">
           <div className="flex flex-col items-center justify-center space-y-3">
             <div className="h-5 w-5 animate-spin rounded-full border-2 border-text-muted border-t-transparent"></div>
             <p className="text-xs text-text-muted">Memuat status sinyal...</p>
@@ -196,7 +196,7 @@ export default function SignalStatusPanel({
   return (
     <div className="flex h-full flex-col dashboard-card rounded-lg border border-border bg-surface p-4">
       {/* HEADER */}
-      <div className="mb-4 flex items-center justify-between">
+      <div className="dashboard-card-header mb-4 flex items-center justify-between">
         <h2 className="flex items-center gap-2 font-display text-sm font-semibold text-text">
           Signal Status
           {displaySignal.source === "mock" ? (
@@ -204,7 +204,7 @@ export default function SignalStatusPanel({
               Simulated
             </span>
           ) : (
-            <span className="rounded-full bg-accent-blue/10 px-2 py-0.5 text-[10px] font-medium text-accent-blue ring-1 ring-accent-blue/20">
+            <span className="rounded-full bg-accent/10 px-2 py-0.5 text-[10px] font-medium text-accent ring-1 ring-accent/20">
               Live
             </span>
           )}
@@ -251,7 +251,7 @@ export default function SignalStatusPanel({
             {hasRecommendation ? (
               <>
                 <div className="grid grid-cols-2 gap-3">
-                  <div className="rounded-md border border-border bg-surface-2 p-4 flex flex-col items-center justify-center relative">
+                  <div className="dashboard-detail-card rounded-md border border-border bg-surface-2 p-4 flex flex-col items-center justify-center relative">
                     <div className="absolute top-3 left-3 text-[10px] uppercase tracking-wider font-semibold text-text-muted">Current Signal</div>
                     <div className={`mt-4 flex items-center text-lg font-bold ${statusColorClass}`}>
                       <span className={`mr-2 inline-block h-3 w-3 rounded-full animate-pulse ${dotColorClass}`} />
@@ -263,7 +263,7 @@ export default function SignalStatusPanel({
                     </div>
                   </div>
 
-                  <div className="rounded-md border border-border bg-surface-2 p-4 flex flex-col justify-center">
+                  <div className="dashboard-detail-card rounded-md border border-border bg-surface-2 p-4 flex flex-col justify-center">
                     <div className="text-[10px] uppercase tracking-wider font-semibold text-text-muted mb-2">Active Phase</div>
                     <div className="font-display text-2xl font-bold text-text">
                       {approachLabel(sharedVisualPhase || "")}
@@ -275,7 +275,7 @@ export default function SignalStatusPanel({
                 </div>
 
                 <div className="grid grid-cols-2 gap-3">
-                  <div className="rounded-md border border-border bg-surface-2 p-4 flex flex-col justify-center">
+                  <div className="dashboard-detail-card rounded-md border border-border bg-surface-2 p-4 flex flex-col justify-center">
                     <div className="text-[10px] uppercase tracking-wider font-semibold text-text-muted mb-2">Next Phase</div>
                     <div className="font-display text-lg font-semibold text-text">
                       {approachLabel(nextPhaseApproach)}
@@ -292,7 +292,7 @@ export default function SignalStatusPanel({
                     </div>
                   </div>
 
-                  <div className="rounded-md border border-border bg-surface-2 p-4 flex flex-col justify-center">
+                  <div className="dashboard-detail-card rounded-md border border-border bg-surface-2 p-4 flex flex-col justify-center">
                     <div className="text-[10px] uppercase tracking-wider font-semibold text-text-muted mb-2">Cycle Progress</div>
                     <div className="flex items-end justify-between">
                       <div className="font-mono text-2xl font-bold text-text tabular-nums">{Math.round(progressPercent)}<span className="text-sm text-text-muted">%</span></div>
@@ -307,7 +307,7 @@ export default function SignalStatusPanel({
                   </div>
                 </div>
 
-                <div className="rounded-md border border-border bg-surface-2 p-4">
+                <div className="dashboard-detail-card rounded-md border border-border bg-surface-2 p-4">
                   <div className="mb-3 text-[10px] uppercase tracking-wider font-semibold text-text-muted">Phase Sequence</div>
                   <div className="flex flex-wrap items-center gap-2 text-xs">
                     {phases.map((p, idx) => {
@@ -329,7 +329,7 @@ export default function SignalStatusPanel({
             ) : (
               <div className="space-y-3">
                 <div className="grid grid-cols-2 gap-3">
-                  <div className="rounded-md border border-border bg-surface-2 p-4 text-center">
+                  <div className="dashboard-detail-card rounded-md border border-border bg-surface-2 p-4 text-center">
                     <div className="text-[10px] font-semibold uppercase tracking-wider text-text-muted">
                       Current Signal
                     </div>
@@ -340,7 +340,7 @@ export default function SignalStatusPanel({
                       {sharedVisualRemaining}<span className="ml-1 text-base font-normal text-text-muted">s</span>
                     </div>
                   </div>
-                  <div className="rounded-md border border-border bg-surface-2 p-4">
+                  <div className="dashboard-detail-card rounded-md border border-border bg-surface-2 p-4">
                     <div className="text-[10px] font-semibold uppercase tracking-wider text-text-muted">
                       Active Phase
                     </div>

@@ -108,7 +108,7 @@ export default function ForecastChart({
   if (!data || !data.predictions || data.predictions.length === 0) {
     return (
       <div className="flex flex-col dashboard-card rounded-lg border border-border bg-surface p-4">
-        <div className="mb-3 flex items-center justify-between">
+        <div className="dashboard-card-header mb-3 flex items-center justify-between">
           <h2 className="font-display text-sm font-semibold text-text">
             Traffic Forecast
           </h2>
@@ -193,7 +193,7 @@ export default function ForecastChart({
 
   return (
     <div className="flex flex-col dashboard-card rounded-lg border border-border bg-surface p-4">
-      <div className="mb-3 flex items-center justify-between">
+      <div className="dashboard-card-header mb-3 flex items-center justify-between">
         <h2 className="font-display text-sm font-semibold text-text">
           Traffic Forecast
         </h2>
@@ -415,7 +415,7 @@ export default function ForecastChart({
 
       {/* ADDITIONAL DETAILS TO FILL SPACE */}
       <div className="mt-4 shrink-0">
-        <div className="rounded-md border border-border bg-surface-2 p-3 text-xs">
+        <div className="dashboard-detail-card rounded-md border border-border bg-surface-2 p-3 text-xs">
           <div className="mb-2 font-medium text-text">Ringkasan Prediksi</div>
           <div className="flex flex-col gap-2">
             <div className="flex items-center justify-between text-text-secondary">

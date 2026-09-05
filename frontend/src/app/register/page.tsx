@@ -74,7 +74,7 @@ export default function RegisterPage() {
     return (
         <main className="flex min-h-screen items-center justify-center bg-background px-4 py-8">
 
-            <div className="w-full max-w-md">
+            <div className="w-full max-w-lg">
 
                 {/* LOGO -- lockup sudah memuat tulisan "SmartTwin", jadi
                     menggantikan ikon placeholder DAN <h1> teks sekaligus */}
@@ -82,7 +82,7 @@ export default function RegisterPage() {
 
                     <Logo height={96} className="mx-auto mb-4 justify-center" />
 
-                    <p className="mt-2 text-sm text-text-muted">
+                    <p className="mt-2 text-base text-text-secondary">
                         Create your SmartTwin account
                     </p>
 
@@ -92,11 +92,11 @@ export default function RegisterPage() {
                 <div className="rounded-xl border border-border bg-surface p-6">
 
                     <div className="mb-6">
-                        <h2 className="font-display text-lg font-semibold text-text">
+                        <h2 className="font-display text-2xl font-semibold text-text">
                             Create Account
                         </h2>
 
-                        <p className="mt-1 text-xs text-text-muted">
+                        <p className="mt-1 text-base text-text-secondary">
                             Daftarkan akun baru untuk menggunakan SmartTwin.
                         </p>
                     </div>
@@ -109,13 +109,13 @@ export default function RegisterPage() {
                         {/* NAME */}
                         <div>
 
-                            <label className="mb-2 block text-xs text-text-secondary">
+                            <label className="mb-2 block text-base text-text-secondary">
                                 Nama Lengkap
                             </label>
 
                             <div className="relative">
 
-                                <User className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-text-muted" />
+                                <User className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-text-secondary" />
 
                                 <input
                                     type="text"
@@ -125,7 +125,7 @@ export default function RegisterPage() {
                                     }
                                     placeholder="Nama lengkap"
                                     required
-                                    className="w-full rounded-lg border border-border bg-surface-2 py-2.5 pl-10 pr-3 text-sm text-text outline-none placeholder:text-text-muted focus:border-accent"
+                                    className="w-full rounded-lg border border-border bg-surface-2 py-3.5 pl-10 pr-3 text-base text-text outline-none placeholder:text-text-secondary focus:border-accent"
                                 />
 
                             </div>
@@ -134,13 +134,13 @@ export default function RegisterPage() {
                         {/* EMAIL */}
                         <div>
 
-                            <label className="mb-2 block text-xs text-text-secondary">
+                            <label className="mb-2 block text-base text-text-secondary">
                                 Email
                             </label>
 
                             <div className="relative">
 
-                                <Mail className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-text-muted" />
+                                <Mail className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-text-secondary" />
 
                                 <input
                                     type="email"
@@ -150,7 +150,7 @@ export default function RegisterPage() {
                                     }
                                     placeholder="nama@email.com"
                                     required
-                                    className="w-full rounded-lg border border-border bg-surface-2 py-2.5 pl-10 pr-3 text-sm text-text outline-none placeholder:text-text-muted focus:border-accent"
+                                    className="w-full rounded-lg border border-border bg-surface-2 py-3.5 pl-10 pr-3 text-base text-text outline-none placeholder:text-text-secondary focus:border-accent"
                                 />
 
                             </div>
@@ -159,13 +159,13 @@ export default function RegisterPage() {
                         {/* PASSWORD */}
                         <div>
 
-                            <label className="mb-2 block text-xs text-text-secondary">
+                            <label className="mb-2 block text-base text-text-secondary">
                                 Password
                             </label>
 
                             <div className="relative">
 
-                                <Lock className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-text-muted" />
+                                <Lock className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-text-secondary" />
 
                                 <input
                                     type="password"
@@ -176,7 +176,7 @@ export default function RegisterPage() {
                                     placeholder="Minimal 8 karakter"
                                     minLength={8}
                                     required
-                                    className="w-full rounded-lg border border-border bg-surface-2 py-2.5 pl-10 pr-3 text-sm text-text outline-none placeholder:text-text-muted focus:border-accent"
+                                    className="w-full rounded-lg border border-border bg-surface-2 py-3.5 pl-10 pr-3 text-base text-text outline-none placeholder:text-text-secondary focus:border-accent"
                                 />
 
                             </div>
@@ -186,13 +186,13 @@ export default function RegisterPage() {
                         {/* CONFIRM PASSWORD */}
                         <div>
 
-                            <label className="mb-2 block text-xs text-text-secondary">
+                            <label className="mb-2 block text-base text-text-secondary">
                                 Konfirmasi Password
                             </label>
 
                             <div className="relative">
 
-                                <Lock className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-text-muted" />
+                                <Lock className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-text-secondary" />
 
                                 <input
                                     type="password"
@@ -203,7 +203,7 @@ export default function RegisterPage() {
                                     placeholder="Ulangi password"
                                     minLength={8}
                                     required
-                                    className="w-full rounded-lg border border-border bg-surface-2 py-2.5 pl-10 pr-3 text-sm text-text outline-none placeholder:text-text-muted focus:border-accent"
+                                    className="w-full rounded-lg border border-border bg-surface-2 py-3.5 pl-10 pr-3 text-base text-text outline-none placeholder:text-text-secondary focus:border-accent"
                                 />
 
                             </div>
@@ -212,13 +212,13 @@ export default function RegisterPage() {
 
                         {/* ERROR / INFO */}
                         {error && (
-                            <p className="text-xs text-red-400">
+                            <p className="text-base text-red-400">
                                 {error}
                             </p>
                         )}
 
                         {info && (
-                            <p className="text-xs text-signal-green">
+                            <p className="text-base text-signal-green">
                                 {info}
                             </p>
                         )}
@@ -227,7 +227,7 @@ export default function RegisterPage() {
                         <button
                             type="submit"
                             disabled={loading}
-                            className="w-full rounded-lg bg-accent px-4 py-2.5 text-sm font-semibold text-background transition hover:opacity-90 disabled:opacity-60"
+                            className="w-full rounded-lg bg-accent px-4 py-3.5 text-base font-semibold text-white dark:text-slate-950 transition hover:opacity-90 disabled:opacity-60"
                         >
                             {loading ? "Creating account..." : "Create Account"}
                         </button>
@@ -237,13 +237,13 @@ export default function RegisterPage() {
                     {/* LOGIN */}
                     <div className="mt-6 border-t border-border pt-5 text-center">
 
-                        <p className="text-xs text-text-muted">
+                        <p className="text-base text-text-secondary">
                             Sudah punya akun?
                         </p>
 
                         <Link
                             href="/login"
-                            className="mt-1 inline-block text-xs font-medium text-accent hover:text-text"
+                            className="mt-1 inline-block text-base font-medium text-accent hover:text-text"
                         >
                             Sign in →
                         </Link>
@@ -252,7 +252,7 @@ export default function RegisterPage() {
 
                 </div>
 
-                <p className="mt-6 text-center text-[10px] text-text-muted">
+                <p className="mt-6 text-center text-sm text-text-secondary">
                     SmartTwin Traffic Management System
                 </p>
 

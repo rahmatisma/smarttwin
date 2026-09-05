@@ -34,6 +34,7 @@ let forecastRetryAfter = 0;
 let signalStatusCache: SignalStatus | null = null;
 let signalStatusRequestInFlight: Promise<SignalStatus | null> | null = null;
 let recommendationCache: Recommendation | null = null;
+let recommendationCacheTime = 0;
 let recommendationRequestInFlight: Promise<Recommendation | null> | null = null;
 const intersectionRowIdCache = new Map<string, number | null>();
 const intersectionRowIdRequests = new Map<string, Promise<number | null>>();
@@ -326,23 +327,29 @@ export async function fetchRecommendation(
   intersectionId: string = DEFAULT_INTERSECTION_ID
 ): Promise<Recommendation | null> {
   if (intersectionId !== DEFAULT_INTERSECTION_ID) return null;
+  if (recommendationCache && Date.now() - recommendationCacheTime < 5000) return recommendationCache;
   if (recommendationRequestInFlight) return recommendationRequestInFlight;
 
   recommendationRequestInFlight = fetch(`${API_BASE_URL}/recommendation`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ intersectionId }),
+    signal: AbortSignal.timeout(15000),
   })
     .then(async (response) => {
-      if (!response.ok) return recommendationCache;
+      if (!response.ok) throw new Error(`Rekomendasi gagal dimuat (HTTP ${response.status}).`);
 
       const body = await response.json();
       if (!body.success || !body.recommendation) return recommendationCache;
 
       recommendationCache = body.recommendation as Recommendation;
+      recommendationCacheTime = Date.now();
       return recommendationCache;
     })
-    .catch(() => recommendationCache)
+    .catch((error) => {
+      console.warn("Permintaan rekomendasi gagal:", error);
+      return recommendationCache;
+    })
     .finally(() => {
       recommendationRequestInFlight = null;
     });
