@@ -436,6 +436,16 @@ def generate_cycle_candidate_plans(
     lama yang belum diperbarui), jatuh ke heuristik lama (+1 detik ke
     lengan tersibuk / rata-rata ditarik ke minimum) supaya tidak ada
     pemanggil lama yang tiba-tiba error.
+
+    Kenapa pemanggil (ScenarioEngine.recommend_full_cycle) bisa mengirim
+    traffic_state yang BEDA dari state yang dipakai baseline: satu
+    jendela CV 5 detik terlalu sensitif diekstrapolasi jadi laju per jam
+    (1 kendaraan tambahan = +720 smp/jam) -- diukur langsung, lihat
+    docs/hasil-implementasi-pkji-aggressive-balanced.md bagian 5.3.
+    Sejak 5 September pemanggil live (scenario_worker.py) mengirim
+    rata-rata 2 menit terakhir (bukan 1 jendela sesaat) khusus untuk
+    parameter ini -- baseline TETAP baca 1 jendela terbaru seperti biasa,
+    supaya rumus RuleBasedEngine baseline tidak ikut berubah perilakunya.
     """
     phase_by_approach = {
         phase.approach: phase for phase in baseline.phases
@@ -789,8 +799,18 @@ class ScenarioEngine:
         currentPhase: str = "west",
         forecast: dict[str, Any] | None = None,
         forecastWeight: float = 0.5,
+        pkji_traffic_state: Any | None = None,
     ) -> Recommendation:
-        """Uji tiga CyclePlan empat-lengan tanpa mengganti recommend() lama."""
+        """
+        Uji tiga CyclePlan empat-lengan tanpa mengganti recommend() lama.
+
+        `state` (satu jendela 5 detik) tetap satu-satunya sumber untuk
+        baseline -- TIDAK berubah. `pkji_traffic_state`, kalau diberikan,
+        dipakai KHUSUS untuk kandidat aggressive/balanced (PKJI) -- lihat
+        catatan "Kenapa dua traffic_state berbeda" di
+        generate_cycle_candidate_plans(). Kalau tidak diberikan, PKJI
+        jatuh ke `state` juga (perilaku lama, satu jendela sesaat).
+        """
         baseline_recommendation = self._rule_based_engine.recommend(
             state=state,
             currentGreenSeconds=currentGreenSeconds,
@@ -804,7 +824,10 @@ class ScenarioEngine:
             forecast=forecast,
             forecastWeight=forecastWeight,
         )
-        candidates = generate_cycle_candidate_plans(baseline_cycle, traffic_state=state)
+        candidates = generate_cycle_candidate_plans(
+            baseline_cycle,
+            traffic_state=pkji_traffic_state if pkji_traffic_state is not None else state,
+        )
         # Semua kandidat berjalan pada horizon sama dan minimal mencakup cycle
         # terpanjang, supaya kandidat berdurasi pendek tidak diuntungkan.
         step_limit = max(

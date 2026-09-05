@@ -89,8 +89,8 @@ adalah lengan tersibuk **dan sudah mentok `MAX_GREEN_SECONDS`**):
 
 | Lengan | Baseline | Aggressive **LAMA** | Aggressive **SEKARANG** |
 |---|--:|--:|--:|
-| Utara (tersibuk) | 60 | 60 *(+1 detik, tapi sudah mentok 60 → tidak berubah)* | 34 |
-| Timur | 26 | 26 *(tidak disentuh)* | 25 |
+| Utara (tersibuk) | 60 | 60 *(+1 detik, tapi sudah mentok 60 → tidak berubah)* | 33 |
+| Timur | 26 | 26 *(tidak disentuh)* | 26 |
 | Selatan | 22 | 22 *(tidak disentuh)* | 15 |
 | Barat | 20 | 20 *(tidak disentuh)* | 15 |
 
@@ -98,12 +98,12 @@ adalah lengan tersibuk **dan sudah mentok `MAX_GREEN_SECONDS`**):
 persis dengan baseline, TIDAK melakukan apa-apa** — Utara sudah di
 batas maksimum sebelum "+1 detik" dicoba, jadi tidak ada efeknya sama
 sekali. Aggressive sekarang **menghitung ulang total dari nol**: Utara
-justru **turun** dari 60 ke 34 detik (rumus RuleBasedEngine lama
+justru **turun** dari 60 ke 33 detik (rumus RuleBasedEngine lama
 menebak Utara butuh hijau maksimum, tapi Flow Ratio sungguhan dari
 data kendaraan bilang tidak sebesar itu), dan siklus totalnya jadi jauh
 lebih pendek (144 detik → 105 detik). Ini bukan cuma beda kandidatnya —
 **hasilnya juga lebih baik**: diuji SUMO, delay turun dari 21,42 detik
-(LOS C) jadi 16,07 detik (LOS B). Detail lengkap di bagian 6.
+(LOS C) jadi 16,00 detik (LOS B). Detail lengkap di bagian 6.
 
 ### 1.2 Kelebihan & kekurangan masing-masing
 
@@ -117,9 +117,9 @@ lebih pendek (144 detik → 105 detik). Ini bukan cuma beda kandidatnya —
 - ✅ Ada rumus & standar resmi yang bisa ditunjuk kalau ditanya
 - ✅ Semua lengan ikut dipertimbangkan, bukan cuma yang paling padat
 - ✅ Ada bukti bisa ditelusuri ke angka kendaraan asli (bagian 5)
-- ✅ Lebar lengan sekarang pakai **data survei asli** Simpang Pingit (bagian 4), bukan lagi angka asumsi tim
+- ✅ Arus jenuh sekarang diambil **langsung dari studi lapangan Simpang Pingit yang sudah dipublikasikan** (bagian 4), bukan lagi dihitung sendiri dari asumsi lebar jalan
 - ❌ Perubahannya jauh lebih besar dari sebelumnya (kandidat yang padat masih bisa mentok ke batas atas/bawah — lihat temuan bagian 5.3), jadi butuh diuji SUMO dengan hati-hati sebelum dipakai beneran, tidak sekadar "pasti lebih baik karena rumusnya resmi"
-- ❌ Satu-satunya bagian yang masih asumsi: faktor penyesuaian lanjutan PKJI (FCS/FSF/FG/FP/FRT/FLT) — lihat bagian 4
+- ❌ Data sumbernya dari survei 2016 (10 tahun lalu) dan proyek ini tidak mengukur ulang kondisi jalan sendiri — lihat bagian 4.4-4.5
 
 ## 2. Kenapa baseline TIDAK ikut diubah
 
@@ -246,72 +246,102 @@ bertahap (2 detik/langkah) sampai DS turun ke ambang, atau mentok
 
 ## 4. Asumsi yang harus disebutkan jujur kalau ditanya juri
 
-> **Diperbarui 5 September 2026.** Sebelumnya bagian ini bilang lebar
-> jalan cuma asumsi tim (`We = 6,0 meter` rata untuk semua lengan).
-> **Sekarang diganti data survei lapangan asli** Simpang Pingit, per
-> lengan (bukan lagi satu angka rata). Ini mengurangi satu-satunya
-> asumsi terbesar di seluruh implementasi PKJI ini.
+> **Diperbarui 5 September 2026 (revisi ke-2, sore).** Pengguna
+> mengirim **PDF lengkap paper aslinya** dan tim **membacanya langsung**
+> (bukan lagi ditranskrip dari ringkasan pihak lain). Isinya beda dari
+> yang dikira sebelumnya — bagian ini ditulis ulang total.
 
-### 4.1 Lebar efektif pendekat (We) — sekarang data survei, bukan asumsi
+### 4.1 Sumbernya SATU paper, bukan dua
 
-| Lengan | We (meter) | Sumber |
-|---|--:|---|
-| Utara (Jl. Magelang) | 8,2 | Survei lapangan Simpang Pingit |
-| Timur (Jl. Diponegoro) | 7,6 | Survei lapangan Simpang Pingit |
-| Selatan (Jl. AM. Sangaji) | 7,0 | Survei lapangan Simpang Pingit |
-| Barat (Jl. Kyai Mojo) | 7,5 | Survei lapangan Simpang Pingit |
+Yang tadinya dikira dua sumber terpisah ternyata **satu paper yang
+sama**:
 
-**Sumber data:** jurnal Renovasi, Universitas Sarjanawiyata Tamansiswa
-(`jurnal.ustjogja.ac.id/index.php/renovasi`, artikel id 1804).
+> Febriana Ramadhani, Widarto Sutrisno, Iskandar Yasin (Universitas
+> Sarjanawiyata Tamansiswa), **"Analisa Kinerja Simpang Bersinyal
+> Pingit Yogyakarta"**, jurnal *Renovasi*
+> (`jurnal.ustjogja.ac.id/index.php/renovasi`, artikel id 1804).
 
-> ⚠️ **Penting — batas kejujuran sumber ini:** angka di atas
-> ditranskrip dari yang diberikan pengguna (5 September 2026), **bukan
-> dibaca langsung oleh tim** dari PDF aslinya. Tim mencoba mengakses
-> PDF-nya 3 kali (link jurnal & link Academia.edu di bawah), **semuanya
-> balik `403 Forbidden`** — kemungkinan diblokir bot atau butuh login.
-> **Sebelum dikutip di laporan/proposal resmi, cek ulang sendiri ke
-> PDF asli** untuk memastikan angka & judul papernya benar. Ini bukan
-> alasan untuk tidak memakainya — datanya jauh lebih baik dari asumsi
-> 6 meter kemarin — tapi kejujuran soal provenance-nya harus tetap
-> disebutkan.
+PDF-nya sudah dibaca **langsung** oleh tim (pengguna mengirim isi
+lengkapnya 5 September 2026, setelah link web-nya diblokir 403 saat
+tim coba akses sendiri). Tidak ada lagi transkrip tak terverifikasi —
+semua angka di bawah dikutip langsung dari tabel di PDF.
 
-### 4.2 Data pembanding tambahan (belum dipakai di rumus, cuma referensi)
+### 4.2 Arus jenuh (S) — dipakai LANGSUNG dari paper, bukan dihitung sendiri
 
-Pengguna juga memberikan tabel kinerja simpang dari sumber kedua
-(academia.edu/144251112, "Analisa Kinerja Simpang Bersinyal Pingit
-Yogyakarta", jam puncak pagi — akses PDF juga 403, sama seperti di
-atas):
+**Perubahan penting:** sebelumnya tim menghitung sendiri
+`S0 = 600 × We` dari lebar jalan. Setelah baca PDF lengkap, ternyata
+**papernya sendiri sudah menghitung arus jenuh yang sudah dikoreksi
+lengkap** (Tabel 2 di paper) — jauh lebih baik daripada dihitung ulang
+dari lebar mentah, karena sudah termasuk semua faktor penyesuaian
+MKJI hasil pengamatan lapangan asli (bukan diasumsikan 1,0 seperti
+kode kami sebelumnya).
 
-| Lengan | Kapasitas (smp/jam) | DS | Keterangan (dari sumber) |
-|---|--:|--:|---|
-| Utara | 1.417 | 0,895 | Lewat jenuh / butuh pelebaran |
-| Timur | 1.017 | 0,943 | Sangat jenuh / pemicu antrean utama |
-| Selatan | 764 | 0,783 | Cukup stabil |
-| Barat | 803 | 0,683 | Kondisi arus relatif aman |
+| Lengan | S — arus jenuh (smp/jam), dari Tabel 2 paper |
+|---|--:|
+| Utara (Jl. Magelang) | 5.212,48 |
+| Timur (Jl. Diponegoro) | 4.489,81 |
+| Selatan (Jl. AM. Sangaji) | 3.652,16 |
+| Barat (Jl. Kyai Mojo) | 3.842,90 |
 
-**Kenapa angka ini TIDAK langsung dimasukkan ke rumus:** kolom
-"Kapasitas" di tabel itu **bukan** arus jenuh (S) yang dipakai rumus
-`FR = Q/S` — itu **kapasitas** (`C = S × hijau/siklus`, sudah
-memperhitungkan waktu hijau yang dipakai simpang PADA SAAT studi itu
-dilakukan). Memasukkannya langsung ke slot `S` di kode ini akan salah
-satuan (dihitung dua kali dikurangi rasio hijau/siklus). **Dipakai
-sebagai referensi/pembanding di laporan saja** — dan kebetulan **cocok
-arahnya** dengan hasil model kami sendiri: Utara dan Timur sama-sama
-muncul sebagai lengan paling jenuh, baik di studi akademik ini maupun
-di hitungan PKJI kami (lihat bagian 5) — walau angka persisnya beda
-karena beda metodologi & waktu pengambilan data.
+**Soal lebar jalan (We) — cuma 2 dari 4 lengan yang bisa dikonfirmasi
+di teks paper:** paper ini secara eksplisit menyebut *"lebar efektif
+(We) untuk lengan Utara yang semula **8,2 meter**... untuk lengan
+Timur yang semula **7,6 meter**"* (di bagian skenario pelebaran
+jalan). **We Selatan dan Barat tidak disebutkan di teks manapun** di
+paper ini. Karena itu tim memakai **S langsung dari Tabel 2** (bukan
+menghitung ulang dari We) — supaya tidak perlu menebak We yang
+memang tidak ada datanya.
 
-### 4.3 Yang masih murni asumsi (satu-satunya yang tersisa)
+### 4.3 Data pembanding: Q, kapasitas (C), dan DS hasil studi lapangan
 
-**Faktor penyesuaian lanjutan PKJI diasumsikan 1,0** (tidak
-diterapkan): `FCS` (ukuran kota), `FSF` (gesekan samping), `FG`
-(kelandaian), `FP` (parkir), `FRT`/`FLT` (belok kanan/kiri) — masing-
-masing butuh survei kondisi jalan tambahan yang di luar scope 16 hari
-proyek ini.
+Paper yang sama juga melaporkan kondisi jam puncak pagi (Selasa, 8
+November 2016, 06.45–07.45 WIB):
 
-Semua konstanta lain (emp, ambang DS 0,85, rumus `S0=600×We`, rumus
-siklus Webster) adalah **nilai baku PKJI/MKJI** yang lazim dipakai di
-praktik rekayasa lalu lintas Indonesia — bukan buatan tim.
+| Lengan | Q — arus lalu lintas (smp/jam) | C — kapasitas (smp/jam) | DS |
+|---|--:|--:|--:|
+| Utara | 1.268 | 1.417 | 0,895 |
+| Timur | 959 | 1.017 | 0,943 |
+| Selatan | 598 | 764 | 0,783 |
+| Barat | 549 | 803 | 0,683 |
+
+**Kenapa Q dan C ini TIDAK dipakai langsung menggantikan hitungan kami
+sendiri:** Q di tabel itu adalah **volume kendaraan hasil survei
+manual 2016** (bukan dari CV SmartTwin), dan C = `S × hijau/siklus`
+memakai **waktu hijau & siklus simpang tahun 2016** — beda dari
+program TLS Simpang Pingit yang dipakai proyek ini sekarang. **S**
+(arus jenuh) yang dipakai proyek ini, karena itu murni kapasitas fisik
+jalan (lebar, kondisi permukaan) yang relatif stabil selama geometri
+jalan belum berubah — beda dari Q/C yang situasional.
+
+**Yang menarik: kesimpulan paper ini SEARAH dengan hasil model kami
+sendiri** — Utara (DS 0,895) dan Timur (DS 0,943) adalah dua lengan
+paling jenuh menurut paper ini, **persis sama** dengan yang ditemukan
+lewat hitungan PKJI kami di bagian 5 & 6 (Utara & Timur konsisten
+butuh koreksi DS di kandidat aggressive).
+
+### 4.4 Catatan umur data — harus disebutkan jujur
+
+**Survei lapangan asli paper ini: Selasa, 8 November 2016** — hampir
+10 tahun lalu, bukan data terbaru. Arus jenuh (S) yang dipakai proyek
+ini murni fungsi geometri jalan (lebar, kondisi fisik) yang biasanya
+tidak berubah cepat kecuali ada pelebaran/renovasi — jadi tetap
+relevan dipakai. Tapi **volume lalu lintas (Q) di paper itu SUDAH
+TIDAK dipakai** proyek ini — Q proyek ini datang dari CV real-time
+SmartTwin sendiri (lihat bagian 5), bukan dari paper 2016.
+
+### 4.5 Yang masih murni asumsi (satu-satunya yang tersisa)
+
+**Faktor penyesuaian lanjutan PKJI** (`FCS`/`FSF`/`FG`/`FP`/`FRT`/`FLT`)
+**tidak dihitung ulang oleh tim SmartTwin** — proyek ini memakai S
+yang SUDAH termasuk faktor-faktor itu dari hasil pengukuran paper di
+atas, apa adanya, bukan mengukur ulang sendiri kondisi jalan (gesekan
+samping, parkir, dll.) tahun 2026. Kalau kondisi jalan berubah
+signifikan sejak 2016 (pelebaran, larangan parkir baru, dst.), angka
+S ini bisa jadi sudah tidak akurat — belum ada survei ulang.
+
+Konstanta lain (emp, ambang DS 0,85, rumus siklus Webster) adalah
+**nilai baku PKJI/MKJI** yang lazim dipakai di praktik rekayasa lalu
+lintas Indonesia — bukan buatan tim.
 
 ## 5. Perhitungan manual, langkah demi langkah, data CV asli
 
@@ -341,25 +371,23 @@ Selatan : tidak ada kendaraan sama sekali           = 0,00 smp  → ×720 =     
 Barat   : 0×1,0 + 3×1,3 + 3×0,25 = 0 + 3,9 + 0,75 = 4,65 smp  → ×720 = 3.348 smp/jam
 ```
 
-**Langkah 2 — Flow Ratio.** `S` sekarang beda tiap lengan (data survei
-asli, bagian 4.1): Utara 4.920, Timur 4.560, Selatan 4.200, Barat 4.500
-smp/jam.
+**Langkah 2 — Flow Ratio.** `S` dari Tabel 2 paper Simpang Pingit
+(bagian 4.2): Utara 5.212,48, Timur 4.489,81, Selatan 3.652,16, Barat
+3.842,90 smp/jam.
 
 ```
-FR utara   = 2.016 / 4.920 = 0,41
-FR timur   = 2.376 / 4.560 = 0,52
-FR selatan =     0 / 4.200 = 0,00
-FR barat   = 3.348 / 4.500 = 0,74
+FR utara   = 2.016 / 5.212,48 = 0,39
+FR timur   = 2.376 / 4.489,81 = 0,53
+FR selatan =     0 / 3.652,16 = 0,00
+FR barat   = 3.348 / 3.842,90 = 0,87
 ------------------------------------
-Σ FR (asli, belum dijepit) = 0,41+0,52+0+0,74 = 1,67
+Σ FR (asli, belum dijepit) = 0,39+0,53+0+0,87 = 1,79
 ```
 
-⚠️ **Σ FR = 1,67, masih di atas 1** — lebih rendah dari sebelumnya
-(dulu 2,15 dengan asumsi lebar rata 6 meter), karena jalan Simpang
-Pingit ternyata lebih lebar dari asumsi lama, jadi kapasitasnya lebih
-besar. Tapi jendela 5 detik ini memang jendela yang SANGAT sibuk (lihat
-data mentah di atas) — jadi tetap oversaturasi kalau diekstrapolasi
-jadi laju per jam. Lihat kotak "Temuan penting" di bagian 5.3.
+⚠️ **Σ FR = 1,79, di atas 1.** Jendela 5 detik ini memang jendela yang
+SANGAT sibuk (lihat data mentah di atas) — oversaturasi kalau
+diekstrapolasi jadi laju per jam. Lihat kotak "Temuan jujur" di
+bagian 5.3.
 
 **Langkah 3 — waktu siklus.** Σ FR dijepit ke 0,95 (di atas ambang aman):
 
@@ -369,40 +397,36 @@ c = (1,5×16 + 5) / (1 − 0,95) = 29 / 0,05 = 580 detik  (≈9 menit 40 detik)
 ```
 
 **Langkah 4 — bagi hijau proporsional (balanced).** Porsi tiap lengan
-memakai Σ FR **asli** (1,67), bukan yang dijepit (0,95) — lihat catatan
+memakai Σ FR **asli** (1,79), bukan yang dijepit (0,95) — lihat catatan
 teknis di Langkah 4 bagian 3.
 
 ```
 green_budget = 580 − 16 = 564 detik
 
-porsi utara   = 0,41 / 1,67 = 0,245  → hijau = 0,245×564 = 138 dtk → dijepit MAX 60 dtk
-porsi timur   = 0,52 / 1,67 = 0,311  → hijau = 0,311×564 = 176 dtk → dijepit MAX 60 dtk
-porsi selatan = 0,00 / 1,67 = 0,000  → hijau = 0×564     =   0 dtk → dijepit MIN 15 dtk
-porsi barat   = 0,74 / 1,67 = 0,444  → hijau = 0,444×564 = 251 dtk → dijepit MAX 60 dtk
+porsi utara   = 0,39 / 1,79 = 0,216  → hijau = 0,216×564 = 122 dtk → dijepit MAX 60 dtk
+porsi timur   = 0,53 / 1,79 = 0,296  → hijau = 0,296×564 = 167 dtk → dijepit MAX 60 dtk
+porsi selatan = 0,00 / 1,79 = 0,000  → hijau = 0×564     =   0 dtk → dijepit MIN 15 dtk
+porsi barat   = 0,87 / 1,79 = 0,488  → hijau = 0,488×564 = 275 dtk → dijepit MAX 60 dtk
 ```
 
 → **Kandidat balanced: Utara 60 / Timur 60 / Selatan 15 / Barat 60 detik**
-— hasilnya sama persis mentoknya seperti sebelum lebar asli dipakai
-(jendela ini memang genuinely sangat sibuk), tapi lihat Langkah 5 --
-DS-nya sekarang lebih rendah, artinya kondisinya sedikit tidak separah
-yang dikira asumsi lama.
-Siklus aktual (dari hijau yang SUDAH dijepit) = 60+60+15+60+16 = **211 detik.**
+— jendela ini genuinely sangat sibuk, jadi tetap mentok di ketiga
+lengan yang ada kendaraannya. Siklus aktual (dari hijau yang SUDAH
+dijepit) = 60+60+15+60+16 = **211 detik.**
 
 **Langkah 5 — cek DS (aggressive).** `DS = smp/jam ÷ (S_lengan × hijau/siklus)`, siklus = 211 detik dari Langkah 4:
 
 ```
-DS utara   = 2.016 / (4.920 × 60/211) = 2.016 / 1.399,1 = 1,44
-DS timur   = 2.376 / (4.560 × 60/211) = 2.376 / 1.297,0 = 1,83
-DS selatan =     0 / (4.200 × 15/211) = 0,00
-DS barat   = 3.348 / (4.500 × 60/211) = 3.348 / 1.279,6 = 2,62
+DS utara   = 2.016 / (5.212,48 × 60/211) = 2.016 / 1.482,2 = 1,36
+DS timur   = 2.376 / (4.489,81 × 60/211) = 2.376 / 1.276,7 = 1,86
+DS selatan =     0 / (3.652,16 × 15/211) = 0,00
+DS barat   = 3.348 / (3.842,90 × 60/211) = 3.348 / 1.092,8 = 3,06
 ```
 
-Turun dari perkiraan lama (1,97 / 2,32 / — / 3,27) karena jalannya
-memang lebih lebar dari asumsi — tapi **masih jauh di atas ambang
-0,85**. Utara, timur, barat harusnya dikoreksi (ditambah hijau).
-**Tapi ketiganya sudah mentok `MAX_GREEN_SECONDS = 60 detik`** sebelum
-koreksi sempat jalan, jadi koreksi tidak bisa berbuat apa-apa lagi.
-Hasilnya:
+Utara, timur, barat semua **jauh di atas ambang 0,85**. Harusnya
+dikoreksi (ditambah hijau). **Tapi ketiganya sudah mentok
+`MAX_GREEN_SECONDS = 60 detik`** sebelum koreksi sempat jalan, jadi
+koreksi tidak bisa berbuat apa-apa lagi. Hasilnya:
 
 → **Kandidat aggressive: SAMA PERSIS dengan balanced (60/60/15/60)** —
 bukan karena rumusnya salah, tapi karena batas 60 detik sistem sudah
@@ -425,22 +449,26 @@ jendela ini cuma 6).
 | | Utara | Timur | Selatan | Barat |
 |---|--:|--:|--:|--:|
 | smp/jam | 900 | 720 | 0 | 1.620 |
-| Flow Ratio | 0,183 | 0,158 | 0,000 | 0,360 |
-| **Hijau balanced (dtk)** | **21** | **18** | **15** | **42** |
-| DS balanced | 0,98 | 0,98 | 0,00 | 0,96 |
-| **Hijau aggressive (dtk)** | **29** | **26** | **15** | **52** |
-| DS aggressive | 0,87 | 0,84 | 0,00 | 0,96 |
+| Flow Ratio | 0,173 | 0,160 | 0,000 | 0,422 |
+| **Hijau balanced (dtk)** | **23** | **22** | **15** | **57** |
+| DS balanced | 1,00 | 0,97 | 0,00 | 0,98 |
+| **Hijau aggressive (dtk)** | **29** | **28** | **15** | **60** |
+| DS aggressive | 0,88 | 0,85 | 0,00 | 1,04 |
 
-**Ini yang berubah paling banyak sejak pakai lebar jalan asli.** Dulu
-(asumsi 6 meter rata) jendela ini JUGA mentok semua ke 60 detik, sama
-kayak Contoh 1. **Sekarang, dengan lebar sungguhan (jalan-jalan Simpang
-Pingit ternyata lebih lebar dari asumsi lama), rumusnya berjalan
-normal**: tidak semua lengan mentok, balanced dan aggressive
-kelihatan **benar-benar beda** satu sama lain, dan koreksi DS di
-aggressive kelihatan bekerja seperti dirancang — Utara & Timur naik
-sampai DS-nya turun ke ambang 0,85 (Utara 0,98→0,87, Timur 0,98→0,84),
-Barat tidak dikoreksi lagi karena tetap 0,96 (mentok sebelum sempat
-turun ke bawah 0,85, tapi masih naik dari 42→52 detik).
+**Ini yang berubah paling banyak sejak pakai arus jenuh dari studi
+lapangan asli.** Dengan data yang benar, rumusnya berjalan **jauh
+lebih realistis** untuk jendela ini: tidak semua lengan langsung
+mentok ke 60 detik di kandidat balanced, dan aggressive kelihatan
+**benar-benar beda** — koreksi DS bekerja seperti dirancang untuk
+Utara & Timur (DS turun ke ambang: 1,00→0,88, 0,97→0,85). **Barat**
+menunjukkan pola yang sama seperti Contoh 1 dalam skala kecil: ikut
+dikoreksi (naik 57→60 detik), tapi mentok `MAX_GREEN_SECONDS` **sebelum**
+DS-nya sempat turun ke 0,85 — jadi DS Barat malah naik jadi 1,04
+(karena siklus totalnya ikut memendek saat lengan lain dikoreksi,
+sementara Barat sendiri sudah tidak bisa nambah lagi). Ini contoh
+konkret keterbatasan sistem: PKJI tahu Barat butuh lebih dari 60
+detik untuk benar-benar aman, tapi batas operasional TLS proyek ini
+tidak mengizinkannya.
 
 ### 5.3 ⚠️ Temuan jujur soal jendela 5 detik yang sangat sibuk
 
@@ -469,16 +497,17 @@ bukan disembunyikan.
 **Kalimat siap-jawab kalau juri tanya soal ini:**
 
 > "Kami memakai jendela pengamatan 5 detik dari CV, lalu diekstrapolasi
-> jadi laju per jam untuk rumus PKJI. Setelah memasukkan data lebar
-> jalan asli hasil survei, rumusnya berjalan normal untuk sebagian
-> besar kondisi — tapi kami sadar untuk jendela yang kebetulan sangat
-> sibuk, ekstrapolasi ke laju per jam masih sensitif terhadap noise
-> sampel pendek. Sudah kami ukur langsung dari data CCTV asli, bukan
-> dugaan. Pengaman di kode (penjepitan ke batas hijau minimum/maksimum,
-> dan pembatasan Flow Ratio total) mencegah hasil yang tidak masuk
-> akal, tapi perbaikan idealnya adalah merata-ratakan arus dari
-> beberapa menit, bukan satu jendela sesaat — itu rencana lanjutan,
-> bukan yang sudah kami klaim selesai."
+> jadi laju per jam untuk rumus PKJI. Setelah memasukkan arus jenuh dari
+> studi lapangan Simpang Pingit yang sebenarnya (bukan lagi dihitung
+> sendiri dari asumsi lebar jalan), rumusnya berjalan normal untuk
+> sebagian besar kondisi — tapi kami sadar untuk jendela yang kebetulan
+> sangat sibuk, ekstrapolasi ke laju per jam masih sensitif terhadap
+> noise sampel pendek. Sudah kami ukur langsung dari data CCTV asli,
+> bukan dugaan. Pengaman di kode (penjepitan ke batas hijau
+> minimum/maksimum, dan pembatasan Flow Ratio total) mencegah hasil
+> yang tidak masuk akal, tapi perbaikan idealnya adalah merata-ratakan
+> arus dari beberapa menit, bukan satu jendela sesaat — itu rencana
+> lanjutan, bukan yang sudah kami klaim selesai."
 
 ## 6. Bukti — dijalankan lewat SUMO sungguhan
 
@@ -496,21 +525,21 @@ Kondisi uji: utara padat (1 mobil + 4 motor/jendela), barat paling sepi
 | Kandidat | Hijau U/T/S/B (detik) | Siklus | Delay | LOS |
 |---|---|---:|--:|---|
 | baseline (RuleBasedEngine, tidak berubah) | 60/26/22/20 | 144s | 21,42s | C |
-| **balanced** (PKJI proporsional) | 28/19/15/15 | 93s | 13,43s | **B** |
-| **aggressive** (PKJI + koreksi DS) | 34/25/15/15 | 105s | 16,07s | B |
+| **balanced** (PKJI proporsional) | 27/20/15/15 | 93s | 13,32s | **B** |
+| **aggressive** (PKJI + koreksi DS) | 33/26/15/15 | 105s | 16,00s | B |
 
 **Pemenang di uji SUMO ini: balanced** (delay & antrean terendah).
-DS balanced tertinggi: utara 0,97 (belum dikoreksi). DS aggressive
-tertinggi: utara 0,90 (setelah dikoreksi, turun dari 0,97).
+DS balanced tertinggi: utara 0,95 (belum dikoreksi). DS aggressive
+tertinggi: utara 0,88 (setelah dikoreksi, turun dari 0,95).
 
 **Temuan menarik untuk laporan:** baseline (rumus lama RuleBasedEngine)
 menebak Utara butuh hijau **60 detik** (mentok maksimum) — tapi
 setelah dihitung ulang dari data kendaraan sungguhan pakai PKJI, Utara
-sebenarnya cukup **28–34 detik**. Rumus lama over-estimate kebutuhan
+sebenarnya cukup **27–33 detik**. Rumus lama over-estimate kebutuhan
 Utara, dan siklus totalnya jadi jauh lebih panjang dari yang perlu
 (144 detik vs 93–105 detik) — **siklus yang lebih pendek berarti
 kendaraan tidak menunggu selama itu untuk gilirannya**, itu sebabnya
-delay turun cukup besar (21,42 → 13,43 detik, LOS C → B).
+delay turun cukup besar (21,42 → 13,32 detik, LOS C → B).
 
 ## 7. Kalimat siap-jawab untuk juri
 
@@ -519,14 +548,15 @@ delay turun cukup besar (21,42 → 13,43 detik, LOS C → B).
 > ekivalensi standar, lalu waktu hijau dibagi proporsional terhadap
 > Flow Ratio tiap lengan. 'Aggressive' menambahkan koreksi PKJI untuk
 > lengan yang Degree of Saturation-nya di atas ambang 0,85. Arus jenuh
-> tiap lengan dihitung dari **lebar efektif hasil survei lapangan
-> Simpang Pingit** (8,2 / 7,6 / 7,0 / 7,5 meter untuk Utara/Timur/
-> Selatan/Barat), bukan lagi asumsi rata-rata. Satu-satunya bagian yang
-> masih asumsi adalah faktor penyesuaian lanjutan PKJI (gesekan
-> samping, kelandaian, parkir, belok) yang kami set 1,0 karena belum
-> ada survei kondisi jalan tambahan itu. Baseline sengaja tidak diubah
-> karena dipakai sebagai pembanding 'sebelum dioptimasi' di seluruh
-> sistem."
+> tiap lengan diambil langsung dari **studi lapangan Simpang Pingit
+> yang sudah pernah dipublikasikan** (Ramadhani, Sutrisno & Yasin,
+> jurnal Renovasi UST Yogyakarta) — 5.212/4.490/3.652/3.843 smp/jam
+> untuk Utara/Timur/Selatan/Barat, sudah termasuk faktor penyesuaian
+> lapangan asli, bukan lagi kami hitung sendiri dari asumsi lebar
+> jalan. Satu-satunya bagian yang masih murni asumsi adalah kami tidak
+> mengukur ulang kondisi jalan itu sendiri di 2026 — kami pakai apa
+> adanya dari studi 2016 tersebut. Baseline sengaja tidak diubah karena
+> dipakai sebagai pembanding 'sebelum dioptimasi' di seluruh sistem."
 
 ## 8. Verifikasi
 

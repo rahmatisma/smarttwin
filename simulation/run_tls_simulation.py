@@ -583,6 +583,129 @@ def loadTrafficState():
 
 
 # ============================================================
+# AVERAGED TRAFFIC STATE -- KHUSUS MASUKAN PKJI
+#
+# Satu jendela CV 5 detik (loadTrafficState() di atas) terlalu sensitif
+# untuk diekstrapolasi jadi laju per jam yang dibutuhkan rumus PKJI --
+# 1 kendaraan tambahan di 1 jendela = +720 smp/jam dalam perkiraan.
+# Diukur langsung lewat 538 kondisi CV asli (5 September 2026): 193 pola
+# hijau unik saja dari 538 kondisi berbeda, 43% di antaranya cuma 3 pola
+# yang sama -- gejalanya kelihatan di halaman Riwayat sebagai keputusan
+# yang "sama semua". Lihat docs/hasil-implementasi-pkji-aggressive-
+# balanced.md bagian 5.3.
+#
+# Perbaikannya: rata-ratakan kendaraan per lengan dari beberapa menit
+# terakhir (bukan 1 jendela sesaat) SEBELUM dihitung jadi smp/jam.
+# Cuma dipakai untuk parameter pkji_traffic_state di
+# ScenarioEngine.recommend_full_cycle() -- baseline (RuleBasedEngine)
+# TETAP baca loadTrafficState() 1 jendela terbaru seperti biasa, tidak
+# ikut berubah.
+# ============================================================
+
+PKJI_AVERAGE_WINDOW_MINUTES = 2.0
+PKJI_AVERAGE_WINDOW_SECONDS = 5  # sama dengan DEFAULT_WINDOW_SECONDS CV
+
+
+class _AveragedApproachState:
+    """Bentuk minimal yang dibutuhkan PKJI (lihat pkji_flow_smp_per_hour()
+    di scenario_generator.py) -- duck-typed, bukan pydantic ApproachState,
+    supaya rata-rata boleh pecahan (mis. 2,5 mobil), bukan dipaksa bulat
+    sebelum masuk rumus."""
+
+    def __init__(self, approach: str, car: float, motorcycle: float, bus: float, truck: float):
+        self.approach = approach
+        self.carCount = car
+        self.motorcycleCount = motorcycle
+        self.busCount = bus
+        self.truckCount = truck
+
+
+class _AveragedTrafficState:
+    def __init__(self, approaches: list[_AveragedApproachState], windowCount: int):
+        self.approaches = approaches
+        self.windowCount = windowCount  # dipakai print_averaged_state() di bawah
+
+
+def loadAveragedTrafficState(
+    minutes: float = PKJI_AVERAGE_WINDOW_MINUTES,
+):
+    """
+    Rata-rata kendaraan per lengan dari beberapa jendela 5 detik terakhir
+    (default 2 menit = 24 jendela) -- lihat catatan di atas kenapa ini
+    perlu, terpisah dari loadTrafficState().
+
+    None kalau tidak ada data sama sekali (mis. database kosong) --
+    pemanggil harus jatuh ke perilaku lama (traffic_state=state) kalau
+    ini None, bukan crash.
+    """
+
+    printHeader(
+        "LOADING AVERAGED TRAFFIC STATE (PKJI)"
+    )
+
+    windowCount = max(
+        1,
+        round(minutes * 60 / PKJI_AVERAGE_WINDOW_SECONDS),
+    )
+
+    builder = TrafficStateBuilder(
+        TrafficStateBuilderConfig(windowSeconds=PKJI_AVERAGE_WINDOW_SECONDS)
+    )
+
+    states = builder.buildFromSupabase(
+        intersectionId,
+        limit=windowCount,
+        save=False,
+    )
+
+    if not states:
+        print("Tidak ada TrafficState untuk dirata-ratakan.")
+        return None
+
+    # buildFromSupabase() urut windowStart TERBARU DULU (desc) -- states[0]
+    # menentukan lengan mana saja yang harus ada di hasil rata-rata, supaya
+    # tetap 4 lengan walau jendela lebih lama sempat kehilangan salah satu.
+    sums: dict[str, dict[str, float]] = {}
+    counts: dict[str, int] = {}
+    for builtState in states:
+        for approach in builtState.approaches:
+            bucket = sums.setdefault(
+                approach.approach,
+                {"car": 0.0, "motorcycle": 0.0, "bus": 0.0, "truck": 0.0},
+            )
+            bucket["car"] += approach.carCount
+            bucket["motorcycle"] += approach.motorcycleCount
+            bucket["bus"] += approach.busCount
+            bucket["truck"] += approach.truckCount
+            counts[approach.approach] = counts.get(approach.approach, 0) + 1
+
+    averagedApproaches = [
+        _AveragedApproachState(
+            approach=approachName,
+            car=bucket["car"] / counts[approachName],
+            motorcycle=bucket["motorcycle"] / counts[approachName],
+            bus=bucket["bus"] / counts[approachName],
+            truck=bucket["truck"] / counts[approachName],
+        )
+        for approachName, bucket in sums.items()
+    ]
+
+    print(
+        f"Jendela diminta: {windowCount} ({minutes} menit) | "
+        f"Jendela tersedia: {len(states)} | "
+        f"Lengan: {[a.approach for a in averagedApproaches]}"
+    )
+    for a in averagedApproaches:
+        print(
+            f"  {a.approach:8s} rata-rata/jendela: "
+            f"mobil={a.carCount:.2f} motor={a.motorcycleCount:.2f} "
+            f"bus={a.busCount:.2f} truk={a.truckCount:.2f}"
+        )
+
+    return _AveragedTrafficState(averagedApproaches, len(states))
+
+
+# ============================================================
 # EXTRACT TRAFFIC STATE ID
 # ============================================================
 

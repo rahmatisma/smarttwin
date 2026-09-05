@@ -21,6 +21,7 @@ from forecast_client import ForecastClient
 from run_tls_simulation import (
     approachToPhase,
     connectSupabase,
+    loadAveragedTrafficState,
     loadTrafficState,
     runSimulation,
     sumoBinary,
@@ -175,19 +176,36 @@ def _make_engine(short_sim_steps: int | None = None) -> ScenarioEngine:
 
 
 def evaluate_state(state, *, forecast=None, full_cycle: bool = False,
-                   simulation_steps: int | None = None) -> dict[str, Any]:
-    """Evaluasi satu state; fungsi ini tidak menyentuh cache/database."""
+                   simulation_steps: int | None = None,
+                   pkji_traffic_state=None) -> dict[str, Any]:
+    """
+    Evaluasi satu state; fungsi ini tidak menyentuh cache/database.
+
+    pkji_traffic_state -- kalau diberikan, dipakai KHUSUS untuk kandidat
+    aggressive/balanced (PKJI) alih-alih `state` (satu jendela 5 detik).
+    Lihat catatan di run_tls_simulation.py::loadAveragedTrafficState()
+    kenapa ini perlu. `state` (baseline) tidak terpengaruh sama sekali.
+    """
     engine = _make_engine(simulation_steps)
-    recommend_method = (
-        engine.recommend_full_cycle if full_cycle else engine.recommend
-    )
-    recommendation = recommend_method(
-        state=state,
-        currentGreenSeconds=15,
-        currentPhase="south",
-        forecast=forecast,
-        forecastWeight=0.3,
-    )
+    if full_cycle:
+        recommendation = engine.recommend_full_cycle(
+            state=state,
+            currentGreenSeconds=15,
+            currentPhase="south",
+            forecast=forecast,
+            forecastWeight=0.3,
+            pkji_traffic_state=pkji_traffic_state,
+        )
+    else:
+        # Jalur satu-lengan lama, tidak (belum) memakai PKJI sama sekali --
+        # pkji_traffic_state sengaja tidak dikirim ke sini.
+        recommendation = engine.recommend(
+            state=state,
+            currentGreenSeconds=15,
+            currentPhase="south",
+            forecast=forecast,
+            forecastWeight=0.3,
+        )
     winner = engine.last_winner
     if winner is None:
         raise RuntimeError("ScenarioEngine tidak menghasilkan kandidat pemenang.")
@@ -413,6 +431,7 @@ def evaluate_once(
     full_cycle: bool = False,
     replay: "ReplaySource | None" = None,
 ) -> dict[str, Any]:
+    pkji_traffic_state = None
     if replay is not None:
         state, posisi, total = replay.next()
         print(
@@ -421,13 +440,23 @@ def evaluate_once(
         )
         # Forecast dilewati di mode replay -- forecast_client membaca
         # kondisi TERBARU (bukan yang sedang diputar), jadi ikut sertakan
-        # forecast di sini akan mencampur dua kerangka waktu berbeda.
+        # forecast di sini akan mencampur dua kerangka waktu berbeda. Alasan
+        # yang sama membuat rata-rata PKJI juga dilewati di sini -- replay
+        # meloncat ke trafficStateId tertentu yang tidak selalu berurutan
+        # dengan window "2 menit terakhir" versi live, jadi tetap pakai
+        # `state` satu jendela seperti sebelumnya (perilaku lama).
         forecast = None
     else:
         state = loadTrafficState()
         forecast = ForecastClient().get_live_forecast()
+        pkji_traffic_state = loadAveragedTrafficState()
 
-    payload = evaluate_state(state, forecast=forecast, full_cycle=full_cycle)
+    payload = evaluate_state(
+        state,
+        forecast=forecast,
+        full_cycle=full_cycle,
+        pkji_traffic_state=pkji_traffic_state,
+    )
 
     if replay is not None:
         # Ditandai jujur, bukan disamarkan seolah realtime -- sama seperti
