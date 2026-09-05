@@ -867,7 +867,7 @@ export default function DashboardPage() {
   }, [allNotifications]);
   
   // Floating notifications handler (mark as read on dismiss)
-  const dismissNotification = (id: number) => {
+  const dismissNotification = (id: string) => {
     markAsRead(id);
   };
 

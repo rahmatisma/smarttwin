@@ -226,3 +226,4 @@ async def shutdown_services():
     # setelah Ctrl+C, baru tutup koneksi HTTP eksternal.
     simulation_service.stop_all()
     await close_hf_client()
+

@@ -24,7 +24,7 @@ def get_notifications():
 
 
 @router.patch("/{notification_id}/read")
-def mark_notification_as_read(notification_id: int):
+def mark_notification_as_read(notification_id: str):
     try:
         data = notification_service.mark_as_read(notification_id)
         if not data:

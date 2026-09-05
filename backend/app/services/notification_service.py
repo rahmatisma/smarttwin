@@ -6,17 +6,17 @@ class NotificationService:
         res = (
             supabase.table("notifications")
             .select("*")
-            .order("createdAt", desc=True)
+            .order("created_at", desc=True)
             .limit(limit)
             .execute()
         )
         return res.data or []
 
-    def mark_as_read(self, notification_id: int):
+    def mark_as_read(self, notification_id: str):
         supabase = get_supabase()
         res = (
             supabase.table("notifications")
-            .update({"isRead": True})
+            .update({"is_read": True})
             .eq("id", notification_id)
             .execute()
         )
@@ -30,7 +30,7 @@ class NotificationService:
             existing = (
                 supabase.table("notifications")
                 .select("id")
-                .eq("referenceId", reference_id)
+                .eq("reference_id", reference_id)
                 .eq("type", type)
                 .limit(1)
                 .execute()
@@ -43,10 +43,10 @@ class NotificationService:
             "title": title,
             "message": message,
             "severity": severity,
-            "isRead": False,
+            "is_read": False,
         }
         if reference_id:
-            payload["referenceId"] = reference_id
+            payload["reference_id"] = reference_id
             
         res = supabase.table("notifications").insert(payload).execute()
         return res.data[0] if res.data else None

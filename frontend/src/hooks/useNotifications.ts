@@ -1,7 +1,7 @@
 import useSWR from "swr";
 
 export interface Notification {
-  id: number;
+  id: string;
   type: string;
   title: string;
   message: string;
@@ -23,7 +23,7 @@ export function useNotifications() {
   const notifications = data?.data || [];
   const unreadCount = notifications.filter((n) => !n.isRead).length;
 
-  const markAsRead = async (id: number) => {
+  const markAsRead = async (id: string) => {
     try {
       await fetch(`http://127.0.0.1:8000/api/v1/notifications/${id}/read`, {
         method: "PATCH",
