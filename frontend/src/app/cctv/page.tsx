@@ -12,7 +12,8 @@ import {
 import Sidebar from "@/components/Sidebar";
 import Header from "@/components/Header";
 
-import { fetchCameras, DEFAULT_INTERSECTION_ID } from "@/lib/supabaseData";
+import { fetchCameras, fetchIntersectionCoords, fetchTrafficState, DEFAULT_INTERSECTION_ID } from "@/lib/supabaseData";
+import { type ApproachSelection } from "@/lib/intersections";
 
 type SourceType = "file" | "url" | "rtsp";
 type Approach = "north" | "south" | "east" | "west";
@@ -144,6 +145,9 @@ export default function CCTVPage() {
     const [loading, setLoading] = useState(true);
     const [showModal, setShowModal] = useState(false);
     const [search, setSearch] = useState("");
+    const [selectedApproach, setSelectedApproach] = useState<ApproachSelection>("all");
+    const [coords, setCoords] = useState<string>("Koordinat belum tersedia");
+    const [lastUpdated, setLastUpdated] = useState<string | number | undefined>(undefined);
     const [form, setForm] = useState(EMPTY_FORM);
     const [saving, setSaving] = useState(false);
     const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -222,6 +226,36 @@ export default function CCTVPage() {
         };
     }, [loadCameras]);
 
+    useEffect(() => {
+        let cancelled = false;
+
+        async function fetchHeaderData() {
+            try {
+                const [c, traffic] = await Promise.all([
+                    fetchIntersectionCoords(DEFAULT_INTERSECTION_ID),
+                    fetchTrafficState(DEFAULT_INTERSECTION_ID),
+                ]);
+
+                if (!cancelled) {
+                    if (c?.latitude && c?.longitude) {
+                        setCoords(`${c.latitude}, ${c.longitude}`);
+                    }
+                    if (traffic) {
+                        setLastUpdated(traffic.matchedCvTime ?? traffic.windowEnd);
+                    }
+                }
+            } catch (error) {
+                console.error("Gagal mengambil data header:", error);
+            }
+        }
+
+        fetchHeaderData();
+
+        return () => {
+            cancelled = true;
+        };
+    }, []);
+
     // =====================================================
     // SEARCH
     // =====================================================
@@ -229,11 +263,17 @@ export default function CCTVPage() {
     const filteredCameras = useMemo(() => {
         const keyword = search.trim().toLowerCase();
 
-        if (!keyword) {
-            return cameras;
+        let filtered = cameras;
+
+        if (selectedApproach !== "all") {
+            filtered = filtered.filter((c) => c.approach === selectedApproach);
         }
 
-        return cameras.filter((camera) => {
+        if (!keyword) {
+            return filtered;
+        }
+
+        return filtered.filter((camera) => {
             const data = [
                 camera.name,
                 camera.intersection,
@@ -245,7 +285,7 @@ export default function CCTVPage() {
 
             return data.includes(keyword);
         });
-    }, [cameras, search]);
+    }, [cameras, search, selectedApproach]);
 
     // =====================================================
     // FILE UPLOAD
@@ -513,8 +553,11 @@ export default function CCTVPage() {
 
                 {/* HEADER */}
                 <Header
+                    selectedApproach={selectedApproach}
+                    onApproachChange={setSelectedApproach}
                     locationName="simpang4-pingit"
-                    coords="Koordinat belum tersedia"
+                    coords={coords}
+                    lastUpdated={lastUpdated}
                 />
 
                 {/* MAIN CONTENT */}

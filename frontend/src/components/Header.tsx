@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { Bell, MapPin } from "lucide-react";
+import { useNotifications } from "@/hooks/useNotifications";
 import {
   APPROACH_OPTIONS,
   type ApproachSelection,
@@ -21,6 +22,7 @@ export default function Header({
   lastUpdated?: string | number;
 }) {
   const router = useRouter();
+  const { unreadCount } = useNotifications();
 
   // Local clock removed in favor of CV data Last Updated timestamp
 
@@ -83,7 +85,11 @@ export default function Header({
           title="Notifikasi"
         >
           <Bell className="h-4 w-4" />
-          <span className="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-signal-amber" />
+          {unreadCount > 0 && (
+            <span className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full bg-signal-red text-[10px] font-bold text-white">
+              {unreadCount > 9 ? "9+" : unreadCount}
+            </span>
+          )}
         </button>
       </div>
     </header>

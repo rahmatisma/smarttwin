@@ -47,12 +47,6 @@ class SumoController:
     SIMULATION_DIR = PROJECT_ROOT / "simulation"
     SIMULATION_VENV_DIR = SIMULATION_DIR / ".venv"
 
-    # SENGAJA pakai sys.prefix (venv Python yang lagi jalan), bukan
-    # hardcode ke simulation/.venv -- sejak backend, simulation, dan
-    # decision_engine digabung jadi satu venv di root repo (30 Agustus
-    # 2026), requirements.txt root sudah mendeklarasikan
-    # traci/sumolib/eclipse-sumo, jadi sys.prefix selalu benar tidak
-    # peduli dari venv mana proses ini dijalankan.
     SUMO_VENV_DIR = Path(sys.prefix)
 
     SUMO_SCRIPTS_DIR = SUMO_VENV_DIR / "Scripts"
@@ -74,23 +68,10 @@ class SumoController:
         / "simpang4_pingit.sumocfg"
     )
 
-    # Screenshot harus dibuat langsung pada rasio card dashboard. Mengandalkan
-    # ukuran window SUMO-GUI menghasilkan viewport sekitar 950x278 di Windows;
-    # ketika di-stretch oleh browser hasilnya terlihat pecah.
-    # 1080p menjaga marka, kendaraan, dan tepi jalan tetap tajam ketika
-    # frame dibentangkan ke monitor fullscreen. Rasio tetap 16:9.
     STREAM_FRAME_WIDTH = 1920
     STREAM_FRAME_HEIGHT = 1080
 
-    # Area kamera ketat di sekitar simpang supaya framing mirip CCTV asli.
-    # Format override: xmin,ymin,xmax,ymax, contoh di .env.example (root repo).
-    # Kendaraan disisipkan dengan departPos="last" (lihat add_vehicle) supaya
-    # antrean menumpuk dari mulut simpang ke belakang dan tetap masuk crop --
-    # bukan tersebar jauh di ruas pendekat Selatan yang 515 m di peta OSM.
     DEFAULT_STREAM_VIEW_BOUNDARY = (240.63, 479.635, 380.63, 558.385)
-    # Cukup lebar untuk memperlihatkan ruas pendekat, tetapi tidak sampai
-    # Zoom fullscreen 70%: boundary diperbesar 1/0,70 agar jaringan tampak
-    # sekitar 70% dari ukuran compact, sementara frame tetap memenuhi layar.
     FULLSCREEN_VIEW_SCALE = 1.43
 
     # Berapa lama clock CCTV (dan penguncian fase TLS ke situ) masih dianggap

@@ -41,7 +41,7 @@ import DonutRing from "./DonutRing";
  * >=5 (sekitar median ke atas) = Sedang.
  */
 
-function congestionFromDensity(avgDensity: number): {
+export function congestionFromDensity(avgDensity: number): {
   label: string;
   color: "red" | "amber" | "green";
 } {
