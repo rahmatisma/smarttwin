@@ -594,7 +594,7 @@ export default function DigitalTwinPanel({
       <div
         ref={simulationViewRef}
         className={`relative w-full overflow-hidden bg-[var(--color-canvas)] ${
-          isFullscreen ? "h-screen" : "aspect-[16/11] rounded-md"
+          isFullscreen ? "h-screen" : "aspect-[4/3] rounded-md"
         }`}
       >
         {simRunning ? (

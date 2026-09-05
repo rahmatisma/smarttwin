@@ -77,10 +77,8 @@ class SumoController:
     # Screenshot harus dibuat langsung pada rasio card dashboard. Mengandalkan
     # ukuran window SUMO-GUI menghasilkan viewport sekitar 950x278 di Windows;
     # ketika di-stretch oleh browser hasilnya terlihat pecah.
-    # 1080p menjaga marka, kendaraan, dan tepi jalan tetap tajam ketika
-    # frame dibentangkan ke monitor fullscreen. Rasio tetap 16:9.
-    STREAM_FRAME_WIDTH = 1920
-    STREAM_FRAME_HEIGHT = 1080
+    STREAM_FRAME_WIDTH = 1280
+    STREAM_FRAME_HEIGHT = 720
 
     # Area kamera ketat di sekitar simpang supaya framing mirip CCTV asli.
     # Format override: xmin,ymin,xmax,ymax, contoh di .env.example (root repo).

@@ -127,36 +127,74 @@ const colorClasses: Record<
 
 function StatCard({
   icon,
+  iconClassName,
   label,
   value,
   unit,
+  caption,
+  progress,
 }: {
   icon: React.ReactNode;
+  // bg + text tetap (bukan token tema) -- dipakai sebagai aksen warna kartu,
+  // bukan warna semantik status, jadi sengaja sama di tema gelap/terang.
+  iconClassName?: string;
   label: string;
   value: string;
   unit?: string;
+  // Info tambahan yang REAL (mis. lengan mana yang jadi sumber angka ini),
+  // bukan angka rekaan -- lihat progress di bawah soal kenapa kartu ini
+  // tidak selalu punya progress bar.
+  caption?: string;
+  // 0-100. Cuma diisi kalau ada basis yang sudah dipercaya di tempat lain
+  // (mis. congestionPct dipakai juga oleh DonutRing) -- tidak dibikin-bikin
+  // dari "kapasitas" yang tidak pernah didefinisikan mana pun di codebase.
+  progress?: { value: number; colorHex: string };
 }) {
   return (
-    <div className="flex flex-1 items-center gap-3 rounded-lg border border-border bg-surface px-4 py-3">
-      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-surface-2 text-text-secondary">
-        {icon}
-      </div>
-
-      <div className="min-w-0">
-        <div className="text-xs text-text-secondary">
-          {label}
+    <div className="flex flex-1 flex-col gap-2.5 rounded-lg border border-border bg-surface px-4 py-3">
+      <div className="flex items-center gap-3">
+        <div
+          className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${
+            iconClassName ?? "bg-surface-2 text-text-secondary"
+          }`}
+        >
+          {icon}
         </div>
 
-        <div className="font-mono text-lg font-semibold tabular-nums text-text">
-          {value}
+        <div className="min-w-0">
+          <div className="text-xs text-text-secondary">
+            {label}
+          </div>
 
-          {unit && (
-            <span className="ml-1 text-xs font-normal text-text-muted">
-              {unit}
-            </span>
-          )}
+          <div className="font-mono text-lg font-semibold tabular-nums text-text">
+            {value}
+
+            {unit && (
+              <span className="ml-1 text-xs font-normal text-text-muted">
+                {unit}
+              </span>
+            )}
+          </div>
         </div>
       </div>
+
+      {progress && (
+        <div className="h-1.5 w-full overflow-hidden rounded-full bg-surface-2">
+          <div
+            className="h-full rounded-full transition-all duration-500"
+            style={{
+              width: `${Math.min(100, Math.max(0, progress.value))}%`,
+              backgroundColor: progress.colorHex,
+            }}
+          />
+        </div>
+      )}
+
+      {caption && (
+        <div className="truncate text-[10px] text-text-muted">
+          {caption}
+        </div>
+      )}
     </div>
   );
 }
@@ -232,6 +270,32 @@ export default function StatsRow({
 
   /*
    * =========================================================
+   * LENGAN TERSIBUK (utk caption StatCard)
+   * =========================================================
+   *
+   * Bukan angka baru -- cuma menunjuk approach mana yang jadi sumber
+   * totalVolume/maxQueue di atas, dari data yang sama.
+   */
+
+  const APPROACH_LABEL: Record<string, string> = {
+    north: "Utara",
+    south: "Selatan",
+    east: "Timur",
+    west: "Barat",
+  };
+
+  const busiestByDensity =
+    approaches.length > 0
+      ? approaches.reduce((a, b) => (b.densityIndex > a.densityIndex ? b : a))
+      : null;
+
+  const busiestByQueue =
+    approaches.length > 0
+      ? approaches.reduce((a, b) => (b.queueLengthMEst > a.queueLengthMEst ? b : a))
+      : null;
+
+  /*
+   * =========================================================
    * AVERAGE DENSITY INDEX
    * =========================================================
    *
@@ -296,8 +360,14 @@ export default function StatsRow({
 
       <StatCard
         icon={<Car className="h-4 w-4" />}
+        iconClassName="bg-blue-500/15 text-blue-500"
         label="Total Kendaraan"
         value={hasData ? totalVolume.toLocaleString("id-ID") : "No data"}
+        caption={
+          hasData && busiestByDensity
+            ? `Terpadat: ${APPROACH_LABEL[busiestByDensity.approach] ?? busiestByDensity.approach}`
+            : undefined
+        }
       />
 
       {/* =====================================================
@@ -306,9 +376,15 @@ export default function StatsRow({
 
       <StatCard
         icon={<Milestone className="h-4 w-4" />}
+        iconClassName="bg-orange-500/15 text-orange-500"
         label="Antrean Terpanjang"
         value={hasData ? maxQueue.toFixed(1) : "No data"}
         unit={hasData ? "m" : undefined}
+        caption={
+          hasData && busiestByQueue
+            ? `Lengan: ${APPROACH_LABEL[busiestByQueue.approach] ?? busiestByQueue.approach}`
+            : undefined
+        }
       />
 
       {/* =====================================================
@@ -317,8 +393,11 @@ export default function StatsRow({
 
       <StatCard
         icon={<PieChart className="h-4 w-4" />}
+        iconClassName="bg-purple-500/15 text-purple-500"
         label="Indeks Kepadatan"
         value={hasData ? avgDensity.toFixed(1) : "No data"}
+        progress={hasData ? { value: congestionPct, colorHex: c.hex } : undefined}
+        caption={hasData ? `Status: ${congestion.label}` : undefined}
       />
 
       {/* =====================================================

@@ -553,7 +553,7 @@ export default function DigitalTwinView() {
                     <div
                         ref={simulationViewRef}
                         className={`overflow-hidden border border-border bg-surface shadow-sm ${
-                            isFullscreen ? "flex h-screen flex-col" : "flex flex-col h-full rounded-2xl"
+                            isFullscreen ? "flex h-screen flex-col" : "rounded-2xl"
                         }`}
                     >
 
@@ -597,7 +597,7 @@ export default function DigitalTwinView() {
                         {/* Simulation area */}
 
                         <div className={`relative w-full overflow-hidden bg-[var(--color-canvas)] ${
-                            isFullscreen ? "min-h-0 flex-1" : "aspect-[16/11]"
+                            isFullscreen ? "min-h-0 flex-1" : "aspect-[4/3]"
                         }`}>
 
                             {/* SUMO-GUI Live Stream */}
@@ -697,7 +697,7 @@ export default function DigitalTwinView() {
                     {/* SIMULATION STATUS */}
                     {/* =============================== */}
 
-                    <div className="flex flex-col gap-5 h-full">
+                    <div className="space-y-5">
 
                         {/* Status */}
 
@@ -791,7 +791,7 @@ export default function DigitalTwinView() {
                         {/* SIMULATION CONTROLS */}
                         {/* =============================== */}
 
-                        <div className="flex flex-col flex-1 rounded-2xl border border-border bg-surface p-5 shadow-sm">
+                        <div className="rounded-2xl border border-border bg-surface p-5 shadow-sm">
 
                             <div className="mb-5 flex items-center gap-3">
 

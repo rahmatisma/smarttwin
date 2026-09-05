@@ -36,18 +36,30 @@ body {
 }
 
 :root[data-theme="light"] {
-  --color-bg: #f5f7fa;
+  --color-bg: #eef2f9;
   --color-surface: #ffffff;
   --color-surface-2: #eef2f6;
-  --color-border: #d8dee8;
+  --color-border: #dce3ee;
   --color-text: #17202b;
   --color-text-secondary: #526071;
   --color-text-muted: #788596;
-  --color-accent-dim: #dff3fc;
+  --color-accent: #2563eb;
+  --color-accent-dim: #dbeafe;
   --color-canvas: #dfe5e8;
   --color-road: #3f464a;
   --color-road-center: #454d51;
   --color-canvas-grid: rgba(71, 85, 105, 0.2);
+  --shadow-card: 0 1px 2px rgba(15, 23, 42, 0.04), 0 8px 20px -4px rgba(30, 64, 175, 0.14);
+}
+
+/* Kartu tema gelap pakai border tipis (flat, sesuai tampilan asli). Tema
+   terang meniru gaya mockup poster: kartu putih mengambang pakai shadow
+   biru lembut, bukan garis tepi -- diterapkan lewat kombinasi class yang
+   SUDAH dipakai di semua kartu (bg-surface + border-border), jadi tidak
+   perlu menyentuh className di tiap komponen satu-satu. */
+:root[data-theme="light"] .bg-surface.border-border {
+  border-color: transparent;
+  box-shadow: var(--shadow-card);
 }
 
 body {

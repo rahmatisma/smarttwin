@@ -1,11 +1,12 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { Bell, MapPin } from "lucide-react";
+import { Bell, MapPin, Sun, Moon } from "lucide-react";
 import {
   APPROACH_OPTIONS,
   type ApproachSelection,
 } from "@/lib/intersections";
+import { useTheme } from "@/context/ThemeContext";
 
 export default function Header({
   locationName,
@@ -21,6 +22,7 @@ export default function Header({
   lastUpdated?: string | number;
 }) {
   const router = useRouter();
+  const { theme, toggleTheme } = useTheme();
 
   // Local clock removed in favor of CV data Last Updated timestamp
 
@@ -75,6 +77,15 @@ export default function Header({
             Data belum tersedia
           </span>
         )}
+        <button
+          type="button"
+          onClick={toggleTheme}
+          className="flex h-8 w-8 items-center justify-center rounded-md border border-border text-text-secondary hover:text-text"
+          aria-label={theme === "dark" ? "Aktifkan tema terang" : "Aktifkan tema gelap"}
+          title={theme === "dark" ? "Tema terang" : "Tema gelap"}
+        >
+          {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+        </button>
         <button
           type="button"
           onClick={() => router.push("/settings?section=notifications")}

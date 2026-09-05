@@ -665,20 +665,24 @@ export default function CameraFeedPanel({
                         void event.currentTarget.play();
                         return;
                       }
-                      // Video sumber sudah habis -- bekukan timeline di posisi
-                      // akhir. JANGAN diputar ulang dari 0: itu yang bikin jam
-                      // durasi kelihatan "mengulang" padahal videonya belum
-                      // benar-benar selesai diputar ulang secara wajar.
+                      // Rekaman demo adalah sumber realtime terbatas. Setelah
+                      // master habis, mulai sesi 42 menit berikutnya dari awal;
+                      // videoTime=0 juga membuat fetchTrafficState() kembali
+                      // memilih window pertama batch Supabase.
                       if (camera.id !== cameras[0]?.id) return;
-                      timelineRef.current.paused = true;
-                      anchorTimeline(timelineRef.current, event.currentTarget.currentTime);
+                      timelineRef.current.paused = false;
+                      anchorTimeline(timelineRef.current, 0);
                       persistTimeline(
-                        timelineRef.current.time,
-                        true,
+                        0,
+                        false,
                         timelineRef.current.updatedAt,
                         timelineRef.current.backendInstanceId
                       );
-                      syncVideos();
+                      videoRefs.current.forEach((video) => {
+                        video.currentTime = 0;
+                        void video.play().catch(() => undefined);
+                      });
+                      onTimeUpdate?.(0, event.currentTarget.duration);
                     }}
                     onPause={(event) => {
                       if (isInspectionMode) return;

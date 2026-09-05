@@ -31,6 +31,7 @@ from app.api.routes.health import router as health_router
 from app.api.routes.history import router as history_router
 from app.api.routes.digital_twin import router as digital_twin_router
 from app.services.simulation_service import simulation_service
+from app.services.scenario_worker_service import scenario_worker_service
 
 
 logger = logging.getLogger("uvicorn.error")
@@ -38,12 +39,15 @@ logger = logging.getLogger("uvicorn.error")
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
+    if settings.scenario_worker_autostart:
+        scenario_worker_service.start(settings.scenario_worker_interval_seconds)
     try:
         yield
     finally:
         # Tutup thread/TraCI lebih dahulu agar proses SUMO tidak tertinggal,
         # baru tutup koneksi HTTP eksternal.
-        simulation_service.stop()
+        simulation_service.stop_all()
+        scenario_worker_service.stop()
         await close_hf_client()
 
 
