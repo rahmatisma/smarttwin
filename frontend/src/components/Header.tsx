@@ -2,6 +2,7 @@
 
 import { useRouter, usePathname } from "next/navigation";
 import { Bell, MapPin, Sun, Moon } from "lucide-react";
+import { useNotifications } from "@/hooks/useNotifications";
 import {
   APPROACH_OPTIONS,
   type ApproachSelection,
@@ -22,6 +23,7 @@ export default function Header({
   lastUpdated?: string | number;
 }) {
   const router = useRouter();
+  const { unreadCount } = useNotifications();
   const pathname = usePathname();
   const pageTitle = pathname === "/" || pathname.startsWith("/dashboard") ? "Dashboard" : pathname.startsWith("/digitaltwin") ? "Digital Twin" : pathname.startsWith("/cctv") ? "Pemantauan CCTV" : pathname.startsWith("/history") ? "Riwayat Keputusan" : "SmartTwin";
   const { theme, toggleTheme } = useTheme();
@@ -96,7 +98,11 @@ export default function Header({
           title="Notifikasi"
         >
           <Bell className="h-4 w-4" />
-          <span className="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-signal-amber" />
+          {unreadCount > 0 && (
+            <span className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full bg-signal-red text-[10px] font-bold text-white">
+              {unreadCount > 9 ? "9+" : unreadCount}
+            </span>
+          )}
         </button>
       </div>
     </header>

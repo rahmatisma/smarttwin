@@ -86,15 +86,7 @@ class SumoController:
     STREAM_FRAME_WIDTH = 1280
     STREAM_FRAME_HEIGHT = 720
 
-    # Area kamera ketat di sekitar simpang supaya framing mirip CCTV asli.
-    # Format override: xmin,ymin,xmax,ymax, contoh di .env.example (root repo).
-    # Kendaraan disisipkan dengan departPos="last" (lihat add_vehicle) supaya
-    # antrean menumpuk dari mulut simpang ke belakang dan tetap masuk crop --
-    # bukan tersebar jauh di ruas pendekat Selatan yang 515 m di peta OSM.
     DEFAULT_STREAM_VIEW_BOUNDARY = (240.63, 479.635, 380.63, 558.385)
-    # Cukup lebar untuk memperlihatkan ruas pendekat, tetapi tidak sampai
-    # Zoom fullscreen 70%: boundary diperbesar 1/0,70 agar jaringan tampak
-    # sekitar 70% dari ukuran compact, sementara frame tetap memenuhi layar.
     FULLSCREEN_VIEW_SCALE = 1.43
 
     # Berapa lama clock CCTV (dan penguncian fase TLS ke situ) masih dianggap
