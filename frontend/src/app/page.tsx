@@ -8,10 +8,8 @@ import DashboardWelcome from "@/components/DashboardWelcome";
 import StatsRow, { congestionFromDensity } from "@/components/StatsRow";
 import DigitalTwinPanel from "@/components/DigitalTwinPanel";
 import CameraFeedPanel from "@/components/CameraFeedPanel";
-import { useNotifications } from "@/hooks/useNotifications";
 import SharedSignalPanels from "@/components/SharedSignalPanels";
 import ForecastChart from "@/components/ForecastChart";
-import { Bell, X, AlertTriangle } from "lucide-react";
 
 import {
   fetchTrafficState,
@@ -863,24 +861,6 @@ export default function DashboardPage() {
   }, [allTrafficStates, selectedApproach]);
 
   /*
-   * =========================================================
-   * NOTIFICATION LOGIC
-   * =========================================================
-   */
-  const { notifications: allNotifications, markAsRead } = useNotifications();
-  // Filter for unread notifications to display as floating
-  const floatingNotifications = useMemo(() => {
-    return allNotifications.filter(n => !n.isRead).slice(0, 3);
-  }, [allNotifications]);
-  
-  // Floating notifications handler (mark as read on dismiss)
-  const dismissNotification = (id: string) => {
-    markAsRead(id);
-  };
-
-  // Dummy notification logic removed, as it's now handled by the backend/scenario_worker.
-
-  /*
    * Approaches dari simpang4-pingit (satu-satunya intersection nyata
    * di database saat ini), difilter berdasarkan lengan yang dipilih
    * di dropdown Header — bukan berdasarkan selectedIntersection.
@@ -1100,24 +1080,6 @@ export default function DashboardPage() {
             />
           </div>
 
-        </div>
-
-        {/* ===================================================
-            NOTIFICATIONS
-            =================================================== */}
-        <div className="fixed bottom-4 right-4 z-50 flex flex-col gap-2">
-          {floatingNotifications.map(notif => (
-            <div key={notif.id} className={`flex max-w-sm items-start gap-3 rounded-lg px-4 py-3 text-white shadow-lg transition-all duration-300 ${notif.type === "recommendation" ? "bg-accent-blue" : "bg-signal-red"}`}>
-              {notif.type === "recommendation" ? <Bell className="mt-0.5 h-5 w-5 shrink-0" /> : <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />}
-              <div className="flex flex-col">
-                <span className="text-sm font-bold">{notif.title}</span>
-                <span className="text-xs font-medium leading-relaxed">{notif.message}</span>
-              </div>
-              <button onClick={() => dismissNotification(notif.id)} className="ml-2 rounded-md p-1 opacity-70 transition-colors hover:bg-white/20 hover:opacity-100">
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-          ))}
         </div>
 
       </div>

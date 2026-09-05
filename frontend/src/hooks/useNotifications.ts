@@ -11,7 +11,31 @@ export interface Notification {
   createdAt: string;
 }
 
-const fetcher = (url: string) => fetch(url).then((res) => res.json());
+type NotificationPayload = Notification & {
+  is_read?: boolean;
+  reference_id?: string;
+  created_at?: string;
+};
+
+const fetcher = async (url: string) => {
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(`Gagal mengambil notifikasi (${response.status})`);
+
+  const payload = (await response.json()) as {
+    success: boolean;
+    data: NotificationPayload[];
+  };
+
+  return {
+    ...payload,
+    data: payload.data.map((notification) => ({
+      ...notification,
+      isRead: notification.isRead ?? notification.is_read ?? false,
+      referenceId: notification.referenceId ?? notification.reference_id,
+      createdAt: notification.createdAt ?? notification.created_at ?? "",
+    })),
+  };
+};
 
 export function useNotifications() {
   const { data, error, mutate } = useSWR<{ success: boolean; data: Notification[] }>(

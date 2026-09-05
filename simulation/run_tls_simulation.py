@@ -7,9 +7,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from dotenv import load_dotenv
-
-
+try:
+    from dotenv import load_dotenv
+except ImportError:
+    def load_dotenv(*args, **kwargs):
+        """Fallback no-op when python-dotenv is not installed."""
+        return None
 # ============================================================
 # PATH
 # ============================================================

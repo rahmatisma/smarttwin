@@ -6,6 +6,8 @@ class NotificationService:
         res = (
             supabase.table("notifications")
             .select("*")
+            .in_("type", ["recommendation", "congestion"])
+            .not_.is_("reference_id", "null")
             .order("created_at", desc=True)
             .limit(limit)
             .execute()

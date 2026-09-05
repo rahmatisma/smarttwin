@@ -4,6 +4,7 @@ import "./globals.css";
 import LanguageProvider from "@/components/LanguageProvider";
 import { ScenarioProvider } from "@/context/ScenarioContext";
 import { ThemeProvider } from "@/context/ThemeContext";
+import GlobalNotifications from "@/components/GlobalNotifications";
 
 export const metadata: Metadata = {
   title: "SmartTwin — Dashboard Simpang",
@@ -36,7 +37,10 @@ export default function RootLayout({
       >
         <ThemeProvider>
           <ScenarioProvider>
-            <LanguageProvider>{children}</LanguageProvider>
+            <LanguageProvider>
+              {children}
+              <GlobalNotifications />
+            </LanguageProvider>
           </ScenarioProvider>
         </ThemeProvider>
       </body>

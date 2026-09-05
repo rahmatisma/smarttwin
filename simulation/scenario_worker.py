@@ -18,7 +18,9 @@ from pathlib import Path
 from typing import Any
 
 from forecast_client import ForecastClient
+import uuid
 from run_tls_simulation import (
+
     approachToPhase,
     connectSupabase,
     loadAveragedTrafficState,
@@ -476,29 +478,89 @@ def evaluate_once(
         
         timestamp = payload["updatedAt"]
         winner_id = payload.get("candidateId", "unknown")
-        rec_phase = payload.get("recommendation", {}).get("recommendedPhase", "unknown")
+        recommendation = payload.get("recommendation") or {}
+        rec_phase = recommendation.get("recommendedPhase", "unknown")
+        approach_labels = {
+            "north": "Utara",
+            "south": "Selatan",
+            "east": "Timur",
+            "west": "Barat",
+        }
+        rec_phase_key = str(rec_phase).lower()
+        cycle_phases = (recommendation.get("cyclePlan") or {}).get("phases") or []
+        selected_phase = next(
+            (
+                phase
+                for phase in cycle_phases
+                if str(phase.get("approach", "")).lower() == rec_phase_key
+            ),
+            {},
+        )
+        green_seconds = selected_phase.get(
+            "greenSeconds", recommendation.get("recommendedGreenSeconds", 0)
+        )
+        traffic_state_id = getattr(state, "trafficStateId", None)
+        recommendation_window = traffic_state_id or getattr(state, "windowEnd", None) or timestamp
+        reference_seed = f"{winner_id}-{rec_phase_key}-{green_seconds}"
+        recommendation_reference = str(uuid.uuid5(uuid.NAMESPACE_URL, reference_seed))
         
         # 1. Recommendation Notification
         if winner_id != "unknown":
-            notification_service.create_notification(
-                type="recommendation",
-                title="Rekomendasi Sinyal Diperbarui",
-                message=f"Sistem menyarankan prioritas lampu hijau untuk lengan {str(rec_phase).upper()} berdasarkan data trafik terbaru.",
-                severity="info",
-                reference_id=f"recommendation-{timestamp}"
-            )
+            # Determine human‑readable phase label
+            phase_label = approach_labels.get(rec_phase_key, rec_phase_key)
+            # Ensure green_seconds is an integer and valid
+            try:
+                green_seconds_int = int(float(green_seconds))
+            except Exception:
+                green_seconds_int = 0
+            if green_seconds_int > 0:
+                # Temporary logging for verification
+                print(
+                    f"[NOTIFICATION] type='recommendation' title='Rekomendasi Durasi Sinyal' "
+                    f"phase={rec_phase_key!r} green_seconds={green_seconds_int!r}"
+                )
+                notification_service.create_notification(
+                    type="recommendation",
+                    title="Rekomendasi Durasi Sinyal",
+                    message=(
+                        f"Simpang 4 Pingit - Fase {phase_label}: durasi hijau yang direkomendasikan {green_seconds_int} detik."
+                    ),
+                    severity="info",
+                    reference_id=recommendation_reference,
+                )
             
         # 2. Congestion Notification (from forecast)
-        if forecast and hasattr(forecast, "predictions"):
-            for p in forecast.predictions:
-                if getattr(p, "predictedDensityIndex", 0) >= 10:
-                    approach_name = str(getattr(p.approach, "value", p.approach)).upper() if hasattr(p, "approach") else str(p.approach).upper()
+        if isinstance(forecast, dict):
+            forecast_rows = forecast.get("approachForecasts") or []
+            forecast_points = [
+                (horizon, approach)
+                for horizon in forecast_rows
+                for approach in horizon.get("approaches", [])
+                if isinstance(approach, dict)
+            ]
+            if forecast_points:
+                horizon, highest = max(
+                    forecast_points,
+                    key=lambda item: float(item[1].get("densityIndex", 0) or 0),
+                )
+                density_index = float(highest.get("densityIndex", 0) or 0)
+                # TrafficState menandai padat mulai 10/33; forecast memakai 0..1.
+                if density_index >= 10 / 33:
+                    approach_key = str(highest.get("approach", "unknown")).lower()
+                    approach_name = approach_labels.get(approach_key, approach_key)
+                    forecast_input = (forecast.get("input") or {}).get("to") or timestamp
                     notification_service.create_notification(
                         type="congestion",
-                        title="Peringatan Kepadatan",
-                        message=f"Kemacetan tinggi terdeteksi di lengan {approach_name} (Index: {p.predictedDensityIndex:.2f})",
+                        title="Traffic Forecast Warning",
+                        message=(
+                            f"Simpang 4 Pingit diprediksi mengalami kepadatan "
+                            f"tertinggi pada lengan {approach_name} dalam "
+                            f"{horizon.get('secondsAhead', 0)} detik ke depan."
+                        ),
                         severity="warning",
-                        reference_id=f"congestion-{timestamp}-{approach_name}"
+                        reference_id=(
+                            f"forecast-{forecast_input}-{approach_key}"
+                        ),
                     )
     except Exception as exc:
         print(f"[WARN] Gagal membuat notifikasi otomatis: {exc}")
