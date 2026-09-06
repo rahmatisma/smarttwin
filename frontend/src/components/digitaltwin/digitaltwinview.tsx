@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import {
     Play,
     Pause,
@@ -76,6 +76,44 @@ export default function DigitalTwinView() {
     const simulationViewRef = useRef<HTMLDivElement>(null);
     const [isFullscreen, setIsFullscreen] = useState(false);
     const fullscreenViewWasRequestedRef = useRef(false);
+
+    // "Ringkasan Simpang" (kolom kiri, di bawah video) dan "Kondisi per
+    // Lengan" (sidebar kanan) itu BUKAN grid-sibling -- posisinya sengaja
+    // di kolom masing-masing, jadi CSS "stretch" bawaan tidak bisa
+    // menyamakan tingginya otomatis. Diukur langsung tinggi asli "Kondisi
+    // per Lengan" lewat ResizeObserver, lalu diterapkan sebagai min-height
+    // ke "Ringkasan Simpang" -- selalu pas walau isi keduanya berubah
+    // panjang (angka delay 2 vs 3 digit, dsb), bukan angka px tebakan.
+    //
+    // Callback ref (BUKAN useRef + useEffect terpisah) -- "Kondisi per
+    // Lengan" cuma render kalau isSimulating && ada data losByApproach,
+    // jadi elemennya bisa mount/unmount kapan saja. Callback ref dipanggil
+    // TEPAT saat elemen itu benar-benar terpasang/terlepas dari DOM,
+    // sehingga observer selalu nempel ke elemen yang benar.
+    const [kondisiPerLenganHeight, setKondisiPerLenganHeight] = useState<number | null>(null);
+    const kondisiPerLenganObserverRef = useRef<ResizeObserver | null>(null);
+
+    const kondisiPerLenganRef = useCallback((node: HTMLDivElement | null) => {
+        kondisiPerLenganObserverRef.current?.disconnect();
+        kondisiPerLenganObserverRef.current = null;
+
+        if (!node) {
+            setKondisiPerLenganHeight(null);
+            return;
+        }
+
+        const observer = new ResizeObserver(() => {
+            // SENGAJA bukan entries[0].contentRect.height -- itu cuma
+            // bagian isi card, TIDAK termasuk padding+border, jadi
+            // hasilnya selalu kependekan. getBoundingClientRect() memberi
+            // tinggi visual asli (border-box), yang benar-benar sebanding
+            // dengan min-height di card "Ringkasan Simpang".
+            const height = node.getBoundingClientRect().height;
+            if (height) setKondisiPerLenganHeight(Math.ceil(height));
+        });
+        observer.observe(node);
+        kondisiPerLenganObserverRef.current = observer;
+    }, []);
 
     useEffect(() => {
         const handleFullscreenChange = () => {
@@ -734,6 +772,7 @@ export default function DigitalTwinView() {
                     {!isSimStateLoaded ? (
                         <div
                             className="rounded-2xl border border-border bg-surface p-8 text-center shadow-sm"
+                            style={kondisiPerLenganHeight ? { minHeight: kondisiPerLenganHeight } : undefined}
                         >
                             <div className="mx-auto h-6 w-6 animate-spin rounded-full border-2 border-text-muted border-t-transparent"></div>
                             <p className="mt-3 text-xs text-text-muted">Memuat informasi kendaraan...</p>
@@ -741,6 +780,7 @@ export default function DigitalTwinView() {
                     ) : (
                         <div
                             className="flex flex-col justify-center rounded-2xl border border-border bg-surface p-5 shadow-sm"
+                            style={kondisiPerLenganHeight ? { minHeight: kondisiPerLenganHeight } : undefined}
                         >
                             {/* Beda dari "Kondisi per Lengan" di sidebar (itu
                                 per lengan) -- 3 card ini semuanya angka
@@ -1045,7 +1085,7 @@ export default function DigitalTwinView() {
                         {isSimulating &&
                             (Object.keys(losByApproach).length > 0 ||
                                 Object.keys(queueLengthVehByApproach).length > 0) && (
-                            <div className="rounded-2xl border border-border bg-surface p-5 shadow-sm">
+                            <div ref={kondisiPerLenganRef} className="rounded-2xl border border-border bg-surface p-5 shadow-sm">
                                 <h2 className="mb-4 text-sm font-semibold">
                                     Kondisi per Lengan
                                 </h2>
