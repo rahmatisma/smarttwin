@@ -339,6 +339,69 @@ tidak salah diagnosis kalau ada bagian dashboard yang "hidup sebagian".
 
 ---
 
+## Ringkasan naratif (versi final, sudah dikoreksi lewat diskusi)
+
+Semua berawal dari `cv/vehicle_counter_pingit.py` yang dijalankan atas
+video Simpang Pingit, menghasilkan dua CSV: `crossing_simpang.csv`
+(berapa kendaraan melewati garis) dan `snapshot_zona.csv` (berapa
+kendaraan ada di suatu zona). Dari CSV ini, data masuk ke Supabase
+lewat dua jalur: **Jalur A**, menjalankan `run_ingest.py` yang
+memanggil `cv_csv_bridge.py::ingest()` untuk memasukkan seluruh isi
+CSV sekaligus (dipakai saat menyiapkan demo); dan **Jalur B**, saat
+user upload video baru lewat dashboard — backend otomatis memicu
+`cv_trigger_service.py`, yang menyalakan `cv/process_uploaded_video.py`
+untuk menjalankan YOLO dan menulis ke Supabase lewat
+`cv/supabase_writer.py` secara bertahap, **tiap 5 detik sekali** (bukan
+instan per-deteksi) — jendela waktunya sama persis dengan yang dipakai
+Jalur A, cuma Jalur B menulis satu jendela demi satu jendela selagi
+video masih diproses. Kedua jalur ini berakhir di tabel yang sama:
+`trafficLaneMetrics` (data paling mentah, per lengan per jendela 5
+detik), yang dirangkum jadi `trafficApproachStates` (1 baris per
+lengan, inilah yang benar-benar dipakai sistem), dan `trafficStates`
+sebagai "amplop" penanda waktu supaya rincian-rincian itu bisa
+dikelompokkan per jendela.
+
+Begitu data tersedia, `simulation/scenario_worker.py` mengambilnya —
+tapi ini murni model **tanya-jawab (pull)**: tiap 60 detik worker aktif
+bertanya ke Supabase "data terbaru sekarang apa", bukan menunggu
+dikirimi otomatis. Ada dua cara bertanya: `loadTrafficState()` minta 1
+jendela 5 detik paling akhir (dipakai kandidat Baseline), dan
+`loadAveragedTrafficState()` minta 24 jendela terakhir lalu
+dirata-ratakan jadi kondisi 2 menit (dipakai Aggressive & Balanced,
+supaya rumus PKJI tidak "kaget" kalau kebetulan ada lonjakan sesaat).
+Khusus Baseline, worker juga meminta prediksi 60 detik ke depan — tapi
+ini **tidak dipanggil langsung sebagai fungsi Python**, melainkan
+lewat request HTTP ke backend sendiri (`forecast_client.py` →
+endpoint `/api/forecast/approaches`), yang di baliknya memakai model
+LSTM per-lengan (dengan cadangan model gabungan-4-lengan kalau yang
+per-lengan gagal), dan butuh 12 data berurutan tanpa bolong (12×5
+detik = 60 detik riwayat) — kalau belum cukup, forecast di-skip (bukan
+sistem error), Baseline sementara jalan tanpa "melihat masa depan".
+
+Dari data kondisi sekarang (dan forecast, khusus Baseline) itu,
+dihitung 3 usulan siklus lampu — Baseline, Aggressive, Balanced — lalu
+ketiganya benar-benar disimulasikan di simpang virtual (SUMO), diukur
+delay/antrean/throughput/LOS-nya, dan dipilih pemenangnya. Hasil ini
+kemudian disimpan ke **dua tempat terpisah** dengan tujuan beda:
+`liveScenarioCache` (papan pengumuman, cuma 1 baris, ditimpa tiap 60
+detik — dipakai panel status "sekarang") dan
+`recommendations`/`simulations`/`simulationMetrics` (buku catatan,
+terus bertambah, tidak pernah ditimpa — dipakai halaman Riwayat).
+Terakhir, saat dashboard minta data, backend mengecek dulu apakah
+`liveScenarioCache` masih segar (≤120 detik) sebelum memakainya, kalau
+basi dia hitung cadangan sendiri secara instan (fallback rule-based) —
+dan dashboard sendiri punya dua jalur ambil data: sebagian lewat
+backend (butuh logika/keputusan, seperti rekomendasi), sebagian
+**langsung ke Supabase** tanpa lewat backend sama sekali (data yang
+cukup dibaca apa adanya, seperti daftar kamera).
+
+**Catatan kecil yang belum ditelusuri tuntas:** `process_uploaded_video.py`
+(Jalur B) ternyata `import` dari `vehicle_counter.py` (generik), bukan
+`vehicle_counter_pingit.py` (yang dipakai Jalur A, sudah dikalibrasi
+khusus Simpang Pingit) — belum diketahui seberapa besar bedanya.
+
+---
+
 ## Ringkasan super singkat (kalau lupa detail di atas)
 
 ```

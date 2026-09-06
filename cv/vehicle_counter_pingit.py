@@ -1,80 +1,87 @@
 """
-SMARTTWIN — PERCOBAAN LOGIKA ZONA (bukan crossing)
+SMARTTWIN — DETEKSI & HITUNG KENDARAAN SIMPANG PINGIT (skrip produksi
+mode batch, proses 4 kamera CCTV sekaligus)
 
-Salinan kerja dari vehicle_counter.py yang MENGGANTI logika hitungnya.
-File aslinya tidak disentuh sama sekali; ini eksperimen terpisah.
+STATUS TERKINI (diperbarui 6 September 2026 — lihat
+catatan-pribadi/kotak-01-cv.md untuk investigasi lengkapnya): file ini
+AWALNYA dibuat sebagai percobaan logika zona (salinan kerja dari
+vehicle_counter.py yang mengganti logika ALIRAN/crossing jadi
+KEHADIRAN/zona). Sejak itu cakupannya bertambah jauh melampaui niat
+awal itu — sekarang file ini menghasilkan TIGA output sekaligus:
+crossing (lewat CROSSING_LINES + hitung_crossing()), zona/kehadiran
+(ZONA_KEPADATAN + hitung_kendaraan_di_zona()), dan antrean
+(hitung_antrean()) — dan dipakai sebagai skrip produksi UTAMA untuk
+menyiapkan seluruh data batch proyek ini, bukan sekadar eksperimen
+lagi. Nama file & sebagian komentar di bawah masih menyisakan jejak
+sejarah itu; bagian ini ditulis ulang supaya tidak menyesatkan
+pembaca baru.
 
-    vehicle_counter.py   ALIRAN    — kendaraan yang MEMOTONG garis hitung
-    file ini             KEHADIRAN — kendaraan yang ADA DI DALAM zona
+    vehicle_counter.py   ALIRAN               — kendaraan yang MEMOTONG garis hitung
+    file ini             KEHADIRAN + ALIRAN   — zona (kehadiran) DAN crossing (aliran)
+                          + ANTREAN             DAN kendaraan nyaris diam, ketiganya sekaligus
 
 Pipeline:
-    Video
+    Video (4 kamera, round-robin 1 thread)
       |
-    YOLO26s + ByteTrack
+    YOLO26s + ByteTrack (imgsz=1280)
       |
-    Titik tengah bbox: cx=(x1+x2)/2, cy=(y1+y2)/2
-      |
-    point_in_polygon(cx, cy, zona)        <- ray casting
-      |
-    Jumlah kendaraan di dalam zona, PER FRAME
-      |
-    Rata-rata per jendela 5 detik
-      |
-    cv/output/percobaan_logic_simpang.csv
+    Dari deteksi yang sama, dihitung 3 hal:
+      - hitung_crossing()          -> crossing_simpang.csv (tiap 5 detik, rata-rata)
+      - hitung_kendaraan_di_zona() -> percobaan_logic_simpang.csv (tiap 5 detik, rata-rata)
+                                    -> snapshot_zona.csv (tiap 1 detik, nilai terakhir)
+      - hitung_antrean()           -> ikut kolom zona di atas
 
 
-BEDANYA DENGAN CROSSING — kenapa angkanya tidak sebanding
----------------------------------------------------------
+BEDANYA CROSSING vs ZONA — kenapa angkanya tidak sebanding
+-----------------------------------------------------------
 Crossing itu ALIRAN: satu kendaraan menyumbang SATU kali seumur
-hidupnya, tepat saat ia memotong garis. Zona ini KEHADIRAN: satu
+hidupnya, tepat saat ia memotong garis. Zona itu KEHADIRAN: satu
 kendaraan yang berhenti di dalam zona menyumbang di SETIAP frame
 selama ia masih di situ.
 
 Konsekuensinya, dan ini penting sebelum angkanya dipakai:
 
-  - Angka zona TIDAK bisa dibandingkan dengan kolom vehicle_count
-    di smarttwin_traffic_data.csv. Satuannya beda — yang satu
-    kendaraan/detik, yang satu kendaraan (cacah sesaat).
+  - Angka zona TIDAK bisa dibandingkan langsung dengan angka crossing.
+    Satuannya beda — yang satu kendaraan/jendela (cacah kejadian),
+    yang satu kendaraan (cacah sesaat, dirata-rata).
   - Angka zona naik saat lampu MERAH (kendaraan menumpuk diam) dan
     turun saat HIJAU. Crossing kebalikannya. Jangan kaget kalau
     grafiknya berlawanan fase.
-  - Yang sepadan dengan zona ini adalah kolom queue_length_veh dan
-    density_index di CSV lama, bukan kolom volume.
+  - Yang sepadan dengan zona ini adalah antrean/kepadatan, bukan
+    volume kendaraan lewat.
 
-Ini justru bisa jadi kelebihannya: untuk mengukur KEPADATAN simpang
-(yang dibutuhkan Decision Engine buat memutuskan lengan mana yang
-perlu hijau lebih lama), cacah kehadiran memang ukuran yang lebih
-langsung daripada laju crossing.
+Cacah kehadiran (zona) memang ukuran yang lebih langsung untuk
+KEPADATAN simpang (dibutuhkan Decision Engine buat memutuskan lengan
+mana yang perlu hijau lebih lama) dibanding laju crossing — makanya
+dua-duanya dipertahankan sekaligus, bukan salah satu dibuang.
 
 
-YANG DIWARISI DARI FILE ASLI
-----------------------------
+YANG DIWARISI DARI FILE ASLI (vehicle_counter.py)
+---------------------------------------------------
 Model, confidence, daftar kelas, dan mesin jam dinding diimpor
 LANGSUNG dari vehicle_counter.py, bukan disalin ulang. Jadi kalau
-konfigurasi di sana berubah, eksperimen ini ikut berubah dan tidak
-diam-diam memakai angka basi. File aslinya dijaga
-`if __name__ == "__main__":` sehingga impor ini tidak menjalankan
-proses 4-kamera apa pun (pola yang sama sudah dipakai
-process_uploaded_video.py).
+konfigurasi di sana berubah, file ini ikut berubah dan tidak diam-diam
+memakai angka basi. File aslinya dijaga `if __name__ == "__main__":`
+sehingga impor ini tidak menjalankan proses 4-kamera apa pun (pola
+yang sama dipakai process_uploaded_video.py).
 
 Timestamp memakai JAM REKAMAN dari sync_report.json, bukan
-datetime.now() — supaya barisnya bisa disandingkan dengan CSV lama
+datetime.now() — supaya barisnya bisa disandingkan dengan CSV lain
 pada detik yang sama.
 
 
-YANG SENGAJA TIDAK ADA DI SINI
-------------------------------
-Tidak ada kolom crossing, tidak ada lane_id, tidak ada estimasi
-antrean dalam meter, tidak ada filter ARAH_MASUK. Zona tidak punya
-arah — kendaraan yang masuk simpang dan yang keluar simpang
-dihitung sama saja selama titik tengahnya ada di dalam poligon.
-Itu batas yang melekat pada pendekatan ini, bukan yang belum
-sempat dikerjakan.
+KETERBATASAN YANG MASIH MELEKAT (bukan yang belum sempat dikerjakan)
+------------------------------------------------------------------
+Zona tidak punya arah — kendaraan yang masuk simpang dan yang keluar
+simpang dihitung sama saja selama titik tengahnya ada di dalam
+poligon. Ambang deteksi antrean (ANTREAN_GERAK_RASIO_MAKS,
+ANTREAN_MIN_FRAME_DIAM) juga masih ditandai perlu dikalibrasi ulang
+dengan data run sungguhan — lihat komentar di masing-masing konstanta.
 
 Cara pakai:
-    python vehicle_counter_copy.py                 # 5 menit pertama
-    python vehicle_counter_copy.py --durasi 600    # 10 menit
-    python vehicle_counter_copy.py --langkah 1     # tiap frame (lambat)
+    python vehicle_counter_pingit.py                 # 5 menit pertama
+    python vehicle_counter_pingit.py --durasi 600     # 10 menit
+    python vehicle_counter_pingit.py --langkah 1      # tiap frame (lambat, tapi crossing lebih akurat)
 """
 
 import argparse
