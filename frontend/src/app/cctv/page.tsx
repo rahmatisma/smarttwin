@@ -578,12 +578,6 @@ export default function CCTVPage() {
                                     </h1>
 
                                 </div>
-
-                                <p className="text-sm text-text-muted">
-                                    Tambahkan dan pantau sumber CCTV
-                                    pada setiap arah persimpangan.
-                                    Data tersimpan di Supabase.
-                                </p>
                             </div>
 
                             <button

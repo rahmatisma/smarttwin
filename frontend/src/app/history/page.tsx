@@ -32,6 +32,7 @@ import {
 } from "recharts";
 
 import Sidebar from "@/components/Sidebar";
+import Header from "@/components/Header";
 import ForecastChart from "@/components/ForecastChart";
 import { fetchForecast, DEFAULT_INTERSECTION_ID } from "@/lib/supabaseData";
 import type { ForecastResponse, TrafficState } from "@/types/traffic";
@@ -571,24 +572,18 @@ export default function HistoryPage() {
         <div className="flex min-h-screen bg-bg text-text">
             <Sidebar />
 
-            <main className="min-w-0 flex-1 px-6 py-6">
-                <div className="mx-auto max-w-[1600px] space-y-6">
+            <div className="flex flex-1 flex-col">
+                <Header 
+                    locationName="Simpang Pingit"
+                    coords="-7.7828, 110.3608"
+                    hideApproachFilter={true}
+                    hideLastUpdated={true}
+                />
 
-                    {/* HEADER */}
-                    <div>
-                        <div className="mb-2 flex items-center gap-2">
-                            <HistoryIcon className="h-6 w-6 text-text" />
-                            <h1 className="text-2xl font-bold tracking-tight">
-                                Riwayat Keputusan
-                            </h1>
-                        </div>
-                        <p className="text-sm text-text-muted">
-                            Rekomendasi durasi lampu yang pernah dikeluarkan sistem,
-                            beserta kondisi lalu lintas yang memicunya.
-                        </p>
-                    </div>
+                <main className="min-w-0 flex-1 px-6 py-6">
+                    <div className="mx-auto max-w-[1600px] space-y-6">
 
-                    {/* RINGKASAN */}
+                        {/* RINGKASAN */}
                     {/*
                         4 kartu gaya "header dashboard". Semua angka nyata dari
                         data yang sedang tampil -- TIDAK ada skor komposit
@@ -1420,6 +1415,7 @@ export default function HistoryPage() {
                     </div>
                 </div>
             )}
+            </div>
         </div>
     );
 }

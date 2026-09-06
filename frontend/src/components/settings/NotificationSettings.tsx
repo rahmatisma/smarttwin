@@ -1,10 +1,24 @@
 "use client";
 
+import { useEffect, useRef } from "react";
+import { useSearchParams } from "next/navigation";
 import { useNotifications } from "@/hooks/useNotifications";
 import { Bell, AlertTriangle, CheckCircle } from "lucide-react";
 
 export default function NotificationSettings() {
     const { notifications, isLoading, markAsRead } = useNotifications();
+    const searchParams = useSearchParams();
+    const notificationId = searchParams.get("notificationId");
+    const itemRefs = useRef<Map<string, HTMLDivElement>>(new Map());
+
+    useEffect(() => {
+        if (!isLoading && notificationId && notifications.length > 0) {
+            const targetElement = itemRefs.current.get(notificationId);
+            if (targetElement) {
+                targetElement.scrollIntoView({ behavior: "smooth", block: "center" });
+            }
+        }
+    }, [isLoading, notificationId, notifications]);
 
     if (isLoading) {
         return (
@@ -39,10 +53,16 @@ export default function NotificationSettings() {
                     notifications.map((notif) => (
                         <div
                             key={notif.id}
-                            className={`flex flex-col sm:flex-row sm:items-center gap-4 rounded-xl border p-4 transition-colors ${
-                                notif.isRead
-                                    ? "border-slate-100 bg-slate-50 opacity-70 dark:border-slate-800 dark:bg-slate-800/50"
-                                    : "border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-800"
+                            ref={(el) => {
+                                if (el) itemRefs.current.set(notif.id, el);
+                                else itemRefs.current.delete(notif.id);
+                            }}
+                            className={`flex flex-col sm:flex-row sm:items-center gap-4 rounded-xl border p-4 transition-all duration-500 ${
+                                notif.id === notificationId
+                                    ? "ring-2 ring-blue-500 border-blue-500 bg-blue-50/30 dark:ring-blue-500 dark:border-blue-500 dark:bg-blue-900/10 scale-[1.01]"
+                                    : notif.isRead
+                                        ? "border-slate-100 bg-slate-50 opacity-70 dark:border-slate-800 dark:bg-slate-800/50"
+                                        : "border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-800"
                             }`}
                         >
                             <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-slate-100 dark:bg-slate-700">

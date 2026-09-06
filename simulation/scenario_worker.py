@@ -514,6 +514,8 @@ def evaluate_once(
     try:
         from app.services.notification_service import notification_service
         
+        print("[NOTIFICATION DEBUG] evaluate_once executed")
+        
         timestamp = payload["updatedAt"]
         winner_id = payload.get("candidateId", "unknown")
         recommendation = payload.get("recommendation") or {}
@@ -539,33 +541,46 @@ def evaluate_once(
         )
         traffic_state_id = getattr(state, "trafficStateId", None)
         recommendation_window = traffic_state_id or getattr(state, "windowEnd", None) or timestamp
-        reference_seed = f"{winner_id}-{rec_phase_key}-{green_seconds}"
+        reference_seed = f"{recommendation_window}-{winner_id}-{rec_phase_key}-{green_seconds}"
         recommendation_reference = str(uuid.uuid5(uuid.NAMESPACE_URL, reference_seed))
         
         # 1. Recommendation Notification
         if winner_id != "unknown":
-            # Determine human‑readable phase label
-            phase_label = approach_labels.get(rec_phase_key, rec_phase_key)
-            # Ensure green_seconds is an integer and valid
-            try:
-                green_seconds_int = int(float(green_seconds))
-            except Exception:
-                green_seconds_int = 0
-            if green_seconds_int > 0:
-                # Temporary logging for verification
-                print(
-                    f"[NOTIFICATION] type='recommendation' title='Rekomendasi Durasi Sinyal' "
-                    f"phase={rec_phase_key!r} green_seconds={green_seconds_int!r}"
-                )
-                notification_service.create_notification(
+            message_lines = []
+            if cycle_phases:
+                # Order phases exactly: Utara, Timur, Selatan, Barat
+                for ap in ["north", "east", "south", "west"]:
+                    for phase in cycle_phases:
+                        if str(phase.get("approach", "")).lower() == ap:
+                            try:
+                                gs = int(float(phase.get("greenSeconds", 0)))
+                                if gs > 0:
+                                    message_lines.append(f"{approach_labels.get(ap, ap)}: {gs} detik")
+                            except Exception:
+                                pass
+                            break
+            
+            # Fallback for single phase logic if cycle_phases is empty or didn't contain valid durations
+            if not message_lines:
+                try:
+                    gs = int(float(green_seconds))
+                    if gs > 0:
+                        phase_label = approach_labels.get(rec_phase_key, rec_phase_key)
+                        message_lines.append(f"{phase_label}: {gs} detik")
+                except Exception:
+                    pass
+
+            if message_lines:
+                message = "\n".join(message_lines)
+                print(f"[NOTIFICATION DEBUG] creating notification: recommendation (all phases)")
+                rec_result = notification_service.create_notification(
                     type="recommendation",
                     title="Rekomendasi Durasi Sinyal",
-                    message=(
-                        f"Simpang 4 Pingit - Fase {phase_label}: durasi hijau yang direkomendasikan {green_seconds_int} detik."
-                    ),
+                    message=message,
                     severity="info",
                     reference_id=recommendation_reference,
                 )
+                print(f"[NOTIFICATION DEBUG] notification created: {rec_result.get('id') if rec_result else 'None (deduplicated)'}")
             
         # 2. Congestion Notification (from forecast)
         if isinstance(forecast, dict):
@@ -576,18 +591,30 @@ def evaluate_once(
                 for approach in horizon.get("approaches", [])
                 if isinstance(approach, dict)
             ]
+            print(f"[NOTIFICATION DEBUG] forecast points: {len(forecast_points)}")
             if forecast_points:
-                horizon, highest = max(
-                    forecast_points,
-                    key=lambda item: float(item[1].get("densityIndex", 0) or 0),
-                )
-                density_index = float(highest.get("densityIndex", 0) or 0)
-                # TrafficState menandai padat mulai 10/33; forecast memakai 0..1.
-                if density_index >= 10 / 33:
-                    approach_key = str(highest.get("approach", "unknown")).lower()
+                # Evaluate congestion per approach instead of a single global max
+                best_per_approach: dict[str, tuple[dict, float, dict]] = {}
+                for horizon, approach in forecast_points:
+                    # Extract density index safely
+                    density = float(approach.get("densityIndex", 0) or 0)
+                    # Apply the same threshold used elsewhere (10/33)
+                    if density >= 10 / 33:
+                        approach_key = str(approach.get("approach", "unknown")).lower()
+                        # Keep the horizon with the highest density for this approach
+                        current = best_per_approach.get(approach_key)
+                        if current is None or density > current[1]:
+                            best_per_approach[approach_key] = (horizon, density, approach)
+                
+                print(f"[NOTIFICATION DEBUG] qualifying approaches: {list(best_per_approach.keys())}")
+                # Create a notification for each qualifying approach
+                for approach_key, (horizon, density, approach) in best_per_approach.items():
                     approach_name = approach_labels.get(approach_key, approach_key)
                     forecast_input = (forecast.get("input") or {}).get("to") or timestamp
-                    notification_service.create_notification(
+                    
+                    ref_id = f"forecast-{forecast_input}-{approach_key}"
+                    print(f"[NOTIFICATION DEBUG] creating notification: congestion for {approach_name}")
+                    cong_result = notification_service.create_notification(
                         type="congestion",
                         title="Traffic Forecast Warning",
                         message=(
@@ -596,10 +623,9 @@ def evaluate_once(
                             f"{horizon.get('secondsAhead', 0)} detik ke depan."
                         ),
                         severity="warning",
-                        reference_id=(
-                            f"forecast-{forecast_input}-{approach_key}"
-                        ),
+                        reference_id=ref_id,
                     )
+                    print(f"[NOTIFICATION DEBUG] notification created: {cong_result.get('id') if cong_result else 'None (deduplicated)'}")
     except Exception as exc:
         print(f"[WARN] Gagal membuat notifikasi otomatis: {exc}")
 
