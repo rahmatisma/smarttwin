@@ -838,15 +838,33 @@ class SimulationService:
                 # kali di controller yang sama, termasuk yang baru dibuat
                 # (tidak ada kelebihan untuk dihapus).
                 #
-                # adapter.to_demand() menulis total per lengan sebagai
-                # "volume", sync_demand() mengharapkan "targetVehicleCount"
-                # (nama field yang sama dipakai skema approaches dashboard)
-                # -- dipetakan di sini, bukan mengubah adapter yang juga
-                # dipakai jalur lain.
+                # PENTING: "volume" dari adapter.to_demand() itu hasil
+                # hitung CROSSING (kendaraan yang melintasi garis, dari
+                # crossing_simpang.csv) -- BUKAN jumlah kendaraan yang
+                # sedang ada di lengan itu sekarang. Sering bernilai 0
+                # walau lenganNya jelas ada kendaraan, karena crossing
+                # dan kehadiran-di-zona itu dua pengukuran yang beda
+                # (lihat cv_csv_bridge.py). Kalau "volume" dipakai
+                # sebagai target, sync_demand() menghapus SEMUA
+                # kendaraan yang ada tiap kali baris data terbaru
+                # kebetulan volume=0 -- persis bug "ganti skenario,
+                # kendaraan hilang total" yang ditemukan 6 September.
+                # targetVehicleCount yang benar adalah jumlah kendaraan
+                # per JENIS (motorcycleCount+carCount+busCount+truckCount),
+                # dari snapshot_zona.csv -- itu yang mengukur "berapa
+                # kendaraan ada di lengan sekarang", bukan arus lintasan.
                 try:
 
                     sync_ready_demand = [
-                        {**item, "targetVehicleCount": item.get("volume", 0)}
+                        {
+                            **item,
+                            "targetVehicleCount": (
+                                int(item.get("motorcycleCount", 0) or 0)
+                                + int(item.get("carCount", 0) or 0)
+                                + int(item.get("busCount", 0) or 0)
+                                + int(item.get("truckCount", 0) or 0)
+                            ),
+                        }
                         for item in demand
                     ]
 
@@ -1066,6 +1084,16 @@ class SimulationService:
                 1,
             ),
             "los": calculate_los(controller.live_avg_delay_seconds),
+            # Rincian per lengan -- lihat
+            # catatan-pribadi/temuan-data-tersembunyi-per-lengan.md. Rata-
+            # rata simpang di atas bisa menyembunyikan satu lengan yang
+            # sebenarnya masih buruk.
+            "delayByApproachSeconds": controller.live_delay_by_approach_seconds,
+            "losByApproach": controller.live_los_by_approach,
+            "queueLengthVehByApproach": controller.live_queue_length_veh_by_approach,
+            "throughputVehPerMinByApproach": (
+                controller.live_throughput_veh_per_min_by_approach
+            ),
             "scenario": self.active_scenario.get(context),
             "seed": self.active_seed.get(context),
             "startedAt": self.started_at.get(context),

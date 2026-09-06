@@ -679,6 +679,12 @@ export interface DigitalTwinCandidate {
   throughputVeh: number;
   los: "A" | "B" | "C" | "D" | "E" | "F";
   isWinner: boolean;
+  // Rincian per lengan -- opsional karena cache lama (sebelum backend
+  // dideklarasikan ulang) tidak punya field ini sama sekali.
+  delayByApproachSeconds?: Record<string, number | null> | null;
+  losByApproach?: Record<string, "A" | "B" | "C" | "D" | "E" | "F" | null> | null;
+  queueLengthVehByApproach?: Record<string, number> | null;
+  throughputVehByApproach?: Record<string, number> | null;
 }
 
 export interface DigitalTwinScenarioResponse {

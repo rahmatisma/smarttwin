@@ -11,6 +11,8 @@ from collections import defaultdict, deque
 from pathlib import Path
 from typing import Any
 
+from simulation.scenario_generator import los_by_approach
+
 logger = logging.getLogger(__name__)
 
 
@@ -492,11 +494,22 @@ class SumoController:
         self.live_last_sync_failed_insertions: int = 0
         self.live_last_sync_failed_by_approach: dict[str, int] = {}
 
-        # Timestamp simulasi (detik) tiap kendaraan "arrived", dipakai
-        # menghitung laju 60 detik TERAKHIR -- bukan rata-rata sejak
-        # simulasi mulai (itu nyaris tidak bergerak begitu simulasi
+        # Rincian per lengan untuk kartu "Kondisi per Lengan" -- lihat
+        # catatan-pribadi/temuan-data-tersembunyi-per-lengan.md. Beda dari
+        # live_queue_length_veh/live_avg_delay_seconds di atas yang sengaja
+        # agregat (lengan terpadat / rata-rata simpang) untuk kartu lain.
+        self.live_queue_length_veh_by_approach: dict[str, int] = {}
+        self.live_delay_by_approach_seconds: dict[str, float | None] = {}
+        self.live_los_by_approach: dict[str, str | None] = {}
+        self.live_throughput_veh_per_min_by_approach: dict[str, float] = {}
+
+        # (timestamp simulasi, lengan asal) tiap kendaraan "arrived",
+        # dipakai menghitung laju 60 detik TERAKHIR -- bukan rata-rata
+        # sejak simulasi mulai (itu nyaris tidak bergerak begitu simulasi
         # sudah jalan lama, dan tidak mencerminkan kondisi "sekarang").
-        self._arrival_timeline: deque[float] = deque()
+        # Lengan ikut disimpan supaya laju per menit bisa dipecah per
+        # lengan juga (kartu "Kondisi per Lengan"), bukan cuma agregat.
+        self._arrival_timeline: deque[tuple[float, str]] = deque()
 
     # ============================================================
     # DEFAULT SUMO BINARY
@@ -1692,7 +1705,7 @@ class SumoController:
                             ] += 1
 
                             self._arrival_timeline.append(
-                                self.last_simulation_time
+                                (self.last_simulation_time, approach)
                             )
 
                         # Snapshot CCTV merepresentasikan okupansi realtime,
@@ -1706,6 +1719,15 @@ class SumoController:
                     
                     current_vehicles_data = []
                     waiting_values: list[float] = []
+                    # Dipecah per lengan lewat self._vehicle_approach (peta
+                    # yang sama dipakai DEPARTED/ARRIVED di atas) supaya
+                    # kartu "Kondisi per lengan" di halaman Digital Twin
+                    # tidak cuma tahu rata-rata simpang -- satu lengan yang
+                    # sebenarnya masih macet bisa tersembunyi di balik
+                    # rata-rata (pola yang sama dengan bug P-3 LOS gabungan).
+                    waiting_values_by_approach: dict[str, list[float]] = {
+                        approach: [] for approach in self.CYCLE_ORDER
+                    }
 
                     for vehicle_id in self.traci.vehicle.getIDList():
                         try:
@@ -1725,15 +1747,30 @@ class SumoController:
                             # dihitung sekali di sini, bukan panggilan TraCI
                             # terpisah lagi di get_metrics(), supaya tidak
                             # dobel jalan per-kendaraan tiap step.
-                            waiting_values.append(
-                                self.traci.vehicle.getAccumulatedWaitingTime(
-                                    vehicle_id
-                                )
+                            waiting = self.traci.vehicle.getAccumulatedWaitingTime(
+                                vehicle_id
                             )
+                            waiting_values.append(waiting)
+
+                            approach = self._vehicle_approach.get(vehicle_id)
+                            if approach in waiting_values_by_approach:
+                                waiting_values_by_approach[approach].append(waiting)
                         except self.traci.TraCIException:
                             pass
 
                     self.active_vehicles_data = current_vehicles_data
+
+                    self.live_delay_by_approach_seconds = {
+                        approach: (
+                            round(sum(samples) / len(samples), 2)
+                            if samples
+                            else None
+                        )
+                        for approach, samples in waiting_values_by_approach.items()
+                    }
+                    self.live_los_by_approach = los_by_approach(
+                        self.live_delay_by_approach_seconds
+                    )
 
                     # Kartu "Current Vehicles" dulu menghitung SEMUA
                     # kendaraan di seluruh network (633x1020m), padahal
@@ -1846,6 +1883,7 @@ class SumoController:
                     self.live_queue_busiest_approach = busiest_approach
 
                     self.live_queue_length_veh = queue_length_veh
+                    self.live_queue_length_veh_by_approach = dict(queue_by_approach)
 
                     # Total 4 lengan sekaligus -- dipakai panel "Hasil
                     # Simulasi" (LOS/delay/antrean simpang secara keseluruhan),
@@ -1865,13 +1903,24 @@ class SumoController:
 
                     while (
                         self._arrival_timeline
-                        and self._arrival_timeline[0] < cutoff
+                        and self._arrival_timeline[0][0] < cutoff
                     ):
                         self._arrival_timeline.popleft()
 
                     self.live_throughput_veh_per_min = float(
                         len(self._arrival_timeline)
                     )
+
+                    throughput_counts_by_approach: dict[str, int] = {
+                        approach: 0 for approach in self.CYCLE_ORDER
+                    }
+                    for _, arrival_approach in self._arrival_timeline:
+                        if arrival_approach in throughput_counts_by_approach:
+                            throughput_counts_by_approach[arrival_approach] += 1
+                    self.live_throughput_veh_per_min_by_approach = {
+                        approach: float(count)
+                        for approach, count in throughput_counts_by_approach.items()
+                    }
 
                     # ==========================================
                     # SCREENSHOT (MJPEG STREAM)
@@ -2336,6 +2385,10 @@ class SumoController:
         self.live_visible_vehicle_count = 0
         self.live_last_sync_failed_insertions = 0
         self.live_last_sync_failed_by_approach = {}
+        self.live_queue_length_veh_by_approach = {}
+        self.live_delay_by_approach_seconds = {}
+        self.live_los_by_approach = {}
+        self.live_throughput_veh_per_min_by_approach = {}
 
         print(
             "SUMO realtime controller closed."

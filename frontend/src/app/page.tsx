@@ -82,6 +82,13 @@ function candidateToRecommendation(
     avgQueueLengthM: candidate.avgQueueLengthM,
     los: candidate.los,
     candidateId: candidate.candidateId,
+    // Rincian per lengan -- tanpa ini, rata-rata simpang di atas bisa
+    // menyembunyikan satu lengan yang sebenarnya masih buruk (lihat
+    // catatan-pribadi/temuan-data-tersembunyi-per-lengan.md).
+    losByApproach: candidate.losByApproach ?? null,
+    delayByApproachSeconds: candidate.delayByApproachSeconds ?? null,
+    queueLengthVehByApproach: candidate.queueLengthVehByApproach ?? null,
+    throughputVehByApproach: candidate.throughputVehByApproach ?? null,
   } as Recommendation;
 }
 

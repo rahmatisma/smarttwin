@@ -27,6 +27,19 @@ class DigitalTwinCandidate(BaseModel):
     los: Literal["A", "B", "C", "D", "E", "F"]
     isWinner: bool = False
 
+    # Rincian per lengan -- tanpa ini, rata-rata simpang bisa menyembunyikan
+    # satu lengan yang sebenarnya masih buruk (pola yang sama dengan bug P-3
+    # LOS gabungan, lihat docs/hasil-implementasi-pkji-aggressive-balanced.md
+    # bagian P-3). Sudah dihitung di simulate_cycle_candidate()
+    # (simulation/scenario_generator.py) sejak awal -- cuma belum
+    # dideklarasikan di sini sehingga Pydantic membuangnya diam-diam.
+    delayByApproachSeconds: dict[str, float | None] | None = None
+    losByApproach: (
+        dict[str, Literal["A", "B", "C", "D", "E", "F"] | None] | None
+    ) = None
+    queueLengthVehByApproach: dict[str, int] | None = None
+    throughputVehByApproach: dict[str, int] | None = None
+
 
 class DigitalTwinScenarioResponse(BaseModel):
     intersectionId: str

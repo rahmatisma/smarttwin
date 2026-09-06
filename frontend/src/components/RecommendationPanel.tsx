@@ -445,36 +445,56 @@ export default function RecommendationPanel({
             </div>
           )}
 
-          {displayRec.losByApproach &&
-            Object.keys(displayRec.losByApproach).length > 0 && (
+          {(displayRec.losByApproach ||
+            displayRec.queueLengthVehByApproach ||
+            displayRec.throughputVehByApproach) && (
             <div className="mt-2">
               <div className="mb-1 text-[9px] uppercase tracking-wider text-text-muted">
-                LOS per lengan (HCM)
+                Kondisi per lengan
               </div>
-              <div className="grid grid-cols-4 gap-1">
+              <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-4">
                 {CYCLE_ORDER.map((approach) => {
                   const grade = displayRec.losByApproach?.[approach] ?? null;
                   const delay =
                     displayRec.delayByApproachSeconds?.[approach] ?? null;
+                  const queue =
+                    displayRec.queueLengthVehByApproach?.[approach] ?? null;
+                  const throughput =
+                    displayRec.throughputVehByApproach?.[approach] ?? null;
                   return (
                     <div
                       key={approach}
                       className="dashboard-detail-card rounded border border-border bg-surface-2 p-1.5 text-center"
-                      title={
-                        typeof delay === "number"
-                          ? `${approachLabel(approach)} — delay ${delay.toFixed(1)}s`
-                          : `${approachLabel(approach)} — tidak ada data`
-                      }
                     >
                       <div className="text-[8px] uppercase tracking-wider text-text-muted">
                         {APPROACH_SHORT[approach] ?? approach}
                       </div>
                       <div
-                        className={`mt-0.5 font-mono text-xs font-bold ${
+                        className={`mt-0.5 font-mono text-sm font-bold ${
                           grade ? LOS_TONE[grade] ?? "text-text" : "text-text-muted"
                         }`}
                       >
                         {grade ?? "–"}
+                      </div>
+                      <div className="mt-1 space-y-0.5 text-[9px] text-text-muted">
+                        <div className="flex items-center justify-between gap-1">
+                          <span>Delay</span>
+                          <span className="font-mono text-text">
+                            {typeof delay === "number" ? `${delay.toFixed(1)}s` : "–"}
+                          </span>
+                        </div>
+                        <div className="flex items-center justify-between gap-1">
+                          <span>Antrean</span>
+                          <span className="font-mono text-text">
+                            {typeof queue === "number" ? `${queue} kend.` : "–"}
+                          </span>
+                        </div>
+                        <div className="flex items-center justify-between gap-1">
+                          <span>Lewat</span>
+                          <span className="font-mono text-text">
+                            {typeof throughput === "number" ? `${throughput} kend.` : "–"}
+                          </span>
+                        </div>
                       </div>
                     </div>
                   );

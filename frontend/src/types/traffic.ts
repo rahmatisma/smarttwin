@@ -217,4 +217,8 @@ export interface Recommendation {
   losByApproach?: Record<string, string | null> | null;
 
   delayByApproachSeconds?: Record<string, number | null> | null;
+
+  queueLengthVehByApproach?: Record<string, number> | null;
+
+  throughputVehByApproach?: Record<string, number> | null;
 }

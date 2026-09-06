@@ -151,6 +151,7 @@ export default function DigitalTwinView() {
         trafficLightId: string;
         state: "GREEN" | "RED" | "YELLOW";
         phase: number;
+        activeApproach?: string | null;
         remainingSeconds: number;
         rawState: string;
     }
@@ -169,6 +170,18 @@ export default function DigitalTwinView() {
     const [avgQueueLengthVeh, setAvgQueueLengthVeh] = useState(0);
     const [avgQueueLengthM, setAvgQueueLengthM] = useState(0);
     const [los, setLos] = useState<string | null>(null);
+
+    // Rincian per lengan -- rata-rata simpang di atas bisa menyembunyikan
+    // satu lengan yang sebenarnya masih buruk (lihat
+    // catatan-pribadi/temuan-data-tersembunyi-per-lengan.md).
+    const [delayByApproachSeconds, setDelayByApproachSeconds] =
+        useState<Record<string, number | null>>({});
+    const [losByApproach, setLosByApproach] =
+        useState<Record<string, string | null>>({});
+    const [queueLengthVehByApproach, setQueueLengthVehByApproach] =
+        useState<Record<string, number>>({});
+    const [throughputVehPerMinByApproach, setThroughputVehPerMinByApproach] =
+        useState<Record<string, number>>({});
 
     // Durasi lampu per lengan untuk skenario yang SEDANG diterapkan --
     // inilah satu-satunya hal yang benar-benar beda antar skenario, jadi
@@ -285,6 +298,20 @@ export default function DigitalTwinView() {
                 if (data.los !== undefined) {
                     setLos(data.los);
                 }
+                if (data.delayByApproachSeconds !== undefined) {
+                    setDelayByApproachSeconds(data.delayByApproachSeconds ?? {});
+                }
+                if (data.losByApproach !== undefined) {
+                    setLosByApproach(data.losByApproach ?? {});
+                }
+                if (data.queueLengthVehByApproach !== undefined) {
+                    setQueueLengthVehByApproach(data.queueLengthVehByApproach ?? {});
+                }
+                if (data.throughputVehPerMinByApproach !== undefined) {
+                    setThroughputVehPerMinByApproach(
+                        data.throughputVehPerMinByApproach ?? {}
+                    );
+                }
                 if (data.cyclePlan) {
                     setCyclePlan(data.cyclePlan);
                 }
@@ -390,6 +417,22 @@ export default function DigitalTwinView() {
             setLoading(false);
         }
     }
+
+    // "Traffic Realtime" adalah instance SUMO milik Dashboard -- SENGAJA
+    // tidak menunggu tombol Start manual seperti 3 skenario sandbox
+    // lainnya (Baseline/Aggressive/Balanced). Begitu polling /state
+    // mengonfirmasi context "dashboard" masih idle (mis. dashboard belum
+    // pernah dibuka di sesi ini), halaman ini menyalakannya sendiri --
+    // mirip cara DigitalTwinPanel.tsx di Dashboard menyalakan dirinya
+    // sendiri lewat useEffect, tanpa tombol.
+    useEffect(() => {
+        if (scenario !== "Traffic Realtime") return;
+        if (!isSimStateLoaded) return;
+        if (status !== "idle") return;
+        if (loading) return;
+        void handleStartSimulation("Traffic Realtime");
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [scenario, status, isSimStateLoaded, loading]);
 
     async function handleReset() {
         setLoading(true);
@@ -544,11 +587,17 @@ export default function DigitalTwinView() {
                 {/* MAIN SIMULATION */}
                 {/* ================================================= */}
 
-                <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_300px]">
+                <div className="grid items-start gap-5 xl:grid-cols-3">
 
                     {/* =============================== */}
                     {/* DIGITAL TWIN CANVAS */}
                     {/* =============================== */}
+                    {/* "items-start" di grid atas mencegah video ikut
+                        ditarik memanjang buat menyamai tinggi sidebar
+                        kanan yang bisa lebih pendek/panjang tergantung
+                        skenario -- video TIDAK pernah diperbesar. */}
+
+                    <div className="space-y-5 xl:col-span-2">
 
                     <div
                         ref={simulationViewRef}
@@ -694,10 +743,70 @@ export default function DigitalTwinView() {
                     </div>
 
                     {/* =============================== */}
+                    {/* RINGKASAN SIMPANG */}
+                    {/* =============================== */}
+
+                    {!isSimStateLoaded ? (
+                        <div
+                            className="rounded-2xl border border-border bg-surface p-8 text-center shadow-sm"
+                        >
+                            <div className="mx-auto h-6 w-6 animate-spin rounded-full border-2 border-text-muted border-t-transparent"></div>
+                            <p className="mt-3 text-xs text-text-muted">Memuat informasi kendaraan...</p>
+                        </div>
+                    ) : (
+                        <div
+                            className="flex flex-col justify-center rounded-2xl border border-border bg-surface p-5 shadow-sm"
+                        >
+                            {/* Beda dari "Kondisi per Lengan" di sidebar (itu
+                                per lengan) -- 3 card ini semuanya angka
+                                GABUNGAN 4 lengan jadi satu, supaya tidak
+                                disangka sama-sama per lengan. */}
+                            <p className="mb-3 text-[11px] uppercase tracking-wider text-text-muted">
+                                Ringkasan Simpang (gabungan 4 lengan)
+                            </p>
+                            <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+                                <StatCard
+                                    label="Kendaraan Terlihat"
+                                    value={status === "idle" ? "0" : visibleVehicleCount.toString()}
+                                    change={status === "idle" ? "" : `${vehicles.length} total di jaringan (gabungan 4 lengan)`}
+                                    warning={
+                                        lastSyncFailedInsertions > 0
+                                            ? `${lastSyncFailedInsertions} gagal disisipkan (ruas padat)`
+                                            : undefined
+                                    }
+                                    icon={<Car size={18} />}
+                                />
+
+                                <StatCard
+                                    label="Queue Length"
+                                    value={
+                                        status === "idle"
+                                            ? "0"
+                                            : queueBusiestApproach
+                                              ? `${APPROACH_SHORT_LABEL[queueBusiestApproach] ?? queueBusiestApproach}: ${queueLengthVeh}`
+                                              : `${queueLengthVeh}`
+                                    }
+                                    change={status === "idle" ? "" : "Lengan terpadat saja, lihat semua lengan di “Kondisi per Lengan”"}
+                                    icon={<List size={18} />}
+                                />
+
+                                <StatCard
+                                    label="Traffic Flow"
+                                    value={status === "idle" ? "0" : `${throughputVehPerMin}/menit`}
+                                    change={status === "idle" ? "" : "Gabungan 4 lengan, live snapshot"}
+                                    icon={<Zap size={18} />}
+                                />
+                            </div>
+                        </div>
+                    )}
+
+                    </div>
+
+                    {/* =============================== */}
                     {/* SIMULATION STATUS */}
                     {/* =============================== */}
 
-                    <div className="space-y-5">
+                    <div className="space-y-5 xl:col-span-1">
 
                         {/* Status */}
 
@@ -762,14 +871,20 @@ export default function DigitalTwinView() {
                             <div className="rounded-2xl border border-border bg-surface p-5 shadow-sm">
                                 <div className="mb-4 flex items-center justify-between">
                                     <div>
-                                        <h2 className="text-sm font-semibold">
-                                            Phase {signals[0].phase}
+                                        {/* Nama lengan, bukan nomor index internal SUMO
+                                            ("Phase 6") yang cuma bisa dibaca kalau tahu
+                                            urutan fase program TLS-nya. */}
+                                        <h2 className="text-base font-semibold">
+                                            {signals[0].activeApproach
+                                                ? APPROACH_SHORT_LABEL[signals[0].activeApproach] ??
+                                                  signals[0].activeApproach
+                                                : `Phase ${signals[0].phase}`}
                                         </h2>
                                         <p className="mt-1 text-xs text-text-muted">
                                             Traffic Light: {signals[0].trafficLightId}
                                         </p>
                                     </div>
-                                    <span className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] font-medium ${signals[0].state === 'GREEN' ? 'bg-signal-green/10 text-signal-green' : signals[0].state === 'YELLOW' ? 'bg-signal-amber/10 text-signal-amber' : 'bg-signal-red/10 text-signal-red'}`}>
+                                    <span className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${signals[0].state === 'GREEN' ? 'bg-signal-green/10 text-signal-green' : signals[0].state === 'YELLOW' ? 'bg-signal-amber/10 text-signal-amber' : 'bg-signal-red/10 text-signal-red'}`}>
                                         <Circle
                                             size={7}
                                             fill="currentColor"
@@ -780,7 +895,7 @@ export default function DigitalTwinView() {
                                 <div className="h-2 overflow-hidden rounded-full bg-surface-2">
                                     <div className={`h-full rounded-full transition-all duration-500 ${signals[0].state === 'GREEN' ? 'bg-signal-green' : signals[0].state === 'YELLOW' ? 'bg-signal-amber' : 'bg-signal-red'}`} style={{width: `${Math.min(100, Math.max(0, (signals[0].remainingSeconds / 60) * 100))}%`}} />
                                 </div>
-                                <div className="mt-2 flex justify-between text-[10px] text-text-muted">
+                                <div className="mt-2 flex justify-between text-xs text-text-muted">
                                     <span className="font-mono">{Math.floor(signals[0].remainingSeconds)}s</span>
                                     <span>Remaining</span>
                                 </div>
@@ -825,40 +940,39 @@ export default function DigitalTwinView() {
                                     <select
                                         value={scenario}
                                         onChange={async (e) => {
+                                            // Dropdown ini SENGAJA cuma memilih, tidak pernah
+                                            // auto-menjalankan simulasi -- pengguna harus klik
+                                            // tombol "Start Simulation" sendiri untuk menerapkan
+                                            // skenario yang dipilih.
                                             const newScenario = e.target.value as ScenarioType;
                                             const oldContext = contextForScenario(scenario);
                                             const newContext = contextForScenario(newScenario);
+
                                             setScenario(newScenario);
 
                                             if (newScenario === runningScenario) {
-                                                // Sudah ini yang aktif -- tidak ada yang perlu diterapkan.
-                                                setRecommendationLoading(false);
+                                                // Sudah ini yang aktif -- tidak ada yang perlu diubah.
                                                 return;
                                             }
 
-                                            if (status === "idle") {
-                                                // Belum ada simulasi jalan -- tombol "Start Simulation"
-                                                // yang akan memicu, sesuai perilaku lama.
-                                                setRecommendationLoading(true);
-                                                return;
-                                            }
-
-                                            // Simulasi lagi jalan/paused dan skenario benar-benar
-                                            // ganti -- terapkan sekarang juga, jangan nyangkut loading
-                                            // selamanya menunggu tombol yang sudah tidak dirender.
-                                            setRecommendationLoading(true);
-
-                                            if (oldContext !== newContext && oldContext === "digitaltwin") {
-                                                // Sandbox lama ditinggal -- matikan supaya tidak nganggur
-                                                // nyala sia-sia. TIDAK PERNAH mematikan context "dashboard"
-                                                // dari sini -- itu bukan milik halaman ini.
+                                            if (
+                                                oldContext === newContext &&
+                                                oldContext === "digitaltwin" &&
+                                                status !== "idle"
+                                            ) {
+                                                // Skenario sandbox LAIN sedang jalan di context yang
+                                                // sama -- hentikan dulu supaya tombol "Start Simulation"
+                                                // muncul lagi untuk skenario yang baru dipilih, bukan
+                                                // diam-diam terus menampilkan skenario lama. TIDAK
+                                                // PERNAH mematikan context "dashboard" dari sini -- itu
+                                                // bukan milik halaman ini (dipakai bersama Dashboard).
                                                 await fetch(
                                                     `${API_BASE_URL}/api/v1/simulation/stop?context=digitaltwin`,
                                                     { method: "POST" }
                                                 ).catch(() => undefined);
+                                                setStatus("idle");
+                                                setRunningScenario(null);
                                             }
-
-                                            await handleStartSimulation(newScenario);
                                         }}
                                         className="w-full appearance-none rounded-lg border border-border bg-surface px-2.5 py-1.5 pr-8 text-xs outline-none transition focus:border-text-muted"
                                     >
@@ -892,14 +1006,18 @@ export default function DigitalTwinView() {
 
                             <div className="mt-4 flex gap-2">
 
-                                {scenario === "Traffic Realtime" && status !== "idle" ? (
-                                    // Ini instance SUMO yang SAMA dengan dashboard -- Pause/Stop
-                                    // dari sini akan ikut menghentikan tampilan live di dashboard
-                                    // (bukan bug, memang instance-nya sama). Supaya tidak tidak
-                                    // sengaja mematikan demo live orang lain, kendali pause/stop
-                                    // sengaja tidak ditawarkan di sini untuk skenario ini.
+                                {scenario === "Traffic Realtime" ? (
+                                    // Ini instance SUMO yang SAMA dengan dashboard -- otomatis
+                                    // ditampilkan begitu jalan (lihat effect auto-start di atas),
+                                    // TIDAK PERNAH minta tombol Start manual seperti 3 skenario
+                                    // sandbox lainnya. Pause/Stop juga sengaja tidak ditawarkan
+                                    // di sini -- itu akan ikut menghentikan tampilan live di
+                                    // dashboard (bukan bug, memang instance-nya sama), supaya
+                                    // tidak tidak sengaja mematikan demo live orang lain.
                                     <div className="rounded-lg border border-border bg-surface-2 px-4 py-1.5 text-[11px] text-text-muted">
-                                        Live dari dashboard -- kendalikan dari halaman Dashboard
+                                        {status === "idle"
+                                            ? "Menyambungkan ke SUMO dashboard…"
+                                            : "Live dari dashboard -- kendalikan dari halaman Dashboard"}
                                     </div>
                                 ) : status === "running" ? (
                                     <button
@@ -935,56 +1053,75 @@ export default function DigitalTwinView() {
 
                         </div>
 
+                        {/* Kondisi per lengan -- rata-rata simpang bisa
+                            menyembunyikan satu lengan yang sebenarnya masih
+                            buruk (lihat catatan-pribadi/
+                            temuan-data-tersembunyi-per-lengan.md). */}
+                        {isSimulating &&
+                            (Object.keys(losByApproach).length > 0 ||
+                                Object.keys(queueLengthVehByApproach).length > 0) && (
+                            <div className="rounded-2xl border border-border bg-surface p-5 shadow-sm">
+                                <h2 className="mb-4 text-sm font-semibold">
+                                    Kondisi per Lengan
+                                </h2>
+                                <div className="grid grid-cols-2 gap-3">
+                                    {(["north", "east", "south", "west"] as const).map((approach) => {
+                                        const grade = losByApproach[approach] ?? null;
+                                        const delay = delayByApproachSeconds[approach] ?? null;
+                                        const queue = queueLengthVehByApproach[approach] ?? null;
+                                        const throughputApproach =
+                                            throughputVehPerMinByApproach[approach] ?? null;
+                                        return (
+                                            <div
+                                                key={approach}
+                                                className="rounded-lg border border-border bg-surface-2 p-3 text-center"
+                                            >
+                                                <p className="text-xs font-medium text-text-muted">
+                                                    {APPROACH_SHORT_LABEL[approach] ?? approach}
+                                                </p>
+                                                <p
+                                                    className={`mt-1 font-mono text-xl font-bold ${
+                                                        grade === "A" || grade === "B"
+                                                            ? "text-signal-green"
+                                                            : grade === "C" || grade === "D"
+                                                              ? "text-signal-amber"
+                                                              : grade
+                                                                ? "text-signal-red"
+                                                                : "text-text-muted"
+                                                    }`}
+                                                >
+                                                    {grade ?? "–"}
+                                                </p>
+                                                <div className="mt-2 space-y-1 text-xs text-text-muted">
+                                                    <div className="flex items-center justify-between gap-1">
+                                                        <span>Delay</span>
+                                                        <span className="font-mono font-medium text-text">
+                                                            {typeof delay === "number" ? `${delay.toFixed(1)}s` : "–"}
+                                                        </span>
+                                                    </div>
+                                                    <div className="flex items-center justify-between gap-1">
+                                                        <span>Antrean</span>
+                                                        <span className="font-mono font-medium text-text">
+                                                            {typeof queue === "number" ? `${queue} kend.` : "–"}
+                                                        </span>
+                                                    </div>
+                                                    <div className="flex items-center justify-between gap-1">
+                                                        <span>Lewat</span>
+                                                        <span className="font-mono font-medium text-text">
+                                                            {typeof throughputApproach === "number"
+                                                                ? `${throughputApproach}/menit`
+                                                                : "–"}
+                                                        </span>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+                        )}
+
                     </div>
-
-                </div>
-
-                {/* ================================================= */}
-                {/* VEHICLE INFORMATION / METRICS */}
-                {/* ================================================= */}
-
-                <div className="mt-5 grid grid-cols-1 gap-4 sm:grid-cols-3">
-
-                    {!isSimStateLoaded ? (
-                        <div className="col-span-full rounded-2xl border border-border bg-surface p-8 text-center shadow-sm">
-                            <div className="mx-auto h-6 w-6 animate-spin rounded-full border-2 border-text-muted border-t-transparent"></div>
-                            <p className="mt-3 text-xs text-text-muted">Memuat informasi kendaraan...</p>
-                        </div>
-                    ) : (
-                        <>
-                            <StatCard
-                                label="Kendaraan Terlihat"
-                                value={status === "idle" ? "0" : visibleVehicleCount.toString()}
-                                change={status === "idle" ? "" : `${vehicles.length} total di jaringan`}
-                                warning={
-                                    lastSyncFailedInsertions > 0
-                                        ? `${lastSyncFailedInsertions} gagal disisipkan (ruas padat)`
-                                        : undefined
-                                }
-                                icon={<Car size={18} />}
-                            />
-
-                            <StatCard
-                                label="Queue Length"
-                                value={
-                                    status === "idle"
-                                        ? "0"
-                                        : queueBusiestApproach
-                                          ? `${APPROACH_SHORT_LABEL[queueBusiestApproach] ?? queueBusiestApproach}: ${queueLengthVeh}`
-                                          : `${queueLengthVeh}`
-                                }
-                                change={status === "idle" ? "" : "Lengan terpadat"}
-                                icon={<List size={18} />}
-                            />
-
-                            <StatCard
-                                label="Traffic Flow"
-                                value={status === "idle" ? "0" : `${throughputVehPerMin}/menit`}
-                                change={status === "idle" ? "" : "Live snapshot"}
-                                icon={<Zap size={18} />}
-                            />
-                        </>
-                    )}
 
                 </div>
 
@@ -1119,23 +1256,23 @@ export default function DigitalTwinView() {
                                         key={phase.approach}
                                         className="rounded-lg border border-border bg-surface-2 p-3"
                                     >
-                                        <p className="mb-2 text-xs font-medium text-text">
+                                        <p className="mb-2 text-sm font-medium text-text">
                                             {APPROACH_SHORT_LABEL[phase.approach] ?? phase.approach}
                                         </p>
-                                        <div className="space-y-1 text-[11px]">
+                                        <div className="space-y-1.5 text-sm">
                                             <div className="flex items-center justify-between">
                                                 <span className="flex items-center gap-1.5 text-text-muted">
                                                     <Circle size={7} fill="currentColor" className="text-signal-green" />
                                                     Hijau
                                                 </span>
-                                                <span className="font-mono text-text">{phase.greenSeconds}s</span>
+                                                <span className="font-mono font-medium text-text">{phase.greenSeconds}s</span>
                                             </div>
                                             <div className="flex items-center justify-between">
                                                 <span className="flex items-center gap-1.5 text-text-muted">
                                                     <Circle size={7} fill="currentColor" className="text-signal-amber" />
                                                     Kuning
                                                 </span>
-                                                <span className="font-mono text-text">{phase.yellowSeconds}s</span>
+                                                <span className="font-mono font-medium text-text">{phase.yellowSeconds}s</span>
                                             </div>
                                             {phase.redSeconds !== undefined && (
                                                 <div className="flex items-center justify-between">
@@ -1143,7 +1280,7 @@ export default function DigitalTwinView() {
                                                         <Circle size={7} fill="currentColor" className="text-signal-red" />
                                                         Merah
                                                     </span>
-                                                    <span className="font-mono text-text">{phase.redSeconds}s</span>
+                                                    <span className="font-mono font-medium text-text">{phase.redSeconds}s</span>
                                                 </div>
                                             )}
                                         </div>
@@ -1224,13 +1361,13 @@ function MetricRow({
 
                 {icon}
 
-                <span className="text-xs">
+                <span className="text-sm">
                     {label}
                 </span>
 
             </div>
 
-            <span className="font-mono text-xs font-medium">
+            <span className="font-mono text-sm font-semibold text-text">
                 {value}
             </span>
 

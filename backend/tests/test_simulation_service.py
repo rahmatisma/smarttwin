@@ -112,6 +112,15 @@ class _FakeControllerWithLiveMetrics:
         self.live_visible_vehicle_count = 3
         self.live_last_sync_failed_insertions = 2
         self.live_last_sync_failed_by_approach = {"south": 2}
+        self.live_queue_length_veh_by_approach = {"north": 5, "south": 2, "east": 1, "west": 3}
+        self.live_delay_by_approach_seconds = {"north": 8.7, "south": None, "east": 4.2, "west": 6.1}
+        self.live_los_by_approach = {"north": "A", "south": None, "east": "A", "west": "A"}
+        self.live_throughput_veh_per_min_by_approach = {
+            "north": 3.0,
+            "south": 1.0,
+            "east": 2.0,
+            "west": 4.0,
+        }
 
     def is_running(self):
         return True
@@ -139,6 +148,18 @@ def test_get_simulation_state_exposes_live_traffic_metrics():
     assert state["visibleVehicleCount"] == 3
     assert state["lastSyncFailedInsertions"] == 2
     assert state["lastSyncFailedByApproach"] == {"south": 2}
+    assert state["queueLengthVehByApproach"] == {
+        "north": 5, "south": 2, "east": 1, "west": 3
+    }
+    assert state["delayByApproachSeconds"] == {
+        "north": 8.7, "south": None, "east": 4.2, "west": 6.1
+    }
+    assert state["losByApproach"] == {
+        "north": "A", "south": None, "east": "A", "west": "A"
+    }
+    assert state["throughputVehPerMinByApproach"] == {
+        "north": 3.0, "south": 1.0, "east": 2.0, "west": 4.0
+    }
 
 
 def test_sync_clock_before_sumo_is_ready_is_a_noop():
