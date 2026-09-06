@@ -437,6 +437,20 @@ def write_history(supabase, payload: dict[str, Any], state) -> None:
                         (f"queueLengthVeh_{approach}", queue_value, "veh")
                     )
 
+            # Antrean per lengan dalam METER -- sebelumnya cuma agregat
+            # (avgQueueLengthM di atas) yang dikonversi dari kendaraan ke
+            # meter; versi per lengan tidak pernah disimpan walau
+            # scenario_generator.py::queue_length_m_by_approach() sudah
+            # menghitungnya dari sumber yang sama dengan queueLengthVeh_*
+            # di atas, cuma dikalikan METERS_PER_QUEUED_VEHICLE.
+            for approach, queue_m_value in (
+                candidate.get("avgQueueLengthMByApproach") or {}
+            ).items():
+                if queue_m_value is not None:
+                    metrics.append(
+                        (f"queueLengthM_{approach}", queue_m_value, "m")
+                    )
+
             # Throughput per lengan -- pola sama, lihat catatan panjang
             # soal vehicleLastApproach di run_tls_simulation.py untuk
             # kenapa ini bisa sedikit di bawah throughputVeh total.

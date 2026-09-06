@@ -62,14 +62,16 @@ _BEFORE_AFTER_METRICS = (
     ("throughputVeh", "Throughput", "kendaraan", False),
 )
 
-# Versi per lengan dari tabel di atas. Satuan antrean di sini "kendaraan",
-# BUKAN "m" seperti versi agregat -- tidak ada versi meter per lengan yang
-# disimpan (cuma queueLengthVehByApproach, dalam kendaraan), jadi jangan
-# disamakan angkanya dengan kolom "Antrean" agregat di tabel utama.
+# Versi per lengan dari tabel di atas. Ada dua metrik antrean per lengan
+# dengan satuan beda (kendaraan vs meter, keduanya diturunkan dari sumber
+# yang sama -- lihat scenario_generator.py::queue_length_m_by_approach())
+# -- label dibedakan eksplisit ("Antrean (kendaraan)"/"Antrean (meter)")
+# supaya tidak tertukar dengan kolom "Antrean" agregat di tabel utama.
 _BEFORE_AFTER_APPROACH_FIELDS = (
     # (field per-lengan, label, satuan, turun_berarti_membaik)
     ("delayByApproachSeconds", "Waktu Tunggu", "s", True),
-    ("queueLengthVehByApproach", "Antrean", "kendaraan", True),
+    ("queueLengthVehByApproach", "Antrean (kendaraan)", "kendaraan", True),
+    ("avgQueueLengthMByApproach", "Antrean (meter)", "m", True),
     ("throughputVehByApproach", "Throughput", "kendaraan", False),
 )
 
@@ -394,6 +396,15 @@ class HistoryService:
                 for approach in ("north", "south", "east", "west")
                 if simulation_metrics.get(f"queueLengthVeh_{approach}") is not None
             }
+            # Versi meter dari queue_by_approach di atas -- baris metrik
+            # terpisah ("queueLengthM_<lengan>", lihat
+            # scenario_worker.py::write_history()). Cycle lama tidak akan
+            # punya baris ini -- dict kosong, bukan error.
+            queue_m_by_approach = {
+                approach: simulation_metrics[f"queueLengthM_{approach}"]
+                for approach in ("north", "south", "east", "west")
+                if simulation_metrics.get(f"queueLengthM_{approach}") is not None
+            }
             throughput_by_approach = {
                 approach: simulation_metrics[f"throughputVeh_{approach}"]
                 for approach in ("north", "south", "east", "west")
@@ -410,6 +421,7 @@ class HistoryService:
                 "delayByApproachSeconds": delay_by_approach or None,
                 "losByApproach": los_by_approach or None,
                 "queueLengthVehByApproach": queue_by_approach or None,
+                "avgQueueLengthMByApproach": queue_m_by_approach or None,
                 "throughputVehByApproach": throughput_by_approach or None,
             }
             cycle["candidates"].append(candidate)

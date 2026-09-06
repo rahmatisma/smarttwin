@@ -292,6 +292,91 @@ def test_kandidat_dan_kondisi_pemicu_ikut_terlampir():
     assert siklus["beforeAfter"]["baselineCandidateId"] == "baseline"
 
 
+def test_antrean_meter_per_lengan_ikut_terhitung():
+    # Temuan audit 6 September 2026: avgQueueLengthM (meter) cuma pernah
+    # ada agregat, versi per lengan tidak pernah disimpan walau
+    # queueLengthVehByApproach (kendaraan) sudah ada dari sumber yang
+    # sama. Baris "queueLengthM_<lengan>" ini yang menutup celah itu.
+    store = {
+        "intersections": [{"id": 1}],
+        "recommendations": [
+            {
+                "id": 10,
+                "timestamp": "2026-09-01T10:00:00+00:00",
+                "recommendedPhase": "north",
+                "recommendedGreenSeconds": 26,
+                "currentGreenSeconds": 15,
+                "confidence": 0.8,
+                "expectedDelayReductionPercent": 3.5,
+                "source": "scenario-generator",
+            }
+        ],
+        "simulations": [
+            {
+                "id": 100,
+                "recommendationId": 10,
+                "trafficStateId": 13784,
+                "simulationName": "balanced @ 2026-09-01T10:00:00+00:00",
+                "status": "winner",
+            },
+        ],
+        "simulationMetrics": [
+            {"simulationId": 100, "metricName": "avgDelaySeconds", "metricValue": 15.7},
+            {"simulationId": 100, "metricName": "queueLengthVeh_north", "metricValue": 4},
+            {"simulationId": 100, "metricName": "queueLengthM_north", "metricValue": 28.0},
+            {"simulationId": 100, "metricName": "queueLengthVeh_south", "metricValue": 0},
+            {"simulationId": 100, "metricName": "queueLengthM_south", "metricValue": 0.0},
+        ],
+        "trafficApproachStates": [],
+    }
+    service, _ = _service(store)
+
+    siklus = service.list_cycles(intersection_id="simpang4-pingit")["items"][0]
+    winner = siklus["winner"]
+
+    assert winner["avgQueueLengthMByApproach"]["north"] == 28.0
+    # 0 tetap disimpan (bukan dilewati), sama seperti queueLengthVehByApproach.
+    assert winner["avgQueueLengthMByApproach"]["south"] == 0.0
+    assert winner["queueLengthVehByApproach"]["north"] == 4
+
+
+def test_before_after_by_approach_membedakan_satuan_kendaraan_dan_meter():
+    kandidat = [
+        {
+            "candidateId": "baseline",
+            "isWinner": False,
+            "avgDelaySeconds": 18.2,
+            "avgQueueLengthM": 70.0,
+            "throughputVeh": 6,
+            "los": "B",
+            "queueLengthVehByApproach": {"north": 10},
+            "avgQueueLengthMByApproach": {"north": 70.0},
+        },
+        {
+            "candidateId": "balanced",
+            "isWinner": True,
+            "avgDelaySeconds": 15.7,
+            "avgQueueLengthM": 56.0,
+            "throughputVeh": 8,
+            "los": "B",
+            "queueLengthVehByApproach": {"north": 8},
+            "avgQueueLengthMByApproach": {"north": 56.0},
+        },
+    ]
+
+    hasil = _compute_before_after(kandidat)
+    metrik_utara = hasil["byApproach"]["north"]
+
+    kendaraan = next(m for m in metrik_utara if m["metric"] == "queueLengthVehByApproach")
+    meter = next(m for m in metrik_utara if m["metric"] == "avgQueueLengthMByApproach")
+
+    assert kendaraan["label"] == "Antrean (kendaraan)"
+    assert kendaraan["before"] == 10
+    assert meter["label"] == "Antrean (meter)"
+    assert meter["before"] == 70.0
+    assert meter["unit"] == "m"
+
+
 def test_before_after_membandingkan_baseline_vs_pemenang():
     kandidat = [
         {

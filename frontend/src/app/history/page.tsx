@@ -35,7 +35,7 @@ import Sidebar from "@/components/Sidebar";
 import Header from "@/components/Header";
 import ForecastChart from "@/components/ForecastChart";
 import { fetchForecast, DEFAULT_INTERSECTION_ID } from "@/lib/supabaseData";
-import type { ForecastResponse, TrafficState } from "@/types/traffic";
+import type { Approach, ForecastResponse, TrafficState } from "@/types/traffic";
 
 /*
  * =========================================================
@@ -112,6 +112,10 @@ interface Kandidat {
     delayByApproachSeconds: Partial<Record<"north" | "south" | "east" | "west", number>> | null;
     losByApproach: Partial<Record<"north" | "south" | "east" | "west", string>> | null;
     queueLengthVehByApproach: Partial<Record<"north" | "south" | "east" | "west", number>> | null;
+    // Dikirim backend sejak Temuan 3 (audit 6 September) tapi sebelumnya
+    // tidak dideklarasikan di sini -- datanya sampai, cuma tidak "dikenal"
+    // TypeScript. Versi meter dari queueLengthVehByApproach di atas.
+    avgQueueLengthMByApproach: Partial<Record<"north" | "south" | "east" | "west", number>> | null;
     throughputVehByApproach: Partial<Record<"north" | "south" | "east" | "west", number>> | null;
 }
 
@@ -220,6 +224,22 @@ function apakahBerubah(sekarang: Siklus, sebelumnya: Siklus | undefined): boolea
         if (lama === undefined) return true;
         return Math.abs((fase.greenSeconds ?? 0) - lama) >= AMBANG_BERUBAH_DETIK;
     });
+}
+
+/*
+ * Siklus BARU BANGET (dibuka pas scenario_worker.py masih di tengah
+ * menulis) bisa punya baris kandidat TANPA metrik apa pun -- beda dari
+ * siklus lama yang memang tidak pernah disimulasikan (candidates kosong
+ * total, kasus itu TIDAK dianggap "masih menunggu" di sini, karena
+ * datanya memang tidak akan pernah muncul). write_history() menulis
+ * baris "simulations" (nama kandidat) dan baris "simulationMetrics"
+ * (angka delay/antrean/throughput) dalam 2 tahap terpisah -- kalau
+ * dibuka tepat di jeda antara keduanya, baris kandidat sudah ada tapi
+ * avgDelaySeconds dkk masih null semua.
+ */
+function sedangMenungguMetrik(siklus: Siklus | null): boolean {
+    if (!siklus || siklus.candidates.length === 0) return false;
+    return siklus.candidates.every((kandidat) => kandidat.avgDelaySeconds == null);
 }
 
 interface TitikGrafik {
@@ -395,6 +415,11 @@ export default function HistoryPage() {
     const [galat, setGalat] = useState<string | null>(null);
     const [dipilih, setDipilih] = useState<Siklus | null>(null);
     const [forecastData, setForecastData] = useState<ForecastResponse | null>(null);
+    // Lengan yang lagi dilihat di panel detail (tab Utara/Timur/Selatan/
+    // Barat). Direset ke "north" tiap kali siklus BEDA dibuka -- lihat efek
+    // di bawah, dikunci ke timestamp supaya tidak reset kalau dipilih cuma
+    // berganti REFERENSI objek yang sama (mis. hasil polling metrik).
+    const [lenganAktif, setLenganAktif] = useState<Approach>("north");
 
     useEffect(() => {
         if (dipilih) {
@@ -407,6 +432,51 @@ export default function HistoryPage() {
             });
         }
     }, [dipilih]);
+
+    useEffect(() => {
+        // Ditunda lewat microtask, pola sama dengan ambilData() di bawah --
+        // supaya tidak dianggap "setState sinkron di dalam efek" oleh
+        // react-hooks/set-state-in-effect.
+        queueMicrotask(() => {
+            setLenganAktif("north");
+        });
+    }, [dipilih?.timestamp]);
+
+    // Kandidat diurutkan berdasarkan delay LENGAN YANG DIPILIH (bukan skor
+    // gabungan sistem) -- kandidat isWinner bisa saja bukan peringkat 1 di
+    // sini, karena dia menang berdasarkan performa gabungan 4 lengan, bukan
+    // terbaik di lengan ini secara spesifik. dipilihTanpaData dipisah supaya
+    // urutan tetap stabil kalau delay-nya sama persis (candidateId sbg tie-break).
+    const kandidatUrutLengan = useMemo(() => {
+        if (!dipilih) return [];
+        return [...dipilih.candidates]
+            .filter((k) => k.delayByApproachSeconds?.[lenganAktif] != null)
+            .sort((a, b) => {
+                const delayA = a.delayByApproachSeconds![lenganAktif]!;
+                const delayB = b.delayByApproachSeconds![lenganAktif]!;
+                if (delayA !== delayB) return delayA - delayB;
+                return a.candidateId.localeCompare(b.candidateId);
+            });
+    }, [dipilih, lenganAktif]);
+
+    // true kalau kandidat yang menang (isWinner) BUKAN peringkat 1 untuk
+    // lenganAktif -- dipakai buat munculkan catatan penjelas, supaya badge
+    // "terpilih" tidak nempel di baris ke-2/3 tanpa keterangan (lihat diskusi
+    // 6 September soal opsi A vs B).
+    const pemenangBukanPeringkatSatu =
+        kandidatUrutLengan.length > 0 && !kandidatUrutLengan[0].isWinner;
+
+    const faseLenganAktif = dipilih
+        ? urutkanFase(dipilih.phases).find((f) => f.approach === lenganAktif) ?? null
+        : null;
+
+    const dampakLenganAktif = dipilih?.beforeAfter?.byApproach?.[lenganAktif] ?? null;
+
+    const lstmLenganAktif = useMemo(() => {
+        const titik = forecastData?.predictionsByApproach?.[lenganAktif];
+        if (!titik || titik.length === 0) return null;
+        return titik[titik.length - 1];
+    }, [forecastData, lenganAktif]);
 
     // Map `dipilih.trafficConditions` into a TrafficState object to provide
     // the "current" context (horizon 0s) to the ForecastChart component.
@@ -473,6 +543,56 @@ export default function HistoryPage() {
             void ambilData(halaman);
         });
     }, [ambilData, halaman]);
+
+    // Poll DIAM-DIAM (tidak lewat setMemuat -- jangan sampai spinner
+    // full-page nyala cuma karena satu siklus masih nunggu metrik) selama
+    // panel yang lagi dibuka masih dalam kondisi sedangMenungguMetrik().
+    // Berhenti sendiri begitu datanya lengkap, ATAU setelah MAKS_PERCOBAAN
+    // kali kalau memang tidak pernah lengkap -- supaya tidak polling selamanya
+    // untuk siklus yang kebetulan gagal ditulis metriknya, bukan cuma telat.
+    useEffect(() => {
+        if (!sedangMenungguMetrik(dipilih)) return;
+
+        const timestampDipantau = dipilih!.timestamp;
+        const MAKS_PERCOBAAN = 6; // 6 x 1.5 detik = ~9 detik sebelum menyerah
+        let percobaan = 0;
+
+        const intervalId = setInterval(() => {
+            percobaan += 1;
+            void (async () => {
+                try {
+                    const res = await fetch(
+                        `${API_BASE_URL}/api/v1/history/recommendations` +
+                            `?page=${halaman}&pageSize=${PAGE_SIZE}`
+                    );
+                    if (res.ok) {
+                        const segar: ResponRiwayat = await res.json();
+                        const siklusSegar = segar.items.find(
+                            (s) => s.timestamp === timestampDipantau
+                        );
+                        if (siklusSegar && !sedangMenungguMetrik(siklusSegar)) {
+                            setData(segar);
+                            setDipilih(siklusSegar);
+                        }
+                    }
+                } catch {
+                    // Diamkan -- coba lagi di percobaan berikutnya, atau
+                    // menyerah sendiri begitu MAKS_PERCOBAAN tercapai.
+                }
+                if (percobaan >= MAKS_PERCOBAAN) {
+                    clearInterval(intervalId);
+                }
+            })();
+        }, 1500);
+
+        return () => clearInterval(intervalId);
+        // dipilih (objek) sengaja tidak dijadikan dependency -- tiap
+        // setDipilih() di atas bikin referensi baru, yang kalau dijadikan
+        // dependency bikin efek ini restart tiap kali polling sendiri
+        // berhasil. timestamp-nya (string, stabil selama siklus yang sama
+        // masih dibuka) sudah cukup buat tahu kapan panel BERGANTI siklus.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [dipilih?.timestamp, halaman]);
 
     const totalHalaman = data
         ? Math.max(1, Math.ceil(data.totalCycles / PAGE_SIZE))
@@ -1130,273 +1250,258 @@ export default function HistoryPage() {
                                 ))}
                             </div>
                         </div>
+                        {/* TAB LENGAN -- di atas grafik, ngontrol Traffic Forecast (garis
+                            mana yang ditebalkan) DAN bagian Proses/Output di bawahnya. */}
+                        <div className="mb-3 grid grid-cols-4 gap-1.5">
+                            {URUTAN_LENGAN.map((lengan) => (
+                                <button
+                                    key={lengan}
+                                    type="button"
+                                    onClick={() => setLenganAktif(lengan as Approach)}
+                                    aria-pressed={lenganAktif === lengan}
+                                    className={`flex items-center justify-center gap-1.5 rounded-lg border px-2 py-2 text-xs font-medium transition ${
+                                        lenganAktif === lengan
+                                            ? "border-current bg-surface-2 text-text"
+                                            : "border-border bg-surface text-text-secondary hover:text-text"
+                                    }`}
+                                    style={lenganAktif === lengan ? { color: WARNA_LENGAN[lengan] } : undefined}
+                                >
+                                    <span
+                                        className="h-1.5 w-1.5 shrink-0 rounded-full"
+                                        style={{ backgroundColor: WARNA_LENGAN[lengan] }}
+                                    />
+                                    {labelLengan(lengan)}
+                                </button>
+                            ))}
+                        </div>
+
                         {/* TRAFFIC FORECAST */}
                         <div className="mb-5">
-                            <ForecastChart data={forecastData} current={currentTrafficState} />
+                            <ForecastChart
+                                data={forecastData}
+                                current={currentTrafficState}
+                                highlightApproach={lenganAktif}
+                            />
                         </div>
 
-                        {/* KANDIDAT */}
+                        {/* PROSES: khusus lengan yang dipilih di tab */}
                         <div className="mb-5">
-                            <div className="mb-2 flex items-center gap-2">
-                                <Layers size={15} className="text-text-secondary" />
-                                <h3 className="text-xs font-medium">Kandidat yang Diuji di SUMO</h3>
-                            </div>
-                            {dipilih.candidates.length === 0 ? (
-                                <p className="text-xs text-text-muted">
-                                    Tidak ada data kandidat — keputusan ini tidak melalui
-                                    Scenario Generator.
-                                </p>
-                            ) : (
-                                <div className="overflow-hidden rounded-lg border border-border">
-                                    <table className="w-full text-left text-xs">
-                                        <thead className="bg-surface-2 text-text-muted">
-                                            <tr>
-                                                <th className="px-3 py-2 font-medium">Kandidat</th>
-                                                <th className="px-3 py-2 font-medium">Delay</th>
-                                                <th className="px-3 py-2 font-medium">Antrean</th>
-                                                <th className="px-3 py-2 font-medium">Throughput</th>
-                                                <th className="px-3 py-2 font-medium">LOS</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody>
-                                            {dipilih.candidates.map((kandidat) => (
-                                                <tr
-                                                    key={kandidat.candidateId}
-                                                    className={`border-t border-border ${
-                                                        kandidat.isWinner ? "bg-signal-green/5" : ""
-                                                    }`}
-                                                >
-                                                    <td className="px-3 py-2">
-                                                        {kandidat.candidateId}
-                                                        {kandidat.isWinner && (
-                                                            <span className="ml-2 text-signal-green">
-                                                                ✓ terpilih
-                                                            </span>
-                                                        )}
-                                                    </td>
-                                                    <td className="px-3 py-2 font-mono">
-                                                        {kandidat.avgDelaySeconds ?? "—"}s
-                                                        {kandidat.delayByApproachSeconds && (
-                                                            <div className="mt-0.5 text-[9px] font-normal text-text-muted">
-                                                                {URUTAN_LENGAN.map((lengan) => {
-                                                                    const nilai = kandidat.delayByApproachSeconds?.[lengan as "north" | "south" | "east" | "west"];
-                                                                    if (nilai == null) return null;
-                                                                    return (
-                                                                        <span key={lengan} className="mr-1.5">
-                                                                            {labelLengan(lengan)[0]}:{Math.round(nilai)}s
-                                                                        </span>
-                                                                    );
-                                                                })}
-                                                            </div>
-                                                        )}
-                                                    </td>
-                                                    <td className="px-3 py-2 font-mono">
-                                                        {kandidat.avgQueueLengthM ?? "—"}m
-                                                        {kandidat.queueLengthVehByApproach && (
-                                                            <div className="mt-0.5 text-[9px] font-normal text-text-muted">
-                                                                {URUTAN_LENGAN.map((lengan) => {
-                                                                    const nilai = kandidat.queueLengthVehByApproach?.[lengan as "north" | "south" | "east" | "west"];
-                                                                    if (nilai == null) return null;
-                                                                    return (
-                                                                        <span key={lengan} className="mr-1.5">
-                                                                            {labelLengan(lengan)[0]}:{nilai}
-                                                                        </span>
-                                                                    );
-                                                                })}
-                                                            </div>
-                                                        )}
-                                                    </td>
-                                                    <td className="px-3 py-2 font-mono">
-                                                        {kandidat.throughputVeh ?? "—"}
-                                                        {kandidat.throughputVehByApproach && (
-                                                            <div className="mt-0.5 text-[9px] font-normal text-text-muted">
-                                                                {URUTAN_LENGAN.map((lengan) => {
-                                                                    const nilai = kandidat.throughputVehByApproach?.[lengan as "north" | "south" | "east" | "west"];
-                                                                    if (nilai == null) return null;
-                                                                    return (
-                                                                        <span key={lengan} className="mr-1.5">
-                                                                            {labelLengan(lengan)[0]}:{nilai}
-                                                                        </span>
-                                                                    );
-                                                                })}
-                                                            </div>
-                                                        )}
-                                                    </td>
-                                                    <td className="px-3 py-2">
-                                                        {kandidat.los ?? "—"}
-                                                        {kandidat.losByApproach && (
-                                                            <div className="mt-0.5 text-[9px] font-normal text-text-muted">
-                                                                {URUTAN_LENGAN.map((lengan) => {
-                                                                    const nilai = kandidat.losByApproach?.[lengan as "north" | "south" | "east" | "west"];
-                                                                    if (nilai == null) return null;
-                                                                    return (
-                                                                        <span key={lengan} className="mr-1.5">
-                                                                            {labelLengan(lengan)[0]}:{nilai}
-                                                                        </span>
-                                                                    );
-                                                                })}
-                                                            </div>
-                                                        )}
-                                                    </td>
-                                                </tr>
-                                            ))}
-                                        </tbody>
-                                    </table>
-                                </div>
-                            )}
-                        </div>
-
-                        {/* DAMPAK REKOMENDASI */}
-                        {dipilih.beforeAfter && (
-                            <div>
-                                <div className="mb-2 flex items-center gap-2">
-                                    <TrendingUp size={15} className="text-text-secondary" />
-                                    <h3 className="text-xs font-medium">
-                                        Dampak Rekomendasi Durasi Lampu Hijau
-                                    </h3>
-                                </div>
-
-                                {!dipilih.beforeAfter.changed && (
-                                    <p className="mb-3 rounded-lg border border-border bg-surface-2 px-3 py-2 text-[11px] text-text-muted">
-                                        Sistem menyimpulkan pengaturan <strong>realtime</strong> saat ini sudah paling baik untuk kondisi ini — bukan kegagalan sistem, ini keputusan yang sah.
+                            {lstmLenganAktif && (
+                                <div className="mb-4">
+                                    <p className="mb-1.5 text-[10.5px] font-semibold uppercase tracking-wide text-text-muted">
+                                        Prediksi LSTM {labelLengan(lenganAktif)} (+60s)
                                     </p>
-                                )}
-
-                                <div className="overflow-hidden rounded-lg border border-border">
-                                    <table className="w-full text-left text-xs">
-                                        <thead className="bg-surface-2 text-text-muted">
-                                            <tr>
-                                                <th className="px-3 py-2 font-medium">Metrik</th>
-                                                <th className="px-3 py-2 font-medium">Realtime</th>
-                                                <th className="px-3 py-2 font-medium">Setelah Rekomendasi</th>
-                                                <th className="px-3 py-2 font-medium">Dampak</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody>
-                                            {dipilih.beforeAfter.metrics.map((metrik) => (
-                                                <tr
-                                                    key={metrik.metric}
-                                                    className="border-t border-border"
-                                                >
-                                                    <td className="px-3 py-2">{metrik.label}</td>
-                                                    <td className="px-3 py-2 font-mono text-text-muted">
-                                                        {metrik.before}
-                                                        {metrik.unit}
-                                                    </td>
-                                                    <td className="px-3 py-2 font-mono">
-                                                        {metrik.after}
-                                                        {metrik.unit}
-                                                    </td>
-                                                    <td className="px-3 py-2">
-                                                        {metrik.improved === null ? (
-                                                            <span className="flex items-center gap-1 text-text-muted">
-                                                                <Minus size={12} />
-                                                                tetap
-                                                            </span>
-                                                        ) : (
-                                                            <span
-                                                                className={`flex items-center gap-1 font-medium ${
-                                                                    metrik.improved
-                                                                        ? "text-signal-green"
-                                                                        : "text-signal-red"
-                                                                }`}
-                                                            >
-                                                                {metrik.improved ? (
-                                                                    <TrendingDown size={12} />
-                                                                ) : (
-                                                                    <TrendingUp size={12} />
-                                                                )}
-                                                                {metrik.changePercent != null &&
-                                                                    `${metrik.changePercent > 0 ? "+" : ""}${metrik.changePercent}%`}
-                                                            </span>
-                                                        )}
-                                                    </td>
-                                                </tr>
-                                            ))}
-                                        </tbody>
-                                    </table>
-                                </div>
-
-                                {dipilih.beforeAfter.byApproach && (
-                                    <div className="mt-3">
-                                        <p className="mb-2 text-[10px] text-text-muted">
-                                            Rincian per lengan (Realtime → Setelah Rekomendasi)
-                                        </p>
-                                        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-                                            {URUTAN_LENGAN.map((lengan) => {
-                                                const metrikLengan =
-                                                    dipilih.beforeAfter?.byApproach?.[
-                                                        lengan as "north" | "south" | "east" | "west"
-                                                    ];
-                                                if (!metrikLengan || metrikLengan.length === 0) return null;
-                                                return (
-                                                    <div
-                                                        key={lengan}
-                                                        className="rounded-lg border border-border bg-surface-2 p-3"
-                                                    >
-                                                        <p className="mb-1.5 text-[11px] text-text-muted">
-                                                            {labelLengan(lengan)}
-                                                        </p>
-                                                        <div className="space-y-1">
-                                                            {metrikLengan.map((metrik) => (
-                                                                <div
-                                                                    key={metrik.metric}
-                                                                    className="flex items-center justify-between text-[10px]"
-                                                                >
-                                                                    <span className="text-text-muted">
-                                                                        {metrik.label}
-                                                                    </span>
-                                                                    <span className="font-mono">
-                                                                        {metrik.before}→{metrik.after}
-                                                                        {metrik.unit}
-                                                                        {metrik.improved != null && (
-                                                                            <span
-                                                                                className={
-                                                                                    metrik.improved
-                                                                                        ? "ml-1 text-signal-green"
-                                                                                        : "ml-1 text-signal-red"
-                                                                                }
-                                                                            >
-                                                                                {metrik.improved ? "↓" : "↑"}
-                                                                            </span>
-                                                                        )}
-                                                                    </span>
-                                                                </div>
-                                                            ))}
-                                                        </div>
-                                                    </div>
-                                                );
-                                            })}
+                                    <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                                        <div className="rounded-lg border border-border bg-surface-2 p-2.5 text-center">
+                                            <p className="text-[9px] uppercase text-text-muted">Kendaraan</p>
+                                            <p className="mt-1 font-mono text-xs font-semibold">
+                                                {lstmLenganAktif.predictedVehicleCount}
+                                            </p>
                                         </div>
-                                    </div>
-                                )}
-                            </div>
-                        )}
-
-                        {/* DURASI LAMPU HIJAU REKOMENDASI */}
-                        <div className="mb-5">
-                            <div className="mb-2 flex items-center gap-2">
-                                <TrafficCone size={15} className="text-signal-green" />
-                                <h3 className="text-xs font-medium">Durasi Lampu Hijau Rekomendasi</h3>
-                            </div>
-                            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-                                {urutkanFase(dipilih.phases).map((fase) => (
-                                    <div
-                                        key={fase.approach}
-                                        className="rounded-lg border border-signal-green/30 bg-surface-2 p-3"
-                                    >
-                                        <p className="text-[11px] text-text-muted">
-                                            {labelLengan(fase.approach)}
-                                        </p>
-                                        <div className="mt-1 flex items-baseline justify-between">
-                                            <p className="font-mono text-sm font-bold text-signal-green">
-                                                {fase.greenSeconds ?? "—"}s
+                                        <div className="rounded-lg border border-border bg-surface-2 p-2.5 text-center">
+                                            <p className="text-[9px] uppercase text-text-muted">Antrean (kend)</p>
+                                            <p className="mt-1 font-mono text-xs font-semibold">
+                                                {lstmLenganAktif.predictedQueueLengthVeh}
+                                            </p>
+                                        </div>
+                                        <div className="rounded-lg border border-border bg-surface-2 p-2.5 text-center">
+                                            <p className="text-[9px] uppercase text-text-muted">Antrean (m)</p>
+                                            <p className="mt-1 font-mono text-xs font-semibold">
+                                                {lstmLenganAktif.predictedQueueLengthMEst.toFixed(1)}
+                                            </p>
+                                        </div>
+                                        <div className="rounded-lg border border-border bg-surface-2 p-2.5 text-center">
+                                            <p className="text-[9px] uppercase text-text-muted">Kepadatan</p>
+                                            <p className="mt-1 font-mono text-xs font-semibold">
+                                                {lstmLenganAktif.predictedDensityIndex.toFixed(2)}
                                             </p>
                                         </div>
                                     </div>
-                                ))}
+                                </div>
+                            )}
+                            <div className="mb-2 flex items-center gap-2">
+                                <Layers size={15} className="text-text-secondary" />
+                                <h3 className="text-xs font-medium">
+                                    Kandidat yang Diuji &mdash; khusus {labelLengan(lenganAktif)}
+                                </h3>
                             </div>
+                            {sedangMenungguMetrik(dipilih) && (
+                                <p className="mb-2 flex items-center gap-1.5 text-[11px] text-signal-amber">
+                                    <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-signal-amber" />
+                                    Siklus ini baru saja dibuat — menunggu metrik selesai ditulis, halaman ini otomatis diperbarui begitu tersedia.
+                                </p>
+                            )}
+                            {kandidatUrutLengan.length === 0 ? (
+                                <p className="text-xs text-text-muted">
+                                    Tidak ada data kandidat untuk lengan ini — keputusan ini
+                                    tidak melalui Scenario Generator, atau belum punya rincian
+                                    per lengan (siklus lama).
+                                </p>
+                            ) : (
+                                <>
+                                    <div className="overflow-hidden rounded-lg border border-border">
+                                        <table className="w-full text-left text-xs">
+                                            <thead className="bg-surface-2 text-text-muted">
+                                                <tr>
+                                                    <th className="px-3 py-2 font-medium">Peringkat</th>
+                                                    <th className="px-3 py-2 font-medium">Kandidat</th>
+                                                    <th className="px-3 py-2 font-medium">Delay</th>
+                                                    <th className="px-3 py-2 font-medium">Antrean</th>
+                                                    <th className="px-3 py-2 font-medium">Throughput</th>
+                                                    <th className="px-3 py-2 font-medium">LOS</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {kandidatUrutLengan.map((kandidat, indeks) => (
+                                                    <tr
+                                                        key={kandidat.candidateId}
+                                                        className={`border-t border-border ${
+                                                            kandidat.isWinner ? "bg-signal-green/5" : ""
+                                                        }`}
+                                                    >
+                                                        <td className="px-3 py-2 font-mono text-text-muted">
+                                                            ke-{indeks + 1}
+                                                        </td>
+                                                        <td className="px-3 py-2">
+                                                            {kandidat.candidateId}
+                                                            {kandidat.isWinner && (
+                                                                <span className="ml-2 text-signal-green">
+                                                                    ✓ terpilih
+                                                                </span>
+                                                            )}
+                                                        </td>
+                                                        <td className="px-3 py-2 font-mono">
+                                                            {kandidat.delayByApproachSeconds?.[lenganAktif] ?? "—"}s
+                                                        </td>
+                                                        <td className="px-3 py-2 font-mono">
+                                                            {kandidat.queueLengthVehByApproach?.[lenganAktif] ?? "—"} kend
+                                                            {kandidat.avgQueueLengthMByApproach?.[lenganAktif] != null &&
+                                                                ` · ${kandidat.avgQueueLengthMByApproach[lenganAktif]}m`}
+                                                        </td>
+                                                        <td className="px-3 py-2 font-mono">
+                                                            {kandidat.throughputVehByApproach?.[lenganAktif] ?? "—"}
+                                                        </td>
+                                                        <td className="px-3 py-2">
+                                                            <span
+                                                                className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${warnaLos(
+                                                                    kandidat.losByApproach?.[lenganAktif] ?? null
+                                                                )}`}
+                                                            >
+                                                                {kandidat.losByApproach?.[lenganAktif] ?? "—"}
+                                                            </span>
+                                                        </td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                    {pemenangBukanPeringkatSatu && (
+                                        <p className="mt-2 text-[11px] text-signal-amber">
+                                            ⓘ Kandidat terpilih menang karena performa gabungan 4
+                                            lengan, bukan yang terbaik khusus di {labelLengan(lenganAktif)}.
+                                        </p>
+                                    )}
+                                </>
+                            )}
                         </div>
+
+                        {/* OUTPUT: khusus lengan yang dipilih di tab */}
+                        <div className="mb-5">
+                            <div className="mb-2 flex items-center gap-2">
+                                <TrendingUp size={15} className="text-signal-green" />
+                                <h3 className="text-xs font-medium">
+                                    Durasi Hijau Rekomendasi &amp; Kondisi Setelah Diterapkan &mdash;{" "}
+                                    {labelLengan(lenganAktif)}
+                                </h3>
+                            </div>
+
+                            {dipilih.beforeAfter && !dipilih.beforeAfter.changed && (
+                                <p className="mb-3 rounded-lg border border-border bg-surface-2 px-3 py-2 text-[11px] text-text-muted">
+                                    Sistem menyimpulkan pengaturan <strong>realtime</strong> saat ini sudah paling baik untuk kondisi ini — bukan kegagalan sistem, ini keputusan yang sah.
+                                </p>
+                            )}
+
+                            {faseLenganAktif && (
+                                <div className="mb-3 rounded-lg border border-signal-green/30 bg-surface-2 p-3">
+                                    <p className="text-[11px] text-text-muted">
+                                        Durasi Hijau — {labelLengan(lenganAktif)}
+                                    </p>
+                                    <div className="mt-1 flex items-baseline gap-2">
+                                        <span className="font-mono text-sm text-text-muted line-through">
+                                            {faseLenganAktif.currentGreenSeconds ?? "—"}s
+                                        </span>
+                                        <span className="text-text-muted">→</span>
+                                        <span className="font-mono text-base font-bold text-signal-green">
+                                            {faseLenganAktif.greenSeconds ?? "—"}s
+                                        </span>
+                                    </div>
+                                </div>
+                            )}
+
+                            {!dampakLenganAktif || dampakLenganAktif.length === 0 ? (
+                                <p className="text-xs text-text-muted">
+                                    Belum ada rincian dampak per lengan untuk siklus ini.
+                                </p>
+                            ) : (
+                                <>
+                                    <div className="overflow-hidden rounded-lg border border-border">
+                                        <table className="w-full text-left text-xs">
+                                            <thead className="bg-surface-2 text-text-muted">
+                                                <tr>
+                                                    <th className="px-3 py-2 font-medium">Metrik</th>
+                                                    <th className="px-3 py-2 font-medium">Realtime</th>
+                                                    <th className="px-3 py-2 font-medium">Simulasi (setelah diterapkan)</th>
+                                                    <th className="px-3 py-2 font-medium">Dampak</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {dampakLenganAktif.map((metrik) => (
+                                                    <tr key={metrik.metric} className="border-t border-border">
+                                                        <td className="px-3 py-2">{metrik.label}</td>
+                                                        <td className="px-3 py-2 font-mono text-text-muted">
+                                                            {metrik.before}
+                                                            {metrik.unit}
+                                                        </td>
+                                                        <td className="px-3 py-2 font-mono">
+                                                            {metrik.after}
+                                                            {metrik.unit}
+                                                        </td>
+                                                        <td className="px-3 py-2">
+                                                            {metrik.improved === null ? (
+                                                                <span className="flex items-center gap-1 text-text-muted">
+                                                                    <Minus size={12} />
+                                                                    tetap
+                                                                </span>
+                                                            ) : (
+                                                                <span
+                                                                    className={`flex items-center gap-1 font-medium ${
+                                                                        metrik.improved
+                                                                            ? "text-signal-green"
+                                                                            : "text-signal-red"
+                                                                    }`}
+                                                                >
+                                                                    {metrik.improved ? (
+                                                                        <TrendingDown size={12} />
+                                                                    ) : (
+                                                                        <TrendingUp size={12} />
+                                                                    )}
+                                                                    {metrik.changePercent != null &&
+                                                                        `${metrik.changePercent > 0 ? "+" : ""}${metrik.changePercent}%`}
+                                                                </span>
+                                                            )}
+                                                        </td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                    <p className="mt-1.5 text-[10px] italic text-text-muted">
+                                        Kolom &quot;Simulasi&quot; = hasil SUMO menjalankan kandidat terpilih, bukan pengamatan CCTV.
+                                    </p>
+                                </>
+                            )}
+                        </div>
+
                         {/* KONDISI LALU LINTAS SETELAH REKOMENDASI DITERAPKAN */}
                         <div className="mb-5">
                             <div className="mb-2 flex items-center gap-2">
