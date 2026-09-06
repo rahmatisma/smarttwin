@@ -101,9 +101,14 @@ type TitikDeret = ReturnType<typeof formatForecastData>[number] & {
 export default function ForecastChart({
   data,
   current,
+  highlightApproach,
 }: {
   data?: ForecastResponse | null;
   current?: TrafficState | null;
+  // Opsional -- kalau diisi, garis lengan ini ditebalkan dan garis lengan
+  // lain diredupkan (dipakai halaman Riwayat saat satu lengan lagi dipilih
+  // lewat tab). Tidak diisi = semua garis sama seperti sebelumnya (dashboard).
+  highlightApproach?: Approach | null;
 }) {
   if (!data || !data.predictions || data.predictions.length === 0) {
     return (
@@ -151,9 +156,18 @@ export default function ForecastChart({
     ];
   }
 
+  // predictedQueueLengthVeh/MEst DI SINI adalah GABUNGAN keempat lengan
+  // (dijumlah, lihat toPrediction() di supabaseData.ts) -- jadi "puncak"
+  // dari deret ini adalah puncak TOTAL simpang, bisa terjadi di waktu yang
+  // beda dan lebih tinggi dari puncak garis lengan manapun sendirian di
+  // grafik per-lengan di bawah. dominantApproachAtHorizon() di bawah
+  // dipakai supaya kotak ringkasan bilang lengan mana penyumbang terbesar
+  // di titik puncak itu, bukan cuma angka gabungan tanpa konteks --
+  // lihat catatan-pribadi/temuan-data-tersembunyi-per-lengan.md.
   const maxQueueVeh = Math.max(...series.map((s) => s.predictedQueueLengthVeh));
   const peakTime = series.find((s) => s.predictedQueueLengthVeh === maxQueueVeh)?.horizonSeconds ?? 0;
   const maxQueue = Math.max(...series.map((s) => s.predictedQueueLengthMEst));
+  const maxQueueTime = series.find((s) => s.predictedQueueLengthMEst === maxQueue)?.horizonSeconds ?? 0;
   const avgDensity = series.reduce((sum, s) => sum + s.predictedDensityIndex, 0) / (series.length || 1);
 
   // Breakdown per lengan (kalau backend mengisi predictionsByApproach dengan
@@ -162,6 +176,74 @@ export default function ForecastChart({
   const approachKeys = APPROACH_ORDER.filter(
     (approach) => (data.predictionsByApproach?.[approach]?.length ?? 0) > 0
   );
+
+  // Lengan dengan nilai tertinggi di satu titik horizon tertentu -- dipakai
+  // buat "Puncak Antrean" dan "Antrean Terpanjang" (keduanya angka SESAAT
+  // di satu waktu). horizonSeconds=0 ITU JUGA titik sungguhan ("sekarang",
+  // dari `current.approaches` -- lihat tooltip "Sekarang (aktual)" di
+  // grafik) bukan cuma milik forecast, jadi tetap dihitung, cuma sumbernya
+  // beda: current.approaches, bukan data.predictionsByApproach (yang cuma
+  // punya titik +5s ke atas). Versi sebelumnya melewatkan horizon 0 sama
+  // sekali -- itu justru sering jadi titik puncaknya (kondisi sekarang
+  // biasanya lebih tinggi dari 12 titik prediksi ke depan), jadi baris
+  // "Puncak Antrean" sering tidak konsisten dengan dua baris di bawahnya
+  // yang selalu kasih tahu lengan dominan.
+  function dominantApproachAtHorizon(
+    horizonSeconds: number,
+    field: "predictedQueueLengthVeh" | "predictedQueueLengthMEst"
+  ): Approach | null {
+    if (approachKeys.length === 0) return null;
+
+    if (horizonSeconds === 0) {
+      if (!current?.approaches) return null;
+      const currentField = field === "predictedQueueLengthVeh" ? "queueLengthVeh" : "queueLengthMEst";
+      let best: Approach | null = null;
+      let bestValue = -Infinity;
+      for (const approach of approachKeys) {
+        const value = current.approaches.find((a) => a.approach === approach)?.[currentField];
+        if (typeof value === "number" && value > bestValue) {
+          bestValue = value;
+          best = approach;
+        }
+      }
+      return best;
+    }
+
+    const index = horizonSeconds / 5 - 1;
+    let best: Approach | null = null;
+    let bestValue = -Infinity;
+    for (const approach of approachKeys) {
+      const value = data?.predictionsByApproach?.[approach]?.[index]?.[field];
+      if (typeof value === "number" && value > bestValue) {
+        bestValue = value;
+        best = approach;
+      }
+    }
+    return best;
+  }
+
+  // Lengan dengan RATA-RATA kepadatan tertinggi sepanjang horizon forecast
+  // -- beda dari dua fungsi di atas karena "Rata-rata Kepadatan" bukan
+  // angka di satu titik waktu, jadi "penyumbang terbesar" di sini berarti
+  // rata-rata sepanjang waktu, bukan nilai tertinggi di satu titik.
+  function dominantApproachByAvgDensity(): Approach | null {
+    let best: Approach | null = null;
+    let bestAvg = -Infinity;
+    for (const approach of approachKeys) {
+      const points = data?.predictionsByApproach?.[approach] ?? [];
+      if (points.length === 0) continue;
+      const avg = points.reduce((sum, p) => sum + p.predictedDensityIndex, 0) / points.length;
+      if (avg > bestAvg) {
+        bestAvg = avg;
+        best = approach;
+      }
+    }
+    return best;
+  }
+
+  const puncakAntreanLengan = dominantApproachAtHorizon(peakTime, "predictedQueueLengthVeh");
+  const antreanTerpanjangLengan = dominantApproachAtHorizon(maxQueueTime, "predictedQueueLengthMEst");
+  const kepadatanLengan = dominantApproachByAvgDensity();
 
   let approachSeries: ApproachPoint[] = [];
 
@@ -272,35 +354,48 @@ export default function ForecastChart({
                 // legend sendiri dari approachKeys, tidak lewat payload.
                 content={() => (
                   <ul className="mt-1 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-[11px] text-text-muted">
-                    {approachKeys.map((approach) => (
-                      <li key={approach} className="flex items-center gap-1.5">
-                        <span
-                          className="inline-block h-0.5 w-3 shrink-0 rounded-full"
-                          style={{ backgroundColor: APPROACH_COLORS[approach] }}
-                        />
-                        {APPROACH_LABELS[approach]}
-                      </li>
-                    ))}
+                    {approachKeys.map((approach) => {
+                      const diredupkan = highlightApproach != null && highlightApproach !== approach;
+                      return (
+                        <li
+                          key={approach}
+                          className={`flex items-center gap-1.5 ${
+                            diredupkan ? "opacity-50" : highlightApproach === approach ? "font-semibold text-text" : ""
+                          }`}
+                        >
+                          <span
+                            className="inline-block h-0.5 w-3 shrink-0 rounded-full"
+                            style={{ backgroundColor: APPROACH_COLORS[approach] }}
+                          />
+                          {APPROACH_LABELS[approach]}
+                        </li>
+                      );
+                    })}
                   </ul>
                 )}
               />
 
-              {approachKeys.map((approach) => (
-                <Line
-                  key={approach}
-                  type="monotone"
-                  dataKey={approach}
-                  name={approach}
-                  stroke={APPROACH_COLORS[approach]}
-                  strokeWidth={2}
-                  dot={renderActualDot(APPROACH_COLORS[approach])}
-                  activeDot={{ r: 4, fill: APPROACH_COLORS[approach] }}
-                  connectNulls
-                  isAnimationActive
-                  animationDuration={500}
-                  animationEasing="ease-out"
-                />
-              ))}
+              {approachKeys.map((approach) => {
+                const disorot = highlightApproach != null && highlightApproach === approach;
+                const diredupkan = highlightApproach != null && highlightApproach !== approach;
+                return (
+                  <Line
+                    key={approach}
+                    type="monotone"
+                    dataKey={approach}
+                    name={approach}
+                    stroke={APPROACH_COLORS[approach]}
+                    strokeWidth={disorot ? 3.5 : 2}
+                    strokeOpacity={diredupkan ? 0.3 : 1}
+                    dot={renderActualDot(APPROACH_COLORS[approach])}
+                    activeDot={{ r: disorot ? 6 : 4, fill: APPROACH_COLORS[approach] }}
+                    connectNulls
+                    isAnimationActive
+                    animationDuration={500}
+                    animationEasing="ease-out"
+                  />
+                );
+              })}
             </LineChart>
           ) : (
             <AreaChart
@@ -418,17 +513,41 @@ export default function ForecastChart({
         <div className="dashboard-detail-card rounded-md border border-border bg-surface-2 p-3 text-xs">
           <div className="mb-2 font-medium text-text">Ringkasan Prediksi</div>
           <div className="flex flex-col gap-2">
-            <div className="flex items-center justify-between text-text-secondary">
-              <span>Puncak Antrean</span>
-              <span className="font-mono text-text">{maxQueueVeh.toFixed(1)} kendaraan <span className="text-text-muted">(+{peakTime}s)</span></span>
+            <div>
+              <div className="flex items-center justify-between text-text-secondary">
+                <span>Puncak Antrean</span>
+                <span className="font-mono text-text">{maxQueueVeh.toFixed(1)} kendaraan <span className="text-text-muted">(+{peakTime}s)</span></span>
+              </div>
+              {approachKeys.length >= 2 && (
+                <div className="text-right text-[10px] text-text-muted">
+                  gabungan {approachKeys.length} lengan
+                  {puncakAntreanLengan && ` · ${APPROACH_LABELS[puncakAntreanLengan]} terbesar`}
+                </div>
+              )}
             </div>
-            <div className="flex items-center justify-between text-text-secondary">
-              <span>Antrean Terpanjang</span>
-              <span className="font-mono text-text">{maxQueue.toFixed(1)}m</span>
+            <div>
+              <div className="flex items-center justify-between text-text-secondary">
+                <span>Antrean Terpanjang</span>
+                <span className="font-mono text-text">{maxQueue.toFixed(1)}m</span>
+              </div>
+              {approachKeys.length >= 2 && (
+                <div className="text-right text-[10px] text-text-muted">
+                  gabungan {approachKeys.length} lengan
+                  {antreanTerpanjangLengan && ` · ${APPROACH_LABELS[antreanTerpanjangLengan]} terbesar`}
+                </div>
+              )}
             </div>
-            <div className="flex items-center justify-between text-text-secondary">
-              <span>Rata-rata Kepadatan</span>
-              <span className="font-mono text-text">{avgDensity.toFixed(1)}</span>
+            <div>
+              <div className="flex items-center justify-between text-text-secondary">
+                <span>Rata-rata Kepadatan</span>
+                <span className="font-mono text-text">{avgDensity.toFixed(1)}</span>
+              </div>
+              {approachKeys.length >= 2 && (
+                <div className="text-right text-[10px] text-text-muted">
+                  rata-rata {approachKeys.length} lengan
+                  {kepadatanLengan && ` · ${APPROACH_LABELS[kepadatanLengan]} terpadat`}
+                </div>
+              )}
             </div>
           </div>
         </div>
