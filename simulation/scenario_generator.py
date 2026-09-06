@@ -152,6 +152,26 @@ def los_by_approach(
     }
 
 
+def queue_length_m_by_approach(
+    queue_veh_by_approach: dict[str, int] | None,
+) -> dict[str, float]:
+    """
+    Versi meter dari queueLengthVehByApproach -- sebelumnya konversi
+    METERS_PER_QUEUED_VEHICLE cuma diterapkan ke queueLengthVeh AGREGAT
+    (jadi avgQueueLengthM), padahal dict per lengan sudah tersedia di
+    titik yang sama. Estimasi kasar yang sama persis dengan versi agregat,
+    lihat catatan di METERS_PER_QUEUED_VEHICLE -- bukan pengukuran lapangan.
+    """
+
+    if not queue_veh_by_approach:
+        return {}
+
+    return {
+        approach: round(count * METERS_PER_QUEUED_VEHICLE, 1)
+        for approach, count in queue_veh_by_approach.items()
+    }
+
+
 # ============================================================
 # PKJI 2023 -- WAKTU SIKLUS & PEMBAGIAN HIJAU
 # (dipakai kandidat "aggressive" dan "balanced")
@@ -600,6 +620,7 @@ def simulate_cycle_candidate(
         "delayByApproachSeconds": delay_by_approach,
         "losByApproach": los_by_approach(delay_by_approach),
         "queueLengthVehByApproach": queue_by_approach,
+        "avgQueueLengthMByApproach": queue_length_m_by_approach(queue_by_approach),
         "throughputVehByApproach": throughput_by_approach,
     }
 
@@ -686,6 +707,7 @@ def simulate_candidate(
         "delayByApproachSeconds": delayByApproach,
         "losByApproach": los_by_approach(delayByApproach),
         "queueLengthVehByApproach": queueByApproach,
+        "avgQueueLengthMByApproach": queue_length_m_by_approach(queueByApproach),
         "throughputVehByApproach": throughputByApproach,
     }
 

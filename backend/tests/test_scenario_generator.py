@@ -23,6 +23,8 @@ from scenario_generator import (  # noqa: E402
     PKJI_BASE_SATURATION_FLOW_SMP_PER_HOUR_BY_APPROACH,
     calculate_los,
     los_by_approach,
+    queue_length_m_by_approach,
+    METERS_PER_QUEUED_VEHICLE,
     build_dynamic_tls_logic,
     generate_cycle_candidate_plans,
     generate_candidate_plans,
@@ -364,6 +366,30 @@ def test_los_by_approach_grades_each_arm_separately():
 def test_los_by_approach_empty_when_no_data():
     assert los_by_approach(None) == {}
     assert los_by_approach({}) == {}
+
+
+# ============================================================
+# QUEUE_LENGTH_M_BY_APPROACH -- versi meter dari queueLengthVehByApproach
+# (temuan audit 6 September 2026: sebelumnya konversi meter cuma
+# diterapkan ke queueLengthVeh agregat)
+# ============================================================
+
+def test_queue_length_m_by_approach_converts_each_arm():
+    hasil = queue_length_m_by_approach({
+        "north": 4,
+        "south": 0,
+        "east": 10,
+    })
+    assert hasil == {
+        "north": round(4 * METERS_PER_QUEUED_VEHICLE, 1),
+        "south": 0.0,
+        "east": round(10 * METERS_PER_QUEUED_VEHICLE, 1),
+    }
+
+
+def test_queue_length_m_by_approach_empty_when_no_data():
+    assert queue_length_m_by_approach(None) == {}
+    assert queue_length_m_by_approach({}) == {}
 
 
 # ============================================================
