@@ -15,12 +15,16 @@ export default function Header({
   selectedApproach,
   onApproachChange,
   lastUpdated,
+  hideApproachFilter = false,
+  hideLastUpdated = false,
 }: {
   locationName: string;
   coords: string;
   selectedApproach?: ApproachSelection;
   onApproachChange?: (selection: ApproachSelection) => void;
   lastUpdated?: string | number;
+  hideApproachFilter?: boolean;
+  hideLastUpdated?: boolean;
 }) {
   const router = useRouter();
   const { unreadCount } = useNotifications();
@@ -41,50 +45,54 @@ export default function Header({
         </div>
       </div>
 
-      <div className="header-filter">
-        <label htmlFor="header-approach">Lengan simpang</label>
-        {selectedApproach && onApproachChange ? (
-          <select
-            id="header-approach"
-            value={selectedApproach}
-            onChange={(event) =>
-              onApproachChange(
-                event.target.value as ApproachSelection
-              )
-            }
-            className="w-full rounded-md border border-border bg-surface px-3 py-2 text-sm text-text outline-none focus:border-accent"
-            aria-label="Pilih lengan simpang"
-          >
-            {APPROACH_OPTIONS.map((option) => (
-              <option key={option.id} value={option.id}>
-                {option.name}
-              </option>
-            ))}
-          </select>
-        ) : (
-          <select id="header-approach" disabled className="w-full rounded-md border border-border px-3 py-2 text-sm">
-            <option>Semua lengan</option>
-          </select>
-        )}
-      </div>
+      {!hideApproachFilter && (
+        <div className="header-filter">
+          <label htmlFor="header-approach">Lengan simpang</label>
+          {selectedApproach && onApproachChange ? (
+            <select
+              id="header-approach"
+              value={selectedApproach}
+              onChange={(event) =>
+                onApproachChange(
+                  event.target.value as ApproachSelection
+                )
+              }
+              className="w-full rounded-md border border-border bg-surface px-3 py-2 text-sm text-text outline-none focus:border-accent"
+              aria-label="Pilih lengan simpang"
+            >
+              {APPROACH_OPTIONS.map((option) => (
+                <option key={option.id} value={option.id}>
+                  {option.name}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <select id="header-approach" disabled className="w-full rounded-md border border-border px-3 py-2 text-sm">
+              <option>Semua lengan</option>
+            </select>
+          )}
+        </div>
+      )}
 
       <div className="header-actions flex shrink-0 items-center gap-3">
-        {lastUpdated !== undefined ? (
-          <span className="header-timestamp text-xs tabular-nums text-text-secondary">
-            {typeof lastUpdated === "number" ? (
-              `Diperbarui: ${Math.floor(lastUpdated / 60).toString().padStart(2, "0")}:${(lastUpdated % 60).toFixed(2).padStart(5, "0")}`
-            ) : (
-              `Diperbarui: ${new Date(lastUpdated).toLocaleTimeString("id-ID", {
-                hour: "2-digit",
-                minute: "2-digit",
-                second: "2-digit",
-              })}`
-            )}
-          </span>
-        ) : (
-          <span className="header-timestamp text-xs tabular-nums text-text-secondary">
-            Data belum tersedia
-          </span>
+        {!hideLastUpdated && (
+          lastUpdated !== undefined ? (
+            <span className="header-timestamp text-xs tabular-nums text-text-secondary">
+              {typeof lastUpdated === "number" ? (
+                `Diperbarui: ${Math.floor(lastUpdated / 60).toString().padStart(2, "0")}:${(lastUpdated % 60).toFixed(2).padStart(5, "0")}`
+              ) : (
+                `Diperbarui: ${new Date(lastUpdated).toLocaleTimeString("id-ID", {
+                  hour: "2-digit",
+                  minute: "2-digit",
+                  second: "2-digit",
+                })}`
+              )}
+            </span>
+          ) : (
+            <span className="header-timestamp text-xs tabular-nums text-text-secondary">
+              Data belum tersedia
+            </span>
+          )
         )}
         <button
           type="button"
