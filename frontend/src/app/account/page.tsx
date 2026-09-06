@@ -118,11 +118,11 @@ export default function AccountPage() {
 
                             <div className="border-b border-border p-5">
 
-                                <h2 className="font-display text-sm font-semibold">
+                                <h2 className="font-display text-base font-semibold">
                                     Session
                                 </h2>
 
-                                <p className="mt-1 text-xs text-text-muted">
+                                <p className="mt-1 text-base text-text-secondary">
                                     Kelola sesi login akun ini.
                                 </p>
 
@@ -136,11 +136,11 @@ export default function AccountPage() {
 
                                 <div className="flex-1">
 
-                                    <p className="text-sm font-medium">
+                                    <p className="text-base font-medium">
                                         Sesi saat ini
                                     </p>
 
-                                    <p className="mt-1 text-xs text-text-muted">
+                                    <p className="mt-1 text-base text-text-secondary">
                                         Kamu sedang menggunakan SmartTwin.
                                     </p>
 
@@ -150,7 +150,7 @@ export default function AccountPage() {
                                     type="button"
                                     onClick={handleLogout}
                                     disabled={loggingOut}
-                                    className="flex items-center justify-center gap-2 rounded-lg border border-red-400/30 px-4 py-2 text-xs text-red-300 hover:bg-red-400/10 disabled:opacity-60"
+                                    className="flex items-center justify-center gap-2 rounded-lg border border-red-400/30 px-5 py-3 text-base text-red-700 dark:text-red-300 hover:bg-red-400/10 disabled:opacity-60"
                                 >
                                     <LogOut className="h-3.5 w-3.5" />
 

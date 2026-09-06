@@ -500,7 +500,7 @@ export default function CameraFeedPanel({
           HEADER
       ================================================= */}
 
-      <div className="mb-3 flex items-center justify-between">
+      <div className="dashboard-card-header mb-3 flex items-center justify-between">
 
         <h2 className="font-display text-sm font-semibold text-text">
           Camera Feed
@@ -766,7 +766,7 @@ export default function CameraFeedPanel({
              EMPTY STATE
           ============================================= */
 
-          <div className="col-span-2 flex aspect-video flex-col items-center justify-center rounded-md border border-dashed border-border bg-surface-2">
+          <div className="dashboard-detail-card col-span-2 flex aspect-video flex-col items-center justify-center rounded-md border border-dashed border-border bg-surface-2">
 
             <Video className="h-6 w-6 text-text-muted" />
 
@@ -798,7 +798,7 @@ export default function CameraFeedPanel({
         {counts.length > 0 ? (
           <div className="flex flex-col gap-3">
             {/* TOTAL */}
-            <div className="flex items-center justify-between rounded-md border border-border bg-surface-2 p-3">
+            <div className="dashboard-detail-card flex items-center justify-between rounded-md border border-border bg-surface-2 p-3">
               <span className="text-xs font-semibold uppercase tracking-wide text-text-muted">
                 Total Vehicles
               </span>
@@ -812,7 +812,7 @@ export default function CameraFeedPanel({
               {counts.map((c) => (
                 <div
                   key={c.vehicleClass}
-                  className="flex flex-col justify-center rounded-md border border-border bg-surface-2 p-3"
+                  className="dashboard-detail-card flex flex-col justify-center rounded-md border border-border bg-surface-2 p-3"
                 >
                   <div className="mb-1 flex items-center gap-2">
                     <span className="text-text-muted">
@@ -830,7 +830,7 @@ export default function CameraFeedPanel({
             </div>
           </div>
         ) : (
-          <div className="rounded-md border border-dashed border-border bg-surface-2 p-4 text-center text-xs text-text-muted">
+          <div className="dashboard-detail-card rounded-md border border-dashed border-border bg-surface-2 p-4 text-center text-xs text-text-muted">
             Data kendaraan belum tersedia.
           </div>
         )}

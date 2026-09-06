@@ -60,9 +60,16 @@ export default function NotificationSettings() {
                                 <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
                                     {notif.message}
                                 </p>
-                                <span className="mt-2 block text-xs text-slate-400">
-                                    {new Date(notif.createdAt).toLocaleString("id-ID")}
-                                </span>
+                                {(() => {
+                                    const createdAt = new Date(notif.createdAt);
+                                    return (
+                                        <span className="mt-2 block text-xs text-slate-400">
+                                            {Number.isNaN(createdAt.getTime())
+                                                ? "Waktu tidak tersedia"
+                                                : createdAt.toLocaleString("id-ID")}
+                                        </span>
+                                    );
+                                })()}
                             </div>
 
                             {!notif.isRead && (

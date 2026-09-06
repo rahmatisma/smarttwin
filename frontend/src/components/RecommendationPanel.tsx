@@ -60,7 +60,7 @@ function ApproachCard({
 
   return (
     <div
-      className={`rounded-md border transition-colors ${isCompact ? "p-2" : "p-3"} ${
+      className={`dashboard-approach-card rounded-md border transition-colors ${isCompact ? "p-2" : "p-3"} ${
         data.isActive
           ? "border-signal-green bg-signal-green/5 ring-1 ring-signal-green"
           : "border-border bg-surface-2"
@@ -113,7 +113,7 @@ function ApproachCard({
       ) : (
         <div className="space-y-2 text-xs">
           {/* GREEN */}
-          <div className="flex flex-col rounded border border-border/50 bg-surface p-2">
+          <div className="dashboard-detail-card flex flex-col rounded border border-border/50 bg-surface p-2">
             <div className="mb-1.5 font-semibold text-signal-green">GREEN</div>
             <div className="mb-0.5 flex items-center justify-between">
               <span className="text-[10px] text-text-muted">Realtime</span>
@@ -126,7 +126,7 @@ function ApproachCard({
           </div>
 
           {/* YELLOW */}
-          <div className="flex flex-col rounded border border-border/50 bg-surface p-2">
+          <div className="dashboard-detail-card flex flex-col rounded border border-border/50 bg-surface p-2">
             <div className="mb-1.5 font-semibold text-signal-amber">YELLOW</div>
             <div className="mb-0.5 flex items-center justify-between">
               <span className="text-[10px] text-text-muted">Realtime</span>
@@ -139,7 +139,7 @@ function ApproachCard({
           </div>
 
           {/* RED */}
-          <div className="flex flex-col rounded border border-border/50 bg-surface p-2">
+          <div className="dashboard-detail-card flex flex-col rounded border border-border/50 bg-surface p-2">
             <div className="mb-1.5 font-semibold text-signal-red">RED</div>
             <div className="mb-0.5 flex items-center justify-between">
               <span className="text-[10px] text-text-muted">Realtime</span>
@@ -183,13 +183,13 @@ export default function RecommendationPanel({
   if (showLoading) {
     return (
       <div className="dashboard-card rounded-lg border border-border bg-surface p-4">
-        <div className="mb-3 flex items-center justify-between">
+        <div className="dashboard-card-header mb-3 flex items-center justify-between">
           <h2 className="font-display text-sm font-semibold text-text">
             Signal Recommendation
           </h2>
           <span className="text-xs text-text-muted">Memuat...</span>
         </div>
-        <div className="flex min-h-[320px] items-center justify-center rounded-md border border-border bg-surface-2 px-4 text-center">
+        <div className="dashboard-detail-card flex min-h-[320px] items-center justify-center rounded-md border border-border bg-surface-2 px-4 text-center">
           <div className="flex flex-col items-center justify-center space-y-3">
             <div className="h-5 w-5 animate-spin rounded-full border-2 border-text-muted border-t-transparent"></div>
             <p className="text-xs text-text-muted">Mengambil data rekomendasi...</p>
@@ -205,13 +205,13 @@ export default function RecommendationPanel({
   if (!displayRec) {
     return (
       <div className="dashboard-card rounded-lg border border-border bg-surface p-4">
-        <div className="mb-3 flex items-center justify-between">
+        <div className="dashboard-card-header mb-3 flex items-center justify-between">
           <h2 className="font-display text-sm font-semibold text-text">
             Signal Recommendation
           </h2>
           <span className="text-xs text-amber-500">Menunggu backend</span>
         </div>
-        <div className="flex min-h-[320px] items-center justify-center rounded-md border border-border bg-surface-2 px-6 text-center">
+        <div className="dashboard-detail-card flex min-h-[320px] items-center justify-center rounded-md border border-border bg-surface-2 px-6 text-center">
           <div>
             <p className="text-sm font-medium text-text">Rekomendasi belum tersedia</p>
             <p className="mt-2 text-xs text-text-muted">
@@ -293,7 +293,7 @@ export default function RecommendationPanel({
 
   return (
     <div className="flex h-full flex-col dashboard-card rounded-lg border border-border bg-surface p-4 shadow-sm">
-      <div className="mb-4 flex items-center justify-between">
+      <div className="dashboard-card-header mb-4 flex items-center justify-between">
         <h2 className="font-display text-sm font-semibold text-text">Signal Recommendation</h2>
         <span className="text-xs text-signal-green">Available</span>
       </div>
@@ -356,7 +356,7 @@ export default function RecommendationPanel({
             </div>
           )
         ) : (
-          <div className="rounded-md border border-border bg-surface-2 p-3 text-center text-xs text-text-muted">
+          <div className="dashboard-detail-card rounded-md border border-border bg-surface-2 p-3 text-center text-xs text-text-muted">
             Data Cycle Plan belum tersedia
           </div>
         )}
@@ -424,19 +424,19 @@ export default function RecommendationPanel({
 
           {typeof displayRec.avgDelaySeconds === "number" && (
             <div className="mt-1 grid grid-cols-3 gap-2">
-              <div className="rounded border border-border bg-surface-2 p-2 text-center">
+              <div className="dashboard-detail-card rounded border border-border bg-surface-2 p-2 text-center">
                 <div className="text-[9px] uppercase tracking-wider text-text-muted">LOS</div>
                 <div className="mt-1 font-mono text-xs font-bold text-text">
                   {displayRec.los ?? "-"}
                 </div>
               </div>
-              <div className="rounded border border-border bg-surface-2 p-2 text-center">
+              <div className="dashboard-detail-card rounded border border-border bg-surface-2 p-2 text-center">
                 <div className="text-[9px] uppercase tracking-wider text-text-muted">Delay</div>
                 <div className="mt-1 font-mono text-xs font-bold text-text">
                   {displayRec.avgDelaySeconds.toFixed(1)}s
                 </div>
               </div>
-              <div className="rounded border border-border bg-surface-2 p-2 text-center">
+              <div className="dashboard-detail-card rounded border border-border bg-surface-2 p-2 text-center">
                 <div className="text-[9px] uppercase tracking-wider text-text-muted">Antrean</div>
                 <div className="mt-1 font-mono text-xs font-bold text-text">
                   {displayRec.avgQueueLengthM?.toFixed(1) ?? "-"}m
@@ -459,7 +459,7 @@ export default function RecommendationPanel({
                   return (
                     <div
                       key={approach}
-                      className="rounded border border-border bg-surface-2 p-1.5 text-center"
+                      className="dashboard-detail-card rounded border border-border bg-surface-2 p-1.5 text-center"
                       title={
                         typeof delay === "number"
                           ? `${approachLabel(approach)} — delay ${delay.toFixed(1)}s`

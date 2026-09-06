@@ -103,7 +103,7 @@ export default function LoginPage() {
                         <h2>Perjalanan lebih lancar.<br /><span>Kota lebih terhubung.</span></h2>
                         <p>Memahami setiap pergerakan.<br />Membuka jalan untuk perubahan.</p>
                     </div>
-                    <CityIllustration />
+                    <div className={styles.artwork}><CityIllustration /></div>
                     <div className={styles.visualFooter}><span>DIRANCANG UNTUK KOTA INDONESIA</span><span>01 / SMART MOBILITY</span></div>
                 </aside>
             </div>
@@ -113,36 +113,44 @@ export default function LoginPage() {
 
 function CityIllustration() {
     return (
-        <svg className={styles.city} viewBox="0 0 600 650" fill="none" aria-hidden="true">
+        <svg className={styles.city} viewBox="0 0 600 500" preserveAspectRatio="xMidYMid meet" fill="none" aria-hidden="true">
             <defs>
-                <linearGradient id="city-water" x1="300" y1="415" x2="300" y2="650" gradientUnits="userSpaceOnUse"><stop stopColor="#70cbb7" /><stop offset="1" stopColor="#a5d5a8" /></linearGradient>
-                <linearGradient id="city-tower" x1="220" y1="170" x2="310" y2="430" gradientUnits="userSpaceOnUse"><stop stopColor="#d5e794" /><stop offset="1" stopColor="#70ba8c" /></linearGradient>
-                <pattern id="city-windows" width="15" height="20" patternUnits="userSpaceOnUse"><path d="M4 0V20M0 7H15" stroke="#b9edc6" strokeOpacity=".32" strokeWidth="2" /></pattern>
+                <linearGradient id="city-blue" x1="180" y1="110" x2="300" y2="360" gradientUnits="userSpaceOnUse"><stop stopColor="#38bdf8" /><stop offset="1" stopColor="#1469a7" /></linearGradient>
+                <linearGradient id="city-gold" x1="350" y1="110" x2="400" y2="340" gradientUnits="userSpaceOnUse"><stop stopColor="#ffce7b" /><stop offset="1" stopColor="#f59a28" /></linearGradient>
+                <linearGradient id="city-base" x1="300" y1="290" x2="300" y2="450" gradientUnits="userSpaceOnUse"><stop stopColor="#295c88" /><stop offset="1" stopColor="#173c60" /></linearGradient>
             </defs>
-            <circle cx="455" cy="170" r="60" fill="#e4efa4" opacity=".75" />
-            <path d="M0 339Q72 282 145 323T300 302T470 326T600 292V490H0Z" fill="#54a898" opacity=".45" />
-            <path d="M0 363Q110 321 200 355T400 335T600 350V490H0Z" fill="#83c7a4" opacity=".55" />
-            <g opacity=".6" fill="#69b8a0"><path d="M38 310H84V429H38zM105 272H140V433H105zM382 290H420V427H382zM432 312H470V432H432z" /></g>
-            <path d="M150 246L211 220V432H150Z" fill="#167e79" /><path d="M211 220L239 239V432H211Z" fill="#116c6d" />
-            <path d="M155 251H206V425H155Z" fill="url(#city-windows)" />
-            <path d="M243 178L302 161V436H243Z" fill="url(#city-tower)" /><path d="M302 161L329 184V436H302Z" fill="#6eb68f" />
-            <path d="M253 190V425M266 186V425M279 181V425M292 177V425" stroke="#e0ecae" strokeOpacity=".65" strokeWidth="3" />
-            <path d="M347 218L377 435H316Z" fill="#daecb6" /><path d="M347 218L359 435H377Z" fill="#97cfac" /><path d="M346 283V425M337 345H360M330 380H365" stroke="#439c90" strokeWidth="2" />
-            <path d="M74 347H133V437H74Z" fill="#b3d986" /><path d="M83 355H123V431H83Z" fill="url(#city-windows)" />
-            <path d="M0 439Q140 416 280 438T600 430V650H0Z" fill="url(#city-water)" />
-            <path d="M0 441H600" stroke="#d7e9a1" strokeWidth="16" />
-            <path d="M0 453H600" stroke="#176f70" strokeWidth="7" />
-            <g stroke="#ddf2c8" strokeOpacity=".5" strokeWidth="2"><path d="M35 486H167M203 475H291M369 487H535M130 512H257M303 528H462M20 552H124M415 566H576M195 594H350" /></g>
-            <path d="M600 476C448 472 433 504 295 507S110 512 0 555V650H600Z" fill="#74b590" />
-            <path d="M600 511C435 481 423 543 281 536S76 561 0 602V650H600Z" fill="#aed293" />
-            <path d="M600 542C452 512 416 582 271 570S104 597 40 650H202C284 618 300 628 361 623S470 568 600 590Z" fill="#226d6a" />
-            <path d="M600 566C453 538 420 604 289 599S154 616 122 650" stroke="#e9f0b1" strokeWidth="3" strokeDasharray="18 18" />
-            <g fill="#155f61"><path d="M485 433V344H491V433Z" /><path d="M488 305L461 362H475L452 400H524L501 362H515Z" /><path d="M542 434V354H547V434Z" /><path d="M544 318L521 368H533L513 405H575L555 368H567Z" /></g>
-            <g fill="#317f70"><path d="M40 470V407H45V470Z" /><path d="M42 366L19 420H31L11 450H73L53 420H65Z" /></g>
-            <g transform="translate(390 554) rotate(-15)"><rect width="27" height="13" rx="4" fill="#eaf2bc" /><rect x="7" y="2" width="11" height="9" rx="2" fill="#4a9690" /></g>
-            <g transform="translate(228 606) rotate(-8)"><rect width="24" height="12" rx="4" fill="#f6faf0" /><rect x="6" y="2" width="10" height="8" rx="2" fill="#66a39b" /></g>
-            <path d="M0 650V524Q52 514 80 481Q68 530 22 550Q62 546 105 516Q82 565 28 575Q65 581 93 565Q76 612 25 608L37 650Z" fill="#155f61" />
-            <path d="M572 650Q552 588 579 553Q570 599 588 615Q587 571 600 566V650Z" fill="#256f64" />
+            <circle cx="302" cy="228" r="183" fill="#38bdf8" opacity=".035" />
+            <circle cx="302" cy="228" r="183" stroke="#76caff" strokeOpacity=".14" strokeDasharray="4 10" />
+            <circle cx="450" cy="103" r="37" fill="#ffd18a" />
+            <circle cx="450" cy="103" r="48" stroke="#ffd18a" strokeOpacity=".13" />
+            <ellipse cx="300" cy="432" rx="228" ry="25" fill="#061a30" opacity=".35" />
+            <path d="M58 340Q300 253 542 340V367Q300 485 58 367Z" fill="#102f4e" />
+            <path d="M58 340Q300 231 542 340Q300 458 58 340Z" fill="url(#city-base)" stroke="#6ab5e4" strokeOpacity=".35" />
+            <path d="M87 347Q300 258 513 347" stroke="#5d9bc7" strokeOpacity=".3" strokeWidth="2" />
+            <path d="M116 363Q214 324 296 352T475 366" stroke="#0b263f" strokeWidth="34" strokeLinecap="round" />
+            <path d="M116 363Q214 324 296 352T475 366" stroke="#d2e9fa" strokeWidth="2" strokeDasharray="10 12" strokeLinecap="round" />
+            <path d="M129 309V218L178 204V315Z" fill="#398aca" />
+            <path d="M178 204L202 219V327L178 315Z" fill="#1c5c95" />
+            <path d="M139 233L164 226M139 250L164 243M139 267L164 260M139 284L164 277" stroke="#a9e4ff" strokeWidth="4" strokeOpacity=".6" />
+            <path d="M208 316V126L270 103V316Z" fill="url(#city-blue)" />
+            <path d="M270 103L299 125V332L270 316Z" fill="#105b99" />
+            <path d="M208 126L237 147L299 125L270 103Z" fill="#69cbfa" />
+            <path d="M221 153V299M239 149V299M257 143V299" stroke="#b8ecff" strokeWidth="4" strokeOpacity=".65" />
+            <path d="M314 323V170L345 156V330Z" fill="#d4edff" />
+            <path d="M345 156L364 171V341L345 330Z" fill="#76b2da" />
+            <path d="M325 185V313" stroke="#fff" strokeWidth="4" />
+            <path d="M368 324V130L413 150V328Z" fill="url(#city-gold)" />
+            <path d="M368 130L392 115L438 136L413 150Z" fill="#ffdb99" />
+            <path d="M413 150L438 136V315L413 328Z" fill="#d88227" />
+            <path d="M380 153V309M394 160V313" stroke="#fff1cf" strokeWidth="4" strokeOpacity=".85" />
+            <path d="M102 331V297M467 332V292M490 323V305" stroke="#81aaca" strokeWidth="4" strokeLinecap="round" />
+            <path d="M102 263L84 301H120Z" fill="#458fb8" /><path d="M102 280L78 317H126Z" fill="#2d709c" />
+            <path d="M467 252L446 297H488Z" fill="#6faacc" /><path d="M467 273L441 314H493Z" fill="#3d7ea6" />
+            <path d="M490 283L472 315H508Z" fill="#659bbf" />
+            <g transform="translate(205 341) rotate(-5)"><rect width="28" height="14" rx="5" fill="#ffca72" /><rect x="8" y="3" width="12" height="8" rx="2" fill="#22567d" /></g>
+            <g transform="translate(372 369) rotate(4)"><rect width="28" height="14" rx="5" fill="#e3f4ff" /><rect x="8" y="3" width="12" height="8" rx="2" fill="#22567d" /></g>
+            <circle cx="115" cy="170" r="5" fill="#38bdf8" /><circle cx="481" cy="202" r="4" fill="#ffca72" />
+            <path d="M103 170H85M481 185V175" stroke="#8dd6ff" strokeOpacity=".5" strokeWidth="2" strokeLinecap="round" />
         </svg>
     );
 }

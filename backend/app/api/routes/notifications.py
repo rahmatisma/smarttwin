@@ -8,7 +8,7 @@ router = APIRouter(
     tags=["Notifications"],
 )
 
-@router.get("", response_model=NotificationListResponse)
+@router.get("", response_model=NotificationListResponse, response_model_by_alias=False)
 def get_notifications():
     try:
         data = notification_service.get_notifications()

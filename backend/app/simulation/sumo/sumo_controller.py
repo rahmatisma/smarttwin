@@ -53,6 +53,19 @@ class SumoController:
     # gagal start.
     GUI_VIEW_SETTINGS_FILE = SIMULATION_DIR / "network" / "gui-view-settings.xml"
 
+    # Diperkecil dari 1,0 ke 0,2 detik (6 September 2026). Sebelumnya
+    # posisi kendaraan cuma diperbarui 1x/detik (1 simulationStep() = 1
+    # detik simulasi, dipanggil sekali per detik nyata), sementara
+    # screenshot untuk dashboard diambil 4x/detik (tiap 0,25 detik) --
+    # 3 dari 4 frame jadi identik lalu kendaraan "meloncat" di frame
+    # ke-4, terlihat patah-patah. Dengan 0,2 detik, posisi diperbarui
+    # 5x/detik, sepadan dengan laju screenshot. Dipakai di dua tempat:
+    # flag --step-length saat start SUMO, dan pacing real-time di loop
+    # (_run_realtime_loop) -- keduanya WAJIB diubah bersamaan, kalau
+    # cuma salah satu simulasi jadi berjalan 5x lebih cepat/lambat dari
+    # waktu nyata.
+    STEP_LENGTH_SECONDS = 0.2
+
     # SENGAJA pakai sys.prefix (venv Python yang lagi jalan), bukan
     # hardcode ke simulation/.venv -- sejak backend, simulation, dan
     # decision_engine digabung jadi satu venv di root repo (30 Agustus
@@ -695,7 +708,7 @@ class SumoController:
 
             "--step-length",
 
-            "1",
+            str(self.STEP_LENGTH_SECONDS),
 
             "--no-step-log",
 
@@ -1980,7 +1993,7 @@ class SumoController:
             # permanent drift to the one-second SUMO simulation steps.
             if self.paused:
                 next_step_at = time.perf_counter()
-            next_step_at += 1.0
+            next_step_at += self.STEP_LENGTH_SECONDS
             sleep_time = max(0.0, next_step_at - time.perf_counter())
 
             if self._stop_event.wait(
