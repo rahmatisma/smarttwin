@@ -106,6 +106,12 @@ interface Kandidat {
     avgQueueLengthM: number | null;
     throughputVeh: number | null;
     los: string | null;
+    // Cuma terisi untuk siklus BARU (setelah delay-per-lengan mulai
+    // disimpan) -- riwayat lama tetap null, bukan error.
+    delayByApproachSeconds: Partial<Record<"north" | "south" | "east" | "west", number>> | null;
+    losByApproach: Partial<Record<"north" | "south" | "east" | "west", string>> | null;
+    queueLengthVehByApproach: Partial<Record<"north" | "south" | "east" | "west", number>> | null;
+    throughputVehByApproach: Partial<Record<"north" | "south" | "east" | "west", number>> | null;
 }
 
 interface MetrikBeforeAfter {
@@ -125,6 +131,9 @@ interface BeforeAfter {
     winnerCandidateId: string;
     changed: boolean;
     metrics: MetrikBeforeAfter[];
+    // Cuma terisi untuk siklus BARU (setelah delay/antrean/throughput per
+    // lengan mulai disimpan) -- riwayat lama tetap null, bukan error.
+    byApproach: Partial<Record<"north" | "south" | "east" | "west", MetrikBeforeAfter[]>> | null;
 }
 
 interface KondisiLengan {
@@ -1091,6 +1100,12 @@ export default function HistoryPage() {
                                             <p className="text-[10px] text-text-muted">
                                                 {kondisi.volume ?? "—"} melintas · antrean {kondisi.queueLengthMEst ?? "—"}m
                                             </p>
+                                            <p className="text-[10px] text-text-muted">
+                                                kepadatan{" "}
+                                                {kondisi.densityIndex != null
+                                                    ? `${Math.round(kondisi.densityIndex * 100)}%`
+                                                    : "—"}
+                                            </p>
                                         </div>
                                     ))}
                                 </div>
@@ -1166,14 +1181,68 @@ export default function HistoryPage() {
                                                     </td>
                                                     <td className="px-3 py-2 font-mono">
                                                         {kandidat.avgDelaySeconds ?? "—"}s
+                                                        {kandidat.delayByApproachSeconds && (
+                                                            <div className="mt-0.5 text-[9px] font-normal text-text-muted">
+                                                                {URUTAN_LENGAN.map((lengan) => {
+                                                                    const nilai = kandidat.delayByApproachSeconds?.[lengan as "north" | "south" | "east" | "west"];
+                                                                    if (nilai == null) return null;
+                                                                    return (
+                                                                        <span key={lengan} className="mr-1.5">
+                                                                            {labelLengan(lengan)[0]}:{Math.round(nilai)}s
+                                                                        </span>
+                                                                    );
+                                                                })}
+                                                            </div>
+                                                        )}
                                                     </td>
                                                     <td className="px-3 py-2 font-mono">
                                                         {kandidat.avgQueueLengthM ?? "—"}m
+                                                        {kandidat.queueLengthVehByApproach && (
+                                                            <div className="mt-0.5 text-[9px] font-normal text-text-muted">
+                                                                {URUTAN_LENGAN.map((lengan) => {
+                                                                    const nilai = kandidat.queueLengthVehByApproach?.[lengan as "north" | "south" | "east" | "west"];
+                                                                    if (nilai == null) return null;
+                                                                    return (
+                                                                        <span key={lengan} className="mr-1.5">
+                                                                            {labelLengan(lengan)[0]}:{nilai}
+                                                                        </span>
+                                                                    );
+                                                                })}
+                                                            </div>
+                                                        )}
                                                     </td>
                                                     <td className="px-3 py-2 font-mono">
                                                         {kandidat.throughputVeh ?? "—"}
+                                                        {kandidat.throughputVehByApproach && (
+                                                            <div className="mt-0.5 text-[9px] font-normal text-text-muted">
+                                                                {URUTAN_LENGAN.map((lengan) => {
+                                                                    const nilai = kandidat.throughputVehByApproach?.[lengan as "north" | "south" | "east" | "west"];
+                                                                    if (nilai == null) return null;
+                                                                    return (
+                                                                        <span key={lengan} className="mr-1.5">
+                                                                            {labelLengan(lengan)[0]}:{nilai}
+                                                                        </span>
+                                                                    );
+                                                                })}
+                                                            </div>
+                                                        )}
                                                     </td>
-                                                    <td className="px-3 py-2">{kandidat.los ?? "—"}</td>
+                                                    <td className="px-3 py-2">
+                                                        {kandidat.los ?? "—"}
+                                                        {kandidat.losByApproach && (
+                                                            <div className="mt-0.5 text-[9px] font-normal text-text-muted">
+                                                                {URUTAN_LENGAN.map((lengan) => {
+                                                                    const nilai = kandidat.losByApproach?.[lengan as "north" | "south" | "east" | "west"];
+                                                                    if (nilai == null) return null;
+                                                                    return (
+                                                                        <span key={lengan} className="mr-1.5">
+                                                                            {labelLengan(lengan)[0]}:{nilai}
+                                                                        </span>
+                                                                    );
+                                                                })}
+                                                            </div>
+                                                        )}
+                                                    </td>
                                                 </tr>
                                             ))}
                                         </tbody>
@@ -1252,6 +1321,60 @@ export default function HistoryPage() {
                                         </tbody>
                                     </table>
                                 </div>
+
+                                {dipilih.beforeAfter.byApproach && (
+                                    <div className="mt-3">
+                                        <p className="mb-2 text-[10px] text-text-muted">
+                                            Rincian per lengan (Realtime → Setelah Rekomendasi)
+                                        </p>
+                                        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                                            {URUTAN_LENGAN.map((lengan) => {
+                                                const metrikLengan =
+                                                    dipilih.beforeAfter?.byApproach?.[
+                                                        lengan as "north" | "south" | "east" | "west"
+                                                    ];
+                                                if (!metrikLengan || metrikLengan.length === 0) return null;
+                                                return (
+                                                    <div
+                                                        key={lengan}
+                                                        className="rounded-lg border border-border bg-surface-2 p-3"
+                                                    >
+                                                        <p className="mb-1.5 text-[11px] text-text-muted">
+                                                            {labelLengan(lengan)}
+                                                        </p>
+                                                        <div className="space-y-1">
+                                                            {metrikLengan.map((metrik) => (
+                                                                <div
+                                                                    key={metrik.metric}
+                                                                    className="flex items-center justify-between text-[10px]"
+                                                                >
+                                                                    <span className="text-text-muted">
+                                                                        {metrik.label}
+                                                                    </span>
+                                                                    <span className="font-mono">
+                                                                        {metrik.before}→{metrik.after}
+                                                                        {metrik.unit}
+                                                                        {metrik.improved != null && (
+                                                                            <span
+                                                                                className={
+                                                                                    metrik.improved
+                                                                                        ? "ml-1 text-signal-green"
+                                                                                        : "ml-1 text-signal-red"
+                                                                                }
+                                                                            >
+                                                                                {metrik.improved ? "↓" : "↑"}
+                                                                            </span>
+                                                                        )}
+                                                                    </span>
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                    </div>
+                                )}
                             </div>
                         )}
 
@@ -1284,13 +1407,13 @@ export default function HistoryPage() {
                             <div className="mb-2 flex items-center gap-2">
                                 <Car size={15} className="text-text-secondary" />
                                 <h3 className="text-xs font-medium">
-                                    Kondisi Lalu Lintas Setelah Rekomendasi Diterapkan
+                                    Kondisi Lalu Lintas Nyata Setelah Rekomendasi Diterapkan
                                 </h3>
                             </div>
                             <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-border bg-surface-2 py-8 text-center">
-                                <p className="mb-1 text-xs font-medium text-text-muted">Data aktual belum tersedia</p>
-                                <p className="max-w-[300px] text-[10px] text-text-muted opacity-70">
-                                    Menunggu hasil observasi siklus berikutnya setelah rekomendasi ini diterapkan di lapangan.
+                                <p className="mb-1 text-xs font-medium text-text-muted">Data pengamatan lapangan belum tersedia</p>
+                                <p className="max-w-[320px] text-[10px] text-text-muted opacity-70">
+                                    Tabel &quot;Dampak Rekomendasi&quot; di atas adalah hasil SIMULASI, bukan kondisi nyata. Bagian ini khusus untuk hasil pengamatan kamera CCTV setelah rekomendasi benar-benar diterapkan di lapangan — menunggu siklus observasi berikutnya.
                                 </p>
                             </div>
                         </div>

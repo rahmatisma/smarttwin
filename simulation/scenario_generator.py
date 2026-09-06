@@ -588,6 +588,8 @@ def simulate_cycle_candidate(
     delay = metrics["averageWaitingTimeSeconds"]
     queue_veh = metrics["queueLengthVeh"]
     delay_by_approach = metrics.get("averageWaitingTimeSecondsByApproach")
+    queue_by_approach = metrics.get("queueLengthVehByApproach")
+    throughput_by_approach = metrics.get("throughputVehByApproach")
     return {
         **candidate,
         "avgDelaySeconds": delay,
@@ -597,6 +599,8 @@ def simulate_cycle_candidate(
         "los": calculate_los(delay),
         "delayByApproachSeconds": delay_by_approach,
         "losByApproach": los_by_approach(delay_by_approach),
+        "queueLengthVehByApproach": queue_by_approach,
+        "throughputVehByApproach": throughput_by_approach,
     }
 
 
@@ -664,6 +668,8 @@ def simulate_candidate(
     avgDelaySeconds = metrics["averageWaitingTimeSeconds"]
     queueLengthVeh = metrics["queueLengthVeh"]
     delayByApproach = metrics.get("averageWaitingTimeSecondsByApproach")
+    queueByApproach = metrics.get("queueLengthVehByApproach")
+    throughputByApproach = metrics.get("throughputVehByApproach")
 
     return {
         "candidateId": candidate["candidateId"],
@@ -679,6 +685,8 @@ def simulate_candidate(
         "los": calculate_los(avgDelaySeconds),
         "delayByApproachSeconds": delayByApproach,
         "losByApproach": los_by_approach(delayByApproach),
+        "queueLengthVehByApproach": queueByApproach,
+        "throughputVehByApproach": throughputByApproach,
     }
 
 

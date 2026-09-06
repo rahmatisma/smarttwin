@@ -407,6 +407,44 @@ def write_history(supabase, payload: dict[str, Any], state) -> None:
                 ("avgQueueLengthM", candidate.get("avgQueueLengthM"), "m"),
                 ("throughputVeh", candidate.get("throughputVeh"), "veh"),
             ]
+
+            # Delay per lengan -- sudah dihitung scenario_generator.py
+            # (delayByApproachSeconds), sebelumnya cuma dipakai cache live
+            # (liveScenarioCache), tidak pernah ikut ke riwayat. Disimpan
+            # sebagai baris metrik terpisah per lengan (nama
+            # "delaySeconds_<lengan>") -- skema simulationMetrics ini cuma
+            # metricName+metricValue, tidak ada kolom JSON, jadi 1 baris per
+            # lengan mengikuti pola yang sudah ada, bukan migrasi skema baru.
+            for approach, delay_value in (
+                candidate.get("delayByApproachSeconds") or {}
+            ).items():
+                if delay_value is not None:
+                    metrics.append(
+                        (f"delaySeconds_{approach}", delay_value, "s")
+                    )
+
+            # Antrean per lengan -- pola sama persis dengan delay per
+            # lengan di atas. 0 tetap disimpan (bukan dilewati seperti
+            # "if value is not None" pada delay) karena "tidak ada yang
+            # antre" itu sendiri sudah informasi sah untuk queue.
+            for approach, queue_value in (
+                candidate.get("queueLengthVehByApproach") or {}
+            ).items():
+                if queue_value is not None:
+                    metrics.append(
+                        (f"queueLengthVeh_{approach}", queue_value, "veh")
+                    )
+
+            # Throughput per lengan -- pola sama, lihat catatan panjang
+            # soal vehicleLastApproach di run_tls_simulation.py untuk
+            # kenapa ini bisa sedikit di bawah throughputVeh total.
+            for approach, throughput_value in (
+                candidate.get("throughputVehByApproach") or {}
+            ).items():
+                if throughput_value is not None:
+                    metrics.append(
+                        (f"throughputVeh_{approach}", throughput_value, "veh")
+                    )
             metric_rows = [
                 {
                     "simulationId": simulation_id,

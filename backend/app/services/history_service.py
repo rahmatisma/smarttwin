@@ -62,6 +62,19 @@ _BEFORE_AFTER_METRICS = (
     ("throughputVeh", "Throughput", "kendaraan", False),
 )
 
+# Versi per lengan dari tabel di atas. Satuan antrean di sini "kendaraan",
+# BUKAN "m" seperti versi agregat -- tidak ada versi meter per lengan yang
+# disimpan (cuma queueLengthVehByApproach, dalam kendaraan), jadi jangan
+# disamakan angkanya dengan kolom "Antrean" agregat di tabel utama.
+_BEFORE_AFTER_APPROACH_FIELDS = (
+    # (field per-lengan, label, satuan, turun_berarti_membaik)
+    ("delayByApproachSeconds", "Waktu Tunggu", "s", True),
+    ("queueLengthVehByApproach", "Antrean", "kendaraan", True),
+    ("throughputVehByApproach", "Throughput", "kendaraan", False),
+)
+
+_APPROACHES = ("north", "south", "east", "west")
+
 BASELINE_CANDIDATE_ID = "baseline"
 
 
@@ -107,6 +120,41 @@ def _compute_before_after(candidates: list[dict[str, Any]]) -> dict[str, Any] | 
             }
         )
 
+    # Sama seperti di atas, tapi dipecah per lengan -- cuma terisi untuk
+    # siklus BARU (setelah delay/antrean/throughput per lengan mulai
+    # disimpan). Siklus lama: by_approach jadi {} (bukan error).
+    by_approach: dict[str, list[dict[str, Any]]] = {}
+    for approach in _APPROACHES:
+        approach_metrics = []
+        for field, label, unit, lower_is_better in _BEFORE_AFTER_APPROACH_FIELDS:
+            before = (baseline.get(field) or {}).get(approach)
+            after = (winner.get(field) or {}).get(approach)
+            if before is None or after is None:
+                continue
+
+            change_percent = (
+                round((after - before) / before * 100, 1) if before != 0 else None
+            )
+            membaik = (
+                None
+                if change_percent is None or change_percent == 0
+                else (change_percent < 0) == lower_is_better
+            )
+
+            approach_metrics.append(
+                {
+                    "metric": field,
+                    "label": label,
+                    "unit": unit,
+                    "before": before,
+                    "after": after,
+                    "changePercent": change_percent,
+                    "improved": membaik,
+                }
+            )
+        if approach_metrics:
+            by_approach[approach] = approach_metrics
+
     return {
         "baselineCandidateId": baseline["candidateId"],
         "winnerCandidateId": winner["candidateId"],
@@ -115,6 +163,7 @@ def _compute_before_after(candidates: list[dict[str, Any]]) -> dict[str, Any] | 
         # gagal berpikir. Ditandai eksplisit supaya tidak disalahartikan.
         "changed": winner["candidateId"] != baseline["candidateId"],
         "metrics": metrics,
+        "byApproach": by_approach or None,
     }
 
 
@@ -326,6 +375,31 @@ class HistoryService:
             simulation_metrics = metrics_by_simulation.get(simulation["id"], {})
             avg_delay = simulation_metrics.get("avgDelaySeconds")
 
+            # Delay per lengan disimpan sebagai baris metrik terpisah
+            # ("delaySeconds_north" dst, lihat scenario_worker.py::write_history()).
+            # Cycle lama (sebelum perubahan ini) tidak akan punya baris-baris
+            # ini -- delayByApproach jadi dict kosong, bukan error, untuk
+            # riwayat lama.
+            delay_by_approach = {
+                approach: simulation_metrics[f"delaySeconds_{approach}"]
+                for approach in ("north", "south", "east", "west")
+                if simulation_metrics.get(f"delaySeconds_{approach}") is not None
+            }
+            los_by_approach = {
+                approach: _calculate_los(delay)
+                for approach, delay in delay_by_approach.items()
+            }
+            queue_by_approach = {
+                approach: simulation_metrics[f"queueLengthVeh_{approach}"]
+                for approach in ("north", "south", "east", "west")
+                if simulation_metrics.get(f"queueLengthVeh_{approach}") is not None
+            }
+            throughput_by_approach = {
+                approach: simulation_metrics[f"throughputVeh_{approach}"]
+                for approach in ("north", "south", "east", "west")
+                if simulation_metrics.get(f"throughputVeh_{approach}") is not None
+            }
+
             candidate = {
                 "candidateId": str(simulation.get("simulationName", "")).split(" @ ")[0],
                 "isWinner": simulation.get("status") == "winner",
@@ -333,6 +407,10 @@ class HistoryService:
                 "avgQueueLengthM": simulation_metrics.get("avgQueueLengthM"),
                 "throughputVeh": simulation_metrics.get("throughputVeh"),
                 "los": _calculate_los(avg_delay),
+                "delayByApproachSeconds": delay_by_approach or None,
+                "losByApproach": los_by_approach or None,
+                "queueLengthVehByApproach": queue_by_approach or None,
+                "throughputVehByApproach": throughput_by_approach or None,
             }
             cycle["candidates"].append(candidate)
 

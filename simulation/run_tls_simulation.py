@@ -1374,6 +1374,36 @@ def runSimulation(
         "west": [],
     }
 
+    # Puncak kendaraan berhenti PER LENGAN -- pola sama dengan
+    # peakQueueLength (global), dipecah pakai approach yang sudah dihitung
+    # di loop yang sama (lihat approachForRoad() di bawah), bukan loop
+    # terpisah.
+    peakQueueLengthByApproach: dict[str, int] = {
+        "north": 0,
+        "south": 0,
+        "east": 0,
+        "west": 0,
+    }
+
+    # Throughput per lengan butuh trik beda dari delay/antrean di atas:
+    # begitu kendaraan "arrived" (sampai tujuan), traci sudah tidak bisa
+    # ditanya lagi getRoadID()-nya -- datanya sudah dihapus dari simulasi.
+    # Jadi lengan ASALnya diingat DI SINI, tiap step selagi kendaraan itu
+    # masih ada dan masih di salah satu edge pendekat (approachForRoad()
+    # tidak None), lalu dipakai belakangan saat vehicle ID itu muncul di
+    # getArrivedIDList(). Kendaraan yang arrived tanpa pernah tercatat di
+    # sini (mis. edge case: langsung arrived di step yang sama dia depart)
+    # cuma tidak ikut dihitung PER LENGAN -- total agregatnya (arrivedVehicles
+    # dari getArrivedNumber(), TIDAK diubah) tetap benar seperti sebelumnya.
+    vehicleLastApproach: dict[str, str] = {}
+
+    arrivedVehiclesByApproach: dict[str, int] = {
+        "north": 0,
+        "south": 0,
+        "east": 0,
+        "west": 0,
+    }
+
     while (
         steps
         < step_limit
@@ -1410,6 +1440,22 @@ def runSimulation(
                 .getArrivedNumber()
             )
 
+            # Tidak mengganti getArrivedNumber() di atas (dibiarkan
+            # persis seperti sebelumnya) -- ini panggilan TERPISAH cuma
+            # untuk pecah per lengan, pakai lengan asal yang sudah
+            # diingat vehicleLastApproach selagi kendaraan itu aktif.
+            for arrivedId in (
+                traci.simulation.getArrivedIDList()
+            ):
+
+                lastApproach = vehicleLastApproach.pop(
+                    arrivedId, None
+                )
+
+                if lastApproach is not None:
+
+                    arrivedVehiclesByApproach[lastApproach] += 1
+
             departedVehicles += (
                 traci
                 .simulation
@@ -1437,6 +1483,13 @@ def runSimulation(
             # menelusuri seluruh kendaraan aktif tiap step.
             haltingCount = 0
 
+            haltingCountByApproach: dict[str, int] = {
+                "north": 0,
+                "south": 0,
+                "east": 0,
+                "west": 0,
+            }
+
             for vehicleId in vehicleIds:
 
                 waitingTime = (
@@ -1458,6 +1511,13 @@ def runSimulation(
                         waitingTime
                     )
 
+                    # Diingat SELAGI masih di edge pendekat -- begitu
+                    # kendaraan lewat simpang, roadID-nya ganti ke edge
+                    # keluar (approachForRoad balik None), jadi nilai
+                    # terakhir yang tersimpan di sini adalah lengan ASAL-
+                    # nya, dipakai nanti saat vehicleId ini "arrived".
+                    vehicleLastApproach[vehicleId] = approach
+
                 if (
                     traci.vehicle
                     .getSpeed(vehicleId)
@@ -1466,10 +1526,21 @@ def runSimulation(
 
                     haltingCount += 1
 
+                    if approach is not None:
+
+                        haltingCountByApproach[approach] += 1
+
             peakQueueLength = max(
                 peakQueueLength,
                 haltingCount,
             )
+
+            for approachName, count in haltingCountByApproach.items():
+
+                peakQueueLengthByApproach[approachName] = max(
+                    peakQueueLengthByApproach[approachName],
+                    count,
+                )
 
         except Exception:
 
@@ -1545,8 +1616,22 @@ def runSimulation(
         "throughputVeh":
             arrivedVehicles,
 
+        # Bisa jumlahnya SEDIKIT di bawah throughputVeh total -- kendaraan
+        # yang arrived tanpa pernah tercatat lengan asalnya (mis. depart
+        # dan arrived di step yang sama) tidak ikut kehitung di sini,
+        # walau tetap kehitung di throughputVeh agregat. Lihat catatan di
+        # vehicleLastApproach di atas.
+        "throughputVehByApproach":
+            arrivedVehiclesByApproach,
+
         "queueLengthVeh":
             peakQueueLength,
+
+        # Lengan tanpa kendaraan teramati dilaporkan 0 (bukan None) --
+        # beda dari delay, "tidak ada yang antre" itu sendiri sudah
+        # informasi yang sah (bukan "tidak terukur").
+        "queueLengthVehByApproach":
+            peakQueueLengthByApproach,
 
         "averageWaitingTimeSeconds":
             round(
