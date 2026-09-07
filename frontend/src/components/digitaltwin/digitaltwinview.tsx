@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
     Play,
     Pause,
@@ -27,11 +27,13 @@ import {
     CartesianGrid,
 } from "recharts";
 
+import ScenarioComparison from "./ScenarioComparison";
 import Sidebar from "@/components/Sidebar";
 import Header from "@/components/Header";
 import { useScenario, ScenarioType } from "@/context/ScenarioContext";
-import { fetchSignalStatus } from "@/lib/supabaseData";
+import { fetchSignalStatus, fetchForecast, fetchTrafficState } from "@/lib/supabaseData";
 import SignalStatusPanel from "@/components/SignalStatusPanel";
+import type { Approach, ForecastResponse, TrafficState } from "@/types/traffic";
 
 // "Traffic Realtime" BUKAN instance terpisah -- itu adalah instance SUMO
 // yang SAMA persis dengan dashboard (context "dashboard"), supaya SUMO
@@ -67,53 +69,15 @@ interface CyclePlanData {
 
 interface SimHistoryPoint {
     t: number;
-    delay: number;
-    queue: number;
-    throughput: number;
+    delay: number | null;
+    queue: number | null;
+    throughput: number | null;
 }
 
 export default function DigitalTwinView() {
     const simulationViewRef = useRef<HTMLDivElement>(null);
     const [isFullscreen, setIsFullscreen] = useState(false);
     const fullscreenViewWasRequestedRef = useRef(false);
-
-    // "Ringkasan Simpang" (kolom kiri, di bawah video) dan "Kondisi per
-    // Lengan" (sidebar kanan) itu BUKAN grid-sibling -- posisinya sengaja
-    // di kolom masing-masing, jadi CSS "stretch" bawaan tidak bisa
-    // menyamakan tingginya otomatis. Diukur langsung tinggi asli "Kondisi
-    // per Lengan" lewat ResizeObserver, lalu diterapkan sebagai min-height
-    // ke "Ringkasan Simpang" -- selalu pas walau isi keduanya berubah
-    // panjang (angka delay 2 vs 3 digit, dsb), bukan angka px tebakan.
-    //
-    // Callback ref (BUKAN useRef + useEffect terpisah) -- "Kondisi per
-    // Lengan" cuma render kalau isSimulating && ada data losByApproach,
-    // jadi elemennya bisa mount/unmount kapan saja. Callback ref dipanggil
-    // TEPAT saat elemen itu benar-benar terpasang/terlepas dari DOM,
-    // sehingga observer selalu nempel ke elemen yang benar.
-    const [kondisiPerLenganHeight, setKondisiPerLenganHeight] = useState<number | null>(null);
-    const kondisiPerLenganObserverRef = useRef<ResizeObserver | null>(null);
-
-    const kondisiPerLenganRef = useCallback((node: HTMLDivElement | null) => {
-        kondisiPerLenganObserverRef.current?.disconnect();
-        kondisiPerLenganObserverRef.current = null;
-
-        if (!node) {
-            setKondisiPerLenganHeight(null);
-            return;
-        }
-
-        const observer = new ResizeObserver(() => {
-            // SENGAJA bukan entries[0].contentRect.height -- itu cuma
-            // bagian isi card, TIDAK termasuk padding+border, jadi
-            // hasilnya selalu kependekan. getBoundingClientRect() memberi
-            // tinggi visual asli (border-box), yang benar-benar sebanding
-            // dengan min-height di card "Ringkasan Simpang".
-            const height = node.getBoundingClientRect().height;
-            if (height) setKondisiPerLenganHeight(Math.ceil(height));
-        });
-        observer.observe(node);
-        kondisiPerLenganObserverRef.current = observer;
-    }, []);
 
     useEffect(() => {
         const handleFullscreenChange = () => {
@@ -234,6 +198,37 @@ export default function DigitalTwinView() {
     const [simHistory, setSimHistory] = useState<SimHistoryPoint[]>([]);
     const SIM_HISTORY_MAX_POINTS = 120;
 
+    // Prediksi (LSTM) per lengan -- BEDA sumber dari metrik simulasi SUMO di
+    // atas: forecast dihitung dari riwayat TrafficState ASLI (deteksi CV),
+    // bukan dari skenario yang sedang disimulasikan. Jadi tetap relevan
+    // ditampilkan berapa pun skenario yang dipilih -- "apa yang benar-benar
+    // diprediksi terjadi", bukan "apa yang disimulasikan". Komponen &
+    // endpoint-nya sudah ada dan dipakai di Dashboard (ForecastChart.tsx +
+    // fetchForecast()), dipasang ulang di sini, bukan dibangun baru.
+    const [traffic, setTraffic] = useState<TrafficState | null>(null);
+    const [forecast, setForecast] = useState<ForecastResponse | null>(null);
+
+    useEffect(() => {
+        let cancelled = false;
+
+        async function pollForecast() {
+            const [result, observed] = await Promise.all([fetchForecast("simpang4-pingit"), fetchTrafficState("simpang4-pingit")]);
+            if (!cancelled) setTraffic(observed);
+            if (!cancelled && result) setForecast(result);
+        }
+
+        void pollForecast();
+        // fetchForecast() sendiri sudah throttle internal ke 15 detik +
+        // cooldown 60 detik kalau gagal -- interval di sini cuma "kapan
+        // dicoba lagi", bukan laju request sungguhan ke backend.
+        const interval = setInterval(pollForecast, 5000);
+
+        return () => {
+            cancelled = true;
+            clearInterval(interval);
+        };
+    }, []);
+
     const APPROACH_SHORT_LABEL: Record<string, string> = {
         north: "Utara",
         south: "Selatan",
@@ -250,6 +245,10 @@ export default function DigitalTwinView() {
                 const data = await res.json();
                 
                 setIsSimStateLoaded(true);
+                setRunningScenario(data.running
+                    ? context === "dashboard" ? "Traffic Realtime"
+                        : ["Baseline", "Aggressive", "Balanced"].includes(data.scenario) ? data.scenario : null
+                    : null);
 
                 if (data.running) {
                     if (data.paused) {
@@ -374,7 +373,7 @@ export default function DigitalTwinView() {
                                 t: data.simulationTimeSeconds,
                                 delay: data.avgDelaySeconds,
                                 queue: data.avgQueueLengthM ?? 0,
-                                throughput: data.throughputVehPerMin ?? 0,
+                                throughput: data.throughputVehPerMin ?? null,
                             },
                         ];
                         return next.length > SIM_HISTORY_MAX_POINTS
@@ -563,6 +562,14 @@ export default function DigitalTwinView() {
     // sedang jalan di halaman ini (simSharedPhase/State/Remaining, diisi
     // langsung dari rawState TLS lewat polling /state), tidak pernah dari
     // cache produksi.
+    const summaryReady = isSimulating && !loading;
+    const approachKeys = ["north", "east", "south", "west"] as const;
+    const queueValues = approachKeys.map(approach => queueLengthVehByApproach[approach]);
+    const totalQueue = queueValues.every(value => typeof value === "number" && Number.isFinite(value)) ? queueValues.reduce((sum, value) => sum + value, 0) : null;
+    const worstDelay = approachKeys.map(approach => ({ approach, delay: delayByApproachSeconds[approach] })).filter((item): item is { approach: typeof approachKeys[number]; delay: number } => typeof item.delay === "number" && Number.isFinite(item.delay)).sort((a, b) => b.delay - a.delay)[0];
+    const unavailable = "\u2014";
+
+
     const mappedPhase = isSimulating ? simSharedPhase : null;
     const mappedState: "GREEN" | "YELLOW" | "RED" = simSharedState;
     const mappedRemaining = isSimulating ? simSharedRemaining : 0;
@@ -570,7 +577,7 @@ export default function DigitalTwinView() {
     return (
         <div className="flex min-h-screen bg-background text-text">
             <Sidebar />
-            <div className="flex flex-1 flex-col">
+            <div className="flex min-w-0 flex-1 flex-col">
                 {/* ================================================= */}
                 {/* HEADER */}
                 {/* ================================================= */}
@@ -581,57 +588,30 @@ export default function DigitalTwinView() {
                     hideLastUpdated={true}
                 />
 
-                <main className="min-w-0 flex-1 bg-background px-5 py-6 md:px-7">
-                    <div className="mx-auto w-full max-w-[1400px]">
-
-                        {/* Simulation status */}
-                        <div className="mb-6 flex justify-end">
-                            <div className="flex items-center gap-2 rounded-xl border border-border bg-surface px-4 py-2.5">
-                                <span
-                                    className={`h-2 w-2 rounded-full ${
-                                        status === "running"
-                                            ? "bg-signal-green"
-                                            : status === "paused"
-                                            ? "bg-yellow-400"
-                                            : "bg-text-muted"
-                                    }`}
-                                />
-                                <span className="text-xs font-medium">
-                                    {status === "running"
-                                        ? "Simulation Running"
-                                        : status === "paused"
-                                        ? "Simulation Paused"
-                                        : "Simulation Ready"}
-                                </span>
-                            </div>
-                        </div>
+                <main className="min-w-0 flex-1 bg-background px-5 py-4 md:px-7">
+                    <div className="w-full">
 
                 {/* ================================================= */}
                 {/* MAIN SIMULATION */}
                 {/* ================================================= */}
 
-                <div className="grid items-start gap-5 xl:grid-cols-3">
+                <div className="grid items-stretch gap-5 xl:grid-cols-3">
 
                     {/* =============================== */}
                     {/* DIGITAL TWIN CANVAS */}
                     {/* =============================== */}
-                    {/* "items-start" di grid atas mencegah video ikut
-                        ditarik memanjang buat menyamai tinggi sidebar
-                        kanan yang bisa lebih pendek/panjang tergantung
-                        skenario -- video TIDAK pernah diperbesar. */}
-
-                    <div className="space-y-5 xl:col-span-2">
+                    <div className="flex min-w-0 flex-col gap-5 xl:col-span-2">
 
                     <div
                         ref={simulationViewRef}
-                        className={`overflow-hidden border border-border bg-surface shadow-sm ${
-                            isFullscreen ? "flex h-screen flex-col" : "rounded-2xl"
+                        className={`flex flex-col overflow-hidden border border-border bg-surface shadow-sm ${
+                            isFullscreen ? "h-screen" : "flex-1 rounded-2xl"
                         }`}
                     >
 
                         {/* Canvas header */}
 
-                        <div className="flex items-center justify-between border-b border-border px-5 py-4">
+                        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-5 py-4">
 
                             <div className="flex items-center gap-3">
 
@@ -643,17 +623,34 @@ export default function DigitalTwinView() {
                                 </div>
 
                                 <div>
-                                    <h2 className="text-sm font-semibold">
+                                    <h2 className="text-base font-semibold">
                                         Intersection Simulation
                                     </h2>
 
-                                    <p className="text-xs text-text-muted">
+                                    <p className="text-sm text-text-muted">
                                         Simpang 4 Pingit
                                     </p>
                                 </div>
 
                             </div>
 
+                            <div className="flex items-center gap-2">
+                            <div className="flex flex-wrap items-center gap-2 text-text-secondary">
+                                <span
+                                    className={`h-2 w-2 rounded-full ${
+                                        status === "running"
+                                            ? "bg-signal-green"
+                                            : status === "paused"
+                                            ? "bg-yellow-400"
+                                            : "bg-text-muted"
+                                    }`}
+                                />
+                                <span className="text-sm" aria-live="polite">
+                                    {isSimulating ? runningScenario ?? "Memuat skenario..." : scenario}
+                                    {" \u00b7 "}
+                                    {loading ? "Menyiapkan..." : status === "running" ? "Berjalan" : status === "paused" ? "Dijeda" : "Belum berjalan"}
+                                </span>
+                            </div>
                             <button
                                 type="button"
                                 onClick={() => void toggleFullscreen()}
@@ -663,13 +660,14 @@ export default function DigitalTwinView() {
                             >
                                 {isFullscreen ? <Minimize2 size={17} /> : <Maximize2 size={17} />}
                             </button>
+                            </div>
 
                         </div>
 
                         {/* Simulation area */}
 
                         <div className={`relative w-full overflow-hidden bg-[var(--color-canvas)] ${
-                            isFullscreen ? "min-h-0 flex-1" : "aspect-[4/3]"
+                            isFullscreen ? "min-h-0 flex-1" : "aspect-[4/3] flex-1"
                         }`}>
 
                             {/* SUMO-GUI Live Stream */}
@@ -683,7 +681,7 @@ export default function DigitalTwinView() {
                                 />
                             ) : (
                                 <div className="absolute inset-0 flex items-center justify-center">
-                                    <p className="text-sm text-text-muted">Simulation Not Running</p>
+                                    <p className="text-base text-text-muted">Simulation Not Running</p>
                                 </div>
                             )}
 
@@ -701,7 +699,7 @@ export default function DigitalTwinView() {
                                         ? "bg-signal-amber"
                                         : "bg-signal-green";
                                 return (
-                                    <div key={approach} className={`absolute ${position} flex items-center gap-1 rounded bg-black/75 px-1.5 py-0.5 text-[9px] font-semibold text-white`}>
+                                    <div key={approach} className={`absolute ${position} flex items-center gap-1 rounded bg-black/75 px-1.5 py-0.5 text-xs font-semibold text-white`}>
                                         <i className={`h-2.5 w-2.5 shrink-0 rounded-full border border-white/40 ${lampClass}`} />
                                         {label}
                                     </div>
@@ -710,7 +708,7 @@ export default function DigitalTwinView() {
 
                             {/* Legenda warna lampu */}
                             {status === "running" && (
-                                <div className="absolute right-3 top-3 flex gap-2 rounded-md border border-white/10 bg-black/55 px-2 py-1 text-[10px] text-white backdrop-blur-sm">
+                                <div className="absolute right-3 top-3 flex gap-2 rounded-md border border-white/10 bg-black/55 px-2 py-1 text-xs text-white backdrop-blur-sm">
                                     <span className="flex items-center gap-1"><i className="h-2 w-2 rounded-full bg-signal-red" />Merah</span>
                                     <span className="flex items-center gap-1"><i className="h-2 w-2 rounded-full bg-signal-amber" />Kuning</span>
                                     <span className="flex items-center gap-1"><i className="h-2 w-2 rounded-full bg-signal-green" />Hijau</span>
@@ -724,7 +722,7 @@ export default function DigitalTwinView() {
                                 area SELATAN (bottom-center) di kartu sempit maupun lebar. */}
                             {status === "running" && (
                                 <div className="absolute bottom-2 left-2 max-w-[130px] rounded-lg border border-white/10 bg-black/50 px-2 py-1 backdrop-blur-sm">
-                                    <p className="font-mono text-[10px] font-medium leading-snug text-white">
+                                    <p className="font-mono text-xs font-medium leading-snug text-white">
                                         Deteksi: {detectedVehicles} · Terlihat: {visibleVehicleCount} · Total jaringan: {vehicles.length}
                                         {lastSyncFailedInsertions > 0 && (
                                             <span className="text-signal-amber"> · Gagal sisip: {lastSyncFailedInsertions}</span>
@@ -737,11 +735,11 @@ export default function DigitalTwinView() {
 
                             <div className="absolute left-5 top-5 rounded-lg border border-white/10 bg-black/50 px-3 py-2 backdrop-blur-sm">
 
-                                <p className="text-[10px] uppercase tracking-wider text-white/50">
+                                <p className="text-xs uppercase tracking-wider text-white/50">
                                     Scenario
                                 </p>
 
-                                <p className="mt-0.5 text-xs font-medium text-white">
+                                <p className="mt-0.5 text-sm font-medium text-white">
                                     {scenario}
                                 </p>
 
@@ -751,11 +749,11 @@ export default function DigitalTwinView() {
 
                             <div className="absolute bottom-5 right-5 rounded-lg border border-white/10 bg-black/50 px-3 py-2 backdrop-blur-sm">
 
-                                <p className="text-[10px] uppercase tracking-wider text-white/50">
+                                <p className="text-xs uppercase tracking-wider text-white/50">
                                     Simulation Time
                                 </p>
 
-                                <p className="mt-0.5 font-mono text-sm font-medium text-white">
+                                <p className="mt-0.5 font-mono text-base font-medium text-white">
                                     {Math.floor(simulationTime / 60).toString().padStart(2, '0')}:{(Math.floor(simulationTime) % 60).toString().padStart(2, '0')}
                                 </p>
 
@@ -772,55 +770,22 @@ export default function DigitalTwinView() {
                     {!isSimStateLoaded ? (
                         <div
                             className="rounded-2xl border border-border bg-surface p-8 text-center shadow-sm"
-                            style={kondisiPerLenganHeight ? { minHeight: kondisiPerLenganHeight } : undefined}
                         >
                             <div className="mx-auto h-6 w-6 animate-spin rounded-full border-2 border-text-muted border-t-transparent"></div>
-                            <p className="mt-3 text-xs text-text-muted">Memuat informasi kendaraan...</p>
+                            <p className="mt-3 text-sm text-text-muted">Memuat informasi kendaraan...</p>
                         </div>
                     ) : (
                         <div
-                            className="flex flex-col justify-center rounded-2xl border border-border bg-surface p-5 shadow-sm"
-                            style={kondisiPerLenganHeight ? { minHeight: kondisiPerLenganHeight } : undefined}
+                            className="rounded-2xl border border-border bg-surface p-4 shadow-sm sm:p-5"
                         >
-                            {/* Beda dari "Kondisi per Lengan" di sidebar (itu
-                                per lengan) -- 3 card ini semuanya angka
-                                GABUNGAN 4 lengan jadi satu, supaya tidak
-                                disangka sama-sama per lengan. */}
-                            <p className="mb-3 text-[11px] uppercase tracking-wider text-text-muted">
-                                Ringkasan Simpang (gabungan 4 lengan)
-                            </p>
-                            <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-                                <StatCard
-                                    label="Kendaraan Terlihat"
-                                    value={status === "idle" ? "0" : visibleVehicleCount.toString()}
-                                    change={status === "idle" ? "" : `${vehicles.length} total di jaringan (gabungan 4 lengan)`}
-                                    warning={
-                                        lastSyncFailedInsertions > 0
-                                            ? `${lastSyncFailedInsertions} gagal disisipkan (ruas padat)`
-                                            : undefined
-                                    }
-                                    icon={<Car size={18} />}
-                                />
-
-                                <StatCard
-                                    label="Queue Length"
-                                    value={
-                                        status === "idle"
-                                            ? "0"
-                                            : queueBusiestApproach
-                                              ? `${APPROACH_SHORT_LABEL[queueBusiestApproach] ?? queueBusiestApproach}: ${queueLengthVeh}`
-                                              : `${queueLengthVeh}`
-                                    }
-                                    change={status === "idle" ? "" : "Lengan terpadat saja, lihat semua lengan di “Kondisi per Lengan”"}
-                                    icon={<List size={18} />}
-                                />
-
-                                <StatCard
-                                    label="Traffic Flow"
-                                    value={status === "idle" ? "0" : `${throughputVehPerMin}/menit`}
-                                    change={status === "idle" ? "" : "Gabungan 4 lengan, live snapshot"}
-                                    icon={<Zap size={18} />}
-                                />
+                            <h2 className="mb-3 text-base font-semibold">Ringkasan Simpang</h2>
+                            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 2xl:grid-cols-3">
+                            <StatCard label="Kendaraan di Jaringan" value={summaryReady ? String(vehicles.length) : unavailable} detail={summaryReady ? "Target deteksi: " + detectedVehicles + " kend." : undefined} warning={summaryReady && lastSyncFailedInsertions > 0 ? lastSyncFailedInsertions + " gagal disisipkan" : undefined} icon={<Car size={18} />} />
+                            <StatCard label="Kendaraan Terlihat" value={summaryReady ? String(visibleVehicleCount) : unavailable} icon={<Map size={18} />} />
+                            <StatCard label="Total Antrean 4 Lengan" value={summaryReady && totalQueue !== null ? totalQueue + " kend." : unavailable} icon={<List size={18} />} />
+                            <StatCard label="Antrean Terpadat" value={summaryReady ? queueLengthVeh + " kend." : unavailable} detail={summaryReady && queueBusiestApproach ? APPROACH_SHORT_LABEL[queueBusiestApproach] ?? queueBusiestApproach : undefined} icon={<TrafficCone size={18} />} />
+                            <StatCard label="Arus Kendaraan" value={summaryReady ? throughputVehPerMin + "/menit" : unavailable} icon={<Zap size={18} />} />
+                            <StatCard label="Delay Lengan Tertinggi" value={summaryReady && worstDelay ? worstDelay.delay.toFixed(1) + " s" : unavailable} detail={summaryReady && worstDelay ? APPROACH_SHORT_LABEL[worstDelay.approach] : undefined} icon={<Clock3 size={18} />} />
                             </div>
                         </div>
                     )}
@@ -831,7 +796,7 @@ export default function DigitalTwinView() {
                     {/* SIMULATION STATUS */}
                     {/* =============================== */}
 
-                    <div className="space-y-5 xl:col-span-1">
+                    <div className="flex min-w-0 flex-col gap-5 xl:col-span-1">
 
                         {/* Status */}
 
@@ -847,11 +812,11 @@ export default function DigitalTwinView() {
                                 </div>
 
                                 <div>
-                                    <h2 className="text-sm font-semibold">
+                                    <h2 className="text-base font-semibold">
                                         Simulation Status
                                     </h2>
 
-                                    <p className="text-xs text-text-muted">
+                                    <p className="text-sm text-text-muted">
                                         Real-time simulation metrics
                                     </p>
                                 </div>
@@ -861,12 +826,12 @@ export default function DigitalTwinView() {
                             {!isSimStateLoaded ? (
                                 <div className="py-6 text-center">
                                     <div className="mx-auto h-5 w-5 animate-spin rounded-full border-2 border-text-muted border-t-transparent"></div>
-                                    <p className="mt-3 text-xs text-text-muted">Memuat status simulasi...</p>
+                                    <p className="mt-3 text-sm text-text-muted">Memuat status simulasi...</p>
                                 </div>
                             ) : status === "idle" ? (
                                 <div className="py-6 text-center">
-                                    <p className="text-xs font-medium text-text">Stopped / Ready</p>
-                                    <p className="mt-1 text-[10px] text-text-muted">Mulai simulasi untuk melihat metrik.</p>
+                                    <p className="text-sm font-medium text-text">Stopped / Ready</p>
+                                    <p className="mt-1 text-xs text-text-muted">Mulai simulasi untuk melihat metrik.</p>
                                 </div>
                             ) : (
                                 <div className="space-y-4">
@@ -905,11 +870,11 @@ export default function DigitalTwinView() {
                                                   signals[0].activeApproach
                                                 : `Phase ${signals[0].phase}`}
                                         </h2>
-                                        <p className="mt-1 text-xs text-text-muted">
+                                        <p className="mt-1 text-sm text-text-muted">
                                             Traffic Light: {signals[0].trafficLightId}
                                         </p>
                                     </div>
-                                    <span className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${signals[0].state === 'GREEN' ? 'bg-signal-green/10 text-signal-green' : signals[0].state === 'YELLOW' ? 'bg-signal-amber/10 text-signal-amber' : 'bg-signal-red/10 text-signal-red'}`}>
+                                    <span className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-sm font-medium ${signals[0].state === 'GREEN' ? 'bg-signal-green/10 text-signal-green' : signals[0].state === 'YELLOW' ? 'bg-signal-amber/10 text-signal-amber' : 'bg-signal-red/10 text-signal-red'}`}>
                                         <Circle
                                             size={7}
                                             fill="currentColor"
@@ -920,7 +885,7 @@ export default function DigitalTwinView() {
                                 <div className="h-2 overflow-hidden rounded-full bg-surface-2">
                                     <div className={`h-full rounded-full transition-all duration-500 ${signals[0].state === 'GREEN' ? 'bg-signal-green' : signals[0].state === 'YELLOW' ? 'bg-signal-amber' : 'bg-signal-red'}`} style={{width: `${Math.min(100, Math.max(0, (signals[0].remainingSeconds / 60) * 100))}%`}} />
                                 </div>
-                                <div className="mt-2 flex justify-between text-xs text-text-muted">
+                                <div className="mt-2 flex justify-between text-sm text-text-muted">
                                     <span className="font-mono">{Math.floor(signals[0].remainingSeconds)}s</span>
                                     <span>Remaining</span>
                                 </div>
@@ -943,7 +908,7 @@ export default function DigitalTwinView() {
                                 </div>
 
                                 <div>
-                                    <h2 className="text-sm font-semibold">
+                                    <h2 className="text-base font-semibold">
                                         Simulation Controls
                                     </h2>
                                 </div>
@@ -953,10 +918,10 @@ export default function DigitalTwinView() {
                             {/* Scenario */}
 
                             <div>
-                                <label className="mb-1.5 flex items-center justify-between text-[11px] font-medium text-text-secondary">
+                                <label className="mb-1.5 flex items-center justify-between text-sm font-medium text-text-secondary">
                                     <span>Traffic Scenario</span>
                                     {scenario !== "Traffic Realtime" && (
-                                        <span className="text-[9px] text-accent-blue">Simulated</span>
+                                        <span className="text-xs text-accent-blue">Simulated</span>
                                     )}
                                 </label>
 
@@ -999,7 +964,7 @@ export default function DigitalTwinView() {
                                                 setRunningScenario(null);
                                             }
                                         }}
-                                        className="w-full appearance-none rounded-lg border border-border bg-surface px-2.5 py-1.5 pr-8 text-xs outline-none transition focus:border-text-muted"
+                                        className="w-full appearance-none rounded-lg border border-border bg-surface px-3 py-2.5 pr-8 text-sm outline-none transition focus:border-text-muted"
                                     >
                                         {Object.keys(SCENARIO_CONFIG).map((key) => (
                                             <option key={key} value={key}>
@@ -1015,7 +980,7 @@ export default function DigitalTwinView() {
 
                                 </div>
 
-                                <p className="mt-1.5 text-[10px] text-text-muted">
+                                <p className="mt-1.5 text-xs text-text-muted">
                                     {loading
                                         ? `Menerapkan skenario ${scenario} ke SUMO…`
                                         : status === "idle"
@@ -1039,7 +1004,7 @@ export default function DigitalTwinView() {
                                     // di sini -- itu akan ikut menghentikan tampilan live di
                                     // dashboard (bukan bug, memang instance-nya sama), supaya
                                     // tidak tidak sengaja mematikan demo live orang lain.
-                                    <div className="rounded-lg border border-border bg-surface-2 px-4 py-1.5 text-[11px] text-text-muted">
+                                    <div className="rounded-lg border border-border bg-surface-2 px-4 py-2.5 text-sm text-text-muted">
                                         {status === "idle"
                                             ? "Menyambungkan ke SUMO dashboard…"
                                             : "Live dari dashboard -- kendalikan dari halaman Dashboard"}
@@ -1048,7 +1013,7 @@ export default function DigitalTwinView() {
                                     <button
                                         type="button"
                                         onClick={handlePause}
-                                        className="flex items-center gap-1.5 rounded-lg bg-accent px-4 py-1.5 text-[11px] font-medium text-bg transition hover:opacity-90"
+                                        className="flex items-center gap-1.5 rounded-lg bg-accent px-4 py-2.5 text-sm font-medium text-bg transition hover:opacity-90"
                                     >
                                         <Pause size={13} />
                                         Pause Simulation
@@ -1057,7 +1022,7 @@ export default function DigitalTwinView() {
                                     <button
                                         type="button"
                                         onClick={handleResume}
-                                        className="flex items-center gap-1.5 rounded-lg bg-accent px-4 py-1.5 text-[11px] font-medium text-bg transition hover:opacity-90"
+                                        className="flex items-center gap-1.5 rounded-lg bg-accent px-4 py-2.5 text-sm font-medium text-bg transition hover:opacity-90"
                                     >
                                         <Play size={13} />
                                         Resume Simulation
@@ -1067,7 +1032,7 @@ export default function DigitalTwinView() {
                                         type="button"
                                         onClick={() => handleStartSimulation()}
                                         disabled={loading}
-                                        className="flex items-center gap-1.5 rounded-lg bg-accent px-4 py-1.5 text-[11px] font-medium text-bg transition hover:opacity-90 disabled:opacity-50"
+                                        className="flex items-center gap-1.5 rounded-lg bg-accent px-4 py-2.5 text-sm font-medium text-bg transition hover:opacity-90 disabled:opacity-50"
                                     >
                                         <Play size={13} />
                                         {loading ? "Starting..." : "Start Simulation"}
@@ -1085,11 +1050,11 @@ export default function DigitalTwinView() {
                         {isSimulating &&
                             (Object.keys(losByApproach).length > 0 ||
                                 Object.keys(queueLengthVehByApproach).length > 0) && (
-                            <div ref={kondisiPerLenganRef} className="rounded-2xl border border-border bg-surface p-5 shadow-sm">
-                                <h2 className="mb-4 text-sm font-semibold">
+                            <div className="flex flex-1 flex-col rounded-2xl border border-border bg-surface p-5 shadow-sm">
+                                <h2 className="mb-4 text-xl font-semibold">
                                     Kondisi per Lengan
                                 </h2>
-                                <div className="grid grid-cols-2 gap-3">
+                                <div className="grid flex-1 grid-cols-1 gap-4 sm:grid-cols-2">
                                     {(["north", "east", "south", "west"] as const).map((approach) => {
                                         const grade = losByApproach[approach] ?? null;
                                         const delay = delayByApproachSeconds[approach] ?? null;
@@ -1099,13 +1064,13 @@ export default function DigitalTwinView() {
                                         return (
                                             <div
                                                 key={approach}
-                                                className="rounded-lg border border-border bg-surface-2 p-3 text-center"
+                                                className="flex flex-col rounded-xl border border-border bg-surface-2 p-4"
                                             >
-                                                <p className="text-xs font-medium text-text-muted">
+                                                <p className="text-lg font-semibold text-text">
                                                     {APPROACH_SHORT_LABEL[approach] ?? approach}
                                                 </p>
                                                 <p
-                                                    className={`mt-1 font-mono text-xl font-bold ${
+                                                    className={`mt-3 font-mono text-4xl font-bold ${
                                                         grade === "A" || grade === "B"
                                                             ? "text-signal-green"
                                                             : grade === "C" || grade === "D"
@@ -1117,22 +1082,22 @@ export default function DigitalTwinView() {
                                                 >
                                                     {grade ?? "–"}
                                                 </p>
-                                                <div className="mt-2 space-y-1 text-xs text-text-muted">
-                                                    <div className="flex items-center justify-between gap-1">
+                                                <div className="mt-4 flex flex-1 flex-col justify-evenly gap-3 border-t border-border pt-4 text-base text-text-secondary">
+                                                    <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1">
                                                         <span>Delay</span>
-                                                        <span className="font-mono font-medium text-text">
+                                                        <span className="font-mono text-lg font-semibold text-text">
                                                             {typeof delay === "number" ? `${delay.toFixed(1)}s` : "–"}
                                                         </span>
                                                     </div>
-                                                    <div className="flex items-center justify-between gap-1">
+                                                    <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1">
                                                         <span>Antrean</span>
-                                                        <span className="font-mono font-medium text-text">
+                                                        <span className="font-mono text-lg font-semibold text-text">
                                                             {typeof queue === "number" ? `${queue} kend.` : "–"}
                                                         </span>
                                                     </div>
-                                                    <div className="flex items-center justify-between gap-1">
+                                                    <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1">
                                                         <span>Lewat</span>
-                                                        <span className="font-mono font-medium text-text">
+                                                        <span className="font-mono text-lg font-semibold text-text">
                                                             {typeof throughputApproach === "number"
                                                                 ? `${throughputApproach}/menit`
                                                                 : "–"}
@@ -1167,7 +1132,7 @@ export default function DigitalTwinView() {
 
                     <div className="rounded-2xl border border-border bg-surface p-5 shadow-sm">
 
-                        <div className="mb-5 flex items-center justify-between">
+                        <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
 
                             <div className="flex items-center gap-3">
 
@@ -1179,10 +1144,10 @@ export default function DigitalTwinView() {
                                 </div>
 
                                 <div>
-                                    <h2 className="text-sm font-semibold">
+                                    <h2 className="text-xl font-semibold">
                                         Hasil Simulasi
                                     </h2>
-                                    <p className="text-xs text-text-muted">
+                                    <p className="text-sm text-text-muted">
                                         {isSimulating
                                             ? `Skenario aktif: ${runningScenario ?? scenario}`
                                             : "Belum ada simulasi jalan"}
@@ -1193,7 +1158,7 @@ export default function DigitalTwinView() {
 
                             {isSimulating && los && (
                                 <span
-                                    className={`rounded-full px-3 py-1 text-xs font-semibold ${
+                                    className={`rounded-full px-3 py-1 text-sm font-semibold ${
                                         los === "A" || los === "B"
                                             ? "bg-signal-green/10 text-signal-green"
                                             : los === "C" || los === "D"
@@ -1209,36 +1174,18 @@ export default function DigitalTwinView() {
 
                         {!isSimulating ? (
                             <div className="py-8 text-center">
-                                <p className="text-xs text-text-muted">
+                                <p className="text-sm text-text-muted">
                                     Mulai simulasi untuk melihat delay, antrean, dan LOS simpang.
                                 </p>
                             </div>
                         ) : (
-                            <div className="grid grid-cols-2 gap-x-6 gap-y-4 sm:grid-cols-4">
-                                <MetricRow
-                                    label="Avg Delay"
-                                    value={`${avgDelaySeconds}s`}
-                                    icon={<Clock3 size={15} />}
-                                />
-                                <MetricRow
-                                    label="Avg Queue"
-                                    value={`${avgQueueLengthM}m (${avgQueueLengthVeh} kend.)`}
-                                    icon={<List size={15} />}
-                                />
-                                <MetricRow
-                                    label="Throughput"
-                                    value={`${throughputVehPerMin}/menit`}
-                                    icon={<Zap size={15} />}
-                                />
-                                <MetricRow
-                                    label="Fase Aktif"
-                                    value={
-                                        mappedPhase
-                                            ? `${APPROACH_SHORT_LABEL[mappedPhase] ?? mappedPhase} · ${mappedState} · ${Math.floor(mappedRemaining)}s`
-                                            : "-"
-                                    }
-                                    icon={<Circle size={15} />}
-                                />
+                            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 2xl:grid-cols-4">
+                                <StatCard label="Rata-rata Delay" value={avgDelaySeconds.toFixed(1) + " s"} icon={<Clock3 size={20} />} />
+                                <StatCard label="Rata-rata Antrean" value={avgQueueLengthM.toFixed(1) + " m"} detail={avgQueueLengthVeh.toFixed(1) + " kendaraan"} icon={<List size={20} />} />
+                                <StatCard label="Arus Kendaraan" value={throughputVehPerMin + "/menit"} icon={<Zap size={20} />} />
+                                <StatCard label="Fase Aktif" value={mappedPhase ? APPROACH_SHORT_LABEL[mappedPhase] ?? mappedPhase : "\u2014"}
+                                    detail={mappedPhase ? ({ GREEN: "Hijau", YELLOW: "Kuning", RED: "Merah" }[mappedState]) + " - " + Math.floor(mappedRemaining) + " s tersisa" : undefined}
+                                    icon={<Circle size={20} className={mappedState === "GREEN" ? "text-signal-green" : mappedState === "YELLOW" ? "text-signal-amber" : "text-signal-red"} />} />
                             </div>
                         )}
 
@@ -1253,6 +1200,8 @@ export default function DigitalTwinView() {
                         eksplisit sebagai angka supaya beda skenario kerasa,
                         tidak cuma tersirat dari video yang jalan. */}
 
+                    <ScenarioComparison forecast={forecast} traffic={traffic} />
+
                     {isSimulating && cyclePlan && cyclePlan.phases.length > 0 && (
                         <div className="mt-5 rounded-2xl border border-border bg-surface p-5 shadow-sm">
 
@@ -1262,29 +1211,29 @@ export default function DigitalTwinView() {
                                         <TrafficCone size={18} className="text-text-secondary" />
                                     </div>
                                     <div>
-                                        <h2 className="text-sm font-semibold">Durasi Sinyal Per Lengan</h2>
-                                        <p className="text-xs text-text-muted">
+                                        <h2 className="text-base font-semibold">Durasi Sinyal Per Lengan</h2>
+                                        <p className="text-sm text-text-muted">
                                             {cyclePlan.candidateId ? `Skenario: ${cyclePlan.candidateId}` : "Program TLS aktif"}
                                         </p>
                                     </div>
                                 </div>
                                 {cyclePlan.totalCycleSeconds !== undefined && (
-                                    <span className="text-xs text-text-muted">
+                                    <span className="text-sm text-text-muted">
                                         Total siklus: <span className="font-mono text-text">{cyclePlan.totalCycleSeconds}s</span>
                                     </span>
                                 )}
                             </div>
 
-                            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
                                 {cyclePlan.phases.map((phase) => (
                                     <div
                                         key={phase.approach}
                                         className="rounded-lg border border-border bg-surface-2 p-3"
                                     >
-                                        <p className="mb-2 text-sm font-medium text-text">
+                                        <p className="mb-2 text-base font-medium text-text">
                                             {APPROACH_SHORT_LABEL[phase.approach] ?? phase.approach}
                                         </p>
-                                        <div className="space-y-1.5 text-sm">
+                                        <div className="space-y-1.5 text-base">
                                             <div className="flex items-center justify-between">
                                                 <span className="flex items-center gap-1.5 text-text-muted">
                                                     <Circle size={7} fill="currentColor" className="text-signal-green" />
@@ -1324,8 +1273,8 @@ export default function DigitalTwinView() {
                         <div className="mt-5 rounded-2xl border border-border bg-surface p-5 shadow-sm">
 
                             <div className="mb-4">
-                                <h2 className="text-sm font-semibold">Tren Simulasi</h2>
-                                <p className="text-xs text-text-muted">
+                                <h2 className="text-base font-semibold">Tren Simulasi</h2>
+                                <p className="text-sm text-text-muted">
                                     {simHistory.length < 2
                                         ? "Mengumpulkan data…"
                                         : `${simHistory.length} titik sejak skenario ini diterapkan`}
@@ -1359,6 +1308,9 @@ export default function DigitalTwinView() {
                         </div>
                     )}
 
+                    {/* =============================== */}
+
+
                 </div>
                 </div>
             </main>
@@ -1380,19 +1332,19 @@ function MetricRow({
     icon: React.ReactNode;
 }) {
     return (
-        <div className="flex items-center justify-between">
+        <div className="flex min-w-0 flex-wrap items-center justify-between gap-x-3 gap-y-1">
 
             <div className="flex items-center gap-2 text-text-muted">
 
                 {icon}
 
-                <span className="text-sm">
+                <span className="text-base">
                     {label}
                 </span>
 
             </div>
 
-            <span className="font-mono text-sm font-semibold text-text">
+            <span className="break-words font-mono text-base font-semibold text-text">
                 {value}
             </span>
 
@@ -1403,45 +1355,41 @@ function MetricRow({
 function StatCard({
     label,
     value,
-    change,
+    detail,
     warning,
     icon,
 }: {
     label: string;
     value: string;
-    change: string;
+    detail?: string;
     warning?: string;
     icon: React.ReactNode;
 }) {
     return (
-        <div className="rounded-2xl border border-border bg-surface p-5 shadow-sm">
+        <div className="min-w-0 rounded-xl border border-border bg-surface-2/50 p-4">
 
-            <div className="flex items-start justify-between">
+            <div className="flex items-start justify-between gap-3">
 
-                <div>
-                    <p className="text-xs text-text-muted">
+                <div className="min-w-0">
+                    <p className="text-sm text-text-secondary">
                         {label}
                     </p>
 
-                    <p className="mt-2 font-display text-xl font-semibold">
+                    <p className="mt-2 break-words font-display text-2xl font-semibold leading-tight text-text">
                         {value}
                     </p>
                 </div>
 
-                <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-surface-2 text-text-secondary">
+                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-surface text-text-secondary">
                     {icon}
                 </div>
 
             </div>
 
-            {change && (
-                <p className={`mt-3 text-[10px] ${change.includes("Data belum tersedia") ? "text-text-muted" : "text-signal-green"}`}>
-                    {change}
-                </p>
-            )}
+            {detail && <p className="mt-2 text-sm text-text-secondary">{detail}</p>}
 
             {warning && (
-                <p className="mt-1 text-[10px] text-signal-amber">
+                <p className="mt-1 text-xs text-signal-amber">
                     {warning}
                 </p>
             )}
@@ -1469,8 +1417,8 @@ function MiniTrendChart({
         <div className="rounded-lg border border-border bg-surface-2 p-3">
 
             <div className="mb-1 flex items-center justify-between">
-                <span className="text-xs text-text-muted">{title}</span>
-                <span className="font-mono text-xs font-medium text-text">
+                <span className="text-sm text-text-muted">{title}</span>
+                <span className="font-mono text-sm font-medium text-text">
                     {latest !== null ? `${latest}${unit}` : "-"}
                 </span>
             </div>
@@ -1478,7 +1426,7 @@ function MiniTrendChart({
             <div className="h-[90px] w-full">
                 {data.length < 2 ? (
                     <div className="flex h-full items-center justify-center">
-                        <span className="text-[10px] text-text-muted">Mengumpulkan data…</span>
+                        <span className="text-xs text-text-muted">Mengumpulkan data…</span>
                     </div>
                 ) : (
                     <ResponsiveContainer width="100%" height="100%">
@@ -1486,17 +1434,17 @@ function MiniTrendChart({
                             <CartesianGrid stroke="#232935" vertical={false} />
                             <XAxis dataKey="t" hide />
                             <YAxis
-                                tick={{ fill: "#5b6472", fontSize: 10 }}
+                                tick={{ fill: "#5b6472", fontSize: 12 }}
                                 axisLine={false}
                                 tickLine={false}
-                                width={28}
+                                width={36}
                             />
                             <Tooltip
                                 contentStyle={{
                                     background: "#171c27",
                                     border: "1px solid #232935",
                                     borderRadius: 8,
-                                    fontSize: 11,
+                                    fontSize: 14,
                                 }}
                                 labelFormatter={(t) => `Detik simulasi ${t}`}
                                 formatter={(value) => [`${value}${unit}`, title]}

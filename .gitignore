@@ -1,4 +1,4 @@
-# Python
+# Repository exclusions
 __pycache__/
 *.pyc
 *.py[cod]
@@ -10,106 +10,79 @@ forecasting/.venv/
 .env.*
 !.env.example
 .tmp-chrome-*/
-
-# pip cache — jangan pernah di-commit, ini cache lokal
 pip-cache/
-
-# Backup/scratch zip di root repo -- 24 Agustus 2026 ada backend.zip
-# (2,23 GB) ke-commit tanpa sengaja lewat `git add -A` pas resolve
-# conflict, bikin push gagal berulang kali (timeout). data/*.zip di
-# bawah tidak menutup ini karena file-nya ada di root, bukan di data/.
 *.zip
-
 cv/output/anotasi_CCTV_1.mp4
 cv/output/anotasi_CCTV_2.mp4
 cv/output/anotasi_CCTV_3.mp4
 cv/output/anotasi_CCTV_4.mp4
-
-# CCTV videos
 cv/videos/
 cv/models/
-
-# Cache video CCTV backend (lihat backend/app/api/routes/cctv.py) --
-# salinan lokal video yang sudah pernah ditonton, regenerated dari
-# Hugging Face, tidak pernah perlu di-commit.
 backend/cache/
-
-# Cache runtime di ROOT repo -- beda folder dari backend/cache/ di atas.
-# Isinya cache/simulation/frame.jpg: screenshot SUMO yang ditimpa ulang
-# tiap 0,25 detik selama simulasi GUI berjalan (sumo_controller.py).
-# Kalau ikut di-track, working tree SELALU terlihat kotor dan tiap orang
-# yang menjalankan simulasi menghasilkan konflik palsu di file biner ini.
-# Aman diabaikan: penulisnya bikin foldernya sendiri lewat
-# mkdir(parents=True, exist_ok=True), stream_simulation() menunggu sampai
-# filenya ada, dan GET /simulation/frame balas 404 yang jelas kalau belum.
 cache/
-
-# Output CV di-ignore secara umum (regenerated tiap run). Dua jenis
-# berkas dikecualikan secara sadar:
-#   1. dataset hasil run Melpi 14 Agustus 2026 — baseline/bukti laporan.
-#   2. sync_report.* — metadata produksi: offset & durasi potong tiap
-#      kamera, satu-satunya catatan bagaimana CCTV_*_sync.mp4 dibuat.
-# CSV dan JSON diperlakukan sama supaya sync_report tidak lagi terbelah
-# (dulu .csv kena `cv/output/*.csv` sementara .json lolos tanpa aturan).
 cv/output/*.csv
 cv/output/*.json
 !cv/output/smarttwin_traffic_data_melpi_20260814.csv
 !cv/output/sync_report.csv
 !cv/output/sync_report.json
-
-# Output --sumber (vehicle_counter_pingit.py, lihat argumen --sumber)
-# -- CSV eksperimen/pengetesan sengaja dipisah dari cv/output/*.csv
-# produksi supaya tidak pernah tertimpa lagi (kejadian nyata 29
-# Agustus, lihat docs/STATUS-DAN-SISA-KERJA.md item S-5).
 cv/output/_sumber_kustom/
-
-# Peta jam per video — dibuat ulang tiap `sync_videos.py --dry-run`
 cv/output/clockmap/
-
-# Arsip investigasi sinkronisasi: disimpan di disk sebagai barang bukti,
-# tapi bukan jalur produksi dan terlalu besar untuk riwayat git.
-# README-nya ikut supaya isinya tetap terdokumentasi di repo.
 cv/_arsip/*
 !cv/_arsip/README.md
-
-# Dataset
 data/*.csv
 data/*.zip
 data/*.parquet
-
-# Forecasting datasets, model, hasil training
 forecasting/data/*
 forecasting/models/*
 !forecasting/data/.gitkeep
 !forecasting/models/.gitkeep
 !forecasting/outputs/.gitkeep
-
-# Node
 node_modules/
 .next/
 dist/
 build/
-
-# SUMO run outputs (regenerated tiap run, jangan di-commit)
 simulation/outputs/*
 !simulation/outputs/.gitkeep
-
-# Folder hasil osmWebWizard (nama = timestamp), jangan ke-track otomatis
 simulation/20*-*-*-*/
-
-# env
-.env
-
-# Python
-__pycache__/
-*.py[cod]
 *.pyo
-
-# IDE
 .vscode/
 .idea/
-
-# Testing
 .pytest_cache/
 .coverage
 htmlcov/backend.log
+
+# Internal documentation (keep only the root README)
+*.[mM][dD]
+!/README.md
+/docs/
+/catatan-pribadi/
+
+# Local AI assistant settings
+.claude/
+.[cC][lL][aA][uU][dD][eE]/
+[cC][lL][aA][uU][dD][eE].*
+.claude*
+.codex/
+.agents/
+
+# Runtime logs, caches, and local browser profiles
+*.log
+*.log.*
+*.tsbuildinfo
+.tmp-*/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+coverage/
+.coverage.*
+
+# Local credentials
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Temporary API responses and investigation snapshots
+/bmkg_test.json
+/response.json
+/temp_history*.json
