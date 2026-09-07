@@ -153,6 +153,30 @@ def forecast_health() -> dict[str, Any]:
         ) from exc
 
 
+@router.get("/approaches/snapshot/{traffic_state_id}")
+def predict_snapshot(traffic_state_id: int, intersectionId: str = "simpang4-pingit") -> dict[str, Any]:
+    from app.services.traffic_snapshot import load_snapshot
+    from app.services.traffic_repository import TrafficRepository
+    from app.services.supabase_client import get_supabase
+    try:
+        snapshot = load_snapshot(intersectionId, traffic_state_id)
+        repository = TrafficRepository()
+        intersection_row_id = repository.get_intersection_row_id(intersectionId)
+        rows = (get_supabase().table("trafficStates").select("id,windowStart,windowEnd")
+                .eq("intersectionId", intersection_row_id)
+                .lte("windowEnd", snapshot.windowEnd.isoformat())
+                .order("windowEnd", desc=True).limit(12).execute()).data or []
+        records = [{"timestamp": row["windowEnd"],
+                    "approaches": repository.get_approach_states(traffic_state_id=row["id"])} for row in rows]
+        # Only actual, complete observations are admitted; no zero-filled missing arms.
+        result = per_approach_forecast_service.predict_records(records)
+        if datetime.fromisoformat(result["input"]["to"]) != snapshot.windowEnd:
+            raise ValueError("Riwayat LSTM tidak berakhir pada TrafficState yang dipilih.")
+        return {**result, "trafficStateId": traffic_state_id}
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
 @router.post(
     "/approaches",
     summary="Traffic Forecast 60 Detik Per Pendekat",

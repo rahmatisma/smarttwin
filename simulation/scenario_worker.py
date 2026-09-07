@@ -11,6 +11,7 @@ mengabaikan cache yang basi sehingga worker aman dihentikan kapan saja.
 from __future__ import annotations
 
 import argparse
+from functools import partial
 import json
 import time
 from datetime import datetime, timezone
@@ -133,6 +134,11 @@ class ReplaySource:
         self._ensure_loaded()
         assert self._state_ids is not None and self._maps is not None
 
+        if self._position >= len(self._state_ids):
+            self._state_ids = None
+            self._ensure_loaded()
+            assert self._state_ids is not None
+            self._position %= len(self._state_ids)
         index = self._position % len(self._state_ids)
         traffic_state_id = self._state_ids[index]
         self._position += self._step
@@ -172,7 +178,7 @@ def _make_engine(short_sim_steps: int | None = None) -> ScenarioEngine:
         sumo_config=sumoConfig,
         tls_id=tlsId,
         approach_to_phase=approachToPhase,
-        run_simulation_fn=runSimulation,
+        run_simulation_fn=partial(runSimulation, stop_when_empty=False),
         **options,
     )
 
@@ -238,7 +244,7 @@ def evaluate_state(state, *, forecast=None, full_cycle: bool = False,
     return payload
 
 
-def write_cache(supabase, payload: dict[str, Any]) -> None:
+def write_cache(supabase, payload: dict[str, Any], *, strict: bool = False) -> None:
     # Simpan ketiga hasil agar Digital Twin tidak menghitung logic sendiri.
     # Retry legacy menjaga worker tetap hidup bila migrasi kolom `candidates`
     # belum dijalankan; endpoint akan mengembalikan candidates=[] secara jujur.
@@ -249,6 +255,8 @@ def write_cache(supabase, payload: dict[str, Any]) -> None:
             .execute()
         )
     except Exception as exc:
+        if strict:
+            raise
         legacy_payload = {
             key: value for key, value in payload.items()
             if key != "candidates"
@@ -288,7 +296,7 @@ def _resolve_intersection_row_id(supabase) -> int | None:
     return _intersection_row_id
 
 
-def write_history(supabase, payload: dict[str, Any], state) -> None:
+def write_history(supabase, payload: dict[str, Any], state, *, strict: bool = False) -> None:
     """Simpan hasil siklus ini sebagai riwayat permanen (append-only).
 
     Ditulis TIAP siklus, termasuk saat isinya sama dengan siklus sebelumnya --
@@ -303,6 +311,8 @@ def write_history(supabase, payload: dict[str, Any], state) -> None:
     """
     intersection_row_id = _resolve_intersection_row_id(supabase)
     if intersection_row_id is None:
+        if strict:
+            raise RuntimeError("Intersection untuk riwayat tidak ditemukan.")
         print("[WARN] intersections.id tidak diketahui; riwayat dilewati.")
         return
 
@@ -311,6 +321,8 @@ def write_history(supabase, payload: dict[str, Any], state) -> None:
     phases = cycle_plan.get("phases") or []
 
     if not phases:
+        if strict:
+            raise RuntimeError("CyclePlan hasil evaluasi kosong.")
         print("[WARN] cyclePlan kosong; riwayat dilewati.")
         return
 
@@ -365,6 +377,8 @@ def write_history(supabase, payload: dict[str, Any], state) -> None:
             int(inserted.data[0]["id"]) if inserted.data else None
         )
     except Exception as exc:
+        if strict:
+            raise
         print(f"[WARN] Gagal menyimpan riwayat rekomendasi: {exc}")
         return
 
@@ -385,7 +399,7 @@ def write_history(supabase, payload: dict[str, Any], state) -> None:
                         "intersectionId": intersection_row_id,
                         "trafficStateId": traffic_state_id,
                         "recommendationId": recommendation_id,
-                        "simulationName": f"{candidate_id} @ {timestamp}",
+                        "simulationName": f"{candidate_id} @ {timestamp}" + (" | evaluation=" + candidate["evaluation"]["id"] if (candidate.get("evaluation") or {}).get("id") else ""),
                         "simulationType": "scenario-comparison",
                         "engine": source,
                         "status": (
@@ -408,6 +422,9 @@ def write_history(supabase, payload: dict[str, Any], state) -> None:
                 ("avgDelaySeconds", candidate.get("avgDelaySeconds"), "s"),
                 ("avgQueueLengthM", candidate.get("avgQueueLengthM"), "m"),
                 ("throughputVeh", candidate.get("throughputVeh"), "veh"),
+                ("evaluationDurationSeconds", (candidate.get("evaluation") or {}).get("durationSeconds"), "s"),
+                ("evaluationSeed", (candidate.get("evaluation") or {}).get("seed"), "seed"),
+                ("evaluationTargetVehicles", (candidate.get("evaluation") or {}).get("targetVehicles"), "veh"),
             ]
 
             # Delay per lengan -- sudah dihitung scenario_generator.py
@@ -476,6 +493,8 @@ def write_history(supabase, payload: dict[str, Any], state) -> None:
                     metric_rows
                 ).execute()
         except Exception as exc:
+            if strict:
+                raise
             print(f"[WARN] Gagal menyimpan simulasi '{candidate_id}': {exc}")
 
 

@@ -50,6 +50,7 @@ export interface ApproachState {
 
 
 export interface TrafficState {
+  trafficStateId?: number;
   intersectionId: string;
 
   windowStart: string;
@@ -91,6 +92,8 @@ export interface ForecastPrediction {
 
 
 export interface ForecastResponse {
+  inputTimestamp?: string;
+  trafficStateId?: number;
   intersectionId: string;
 
   horizonMinutes: number;

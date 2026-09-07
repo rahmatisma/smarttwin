@@ -288,12 +288,14 @@ export default function DigitalTwinPanel({
   signal,
   cyclePlan,
   trafficTimestamp,
+  trafficStateId,
   candidateId,
 }: {
   approaches: ApproachState[];
   signal: SignalStatus;
   cyclePlan?: CyclePlan | null;
   trafficTimestamp?: string;
+  trafficStateId?: number;
   candidateId?: string | null;
 }) {
   const [simRunning, setSimRunning] = useState(false);
@@ -408,6 +410,7 @@ export default function DigitalTwinPanel({
 
   const livePayloadSignature = JSON.stringify({
     trafficTimestamp,
+    trafficStateId,
     approaches: approaches.map((approach) => ({
       approach: approach.approach,
       targetVehicleCount: Math.max(0, Math.round(approach.densityIndex)),
@@ -442,6 +445,8 @@ export default function DigitalTwinPanel({
         guiDelayMs: 0,
         seed: 42,
         trafficTimestamp: payload.trafficTimestamp,
+        trafficStateId: payload.trafficStateId,
+        scenario: "Traffic Realtime",
         approaches: payload.approaches,
         cyclePlan: {
           phases: LIVE_SUMO_PHASES,

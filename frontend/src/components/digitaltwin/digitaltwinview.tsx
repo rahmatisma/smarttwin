@@ -31,7 +31,7 @@ import ScenarioComparison from "./ScenarioComparison";
 import Sidebar from "@/components/Sidebar";
 import Header from "@/components/Header";
 import { useScenario, ScenarioType } from "@/context/ScenarioContext";
-import { fetchSignalStatus, fetchForecast, fetchTrafficState } from "@/lib/supabaseData";
+import { fetchSignalStatus, fetchSnapshotForecast, fetchTrafficState } from "@/lib/supabaseData";
 import SignalStatusPanel from "@/components/SignalStatusPanel";
 import type { Approach, ForecastResponse, TrafficState } from "@/types/traffic";
 
@@ -210,25 +210,15 @@ export default function DigitalTwinView() {
 
     useEffect(() => {
         let cancelled = false;
-
-        async function pollForecast() {
-            const [result, observed] = await Promise.all([fetchForecast("simpang4-pingit"), fetchTrafficState("simpang4-pingit")]);
-            if (!cancelled) setTraffic(observed);
-            if (!cancelled && result) setForecast(result);
-        }
-
-        void pollForecast();
-        // fetchForecast() sendiri sudah throttle internal ke 15 detik +
-        // cooldown 60 detik kalau gagal -- interval di sini cuma "kapan
-        // dicoba lagi", bukan laju request sungguhan ke backend.
-        const interval = setInterval(pollForecast, 5000);
-
-        return () => {
-            cancelled = true;
-            clearInterval(interval);
-        };
+        void fetchTrafficState("simpang4-pingit").then(state => { if (!cancelled) setTraffic(state); });
+        return () => { cancelled = true; };
     }, []);
-
+    useEffect(() => {
+        let cancelled = false;
+        setForecast(null);
+        if (traffic?.trafficStateId) void fetchSnapshotForecast(traffic.trafficStateId).then(result => { if (!cancelled) setForecast(result); });
+        return () => { cancelled = true; };
+    }, [traffic?.trafficStateId]);
     const APPROACH_SHORT_LABEL: Record<string, string> = {
         north: "Utara",
         south: "Selatan",
@@ -238,11 +228,16 @@ export default function DigitalTwinView() {
 
     useEffect(() => {
         const context = contextForScenario(scenario);
+        let inFlight = false;
+        const controller = new AbortController();
         const interval = setInterval(async () => {
+            if (inFlight || controller.signal.aborted) return;
+            inFlight = true;
             try {
-                const res = await fetch(`${API_BASE_URL}/api/v1/simulation/state?context=${context}`);
+                const res = await fetch(`${API_BASE_URL}/api/v1/simulation/state?context=${context}`, { signal: controller.signal, cache: "no-store" });
                 if (!res.ok) return;
                 const data = await res.json();
+                if (controller.signal.aborted) return;
                 
                 setIsSimStateLoaded(true);
                 setRunningScenario(data.running
@@ -398,11 +393,13 @@ export default function DigitalTwinView() {
                 }
 
             } catch (err) {
-                console.error("Failed to fetch positions:", err);
+                if (!controller.signal.aborted) console.error("Failed to fetch positions:", err);
+            } finally {
+                inFlight = false;
             }
         }, 500);
 
-        return () => clearInterval(interval);
+        return () => { controller.abort(); clearInterval(interval); };
     }, [API_BASE_URL, scenario]);
 
     async function handleStartSimulation(targetScenario?: ScenarioType) {
@@ -412,6 +409,7 @@ export default function DigitalTwinView() {
         const effectiveScenario = targetScenario ?? scenario;
         const context = contextForScenario(effectiveScenario);
 
+        if (context === "digitaltwin" && !traffic?.trafficStateId) { alert("Kondisi awal belum tersedia."); return; }
         setLoading(true);
         try {
             const abortController = new AbortController();
@@ -427,6 +425,7 @@ export default function DigitalTwinView() {
                     gui: true,
                     guiDelayMs: context === "dashboard" ? 0 : 100,
                     seed: 42,
+                    trafficStateId: context === "digitaltwin" ? traffic?.trafficStateId : undefined,
                     scenario: effectiveScenario
                 }),
             }).finally(() => window.clearTimeout(timeout));
@@ -595,6 +594,10 @@ export default function DigitalTwinView() {
                 {/* MAIN SIMULATION */}
                 {/* ================================================= */}
 
+                <div className="mb-4 flex flex-wrap items-center justify-between gap-3 text-sm text-text-secondary">
+                    <span>Kondisi awal evaluasi {traffic ? "#" + traffic.trafficStateId + " - " + new Date(traffic.windowEnd).toLocaleString("id-ID") : "belum tersedia"} {traffic && Date.now() - new Date(traffic.windowEnd).getTime() > 300000 ? "(rekaman)" : ""}</span>
+                    <button type="button" disabled={isSimulating || loading} onClick={() => void fetchTrafficState("simpang4-pingit").then(setTraffic)} className="rounded-lg border border-border bg-surface px-3 py-2 disabled:opacity-50">Ambil kondisi terbaru</button>
+                </div>
                 <div className="grid items-stretch gap-5 xl:grid-cols-3">
 
                     {/* =============================== */}
@@ -1180,8 +1183,8 @@ export default function DigitalTwinView() {
                             </div>
                         ) : (
                             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 2xl:grid-cols-4">
-                                <StatCard label="Rata-rata Delay" value={avgDelaySeconds.toFixed(1) + " s"} icon={<Clock3 size={20} />} />
-                                <StatCard label="Rata-rata Antrean" value={avgQueueLengthM.toFixed(1) + " m"} detail={avgQueueLengthVeh.toFixed(1) + " kendaraan"} icon={<List size={20} />} />
+                                <StatCard label="Waktu Tunggu Rata-rata" value={avgDelaySeconds.toFixed(1) + " s"} icon={<Clock3 size={20} />} />
+                                <StatCard label="Total Antrean (estimasi)" value={avgQueueLengthM.toFixed(1) + " m"} detail={avgQueueLengthVeh.toFixed(1) + " kendaraan"} icon={<List size={20} />} />
                                 <StatCard label="Arus Kendaraan" value={throughputVehPerMin + "/menit"} icon={<Zap size={20} />} />
                                 <StatCard label="Fase Aktif" value={mappedPhase ? APPROACH_SHORT_LABEL[mappedPhase] ?? mappedPhase : "\u2014"}
                                     detail={mappedPhase ? ({ GREEN: "Hijau", YELLOW: "Kuning", RED: "Merah" }[mappedState]) + " - " + Math.floor(mappedRemaining) + " s tersisa" : undefined}
@@ -1200,7 +1203,12 @@ export default function DigitalTwinView() {
                         eksplisit sebagai angka supaya beda skenario kerasa,
                         tidak cuma tersirat dari video yang jalan. */}
 
-                    <ScenarioComparison forecast={forecast} traffic={traffic} />
+                    <ScenarioComparison key={String(traffic?.trafficStateId) + scenario} forecast={forecast} traffic={traffic} scenario={scenario}
+                        live={isSimulating && !loading && runningScenario === scenario ? {
+                            scenario: runningScenario, time: simulationTime, paused: status === "paused",
+                            delay: delayByApproachSeconds, queue: queueLengthVehByApproach,
+                            throughput: throughputVehPerMinByApproach, los: losByApproach,
+                        } : null} />
 
                     {isSimulating && cyclePlan && cyclePlan.phases.length > 0 && (
                         <div className="mt-5 rounded-2xl border border-border bg-surface p-5 shadow-sm">

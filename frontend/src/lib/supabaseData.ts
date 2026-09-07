@@ -228,6 +228,7 @@ async function requestTrafficState(
 
   return {
     intersectionId,
+    trafficStateId: state.id,
     windowStart: state.windowStart,
     windowEnd: state.windowEnd,
     approaches: state.trafficApproachStates ?? [],
@@ -679,6 +680,7 @@ export interface DigitalTwinCandidate {
   throughputVeh: number;
   los: "A" | "B" | "C" | "D" | "E" | "F";
   isWinner: boolean;
+  evaluation?: { id: string; trafficStateId: number; trafficTimestamp: string; seed: number; durationSeconds: number; demandSource: string; demandHash: string; targetVehicles: number; evaluatedAt: string };
   // Rincian per lengan -- opsional karena cache lama (sebelum backend
   // dideklarasikan ulang) tidak punya field ini sama sekali.
   delayByApproachSeconds?: Record<string, number | null> | null;
@@ -713,3 +715,32 @@ export async function fetchDigitalTwinScenarios(
   }
 }
 
+
+const snapshotForecastCache = new Map<number, Promise<ForecastResponse | null>>();
+
+export function fetchSnapshotForecast(trafficStateId: number): Promise<ForecastResponse | null> {
+  const cached = snapshotForecastCache.get(trafficStateId);
+  if (cached) return cached;
+  const request = requestSnapshotForecast(trafficStateId).then(result => {
+    if (!result) snapshotForecastCache.delete(trafficStateId);
+    return result;
+  });
+  if (snapshotForecastCache.size >= 32) snapshotForecastCache.delete(snapshotForecastCache.keys().next().value!);
+  snapshotForecastCache.set(trafficStateId, request);
+  return request;
+}
+
+async function requestSnapshotForecast(trafficStateId: number): Promise<ForecastResponse | null> {
+  try {
+    const response = await fetch(API_BASE_URL + "/api/forecast/approaches/snapshot/" + trafficStateId, { cache: "no-store" });
+    if (!response.ok) return null;
+    const result = await response.json();
+    const rows = result.approachForecasts as Array<{ timestamp: string; secondsAhead: number; approaches: Array<{ approach: Approach; vehicleCount: number; queueLengthVeh: number; queueLengthMEst: number; densityIndex: number }> }>;
+    if (!rows?.length) return null;
+    const predictionsByApproach = Object.fromEntries((["north", "east", "south", "west"] as Approach[]).map(approach => [approach, rows.flatMap(row => {
+      const item = row.approaches.find(item => item.approach === approach);
+      return item ? [{ timestamp: row.timestamp, predictedVehicleCount: item.vehicleCount, predictedQueueLengthVeh: item.queueLengthVeh, predictedQueueLengthMEst: item.queueLengthMEst, predictedDensityIndex: item.densityIndex, predictedSpeedKmh: null }] : [];
+    })]));
+    return { intersectionId: DEFAULT_INTERSECTION_ID, trafficStateId, inputTimestamp: result.input?.to, horizonMinutes: rows[rows.length - 1].secondsAhead / 60, model: result.model.name, predictions: [], predictionsByApproach, forecastSource: result.forecastSource, fallbackUsed: result.fallbackUsed };
+  } catch { return null; }
+}

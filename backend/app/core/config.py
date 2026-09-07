@@ -61,7 +61,7 @@ class Settings(BaseSettings):
     scenario_worker_autostart: bool = Field(
         default=False,
         description=(
-            "Jalankan scenario worker replay bersama backend (opt-in)."
+            "Evaluasi TrafficState terbaru bersama backend (opt-in)."
         ),
     )
 

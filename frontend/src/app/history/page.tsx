@@ -34,7 +34,7 @@ import {
 import Sidebar from "@/components/Sidebar";
 import Header from "@/components/Header";
 import ForecastChart from "@/components/ForecastChart";
-import { fetchForecast, DEFAULT_INTERSECTION_ID } from "@/lib/supabaseData";
+import { fetchSnapshotForecast, DEFAULT_INTERSECTION_ID } from "@/lib/supabaseData";
 import type { Approach, ForecastResponse, TrafficState } from "@/types/traffic";
 
 /*
@@ -102,6 +102,7 @@ interface Fase {
 
 interface Kandidat {
     candidateId: string;
+    evaluation?: { id: string; durationSeconds: number; seed: number; trafficStateId: number; demandSource: string } | null;
     isWinner: boolean;
     avgDelaySeconds: number | null;
     avgQueueLengthM: number | null;
@@ -422,15 +423,10 @@ export default function HistoryPage() {
     const [lenganAktif, setLenganAktif] = useState<Approach>("north");
 
     useEffect(() => {
-        if (dipilih) {
-            fetchForecast(DEFAULT_INTERSECTION_ID).then((res) => {
-                setForecastData(res);
-            });
-        } else {
-            queueMicrotask(() => {
-                setForecastData(null);
-            });
-        }
+        let cancelled = false;
+        setForecastData(null);
+        if (dipilih?.trafficStateId) void fetchSnapshotForecast(dipilih.trafficStateId).then(result => { if (!cancelled) setForecastData(result); });
+        return () => { cancelled = true; };
     }, [dipilih]);
 
     useEffect(() => {
@@ -1187,12 +1183,15 @@ export default function HistoryPage() {
                             </button>
                         </div>
 
+                        {dipilih.winner?.evaluation && <p className="mb-4 text-sm text-text-secondary">
+                            Evaluasi {dipilih.winner.evaluation.id} - kondisi #{dipilih.trafficStateId} - durasi {dipilih.winner.evaluation.durationSeconds} s - seed {dipilih.winner.evaluation.seed}
+                        </p>}
                         {/* KONDISI LALU LINTAS TERKINI */}
                         <div className="mb-5">
                             <div className="mb-2 flex items-center gap-2">
                                 <Clock3 size={15} className="text-text-secondary" />
                                 <h3 className="text-xs font-medium">
-                                    Kondisi Lalu Lintas Terkini
+                                    Kondisi Awal Evaluasi
                                 </h3>
                             </div>
                             {dipilih.trafficConditions.length === 0 ? (
