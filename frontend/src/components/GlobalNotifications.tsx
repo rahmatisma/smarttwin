@@ -40,10 +40,10 @@ export default function GlobalNotifications() {
     newNotifications.forEach((n) => {
       seenIds.current.add(n.id);
 
-      // Start independent 3-second auto-dismiss timer per notification
+      // Start independent 5-second auto-dismiss timer per notification
       const timer = setTimeout(() => {
         dismissPopup(n.id);
-      }, 3000);
+      }, 5000);
       timers.current.set(n.id, timer);
     });
 
