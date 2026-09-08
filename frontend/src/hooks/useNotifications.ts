@@ -47,25 +47,76 @@ export function useNotifications() {
   const notifications = data?.data || [];
   const unreadCount = notifications.filter((n) => !n.isRead).length;
 
-  const markAsRead = async (id: string) => {
-    try {
-      await fetch(`http://127.0.0.1:8000/api/v1/notifications/${id}/read`, {
-        method: "PATCH",
-      });
-      // Optimistic update
-      mutate(
-        {
-          success: true,
-          data: notifications.map((n) =>
-            n.id === id ? { ...n, isRead: true } : n
-          ),
-        },
-        false
-      );
-    } catch (err) {
-      console.error("Gagal menandai notifikasi dibaca", err);
-    }
-  };
+    const markAsRead = async (id: string) => {
+      try {
+        await fetch(`http://127.0.0.1:8000/api/v1/notifications/${id}/read`, {
+          method: "PATCH",
+        });
+        // Optimistic update
+        mutate(
+          {
+            success: true,
+            data: notifications.map((n) =>
+              n.id === id ? { ...n, isRead: true } : n
+            ),
+          },
+          false
+        );
+      } catch (err) {
+        console.error("Gagal menandai notifikasi dibaca", err);
+      }
+    };
+
+    const markAllAsRead = async () => {
+        try {
+            await fetch(`http://127.0.0.1:8000/api/v1/notifications/read-all`, {
+                method: "PATCH",
+            });
+            mutate(
+                {
+                    success: true,
+                    data: notifications.map((n) => ({ ...n, isRead: true })),
+                },
+                false
+            );
+        } catch (err) {
+            console.error("Gagal menandai semua notifikasi dibaca", err);
+        }
+    };
+
+    const deleteAll = async () => {
+        try {
+            await fetch(`http://127.0.0.1:8000/api/v1/notifications`, {
+                method: "DELETE",
+            });
+            mutate(
+                {
+                    success: true,
+                    data: [],
+                },
+                false
+            );
+        } catch (err) {
+            console.error("Gagal menghapus semua notifikasi", err);
+        }
+    };
+
+    const deleteNotification = async (id: string) => {
+        try {
+            await fetch(`http://127.0.0.1:8000/api/v1/notifications/${id}`, {
+                method: "DELETE",
+            });
+            mutate(
+                {
+                    success: true,
+                    data: notifications.filter((n) => n.id !== id),
+                },
+                false
+            );
+        } catch (err) {
+            console.error("Gagal menghapus notifikasi", err);
+        }
+    };
 
   return {
     notifications,
@@ -73,6 +124,9 @@ export function useNotifications() {
     isLoading: !error && !data,
     isError: error,
     markAsRead,
+    markAllAsRead,
+    deleteAll,
+    deleteNotification,
     mutate,
   };
 }

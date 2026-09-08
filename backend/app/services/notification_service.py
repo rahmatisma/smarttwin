@@ -24,6 +24,36 @@ class NotificationService:
         )
         return res.data
 
+    def mark_all_as_read(self):
+        supabase = get_supabase()
+        res = (
+            supabase.table("notifications")
+            .update({"is_read": True})
+            .eq("is_read", False)
+            .execute()
+        )
+        return res.data
+
+    def delete_all(self):
+        supabase = get_supabase()
+        res = (
+            supabase.table("notifications")
+            .delete()
+            .neq("id", "00000000-0000-0000-0000-000000000000")
+            .execute()
+        )
+        return res.data
+
+    def delete_notification(self, notification_id: str):
+        supabase = get_supabase()
+        res = (
+            supabase.table("notifications")
+            .delete()
+            .eq("id", notification_id)
+            .execute()
+        )
+        return res.data
+
     def create_notification(self, type: str, title: str, message: str, severity: str, reference_id: str = None):
         supabase = get_supabase()
         
