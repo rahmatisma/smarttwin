@@ -1,4 +1,5 @@
 import logging
+from collections import OrderedDict
 from fastapi import APIRouter, Query, Depends, HTTPException
 from pydantic import BaseModel, Field
 from app.core.auth import require_operator
@@ -12,6 +13,7 @@ from pathlib import Path
 from app.schemas.digital_twin import (
     DigitalTwinCandidate,
     DigitalTwinScenarioResponse,
+    ScenarioForecastResponse,
 )
 from app.services.live_scenario_cache_service import live_scenario_cache_service
 
@@ -19,10 +21,50 @@ logger = logging.getLogger("uvicorn.error")
 
 router = APIRouter(prefix="/api/v1/digital-twin", tags=["Digital Twin"])
 evaluation_lock = threading.Lock()
+forecast_cache: OrderedDict[int, ScenarioForecastResponse] = OrderedDict()
 
 
 class EvaluationRequest(BaseModel):
     trafficStateId: int = Field(gt=0)
+
+
+@router.post("/forecast", response_model=ScenarioForecastResponse, dependencies=[Depends(require_operator)])
+def forecast_snapshot(request: EvaluationRequest):
+    # A snapshot ID is immutable. Bound the cache and reuse all three projections
+    # when the operator changes the selected scenario.
+    if not evaluation_lock.acquire(blocking=False):
+        raise HTTPException(status_code=409, detail="Simulasi sedang dihitung. Coba lagi sebentar.")
+    try:
+        cached = forecast_cache.get(request.trafficStateId)
+        if cached is not None:
+            forecast_cache.move_to_end(request.trafficStateId)
+            return cached
+        root = Path(__file__).resolve().parents[4]
+        with tempfile.TemporaryDirectory(prefix="smarttwin-forecast-") as directory:
+            output = Path(directory) / "result.json"
+            process = subprocess.run(
+                [sys.executable, str(root / "simulation" / "forecast_snapshot.py"),
+                 "--state-id", str(request.trafficStateId), "--output", str(output)],
+                cwd=root, capture_output=True, text=True, timeout=180,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+            if process.returncode or not output.exists():
+                logger.error("Prediksi skenario gagal: %s", process.stderr[-4000:])
+                raise HTTPException(status_code=503, detail="Prediksi skenario belum dapat dihitung. Silakan coba lagi.")
+            result = ScenarioForecastResponse.model_validate_json(output.read_text(encoding="utf-8"))
+            if result.trafficStateId != request.trafficStateId:
+                raise ValueError("Prediksi memakai kondisi yang berbeda dari permintaan.")
+            forecast_cache[request.trafficStateId] = result
+            while len(forecast_cache) > 16:
+                forecast_cache.popitem(last=False)
+            return result
+    except subprocess.TimeoutExpired as exc:
+        raise HTTPException(status_code=504, detail="Perhitungan prediksi melewati batas waktu. Silakan coba lagi.") from exc
+    except (ValueError, OSError) as exc:
+        logger.exception("Hasil prediksi skenario tidak valid")
+        raise HTTPException(status_code=503, detail="Hasil prediksi belum lengkap. Silakan coba lagi.") from exc
+    finally:
+        evaluation_lock.release()
 
 
 @router.post("/evaluate", response_model=DigitalTwinScenarioResponse, dependencies=[Depends(require_operator)])

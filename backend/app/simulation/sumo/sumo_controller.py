@@ -54,6 +54,13 @@ class SumoController:
     # komputer lain), sumo-gui tetap jalan pakai skema default, bukan
     # gagal start.
     GUI_VIEW_SETTINGS_FILE = SIMULATION_DIR / "network" / "gui-view-settings.xml"
+    TRACI_TIMEOUT_SECONDS = 5.0
+
+    @classmethod
+    def _bound_connection_wait(cls, connection: Any) -> None:
+        # TraCI defaults to an unbounded recv(). A stuck GUI can otherwise
+        # keep the loop and its lock alive forever while status says running.
+        connection._socket.settimeout(cls.TRACI_TIMEOUT_SECONDS)
 
     # Diperkecil dari 1,0 ke 0,2 detik (6 September 2026). Sebelumnya
     # posisi kendaraan cuma diperbarui 1x/detik (1 simulationStep() = 1
@@ -859,6 +866,7 @@ class SumoController:
             # modul traci lagi, supaya dua context tidak saling menimpa
             # koneksi satu sama lain.
             conn = traci.getConnection(self.context)
+            self._bound_connection_wait(conn)
             # Banyak tempat lain di file ini menulis `self.traci.TraCIException`
             # seolah self.traci adalah modul traci (yang punya atribut itu).
             # Objek koneksi tidak otomatis punya atribut itu, jadi ditempel
@@ -1940,8 +1948,20 @@ class SumoController:
                             # secara utuh, tidak pernah JPEG yang sedang ditulis.
                             os.replace(next_frame_path, frame_path)
                             self._last_screenshot_at = time.monotonic()
-                        except Exception:
+                        except (FileNotFoundError, PermissionError):
+                            # SUMO may finish the screenshot on the next step;
+                            # Windows readers can also briefly hold the file.
+                            # Retry publishing it without stopping the engine.
                             pass
+                        except OSError:
+                            # A socket timeout/closed connection is fatal; do
+                            # not swallow it and keep reporting a running loop.
+                            raise
+                        except Exception as exc:
+                            if isinstance(exc, self.traci.TraCIException):
+                                logger.warning("Frame SUMO %s gagal: %s", self.context, exc)
+                            else:
+                                raise
 
                     # ==========================================
                     # SLEEP FOR NEXT STEP

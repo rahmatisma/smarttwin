@@ -5,7 +5,7 @@ import json
 from functools import lru_cache
 
 from postgrest.utils import SyncClient as PostgrestSyncClient
-from supabase import Client, create_client
+from supabase import Client, ClientOptions, create_client
 
 from app.core.config import settings
 
@@ -37,6 +37,17 @@ def _validate_service_role_key(key: str) -> None:
 
 @lru_cache
 def get_supabase() -> Client:
+    return _create_supabase()
+
+
+@lru_cache
+def get_scenario_cache_supabase() -> Client:
+    # Optional dashboard polling must not occupy the API thread pool for the
+    # normal database timeout. Keep this timeout separate from other services.
+    return _create_supabase(ClientOptions(postgrest_client_timeout=3))
+
+
+def _create_supabase(options: ClientOptions | None = None) -> Client:
     if not settings.supabase_url:
         raise RuntimeError("SUPABASE_URL belum dikonfigurasi.")
 
@@ -52,6 +63,7 @@ def get_supabase() -> Client:
     client = create_client(
         settings.supabase_url,
         settings.supabase_service_role_key,
+        options=options,
     )
 
     _force_http1(client)

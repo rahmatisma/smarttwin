@@ -1,9 +1,16 @@
 from datetime import datetime, timezone
+from datetime import timedelta
+import json
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
 
 from fastapi.testclient import TestClient
 
 from app.api.routes import digital_twin as route_module
 from app.main import app
+from app.core.auth import require_operator
 
 
 def candidate(candidate_id: str, delay: float) -> dict:
@@ -91,3 +98,75 @@ def test_latest_scenarios_handles_missing_or_legacy_cache(monkeypatch):
     assert response.json()["status"] == "unavailable"
     assert "format lama" in response.json()["message"]
 
+
+def forecast_payload(state_id=42):
+    now = datetime.now(timezone.utc)
+    candidates = [candidate(name, 10) for name in ("baseline", "aggressive", "balanced")]
+    for item in candidates:
+        item.update(
+            evaluation={"trafficStateId": state_id, "durationSeconds": 60, "completedSteps": 60,
+                        "demandSource": "traffic-state-snapshot", "demandHash": "same-demand", "seed": 42},
+            finalQueueLengthVehByApproach={arm: 2 for arm in ("north", "east", "south", "west")},
+            finalSpeedKmhByApproach={arm: None for arm in ("north", "east", "south", "west")},
+        )
+    return {"intersectionId": "simpang4-pingit", "status": "completed", "trafficStateId": state_id,
+            "inputTimestamp": now.isoformat(), "predictionTimestamp": (now + timedelta(seconds=60)).isoformat(),
+            "horizonSeconds": 60, "assumptions": [], "candidates": candidates}
+
+
+@pytest.fixture
+def forecast_client(monkeypatch):
+    monkeypatch.setattr(route_module, "forecast_cache", route_module.OrderedDict())
+    app.dependency_overrides[require_operator] = lambda: None
+    try:
+        yield TestClient(app)
+    finally:
+        app.dependency_overrides.pop(require_operator, None)
+
+
+def test_forecast_endpoint_reuses_all_candidates_without_evaluation_history(monkeypatch, forecast_client):
+    calls = []
+    def run(command, **kwargs):
+        calls.append(command)
+        assert Path(command[1]).name == "forecast_snapshot.py"
+        state_id = int(command[command.index("--state-id") + 1])
+        Path(command[command.index("--output") + 1]).write_text(json.dumps(forecast_payload(state_id)), encoding="utf-8")
+        return SimpleNamespace(returncode=0)
+    monkeypatch.setattr(route_module.subprocess, "run", run)
+    first = forecast_client.post("/api/v1/digital-twin/forecast", json={"trafficStateId": 42})
+    assert first.status_code == 200
+    assert first.json()["winnerId"] is None
+    assert first.json()["candidates"][0]["finalQueueLengthVehByApproach"]["north"] == 2
+    assert forecast_client.post("/api/v1/digital-twin/forecast", json={"trafficStateId": 42}).json() == first.json()
+    assert len(calls) == 1
+    assert forecast_client.post("/api/v1/digital-twin/forecast", json={"trafficStateId": 43}).status_code == 200
+    assert len(calls) == 2
+
+
+@pytest.mark.parametrize("invalid", ["duration", "incomplete", "missing-arm", "different-demand", "wrong-state"])
+def test_invalid_projection_is_rejected_and_not_cached(monkeypatch, forecast_client, invalid):
+    def run(command, **kwargs):
+        payload = forecast_payload(43 if invalid == "wrong-state" else 42)
+        item = payload["candidates"][0]
+        if invalid == "duration":
+            item["evaluation"]["durationSeconds"] = 120
+        elif invalid == "incomplete":
+            item["evaluation"]["completedSteps"] = 59
+        elif invalid == "missing-arm":
+            del item["finalQueueLengthVehByApproach"]["north"]
+        elif invalid == "different-demand":
+            item["evaluation"]["demandHash"] = "different"
+        Path(command[command.index("--output") + 1]).write_text(json.dumps(payload), encoding="utf-8")
+        return SimpleNamespace(returncode=0)
+    monkeypatch.setattr(route_module.subprocess, "run", run)
+    assert forecast_client.post("/api/v1/digital-twin/forecast", json={"trafficStateId": 42}).status_code == 503
+    assert not route_module.forecast_cache
+    assert not route_module.evaluation_lock.locked()
+
+
+def test_busy_forecast_is_retryable(forecast_client):
+    route_module.evaluation_lock.acquire()
+    try:
+        assert forecast_client.post("/api/v1/digital-twin/forecast", json={"trafficStateId": 42}).status_code == 409
+    finally:
+        route_module.evaluation_lock.release()

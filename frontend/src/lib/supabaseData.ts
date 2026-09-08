@@ -8,6 +8,7 @@
 // src/types/traffic.ts.
 
 import { supabase } from "@/lib/supabaseClient";
+import { createScenarioPoller } from "./scenarioPolling";
 
 import type {
   Approach,
@@ -680,13 +681,15 @@ export interface DigitalTwinCandidate {
   throughputVeh: number;
   los: "A" | "B" | "C" | "D" | "E" | "F";
   isWinner: boolean;
-  evaluation?: { id: string; trafficStateId: number; trafficTimestamp: string; seed: number; durationSeconds: number; demandSource: string; demandHash: string; targetVehicles: number; evaluatedAt: string };
+  evaluation?: { id: string; trafficStateId: number; trafficTimestamp: string; seed: number; durationSeconds: number; completedSteps?: number; demandSource: string; demandHash: string; targetVehicles: number; evaluatedAt: string };
   // Rincian per lengan -- opsional karena cache lama (sebelum backend
   // dideklarasikan ulang) tidak punya field ini sama sekali.
   delayByApproachSeconds?: Record<string, number | null> | null;
   losByApproach?: Record<string, "A" | "B" | "C" | "D" | "E" | "F" | null> | null;
   queueLengthVehByApproach?: Record<string, number> | null;
   throughputVehByApproach?: Record<string, number> | null;
+  finalQueueLengthVehByApproach?: Record<string, number> | null;
+  finalSpeedKmhByApproach?: Record<string, number | null> | null;
 }
 
 export interface DigitalTwinScenarioResponse {
@@ -698,21 +701,12 @@ export interface DigitalTwinScenarioResponse {
   message: string | null;
 }
 
-export async function fetchDigitalTwinScenarios(
+const pollDigitalTwinScenarios = createScenarioPoller({ baseUrl: API_BASE_URL });
+
+export function fetchDigitalTwinScenarios(
   intersectionId: string = DEFAULT_INTERSECTION_ID
 ): Promise<DigitalTwinScenarioResponse | null> {
-  try {
-    const response = await fetch(
-      `${API_BASE_URL}/api/v1/digital-twin/scenarios/latest?intersectionId=${encodeURIComponent(
-        intersectionId
-      )}`
-    );
-    if (!response.ok) return null;
-    return await response.json();
-  } catch (err) {
-    console.error("Failed to fetch scenarios:", err);
-    return null;
-  }
+  return pollDigitalTwinScenarios(intersectionId);
 }
 
 

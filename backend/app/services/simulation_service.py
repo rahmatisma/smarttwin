@@ -934,6 +934,7 @@ class SimulationService:
             return {
                 "backendInstanceId": self.instance_id,
                 "running": False,
+                "lastError": getattr(controller, "last_error", None),
                 "paused": False,
                 "vehicles": [],
                 "signals": [],
@@ -945,6 +946,7 @@ class SimulationService:
         return {
             "backendInstanceId": self.instance_id,
             "running": True,
+            "lastError": getattr(controller, "last_error", None),
             "paused": controller.paused,
             "vehicles": list(controller.active_vehicles_data),
             "visibleVehicleCount": controller.live_visible_vehicle_count,

@@ -9,10 +9,13 @@ dikembalikan sebagai cache miss agar dashboard tetap memakai rule-based.
 from __future__ import annotations
 
 import logging
+import threading
+import time
+from collections import OrderedDict
 from datetime import datetime, timezone
 from typing import Any
 
-from app.services.supabase_client import get_supabase
+from app.services.supabase_client import get_scenario_cache_supabase
 
 logger = logging.getLogger("uvicorn.error")
 
@@ -23,14 +26,39 @@ class LiveScenarioCacheService:
     def __init__(self, supabase=None, max_age_seconds: int = 120) -> None:
         self._supabase = supabase
         self.max_age_seconds = max_age_seconds
+        self._refresh_lock = threading.Lock()
+        self._recent: OrderedDict[str, tuple[float, dict[str, Any] | None]] = OrderedDict()
 
     @property
     def supabase(self):
         if self._supabase is None:
-            self._supabase = get_supabase()
+            self._supabase = get_scenario_cache_supabase()
         return self._supabase
 
     def get_fresh(self, intersection_id: str) -> dict[str, Any] | None:
+        # Coalesce polling from dashboard, recommendation, and other tabs.
+        # A slow database query must never create a queue of waiting threads.
+        if not self._refresh_lock.acquire(blocking=False):
+            return None
+        try:
+            cached = self._recent.get(intersection_id)
+            if cached and time.monotonic() < cached[0]:
+                return cached[1] if cached[1] is not None and self._is_fresh(cached[1]) else None
+            row = self._load_fresh(intersection_id)
+            self._recent[intersection_id] = (time.monotonic() + (5 if row is not None else 15), row)
+            self._recent.move_to_end(intersection_id)
+            while len(self._recent) > 16:
+                self._recent.popitem(last=False)
+            return row
+        finally:
+            self._refresh_lock.release()
+
+    def _is_fresh(self, row: dict[str, Any]) -> bool:
+        updated_at = datetime.fromisoformat(str(row["updatedAt"]).replace("Z", "+00:00"))
+        age = (datetime.now(timezone.utc) - updated_at).total_seconds()
+        return 0 <= age <= self.max_age_seconds
+
+    def _load_fresh(self, intersection_id: str) -> dict[str, Any] | None:
         try:
             response = (
                 self.supabase.table(self.TABLE)
@@ -42,11 +70,7 @@ class LiveScenarioCacheService:
             if not response.data:
                 return None
             row = response.data[0]
-            updated_at = datetime.fromisoformat(
-                str(row["updatedAt"]).replace("Z", "+00:00")
-            )
-            age = (datetime.now(timezone.utc) - updated_at).total_seconds()
-            if not 0 <= age <= self.max_age_seconds:
+            if not self._is_fresh(row):
                 return None
             if not self._is_valid_row(row, intersection_id):
                 logger.warning(

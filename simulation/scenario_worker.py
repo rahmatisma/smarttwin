@@ -171,21 +171,22 @@ class ReplaySource:
         return built, index + 1, len(self._state_ids)
 
 
-def _make_engine(short_sim_steps: int | None = None) -> ScenarioEngine:
+def _make_engine(short_sim_steps: int | None = None, *, strict_metrics: bool = False) -> ScenarioEngine:
     options = {"short_sim_steps": short_sim_steps} if short_sim_steps is not None else {}
     return ScenarioEngine(
         sumo_binary=sumoBinary,
         sumo_config=sumoConfig,
         tls_id=tlsId,
         approach_to_phase=approachToPhase,
-        run_simulation_fn=partial(runSimulation, stop_when_empty=False),
+        run_simulation_fn=partial(runSimulation, stop_when_empty=False, strict_metrics=strict_metrics),
         **options,
     )
 
 
 def evaluate_state(state, *, forecast=None, full_cycle: bool = False,
                    simulation_steps: int | None = None,
-                   pkji_traffic_state=None) -> dict[str, Any]:
+                   pkji_traffic_state=None,
+                   evaluation_horizon_seconds: int | None = None) -> dict[str, Any]:
     """
     Evaluasi satu state; fungsi ini tidak menyentuh cache/database.
 
@@ -194,7 +195,7 @@ def evaluate_state(state, *, forecast=None, full_cycle: bool = False,
     Lihat catatan di run_tls_simulation.py::loadAveragedTrafficState()
     kenapa ini perlu. `state` (baseline) tidak terpengaruh sama sekali.
     """
-    engine = _make_engine(simulation_steps)
+    engine = _make_engine(simulation_steps, strict_metrics=evaluation_horizon_seconds is not None)
     if full_cycle:
         recommendation = engine.recommend_full_cycle(
             state=state,
@@ -203,6 +204,7 @@ def evaluate_state(state, *, forecast=None, full_cycle: bool = False,
             forecast=forecast,
             forecastWeight=0.3,
             pkji_traffic_state=pkji_traffic_state,
+            evaluation_horizon_seconds=evaluation_horizon_seconds,
         )
     else:
         # Jalur satu-lengan lama, tidak (belum) memakai PKJI sama sekali --
