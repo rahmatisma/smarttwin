@@ -89,13 +89,7 @@ export function useNotifications() {
             await fetch(`http://127.0.0.1:8000/api/v1/notifications`, {
                 method: "DELETE",
             });
-            mutate(
-                {
-                    success: true,
-                    data: [],
-                },
-                false
-            );
+            mutate();
         } catch (err) {
             console.error("Gagal menghapus semua notifikasi", err);
         }
