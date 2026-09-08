@@ -16,7 +16,7 @@ import {
   fetchSignalStatus,
   fetchRecommendation,
   fetchDigitalTwinScenarios,
-  fetchForecast,
+  fetchSnapshotForecast,
   fetchIntersectionCoords,
   DEFAULT_INTERSECTION_ID,
   type DigitalTwinCandidate,
@@ -588,7 +588,7 @@ export default function DashboardPage() {
         // forecast yang lambat tidak menahan seluruh halaman di skeleton.
         void fetchOptional(
           "Forecast Simpang Pingit",
-          fetchForecast(DEFAULT_INTERSECTION_ID)
+          newTrafficStates.intersection4?.trafficStateId ? fetchSnapshotForecast(newTrafficStates.intersection4.trafficStateId) : Promise.resolve(null)
         ).then((forecast) => {
           if (forecast && !cancelled) {
             setAllForecasts((previous) => ({
@@ -657,7 +657,7 @@ export default function DashboardPage() {
                       }), 2500, applyLateRecommendation))
                   : null,
                 hasLiveBackend
-                  ? fetchOptionalWithin(`Forecast ${inter.name}`, fetchForecast(inter.databaseId), 2500)
+                  ? Promise.resolve(null)
                   : null,
               ]);
               return {
@@ -665,7 +665,7 @@ export default function DashboardPage() {
                 trafficState,
                 signalStatus,
                 recommendation,
-                forecast,
+                forecast: trafficState?.trafficStateId ? await fetchSnapshotForecast(trafficState.trafficStateId) : forecast,
               };
             } catch (err) {
               console.error(`Gagal mengambil data untuk ${inter.name}:`, err);
@@ -1039,6 +1039,7 @@ export default function DashboardPage() {
                 signal={activeSignal}
                 cyclePlan={activeRecommendation?.cyclePlan}
                 trafficTimestamp={allTrafficStates["intersection4"]?.windowEnd}
+                trafficStateId={allTrafficStates["intersection4"]?.trafficStateId}
                 candidateId={activeRecommendation?.candidateId}
               />
             </div>

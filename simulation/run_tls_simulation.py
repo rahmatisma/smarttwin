@@ -1344,6 +1344,7 @@ def applyTls(
 
 def runSimulation(
     step_limit: int = simulationStepLimit,
+    *, stop_when_empty: bool = True,
 ):
 
     printHeader(
@@ -1559,7 +1560,7 @@ def runSimulation(
                 f"expected={expectedVehicles:<4}"
             )
 
-        if expectedVehicles == 0:
+        if stop_when_empty and expectedVehicles == 0:
 
             break
 

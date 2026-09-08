@@ -4,6 +4,8 @@ import os
 import sys
 from pathlib import Path
 from typing import Any, Callable
+from datetime import datetime, timezone
+import uuid
 
 
 # ============================================================
@@ -593,18 +595,29 @@ def simulate_cycle_candidate(
     tls_id: str,
     run_simulation_fn: Callable[..., dict[str, Any]],
     step_limit: int,
+    traffic_state: Any | None = None,
+    seed: int = 42,
 ) -> dict[str, Any]:
-    """Jalankan satu CyclePlan penuh pada horizon yang sama antar kandidat."""
-    traci.start([str(sumo_binary), "-c", str(sumo_config), "--start"])
+    """Evaluate one signal plan using a reproducible observed population."""
+    from simulation.evaluation_demand import snapshot_population, population_hash, inject_population
+    population = snapshot_population(traffic_state) if traffic_state is not None else None
+    command = [str(sumo_binary), "-c", str(sumo_config), "--start", "--seed", str(seed), "--step-length", "1"]
+    if population is not None:
+        command += ["--route-files", ""]
+    traci.start(command)
     try:
         logic = build_dynamic_tls_logic(candidate)
         traci.trafficlight.setProgramLogic(tls_id, logic)
         traci.trafficlight.setProgram(tls_id, logic.programID)
         traci.trafficlight.setPhase(tls_id, 0)
+        if population is not None:
+            inject_population(traci, population, seed)
         metrics = run_simulation_fn(step_limit=step_limit)
     finally:
         traci.close()
 
+    if population is not None and metrics.get("steps") != step_limit:
+        raise RuntimeError("Evaluasi berhenti sebelum durasi pengujian selesai.")
     delay = metrics["averageWaitingTimeSeconds"]
     queue_veh = metrics["queueLengthVeh"]
     delay_by_approach = metrics.get("averageWaitingTimeSecondsByApproach")
@@ -612,6 +625,16 @@ def simulate_cycle_candidate(
     throughput_by_approach = metrics.get("throughputVehByApproach")
     return {
         **candidate,
+        "evaluation": {
+            "trafficStateId": getattr(traffic_state, "trafficStateId", None),
+            "trafficTimestamp": str(getattr(traffic_state, "windowEnd", "")) or None,
+            "seed": seed, "durationSeconds": step_limit, "completedSteps": metrics.get("steps"),
+            "demandSource": "traffic-state-snapshot" if population is not None else "route-file",
+            "demandHash": population_hash(population) if population is not None else None,
+            "targetVehicles": sum(sum(row["counts"].values()) for row in population) if population is not None else None,
+            "queueMetric": "peak-halting-vehicles",
+            "delayMetric": "mean-accumulated-waiting-time",
+        },
         "avgDelaySeconds": delay,
         "avgQueueLengthM": round(queue_veh * METERS_PER_QUEUED_VEHICLE, 1),
         "queueLengthVeh": queue_veh,
@@ -878,9 +901,15 @@ class ScenarioEngine:
                 tls_id=self.tls_id,
                 run_simulation_fn=self.run_simulation_fn,
                 step_limit=step_limit,
+                traffic_state=state,
             )
             for candidate in candidates
         ]
+        evaluation_id = str(uuid.uuid4())
+        evaluated_at = datetime.now(timezone.utc).isoformat()
+        for result in results:
+            if result.get("evaluation") is not None:
+                result["evaluation"].update({"id": evaluation_id, "evaluatedAt": evaluated_at})
         winner = select_best_scenario(results)
         self.last_results = results
         self.last_winner = winner

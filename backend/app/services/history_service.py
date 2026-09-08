@@ -414,6 +414,14 @@ class HistoryService:
             candidate = {
                 "candidateId": str(simulation.get("simulationName", "")).split(" @ ")[0],
                 "isWinner": simulation.get("status") == "winner",
+                "evaluation": {
+                    "id": str(simulation.get("simulationName", "")).split(" | evaluation=")[-1],
+                    "trafficStateId": simulation.get("trafficStateId"),
+                    "durationSeconds": simulation_metrics.get("evaluationDurationSeconds"),
+                    "seed": simulation_metrics.get("evaluationSeed"),
+                    "targetVehicles": simulation_metrics.get("evaluationTargetVehicles"),
+                    "demandSource": "traffic-state-snapshot",
+                } if " | evaluation=" in str(simulation.get("simulationName", "")) else None,
                 "avgDelaySeconds": avg_delay,
                 "avgQueueLengthM": simulation_metrics.get("avgQueueLengthM"),
                 "throughputVeh": simulation_metrics.get("throughputVeh"),

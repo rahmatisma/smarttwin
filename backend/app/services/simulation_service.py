@@ -292,133 +292,15 @@ class SimulationService:
         request: SimulationRequest,
     ) -> Any:
 
-        print()
-        print("=" * 70)
-        print("BUILDING TRAFFIC STATE")
-        print("=" * 70)
-
-        print(
-            "Intersection:",
-            request.intersectionId,
-        )
-
-        print(
-            "Requested TrafficState ID:",
-            request.trafficStateId,
-        )
-
-        # --------------------------------------------------------
-        # BUILD LATEST STATE
-        # --------------------------------------------------------
-
+        from app.services.traffic_snapshot import load_snapshot
         try:
-
-            traffic_state = (
-                self.builder
-                .build_latest_state_for_intersection(
-                    intersection_id=request.intersectionId,
-                    save=True,
-                )
-            )
-
-        except httpx.TransportError:
-
-            # get_supabase() di-@lru_cache -- satu koneksi (pool httpx)
-            # dipakai seumur proses backend. Kalau backend idle cukup
-            # lama, PostgREST/Supabase bisa menutup keep-alive di sisi
-            # server duluan tanpa client tahu, dan request berikutnya
-            # gagal dengan "Server disconnected". Refresh client + coba
-            # sekali lagi sebelum benar-benar menyerah -- ini transient,
-            # bukan masalah data.
-            #
-            # Jeda singkat SEBELUM retry: kalau penyebabnya kontensi
-            # CPU/IO sesaat (mis. proses SUMO-GUI lain baru saja start
-            # bersamaan), retry tanpa jeda sama sekali bisa masih kena
-            # jendela gangguan yang persis sama dan gagal lagi juga.
-            time.sleep(0.5)
-
-            get_supabase.cache_clear()
-            self.builder.supabase = get_supabase()
-
-            try:
-
-                traffic_state = (
-                    self.builder
-                    .build_latest_state_for_intersection(
-                        intersection_id=request.intersectionId,
-                        save=True,
-                    )
-                )
-
-            except Exception as exc:
-
-                raise SimulationServiceError(
-                    "Gagal membangun TrafficState "
-                    f"dari database: {exc}"
-                ) from exc
-
+            traffic_state = load_snapshot(request.intersectionId, request.trafficStateId)
         except Exception as exc:
-
-            raise SimulationServiceError(
-                "Gagal membangun TrafficState "
-                f"dari database: {exc}"
-            ) from exc
-
-        # --------------------------------------------------------
-        # STATE NOT FOUND
-        # --------------------------------------------------------
-
-        if traffic_state is None:
-
-            print()
-            print("=" * 70)
-            print("TRAFFIC STATE WARNING")
-            print("=" * 70)
-            print(
-                "Tidak ditemukan TrafficState dengan "
-                "trafficLaneMetrics untuk intersection "
-                f"'{request.intersectionId}'."
-            )
-            print("Simulation akan berjalan TANPA demand kendaraan.")
-            print("=" * 70)
-
-            self.active_intersection_id[request.context] = request.intersectionId
-            self.active_traffic_state_id[request.context] = None
-
-            return None
-
-        # --------------------------------------------------------
-        # SAVE ACTIVE STATE
-        # --------------------------------------------------------
-
-        self.active_intersection_id[request.context] = (
-            traffic_state.intersectionId
-        )
-
-        self.active_traffic_state_id[request.context] = (
-            traffic_state.trafficStateId
-        )
-
-        print(
-            "TrafficState berhasil dibangun:"
-        )
-
-        print(
-            "  trafficStateId:",
-            traffic_state.trafficStateId,
-        )
-
-        print(
-            "  intersectionId:",
-            traffic_state.intersectionId,
-        )
-
-        print("=" * 70)
-
+            raise SimulationServiceError(f"TrafficState tidak tersedia: {exc}") from exc
+        self.active_intersection_id[request.context] = traffic_state.intersectionId
+        self.active_traffic_state_id[request.context] = traffic_state.trafficStateId
+        request.trafficTimestamp = traffic_state.windowEnd.isoformat()
         return traffic_state
-
-    # ============================================================
-    # ENSURE SUMO
     # ============================================================
 
     def _ensure_sumo(
@@ -431,6 +313,10 @@ class SimulationService:
         with self._lock:
 
             controller = self.controllers.get(context)
+            if context == "digitaltwin" and controller is not None:
+                controller.close()
+                self.controllers[context] = None
+                controller = None
 
             # Perubahan renderer (GUI/headless) perlu process baru. Perubahan
             # skenario tidak: program TLS dapat diganti lewat TraCI pada
@@ -757,7 +643,9 @@ class SimulationService:
                     controller.active_cycle_plan = selected_candidate
 
                 except Exception as exc:
-                    print(f"Gagal apply scenario logic: {exc}")
+                    controller.close()
+                    self.controllers[request.context] = None
+                    raise SimulationServiceError(f"Gagal menerapkan skenario: {exc}") from exc
 
             # ====================================================
             # 3. CREATE ADAPTER
@@ -1066,6 +954,8 @@ class SimulationService:
             "simulationTimeSeconds": controller.get_display_time(),
             "detectedVehicles": controller.detected_vehicle_count,
             "trafficTimestamp": controller.traffic_timestamp,
+            "trafficStateId": self.active_traffic_state_id.get(context),
+            "dataMode": "timestamped-observation" if controller.traffic_timestamp else "unknown",
             "cyclePlan": controller.active_cycle_plan,
             "queueLengthVeh": controller.live_queue_length_veh,
             "queueBusiestApproach": controller.live_queue_busiest_approach,

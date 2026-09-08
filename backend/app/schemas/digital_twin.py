@@ -26,6 +26,8 @@ class DigitalTwinCandidate(BaseModel):
     throughputVeh: int = Field(ge=0)
     los: Literal["A", "B", "C", "D", "E", "F"]
     isWinner: bool = False
+    evaluation: dict | None = None
+    avgQueueLengthMByApproach: dict[str, float] | None = None
 
     # Rincian per lengan -- tanpa ini, rata-rata simpang bisa menyembunyikan
     # satu lengan yang sebenarnya masih buruk (pola yang sama dengan bug P-3

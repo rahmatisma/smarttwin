@@ -32,14 +32,13 @@ class ScenarioWorkerService:
         command = [
             sys.executable,
             str(WORKER_SCRIPT),
-            "--replay",
             "--full-cycle",
             "--interval",
             str(interval_seconds),
         ]
         self._process = subprocess.Popen(command, cwd=PROJECT_ROOT)
         logger.info(
-            "Scenario worker replay otomatis aktif (PID %s, interval %ss).",
+            "Scenario worker snapshot terbaru aktif (PID %s, interval %ss).",
             self._process.pid,
             interval_seconds,
         )
