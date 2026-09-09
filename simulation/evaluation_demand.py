@@ -34,8 +34,8 @@ def population_hash(population: list[dict[str, Any]]) -> str:
 
 def inject_population(connection: Any, population: list[dict[str, Any]], seed: int) -> int:
     # Reuse the live renderer's vehicle dimensions, road mapping and turn ratios.
-    from app.simulation.sumo.sumo_controller import SumoController
-
+    from backend.app.simulation.sumo.sumo_controller import SumoController
+    
     rng = random.Random(seed)
     for vehicle_type, config in SumoController.VEHICLE_TYPES.items():
         connection.vehicletype.copy("DEFAULT_VEHTYPE", vehicle_type)
@@ -49,7 +49,7 @@ def inject_population(connection: Any, population: list[dict[str, Any]], seed: i
         for vehicle_type, total in row["counts"].items():
             for _ in range(total):
                 turn = rng.choices(list(SumoController.TURN_DISTRIBUTION),
-                                   weights=list(SumoController.TURN_DISTRIBUTION.values()))[0]
+                                    weights=list(SumoController.TURN_DISTRIBUTION.values()))[0]
                 destination = SumoController.TURN_MAPPING[approach][turn]
                 route = connection.simulation.findRoute(
                     SumoController.EDGE_HULU[approach], SumoController.EDGE_KELUAR[destination],
@@ -60,6 +60,6 @@ def inject_population(connection: Any, population: list[dict[str, Any]], seed: i
                 route_id = f"evaluation_route_{count}"
                 connection.route.add(route_id, route.edges)
                 connection.vehicle.add(f"evaluation_{approach}_{count}", route_id,
-                                       typeID=vehicle_type, depart="now", departLane="best", departSpeed="0")
+                                        typeID=vehicle_type, depart="now", departLane="best", departSpeed="0")
                 count += 1
     return count
