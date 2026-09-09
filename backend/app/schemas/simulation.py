@@ -90,6 +90,9 @@ class SimulationClockRequest(BaseModel):
     context: str = Field(default="default")
     videoTimeSeconds: float = Field(ge=0)
     videoDurationSeconds: float | None = Field(default=None, gt=0)
+    # Lengan (approach) yang lagi ditandai "CCTV mati" (simulasi manual)
+    # di dashboard -- lihat rencana-fallback-cctv-per-lengan.md Step 5.
+    offlineApproaches: list[str] = Field(default_factory=list)
 
 
 class SimulationScenarioRequest(BaseModel):

@@ -195,6 +195,15 @@ class SimulationService:
         self.active_seed: dict[str, int | None] = {}
         self.started_at: dict[str, str | None] = {}
 
+        # Lengan (approach) yang lagi ditandai "CCTV mati" di dashboard --
+        # dikirim lewat /sync-clock (lihat sync_clock() di bawah). Disimpan
+        # per context supaya sandbox /digitaltwin tidak ikut kepengaruh
+        # simulasi mati kamera dashboard. Step 6 (belum dikerjakan, lihat
+        # rencana-fallback-cctv-per-lengan.md) akan membaca ini saat
+        # menyusun demand SUMO supaya lengan offline tidak dapat kendaraan
+        # baru.
+        self.offline_approaches: dict[str, set[str]] = {}
+
     # ============================================================
     # CONTROLLER LOOKUP
     # ============================================================
@@ -678,10 +687,40 @@ class SimulationService:
             # 4. DEBUG DEMAND
             # ====================================================
 
+            # ====================================================
+            # 3.5 KOSONGKAN LENGAN YANG "CCTV MATI" (Step 6)
+            # ====================================================
+            # Approach yang ditandai offline lewat /sync-clock (lihat
+            # sync_clock() + self.offline_approaches) dianggap 0 kendaraan
+            # baru -- BUKAN dilewati/di-skip dari list, supaya sync_demand()
+            # masih memprosesnya dan MENGHAPUS kendaraan yang sudah ada di
+            # lengan itu (rekonsiliasi ke target 0), konsisten dengan pesan
+            # toast dashboard "data lengan ini kosong sementara". Approach
+            # lain di list yang sama tetap apa adanya.
+            offline_approaches = self.offline_approaches.get(request.context, set())
+            if offline_approaches and demand:
+                zeroed_fields = (
+                    "targetVehicleCount",
+                    "motorcycleCount",
+                    "carCount",
+                    "busCount",
+                    "truckCount",
+                    "volume",
+                )
+                for item in demand:
+                    approach = str(item.get("approach", "")).lower().strip()
+                    if approach in offline_approaches:
+                        for field in zeroed_fields:
+                            if field in item:
+                                item[field] = 0
+
             print()
             print("=" * 70)
             print("SUMO DEMAND")
             print("=" * 70)
+
+            if offline_approaches:
+                print(f"Lengan offline (dikosongkan): {sorted(offline_approaches)}")
 
             print(demand)
 
@@ -1012,8 +1051,27 @@ class SimulationService:
         video_time_seconds: float,
         video_duration_seconds: float | None = None,
         context: str = "default",
+        offline_approaches: list[str] | None = None,
     ) -> dict[str, Any]:
-        """Camera Feed adalah clock utama untuk fase lampu realtime."""
+        """Camera Feed adalah clock utama untuk fase lampu realtime.
+
+        offline_approaches: lengan yang lagi ditandai "CCTV mati" di
+        dashboard (simulasi manual). Disimpan TERLEPAS dari status SUMO
+        (bisa saja SUMO belum jalan waktu dashboard mengirim status ini) --
+        supaya begitu SUMO dimulai/direstart, status offline yang sudah
+        ada tidak hilang begitu saja.
+        """
+        if offline_approaches is not None:
+            new_offline = {
+                approach.lower().strip() for approach in offline_approaches
+            }
+            if new_offline != self.offline_approaches.get(context, set()):
+                print(
+                    f"[sync_clock] context={context!r} "
+                    f"offlineApproaches={sorted(new_offline) or '(kosong)'}"
+                )
+            self.offline_approaches[context] = new_offline
+
         controller = self.controllers.get(context)
         if controller is None or not controller.is_running():
             return {

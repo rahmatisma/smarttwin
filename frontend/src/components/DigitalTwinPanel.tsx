@@ -299,6 +299,7 @@ export default function DigitalTwinPanel({
   trafficTimestamp,
   trafficStateId,
   candidateId,
+  offlineApproaches,
 }: {
   approaches: ApproachState[];
   signal: SignalStatus;
@@ -306,6 +307,15 @@ export default function DigitalTwinPanel({
   trafficTimestamp?: string;
   trafficStateId?: number;
   candidateId?: string | null;
+  // Lengan yang lagi ditandai "CCTV mati" (simulasi manual di
+  // CameraFeedPanel) -- HANYA dipakai supaya livePayloadSignature di
+  // bawah berubah dan /simulation/run langsung dipanggil ulang saat
+  // status ini berubah. Backend (bukan di sini) yang benar-benar
+  // mengosongkan angka lengan itu sebelum masuk SUMO, lihat Step 6 di
+  // rencana-fallback-cctv-per-lengan.md -- tanpa prop ini, toggle
+  // offline/online tidak berefek sampai data TrafficState di Supabase
+  // kebetulan berubah sendiri (bisa lama/tidak pernah kalau datanya statis).
+  offlineApproaches?: Set<string>;
 }) {
   const [simRunning, setSimRunning] = useState(false);
   const [simTime, setSimTime] = useState(0);
@@ -430,6 +440,13 @@ export default function DigitalTwinPanel({
     })),
     cyclePlan,
     candidateId,
+    // SENGAJA disertakan supaya signature-nya berubah begitu status
+    // offline/online kamera berubah -- itu yang memicu effect di bawah
+    // mengirim ulang /simulation/run SAAT ITU JUGA, bukan menunggu
+    // TrafficState di Supabase kebetulan berubah sendiri. Diurutkan
+    // (sort) supaya urutan Set tidak bikin signature beda padahal isinya
+    // sama.
+    offlineApproaches: Array.from(offlineApproaches ?? []).sort(),
   });
   const canStartSimulation = approaches.length === 4 && Boolean(cyclePlan?.phases?.length);
 

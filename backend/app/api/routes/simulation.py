@@ -78,6 +78,7 @@ def sync_simulation_clock(request: SimulationClockRequest):
 		request.videoTimeSeconds,
 		request.videoDurationSeconds,
 		request.context,
+		offline_approaches=request.offlineApproaches,
 	)
 
 

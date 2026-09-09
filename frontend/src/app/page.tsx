@@ -303,7 +303,27 @@ export default function DashboardPage() {
   const { scenario } = useScenario();
 
   const selectedIntersection: IntersectionSelection = "all";
-  
+
+  // Lengan yang lagi ditandai "CCTV mati" (simulasi manual lewat tombol di
+  // CameraFeedPanel) -- dipakai buat mengosongkan panel "Vehicle Detection"
+  // untuk lengan itu, lihat countedApproaches di bawah, DAN dikirim ke
+  // backend lewat /sync-clock (lihat offlineApproachesRef + Step 5 di
+  // rencana-fallback-cctv-per-lengan.md).
+  const [offlineApproaches, setOfflineApproaches] = useState<Set<string>>(
+    new Set()
+  );
+
+  // handleCameraTimeUpdate() di bawah SENGAJA di-memo dengan dependency
+  // kosong (lihat komentarnya) supaya identitasnya stabil lintas render --
+  // itu artinya closure-nya TIDAK BOLEH langsung baca state offlineApproaches
+  // (akan selalu basi, nyangkut di nilai awal). Ref ini jembatannya: selalu
+  // disinkronkan ke state terbaru lewat effect di bawah, dan dibaca live
+  // dari dalam handleCameraTimeUpdate tanpa membuat closure itu baru lagi.
+  const offlineApproachesRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    offlineApproachesRef.current = offlineApproaches;
+  }, [offlineApproaches]);
+
   const videoTimeRef = useRef<number>(0);
   const lastClockSyncSecondRef = useRef<number>(-1);
   const lastClockPostAtRef = useRef<number>(0);
@@ -343,6 +363,7 @@ export default function DashboardPage() {
             context: "dashboard",
             videoTimeSeconds: time,
             videoDurationSeconds: duration,
+            offlineApproaches: Array.from(offlineApproachesRef.current),
           }),
         }).catch(() => undefined).finally(() => {
           clockSyncInFlightRef.current = false;
@@ -960,12 +981,20 @@ export default function DashboardPage() {
 
   const hasTrafficData = lenganFilteredApproaches.length > 0;
 
+  // Lengan yang lagi ditandai "CCTV mati" (simulasi manual di
+  // CameraFeedPanel, lihat onOfflineApproachesChange) dikeluarkan dari
+  // penjumlahan panel "Vehicle Detection" -- angkanya harus kosong/0
+  // untuk lengan itu, bukan angka terakhir yang nyangkut dari Supabase.
+  const countedApproaches = lenganFilteredApproaches.filter(
+    (approach) => !offlineApproaches.has(approach.approach)
+  );
+
   const vehicleClassCounts: VehicleClassCount[] = [
 
     {
       vehicleClass: "motorcycle",
 
-      count: lenganFilteredApproaches.reduce(
+      count: countedApproaches.reduce(
         (sum, approach) =>
           sum + approach.motorcycleCount,
         0
@@ -975,7 +1004,7 @@ export default function DashboardPage() {
     {
       vehicleClass: "car",
 
-      count: lenganFilteredApproaches.reduce(
+      count: countedApproaches.reduce(
         (sum, approach) =>
           sum + approach.carCount,
         0
@@ -985,7 +1014,7 @@ export default function DashboardPage() {
     {
       vehicleClass: "bus",
 
-      count: lenganFilteredApproaches.reduce(
+      count: countedApproaches.reduce(
         (sum, approach) =>
           sum + approach.busCount,
         0
@@ -995,7 +1024,7 @@ export default function DashboardPage() {
     {
       vehicleClass: "truck",
 
-      count: lenganFilteredApproaches.reduce(
+      count: countedApproaches.reduce(
         (sum, approach) =>
           sum + approach.truckCount,
         0
@@ -1061,7 +1090,7 @@ export default function DashboardPage() {
         <DashboardWelcome dateLabel={weather.dateLabel} />
 
         <StatsRow
-          approaches={lenganFilteredApproaches}
+          approaches={countedApproaches}
           weather={weather}
         />
 
@@ -1083,6 +1112,7 @@ export default function DashboardPage() {
                 trafficTimestamp={allTrafficStates["intersection4"]?.windowEnd}
                 trafficStateId={allTrafficStates["intersection4"]?.trafficStateId}
                 candidateId={activeRecommendation?.candidateId}
+                offlineApproaches={offlineApproaches}
               />
             </div>
 
@@ -1094,6 +1124,7 @@ export default function DashboardPage() {
                 selectedApproach={selectedApproach}
                 onApproachChange={setSelectedApproach}
                 onTimeUpdate={handleCameraTimeUpdate}
+                onOfflineApproachesChange={setOfflineApproaches}
               />
             </div>
 
