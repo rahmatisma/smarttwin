@@ -6,7 +6,6 @@ import { fetchScenarioForecast, type ScenarioForecastResponse } from "@/lib/scen
 
 const approaches = [["north", "Utara"], ["east", "Timur"], ["south", "Selatan"], ["west", "Barat"]] as const;
 const format = (value: number | null | undefined) => typeof value === "number" && Number.isFinite(value) ? value.toFixed(1) : "—";
-const time = (value: string) => new Date(value).toLocaleString("id-ID");
 
 
 export default function ScenarioProjection({ scenario, trafficStateId }: { scenario: ScenarioType; trafficStateId?: number }) {
@@ -32,8 +31,6 @@ export default function ScenarioProjection({ scenario, trafficStateId }: { scena
             <h2 className="text-base font-semibold">Prediksi 1 Menit — {scenario}</h2>
             <span className="rounded-full bg-surface-2 px-3 py-1 text-xs font-medium text-text-primary">Estimasi dampak pengaturan lampu</span>
         </div>
-        {projection && <p className="mt-2 text-sm text-text-secondary">Waktu proyeksi: {time(projection.predictionTimestamp)}</p>}
-
         {!trafficStateId ? <p role="status" className="mt-4 text-sm text-text-secondary">Pilih kondisi lalu lintas untuk menghitung prediksi skenario.</p>
             : error ? <div role="alert" className="mt-4 rounded-xl border border-border p-4">
                 <p className="text-sm text-signal-amber">{error}</p>
@@ -60,10 +57,6 @@ export default function ScenarioProjection({ scenario, trafficStateId }: { scena
                         </dl>
                     </div>)}
                 </div>
-                <details className="mt-4 text-sm text-text-secondary">
-                    <summary className="cursor-pointer font-medium">Asumsi perhitungan</summary>
-                    <ul className="mt-2 list-disc space-y-1 pl-5">{projection?.assumptions.map(assumption => <li key={assumption}>{assumption}</li>)}</ul>
-                </details>
             </>}
 
     </section>;
