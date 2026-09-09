@@ -246,6 +246,42 @@ function sedangMenungguMetrik(siklus: Siklus | null): boolean {
     return kandidat.every((k) => k.avgDelaySeconds == null);
 }
 
+/*
+ * Penanda naik/turun persen. `improved` dari backend (hijau = membaik,
+ * merah = memburuk, null = tidak berubah). Untuk metrik yang tidak punya
+ * arah "baik/buruk" (mis. durasi hijau), lewatkan improved=undefined ->
+ * warna netral, cuma menunjukkan arah.
+ */
+function PersenBadge({
+    percent,
+    improved,
+}: {
+    percent: number | null;
+    improved?: boolean | null;
+}) {
+    if (percent == null || percent === 0) {
+        return (
+            <span className="flex items-center gap-0.5 text-[10px] text-text-muted">
+                <Minus size={10} /> tetap
+            </span>
+        );
+    }
+    const turun = percent < 0;
+    const warna =
+        improved === undefined
+            ? "text-text-secondary"
+            : improved
+              ? "text-signal-green"
+              : "text-signal-red";
+    return (
+        <span className={`flex items-center gap-0.5 text-[10px] font-medium ${warna}`}>
+            {turun ? <TrendingDown size={10} /> : <TrendingUp size={10} />}
+            {turun ? "" : "+"}
+            {percent}%
+        </span>
+    );
+}
+
 interface TitikGrafik {
     waktu: string;
     [kunci: string]: string | number | null;
@@ -1254,6 +1290,125 @@ export default function HistoryPage() {
                                 ))}
                             </div>
                         </div>
+                        {/* DURASI LAMPU HIJAU REKOMENDASI (vs realtime) */}
+                        <div className="mb-5">
+                            <div className="mb-2 flex items-center gap-2">
+                                <TrendingDown size={15} className="text-signal-green" />
+                                <h3 className="text-xs font-medium">
+                                    Durasi Lampu Hijau Rekomendasi
+                                    <span className="ml-1 font-normal text-text-muted">vs realtime 50s</span>
+                                </h3>
+                            </div>
+                            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                                {urutkanFase(dipilih.phases).map((fase) => {
+                                    const dari = fase.currentGreenSeconds;
+                                    const ke = fase.greenSeconds;
+                                    const persen =
+                                        dari != null && ke != null && dari !== 0
+                                            ? Math.round(((ke - dari) / dari) * 100)
+                                            : null;
+                                    return (
+                                        <div
+                                            key={fase.approach}
+                                            className="rounded-lg border border-border bg-surface-2 p-3"
+                                        >
+                                            <p className="text-[11px] text-text-muted">
+                                                {labelLengan(fase.approach)}
+                                            </p>
+                                            <div className="mt-1 flex items-baseline gap-1.5">
+                                                <span className="font-mono text-[11px] text-text-muted line-through">
+                                                    {dari ?? "—"}s
+                                                </span>
+                                                <span className="text-text-muted">→</span>
+                                                <span className="font-mono text-sm font-bold text-signal-green">
+                                                    {ke ?? "—"}s
+                                                </span>
+                                            </div>
+                                            <div className="mt-1">
+                                                <PersenBadge percent={persen} />
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        </div>
+                        {/* KONDISI AKHIR EVALUASI (hasil simulasi kandidat terpilih) */}
+                        {dipilih.beforeAfter?.byApproach && (
+                            <div className="mb-5">
+                                <div className="mb-2 flex items-center gap-2">
+                                    <Activity size={15} className="text-text-secondary" />
+                                    <h3 className="text-xs font-medium">
+                                        Kondisi Akhir Evaluasi
+                                        <span className="ml-1 font-normal text-text-muted">
+                                            hasil SUMO menjalankan rekomendasi, vs realtime
+                                        </span>
+                                    </h3>
+                                </div>
+                                <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                                    {URUTAN_LENGAN.map((lengan) => {
+                                        const rows =
+                                            dipilih.beforeAfter?.byApproach?.[
+                                                lengan as "north" | "south" | "east" | "west"
+                                            ] ?? [];
+                                        if (rows.length === 0) {
+                                            return (
+                                                <div
+                                                    key={lengan}
+                                                    className="rounded-lg border border-border bg-surface-2 p-3"
+                                                >
+                                                    <p className="text-[11px] text-text-muted">
+                                                        {labelLengan(lengan)}
+                                                    </p>
+                                                    <p className="mt-2 text-[10px] text-text-muted">—</p>
+                                                </div>
+                                            );
+                                        }
+                                        return (
+                                            <div
+                                                key={lengan}
+                                                className="rounded-lg border border-border bg-surface-2 p-3"
+                                            >
+                                                <p className="text-[11px] text-text-muted">
+                                                    {labelLengan(lengan)}
+                                                </p>
+                                                <dl className="mt-1.5 space-y-1.5">
+                                                    {rows
+                                                        // "Antrean (meter)" = kendaraan x 7, redundan di kartu ringkas
+                                                        .filter((m) => m.metric !== "avgQueueLengthMByApproach")
+                                                        .map((m) => (
+                                                        <div key={m.metric}>
+                                                            <div className="flex items-baseline justify-between gap-1">
+                                                                <dt className="text-[10px] text-text-muted">
+                                                                    {m.label}
+                                                                </dt>
+                                                                <dd className="font-mono text-xs font-medium">
+                                                                    {m.after}
+                                                                    {m.unit === "s"
+                                                                        ? "s"
+                                                                        : m.unit === "m"
+                                                                          ? "m"
+                                                                          : ""}
+                                                                </dd>
+                                                            </div>
+                                                            <div className="flex justify-end">
+                                                                <PersenBadge
+                                                                    percent={m.changePercent}
+                                                                    improved={m.improved}
+                                                                />
+                                                            </div>
+                                                        </div>
+                                                    ))}
+                                                </dl>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                                <p className="mt-1.5 text-[10px] italic text-text-muted">
+                                    &quot;Setelah&quot; = hasil SUMO menjalankan durasi rekomendasi
+                                    dengan demand yang sama, bukan pengamatan CCTV.
+                                </p>
+                            </div>
+                        )}
                         {/* TAB LENGAN -- di atas grafik, ngontrol Traffic Forecast (garis
                             mana yang ditebalkan) DAN bagian Proses/Output di bawahnya. */}
                         <div className="mb-3 grid grid-cols-4 gap-1.5">
