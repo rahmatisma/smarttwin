@@ -100,6 +100,10 @@ export default function DigitalTwinView() {
         useState<SimulationStatus>("idle");
     const [loading, setLoading] = useState(false);
     const [simulationIssue, setSimulationIssue] = useState<string | null>(null);
+    const [startIssue, setStartIssue] = useState<string | null>(null);
+    const startControllerRef = useRef<AbortController | null>(null);
+    const autoStartAttemptedRef = useRef(false);
+
     const [vehicles, setVehicles] = useState<VehicleData[]>([]);
     // vehicles.length = SEMUA kendaraan di network (633x1020m). Video cuma
     // menampilkan crop kamera (~140x79m) -- jadi ini hitungan yang benar-
@@ -120,6 +124,16 @@ export default function DigitalTwinView() {
     const [runningScenario, setRunningScenario] = useState<ScenarioType | null>("Traffic Realtime");
 
     const { scenario, setScenario } = useScenario();
+
+    useEffect(() => {
+        autoStartAttemptedRef.current = false;
+        setStartIssue(null);
+        setLoading(false);
+        return () => {
+            startControllerRef.current?.abort();
+            startControllerRef.current = null;
+        };
+    }, [scenario]);
 
     const [simSharedPhase, setSimSharedPhase] = useState<string>("north");
     const [simSharedState, setSimSharedState] = useState<"GREEN" | "YELLOW" | "RED">("RED");
@@ -250,6 +264,7 @@ export default function DigitalTwinView() {
                     : null);
 
                 if (data.running) {
+                    setStartIssue(null);
                     if (data.paused) {
                         setStatus("paused");
                     } else {
@@ -407,6 +422,7 @@ export default function DigitalTwinView() {
     }, [API_BASE_URL, scenario]);
 
     async function handleStartSimulation(targetScenario?: ScenarioType) {
+        if (startControllerRef.current) return;
         // Parameter opsional -- WAJIB dipakai (bukan baca `scenario` dari
         // closure) saat dipanggil tepat setelah setScenario(), karena
         // setState di React async: closure di sini masih lihat nilai lama.
@@ -415,9 +431,15 @@ export default function DigitalTwinView() {
 
         if (context === "digitaltwin" && !traffic?.trafficStateId) { alert("Kondisi awal belum tersedia."); return; }
         setLoading(true);
+        setStartIssue(null);
+        const abortController = new AbortController();
+        startControllerRef.current = abortController;
+        let timedOut = false;
+        const timeout = window.setTimeout(() => {
+            timedOut = true;
+            abortController.abort();
+        }, 60_000);
         try {
-            const abortController = new AbortController();
-            const timeout = window.setTimeout(() => abortController.abort(), 20_000);
             const response = await fetch(`${API_BASE_URL}/api/v1/simulation/run`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
@@ -432,12 +454,13 @@ export default function DigitalTwinView() {
                     trafficStateId: context === "digitaltwin" ? traffic?.trafficStateId : undefined,
                     scenario: effectiveScenario
                 }),
-            }).finally(() => window.clearTimeout(timeout));
+            });
 
             if (!response.ok) {
                 const errData = await response.json().catch(() => ({}));
                 throw new Error(errData.detail || "Gagal memulai simulasi");
             }
+            if (abortController.signal.aborted) return;
 
             // Simulasi berhasil berjalan -- riwayat grafik direset supaya
             // tren yang tampil murni punya skenario ini, tidak mencampur
@@ -448,15 +471,21 @@ export default function DigitalTwinView() {
             setSimHistory([]);
             setRecommendationLoading(false);
         } catch (error) {
-            console.error(error);
-            const message = error instanceof DOMException && error.name === "AbortError"
-                ? "SUMO tidak merespons dalam 20 detik. Periksa backend/SUMO."
+            if (startControllerRef.current !== abortController) return;
+            const message = timedOut
+                ? "SUMO belum merespons setelah 60 detik. Status tetap dipantau; backend mungkin masih menyiapkan simulasi."
+                : error instanceof TypeError
+                    ? "Tidak dapat terhubung ke API simulasi. Periksa apakah backend aktif dan alamat NEXT_PUBLIC_API_URL dapat diakses dari browser."
                 : error instanceof Error
                     ? error.message
                     : "Terjadi kesalahan saat memulai simulasi";
-            alert(message);
+            setStartIssue(message);
         } finally {
-            setLoading(false);
+            window.clearTimeout(timeout);
+            if (startControllerRef.current === abortController) {
+                startControllerRef.current = null;
+                setLoading(false);
+            }
         }
     }
 
@@ -472,6 +501,9 @@ export default function DigitalTwinView() {
         if (!isSimStateLoaded) return;
         if (status !== "idle") return;
         if (loading) return;
+        // A failed request must not restart itself when loading becomes false.
+        if (autoStartAttemptedRef.current) return;
+        autoStartAttemptedRef.current = true;
         void handleStartSimulation("Traffic Realtime");
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [scenario, status, isSimStateLoaded, loading]);
@@ -669,7 +701,10 @@ export default function DigitalTwinView() {
                         </div>
 
                         {/* Simulation area */}
-                        {simulationIssue && <div role="alert" className="border-y border-border bg-surface-2 px-4 py-3 text-sm text-signal-amber">{simulationIssue}</div>}
+                        {(startIssue || simulationIssue) && <div role="alert" className="border-y border-border bg-surface-2 px-4 py-3 text-sm text-signal-amber">
+                            {startIssue || simulationIssue}
+                            {startIssue && status === "idle" && <button type="button" disabled={loading} onClick={() => void handleStartSimulation()} className="ml-3 underline disabled:opacity-50">Coba lagi</button>}
+                        </div>}
 
                         <div className={`relative w-full overflow-hidden bg-[var(--color-canvas)] ${
                             isFullscreen ? "min-h-0 flex-1" : "aspect-[4/3] flex-1"
