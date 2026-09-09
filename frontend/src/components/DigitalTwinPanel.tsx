@@ -31,20 +31,29 @@ const SIGNAL_COLOR = {
   green: "#2ecc71",
 } as const;
 
-// Kalibrasi SUMO live dari pengamatan frame video CCTV anotasi yang
-// diputar dashboard (video id 37-40, September 2026): antrean tiap
-// lengan mencair/menumpuk + penghitung crossing ditelusuri selama 2
-// putaran. Simpang Pingit fixed-time, urутan U -> T -> S -> B, video
-// mulai tepat saat Utara hijau (offset ~0). Hijau ~ U/T/S/B = 40/45/
-// 28/65 dtk, kuning 4 dtk, siklus ~194 dtk. Ketelitian +/- ~10 dtk --
-// setel ulang di sini kalau pas demo fase SUMO masih meleset dari video.
-// Nilai ini sengaja TIDAK dipakai oleh card rekomendasi/status sinyal.
-const LIVE_SUMO_PHASES = [
-  { approach: "north", greenSeconds: 40, yellowSeconds: 4 },
-  { approach: "east", greenSeconds: 45, yellowSeconds: 4 },
-  { approach: "south", greenSeconds: 28, yellowSeconds: 4 },
-  { approach: "west", greenSeconds: 65, yellowSeconds: 4 },
-] as const;
+// Simpang Pingit FIXED-TIME: keempat lengan 50 dtk hijau + 4 dtk kuning,
+// urutan U -> T -> S -> B, siklus 4 x (50+4) = 216 dtk. Dikonfirmasi dari
+// pergerakan kendaraan di video CCTV anotasi.
+//
+// START_OFFSET_SECONDS: video CCTV TIDAK mulai tepat di detik ke-0 siklus --
+// saat video mulai, Utara sudah hijau beberapa detik, jadi siklus PERTAMA
+// Utara tampil lebih pendek. Selanjutnya penuh 50 dtk. Nilai ini menggeser
+// posisi siklus SUMO supaya cocok dengan video sejak frame pertama.
+// Setel ulang kalau pas demo fase awal masih meleset dari video:
+//   sisa hijau Utara di awal video = 50 - START_OFFSET_SECONDS
+//   (offset 25 -> Utara mulai dari 25 dtk)
+const LIVE_SUMO_GREEN_SECONDS = 50;
+const LIVE_SUMO_YELLOW_SECONDS = 4;
+const LIVE_SUMO_START_OFFSET_SECONDS = 25;
+const LIVE_SUMO_CYCLE_SECONDS =
+  4 * (LIVE_SUMO_GREEN_SECONDS + LIVE_SUMO_YELLOW_SECONDS); // 216
+const LIVE_SUMO_PHASES = (["north", "east", "south", "west"] as const).map(
+  (approach) => ({
+    approach,
+    greenSeconds: LIVE_SUMO_GREEN_SECONDS,
+    yellowSeconds: LIVE_SUMO_YELLOW_SECONDS,
+  })
+);
 
 /*
  * =========================================================
@@ -452,7 +461,8 @@ export default function DigitalTwinPanel({
           phases: LIVE_SUMO_PHASES,
           candidateId: "observed-cctv-live",
           source: "observed-cctv",
-          totalCycleSeconds: 194,
+          totalCycleSeconds: LIVE_SUMO_CYCLE_SECONDS,
+          startOffsetSeconds: LIVE_SUMO_START_OFFSET_SECONDS,
         },
       }),
     })

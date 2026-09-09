@@ -741,6 +741,18 @@ async function requestSnapshotForecast(trafficStateId: number): Promise<Forecast
       const item = row.approaches.find(item => item.approach === approach);
       return item ? [{ timestamp: row.timestamp, predictedVehicleCount: item.vehicleCount, predictedQueueLengthVeh: item.queueLengthVeh, predictedQueueLengthMEst: item.queueLengthMEst, predictedDensityIndex: item.densityIndex, predictedSpeedKmh: null }] : [];
     })]));
-    return { intersectionId: DEFAULT_INTERSECTION_ID, trafficStateId, inputTimestamp: result.input?.to, horizonMinutes: rows[rows.length - 1].secondsAhead / 60, model: result.model.name, predictions: [], predictionsByApproach, forecastSource: result.forecastSource, fallbackUsed: result.fallbackUsed };
+    // Deret agregat (jumlah 4 lengan per horizon) -- ForecastChart butuh
+    // `predictions` untuk grafik utama. Endpoint snapshot cuma memberi data
+    // per lengan, jadi dijumlahkan di sini persis seperti requestForecast()
+    // lama. Tanpa ini grafik selalu "Data forecast belum tersedia".
+    const predictions = rows.map(row => ({
+      timestamp: row.timestamp,
+      predictedVehicleCount: row.approaches.reduce((sum, item) => sum + item.vehicleCount, 0),
+      predictedQueueLengthVeh: row.approaches.reduce((sum, item) => sum + item.queueLengthVeh, 0),
+      predictedQueueLengthMEst: row.approaches.reduce((sum, item) => sum + item.queueLengthMEst, 0),
+      predictedDensityIndex: row.approaches.reduce((sum, item) => sum + item.densityIndex, 0) / Math.max(row.approaches.length, 1),
+      predictedSpeedKmh: null,
+    }));
+    return { intersectionId: DEFAULT_INTERSECTION_ID, trafficStateId, inputTimestamp: result.input?.to, horizonMinutes: rows[rows.length - 1].secondsAhead / 60, model: result.model.name, predictions, predictionsByApproach, forecastSource: result.forecastSource, fallbackUsed: result.fallbackUsed };
   } catch { return null; }
 }

@@ -462,6 +462,43 @@ export default function DashboardPage() {
           return;
         }
 
+        // Hitung sisa waktu MERAH tiap lengan (detik sampai lengan itu hijau)
+        // dari rotasi cyclePlan + fase aktif. Tanpa ini panel Rekomendasi
+        // menampilkan "Realtime 0s" untuk semua lengan yang sedang merah,
+        // karena /simulation/state hanya memberi fase aktif, bukan per lengan.
+        const YELLOW_SECONDS = 4;
+        const planPhases: Array<{ approach: string; greenSeconds: number; yellowSeconds?: number }> =
+          state.cyclePlan?.phases ?? [];
+        const activeRemaining = Math.max(0, signal.remainingSeconds ?? 0);
+        let phases: SignalStatus["phases"];
+        const activeIdx = planPhases.findIndex((p) => p.approach === signal.activeApproach);
+        if (activeIdx >= 0) {
+          const phaseLen = (p: { greenSeconds: number; yellowSeconds?: number }) =>
+            (p.greenSeconds ?? 0) + (p.yellowSeconds ?? YELLOW_SECONDS);
+          phases = {
+            [signal.activeApproach]: {
+              phaseId: signal.activeApproach,
+              state: (signal.state ?? "GREEN").toLowerCase(),
+              durationSeconds: phaseLen(planPhases[activeIdx]),
+              remainingSeconds: Math.round(activeRemaining),
+            },
+          };
+          // Waktu sampai fase aktif selesai sepenuhnya (hijau sisa + kuning,
+          // atau kuning sisa saja bila sudah kuning).
+          let acc =
+            signal.state === "YELLOW" ? activeRemaining : activeRemaining + YELLOW_SECONDS;
+          for (let k = 1; k < planPhases.length; k++) {
+            const idx = (activeIdx + k) % planPhases.length;
+            phases[planPhases[idx].approach] = {
+              phaseId: planPhases[idx].approach,
+              state: "red",
+              durationSeconds: planPhases[idx].greenSeconds ?? 0,
+              remainingSeconds: Math.round(acc),
+            };
+            acc += phaseLen(planPhases[idx]);
+          }
+        }
+
         setLiveSumoSignal({
           intersectionId: "simpang4-pingit",
           timestamp: new Date().toISOString(),
@@ -470,6 +507,7 @@ export default function DashboardPage() {
           state: signal.state === "YELLOW" ? "YELLOW" : "GREEN",
           remainingSeconds: Math.max(0, Math.ceil(signal.remainingSeconds ?? 0)),
           cycleTimeSeconds: state.cyclePlan?.totalCycleSeconds ?? 0,
+          phases,
           source: "scenario-generator",
         });
       } catch {
