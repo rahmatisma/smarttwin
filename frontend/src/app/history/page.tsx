@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState, useMemo } from "react";
+import { useCallback, useEffect, useState, useMemo, useRef } from "react";
 import {
     Activity,
     ChevronDown,
@@ -402,7 +402,9 @@ function GrafikLengan({
                                     strokeWidth={2}
                                     dot={false}
                                     activeDot={{ r: 4 }}
-                                    isAnimationActive={false}
+                                    isAnimationActive
+                                    animationDuration={450}
+                                    animationEasing="ease-out"
                                     connectNulls
                                 />
                             ))}
@@ -617,6 +619,29 @@ export default function HistoryPage() {
         }, 5000);
         return () => clearInterval(intervalId);
     }, [halaman]);
+
+    // Deteksi baris riwayat yang BARU muncul (dari auto-refresh) supaya bisa
+    // dianimasikan masuk dari kanan. Load pertama tidak dianimasikan (semua
+    // baris "baru"); hanya siklus yang menyusul setelahnya. Kelas dilepas
+    // setelah animasi selesai supaya tidak terulang di re-render berikutnya.
+    const [barisBaru, setBarisBaru] = useState<Set<string>>(new Set());
+    const timestampTerlihatRef = useRef<Set<string> | null>(null);
+    useEffect(() => {
+        if (!data) return;
+        const semua = new Set(data.items.map((s) => s.timestamp));
+        if (timestampTerlihatRef.current === null) {
+            timestampTerlihatRef.current = semua;
+            return;
+        }
+        const baru = [...semua].filter(
+            (ts) => !timestampTerlihatRef.current!.has(ts)
+        );
+        timestampTerlihatRef.current = semua;
+        if (baru.length === 0) return;
+        queueMicrotask(() => setBarisBaru(new Set(baru)));
+        const t = setTimeout(() => setBarisBaru(new Set()), 650);
+        return () => clearTimeout(t);
+    }, [data]);
 
     // Poll DIAM-DIAM (tidak lewat setMemuat -- jangan sampai spinner
     // full-page nyala cuma karena satu siklus masih nunggu metrik) selama
@@ -1081,7 +1106,11 @@ export default function HistoryPage() {
                                                 <tr
                                                     key={siklus.timestamp}
                                                     onClick={() => setDipilih(siklus)}
-                                                    className="cursor-pointer border-b border-border/50 transition hover:bg-surface-2"
+                                                    className={`cursor-pointer border-b border-border/50 transition hover:bg-surface-2 ${
+                                                        barisBaru.has(siklus.timestamp)
+                                                            ? "riwayat-baris-baru"
+                                                            : ""
+                                                    }`}
                                                 >
                                                     <td className="whitespace-nowrap px-5 py-3 font-mono text-xs">
                                                         {formatWaktu(siklus.timestamp)}
