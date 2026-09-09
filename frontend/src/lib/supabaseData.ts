@@ -332,11 +332,15 @@ export async function fetchRecommendation(
   if (recommendationCache && Date.now() - recommendationCacheTime < 5000) return recommendationCache;
   if (recommendationRequestInFlight) return recommendationRequestInFlight;
 
+  // Endpoint normal ~1 dtk (cache in-memory di backend). Batas 30 dtk buat
+  // menahan lonjakan sesekali saat CPU laptop dipakai bareng SUMO worker +
+  // next dev -- lebih baik menunggu lama daripada memunculkan TimeoutError
+  // padahal jawabannya akan datang.
   recommendationRequestInFlight = fetch(`${API_BASE_URL}/recommendation`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ intersectionId }),
-    signal: AbortSignal.timeout(15000),
+    signal: AbortSignal.timeout(30000),
   })
     .then(async (response) => {
       if (!response.ok) throw new Error(`Rekomendasi gagal dimuat (HTTP ${response.status}).`);

@@ -34,17 +34,19 @@ from app.services.signal_service import signal_service
 
 logger = logging.getLogger("uvicorn.error")
 
-# TrafficState baru ditulis ingest CV ~tiap 5 detik, jadi menghitung ulang
-# rekomendasi lebih sering dari itu tidak menghasilkan angka baru -- hanya
-# membebani Supabase + LSTM. Cache proses (bukan per-request) berumur pendek
-# ini membuat: (1) banyak tab dashboard berbagi SATU perhitungan, (2) burst
-# refetch akibat satu event WebSocket tidak menjadi N perhitungan paralel.
+# TrafficState baru ditulis ingest CV ~tiap 5 detik. Cache proses (bukan
+# per-request) ini membuat: (1) banyak tab dashboard berbagi SATU
+# perhitungan, (2) burst refetch akibat satu event WebSocket tidak menjadi
+# N perhitungan paralel, (3) saat CPU laptop dipakai bareng SUMO worker,
+# perhitungan yang sesekali lambat tidak terjadi tiap 3 detik -- 12 detik
+# cukup segar untuk demo (videonya rekaman) dan jauh lebih jarang memicu
+# recompute yang bisa kena starvation CPU sampai timeout.
 # Override lewat env RECOMMENDATION_CACHE_TTL_SECONDS ("0" mematikan cache).
 def _cache_ttl_seconds() -> float:
     try:
-        return max(0.0, float(os.getenv("RECOMMENDATION_CACHE_TTL_SECONDS", "3")))
+        return max(0.0, float(os.getenv("RECOMMENDATION_CACHE_TTL_SECONDS", "12")))
     except ValueError:
-        return 3.0
+        return 12.0
 
 
 class RecommendationService:
