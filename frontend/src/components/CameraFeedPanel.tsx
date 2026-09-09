@@ -438,6 +438,7 @@ export default function CameraFeedPanel({
     const wasOffline = offlineCameraIds.has(camera.id);
 
     if (wasOffline) {
+      const liveTime = getSharedTimelineTime();
       // BALIK ONLINE -- loncat ke posisi kamera lain yang masih hidup &
       // tidak pernah disentuh (bukti paling akurat instan dunia nyata
       // yang sama, lihat jam yang kebakar di gambar CCTV), baru mainkan.
@@ -456,11 +457,11 @@ export default function CameraFeedPanel({
       if (video) {
         const duration = video.duration;
         const target =
-          referenceVideo &&
-          Number.isFinite(referenceVideo.currentTime) &&
           Number.isFinite(duration) &&
           duration > 0
-            ? referenceVideo.currentTime % duration
+            ? (referenceVideo && Number.isFinite(referenceVideo.currentTime)
+                ? referenceVideo.currentTime
+                : liveTime) % duration
             : undefined;
 
         if (target !== undefined) {
@@ -495,7 +496,7 @@ export default function CameraFeedPanel({
       });
 
       timelineRef.current.paused = false;
-      anchorTimeline(timelineRef.current, timelineRef.current.time);
+      anchorTimeline(timelineRef.current, liveTime);
       persistTimeline(
         timelineRef.current.time,
         false,
@@ -516,16 +517,8 @@ export default function CameraFeedPanel({
         const next = new Set(prev);
         next.add(camera.id);
 
-        if (next.size >= cameras.length) {
-          timelineRef.current.paused = true;
-          anchorTimeline(timelineRef.current, timelineRef.current.time);
-          persistTimeline(
-            timelineRef.current.time,
-            true,
-            timelineRef.current.updatedAt,
-            timelineRef.current.backendInstanceId
-          );
-        }
+        // Jam live tetap maju meskipun semua CCTV offline. Saat pulih,
+        // kamera mengejar waktu sekarang, bukan posisi ketika terputus.
 
         return next;
       });

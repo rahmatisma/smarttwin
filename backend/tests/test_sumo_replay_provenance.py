@@ -160,6 +160,8 @@ def test_replay_loops_only_prefix_before_failure(monkeypatch, arm, cutoff):
     now[0] += 2
     assert service._sample_offline_replay(arm, "dashboard")["time"] == 10001
     assert service.offline_cutoffs["dashboard"][arm] == cutoff
+    now[0] += cutoff * 4
+    assert service._sample_offline_replay(arm, "dashboard")["time"] == 10001
 
 
 def test_each_arm_freezes_its_own_cutoff_and_recovery_resets_it():

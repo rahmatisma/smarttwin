@@ -2,7 +2,7 @@
 
 import { History } from "lucide-react";
 import type { DataModeInfo } from "@/lib/dataMode";
-import { formatReplayDate, formatReplaySince, approachLabelId } from "@/lib/dataMode";
+import { approachLabelId } from "@/lib/dataMode";
 
 // Warna penanda "data lama" -- HARUS sama dengan STALE_VEHICLE_COLOR di
 // backend/app/simulation/sumo/sumo_controller.py (putih) supaya kendaraan
@@ -36,19 +36,14 @@ function approachPhrase(approaches: string[]): string | null {
  */
 
 function replaySentence(info: DataModeInfo): string {
-  const tanggal = formatReplayDate(info.replayDataDate);
-  const sejak = formatReplaySince(info.since);
   const lengan = approachPhrase(info.replayApproaches);
 
   const subjek = lengan ? `CCTV ${lengan} nonaktif` : "CCTV nonaktif";
-  const dasar = tanggal
-    ? `${subjek} — menampilkan data historis ${tanggal}`
-    : `${subjek} — menampilkan data terakhir sebelum putus`;
-  const waktu = sejak ? ` sejak ${sejak}` : "";
+  const dasar = `${subjek} — mengulang rekaman dari awal hingga waktu CCTV terputus sampai CCTV kembali online`;
   const penanda = lengan
     ? " Kendaraan putih di lengan itu berasal dari data lama."
     : "";
-  return `${dasar}${waktu}.${penanda}`;
+  return `${dasar}.${penanda}`;
 }
 
 /* Strip melayang di atas frame SUMO -- dipakai di dalam area video. */
@@ -95,7 +90,7 @@ export function ReplayModeCallout({
         <p className="font-semibold uppercase tracking-wide">Mode Data Rekaman</p>
         <p className="mt-0.5 text-signal-amber/90">
           {replaySentence(info)}{" "}
-          {info.replayApproaches.length > 0
+          {info.replayApproaches.length > 0 && info.replayApproaches.length < 4
             ? "Lengan lain tetap live."
             : "Simulasi berjalan dari data historis, bukan lalu lintas langsung."}
         </p>
