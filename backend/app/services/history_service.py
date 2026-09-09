@@ -78,16 +78,24 @@ _BEFORE_AFTER_APPROACH_FIELDS = (
 _APPROACHES = ("north", "south", "east", "west")
 
 BASELINE_CANDIDATE_ID = "baseline"
+# Acuan "sebelum" = lampu fixed-time yang BENAR-BENAR TERPASANG sekarang
+# (disimulasikan dengan demand yang sama). Pertanyaan yang dijawab:
+# "seberapa lebih baik rekomendasi dibanding lampu yang jalan sekarang",
+# bukan "kandidat mana yang terbaik". Siklus lama tanpa baris `realtime`
+# jatuh ke kandidat `baseline` (perilaku sebelumnya).
+REFERENCE_CANDIDATE_ID = "realtime"
 
 
 def _compute_before_after(candidates: list[dict[str, Any]]) -> dict[str, Any] | None:
-    """Bandingkan kandidat `baseline` (before) vs pemenang (after).
+    """Bandingkan lampu terpasang (`realtime`, before) vs pemenang (after).
 
     None kalau datanya tidak lengkap untuk dibandingkan -- mis. siklus lama
     dari sebelum fitur Scenario Generator tersambung ke riwayat, yang tidak
     punya baris `simulations` sama sekali.
     """
     baseline = next(
+        (c for c in candidates if c["candidateId"] == REFERENCE_CANDIDATE_ID), None
+    ) or next(
         (c for c in candidates if c["candidateId"] == BASELINE_CANDIDATE_ID), None
     )
     winner = next((c for c in candidates if c["isWinner"]), None)
@@ -157,13 +165,18 @@ def _compute_before_after(candidates: list[dict[str, Any]]) -> dict[str, Any] | 
         if approach_metrics:
             by_approach[approach] = approach_metrics
 
+    # True kalau rekomendasi benar-benar menurunkan delay dibanding lampu
+    # terpasang. False = lampu terpasang sudah sama baik / lebih baik untuk
+    # kondisi ini -- itu keputusan yang SAH, bukan sistem gagal berpikir.
+    delay_metric = next(
+        (m for m in metrics if m["metric"] == "avgDelaySeconds"), None
+    )
+    changed = bool(delay_metric and delay_metric["improved"] is True)
+
     return {
         "baselineCandidateId": baseline["candidateId"],
         "winnerCandidateId": winner["candidateId"],
-        # False kalau sistem menyimpulkan pengaturan dasar sudah paling
-        # baik untuk kondisi ini -- itu keputusan yang SAH, bukan sistem
-        # gagal berpikir. Ditandai eksplisit supaya tidak disalahartikan.
-        "changed": winner["candidateId"] != baseline["candidateId"],
+        "changed": changed,
         "metrics": metrics,
         "byApproach": by_approach or None,
     }

@@ -232,6 +232,12 @@ def evaluate_state(state, *, forecast=None, full_cycle: bool = False,
     recommendation_payload["delayByApproachSeconds"] = (
         winner.get("delayByApproachSeconds") or {}
     )
+    # `candidates` untuk cache/Digital Twin tetap 3 (baseline/aggressive/
+    # balanced) supaya skema & validasi lama tidak berubah. Baris acuan
+    # `realtime` (lampu terpasang, bukan kandidat) cuma ikut ke riwayat
+    # lewat `candidatesWithReference` -- dipakai perbandingan Dampak.
+    all_results = engine.last_results
+    candidates_only = [c for c in all_results if not c.get("isReference")]
     payload = {
         "intersectionId": INTERSECTION_ID,
         "updatedAt": datetime.now(timezone.utc).isoformat(),
@@ -241,7 +247,8 @@ def evaluate_state(state, *, forecast=None, full_cycle: bool = False,
         "los": winner["los"],
         "candidateId": winner["candidateId"],
         "throughputVeh": winner["throughputVeh"],
-        "candidates": engine.last_results,
+        "candidates": candidates_only,
+        "candidatesWithReference": all_results,
     }
     return payload
 
@@ -250,6 +257,8 @@ def write_cache(supabase, payload: dict[str, Any], *, strict: bool = False) -> N
     # Simpan ketiga hasil agar Digital Twin tidak menghitung logic sendiri.
     # Retry legacy menjaga worker tetap hidup bila migrasi kolom `candidates`
     # belum dijalankan; endpoint akan mengembalikan candidates=[] secara jujur.
+    # `candidatesWithReference` hanya dipakai write_history -- bukan kolom tabel.
+    payload = {k: v for k, v in payload.items() if k != "candidatesWithReference"}
     try:
         (
             supabase.table(CACHE_TABLE)
@@ -391,7 +400,13 @@ def write_history(supabase, payload: dict[str, Any], state, *, strict: bool = Fa
     # ------------------------------------------------------------------
     traffic_state_id = getattr(state, "trafficStateId", None)
 
-    for candidate in payload.get("candidates") or []:
+    # Termasuk baris acuan `realtime` -- perbandingan Dampak di halaman
+    # Riwayat mengukur pemenang vs lampu terpasang, bukan vs kandidat.
+    for candidate in (
+        payload.get("candidatesWithReference")
+        or payload.get("candidates")
+        or []
+    ):
         candidate_id = candidate.get("candidateId")
         try:
             simulation = (

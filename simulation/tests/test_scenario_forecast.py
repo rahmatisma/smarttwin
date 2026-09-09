@@ -39,7 +39,11 @@ def test_projection_uses_exact_horizon_without_changing_full_cycle_default(monke
     engine = generator.ScenarioEngine(sumo_binary="unused", sumo_config="unused", tls_id="test",
                                       approach_to_phase={}, run_simulation_fn=lambda **_: {})
     engine.recommend_full_cycle(state, evaluation_horizon_seconds=horizon)
-    assert len(calls) == 3
+    # 3 kandidat + 1 baris acuan "realtime" (lampu terpasang, bukan kandidat).
+    assert len(calls) == 4
+    assert {candidate["candidateId"] for candidate, _ in calls} == {
+        "baseline", "aggressive", "balanced", "realtime"
+    }
     assert all(kwargs["traffic_state"] is state for _, kwargs in calls)
     durations = {kwargs["step_limit"] for _, kwargs in calls}
     assert len(durations) == 1

@@ -984,7 +984,7 @@ export default function HistoryPage() {
                                             <th className="px-5 py-3 font-medium">Persimpangan</th>
                                             <th className="px-5 py-3 font-medium">Kepadatan</th>
                                             <th className="px-5 py-3 font-medium">Durasi Hijau per Lengan</th>
-                                            <th className="px-5 py-3 font-medium">Dampak (vs Baseline)</th>
+                                            <th className="px-5 py-3 font-medium">Dampak (vs Realtime)</th>
                                             <th className="px-5 py-3 font-medium">LOS</th>
                                             <th className="px-5 py-3 font-medium">Sumber</th>
                                             <th className="px-5 py-3 font-medium">Status</th>
@@ -1070,7 +1070,7 @@ export default function HistoryPage() {
                                                         ) : siklus.beforeAfter ? (
                                                             <span className="flex items-center gap-1 text-xs text-text-muted">
                                                                 <Minus size={12} />
-                                                                Tetap (baseline menang)
+                                                                Setara realtime
                                                             </span>
                                                         ) : (
                                                             <span className="text-xs text-text-muted">—</span>

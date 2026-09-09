@@ -90,6 +90,15 @@ YELLOW_SECONDS = 4
 # persentase ilustratif, tetapi increment minimum yang terukur.
 AGGRESSIVE_GREEN_INCREMENT_SECONDS = 1
 
+# Durasi hijau lampu fixed-time Simpang Pingit yang BENAR-BENAR TERPASANG
+# di lapangan (dikonfirmasi dari pergerakan kendaraan di rekaman CCTV:
+# 50 dtk hijau + 4 dtk kuning merata, siklus 216 dtk). Dipakai sebagai
+# titik acuan "sebelum" pada perbandingan dampak -- pertanyaan yang
+# dijawab bukan "kandidat mana yang terbaik dari 3" tapi "seberapa lebih
+# baik rekomendasi dibanding lampu yang jalan sekarang". Harus sama dengan
+# LIVE_SUMO_GREEN_SECONDS di frontend/src/components/DigitalTwinPanel.tsx.
+REALTIME_REFERENCE_GREEN_SECONDS = 50
+
 # State string berasal dari tls_safe.add.xml. Mapping eksplisit mencegah
 # urutan program dinamis bergantung pada index program statis lama.
 _GREEN_STATE_BY_APPROACH = {
@@ -444,6 +453,34 @@ def generate_candidate_plans(
             "greenSeconds": balancedGreen,
         },
     ]
+
+
+def realtime_reference_plan() -> dict[str, Any]:
+    """CyclePlan lampu fixed-time yang terpasang sekarang (50/4 merata).
+
+    BUKAN kandidat -- tidak ikut diadu memperebutkan pemenang. Cuma
+    disimulasikan dengan demand yang sama sebagai titik "sebelum".
+    """
+    green = REALTIME_REFERENCE_GREEN_SECONDS
+    green_cycle_seconds = green * len(FIXED_CYCLE_ORDER)
+    total_cycle_seconds = green_cycle_seconds + YELLOW_SECONDS * len(FIXED_CYCLE_ORDER)
+    return {
+        "candidateId": "realtime",
+        "phases": [
+            {
+                "approach": approach,
+                "greenSeconds": green,
+                "demandScore": 0.0,
+                "yellowSeconds": YELLOW_SECONDS,
+                "redSeconds": total_cycle_seconds - green - YELLOW_SECONDS,
+            }
+            for approach in FIXED_CYCLE_ORDER
+        ],
+        "cycleLengthSeconds": green_cycle_seconds,
+        "totalCycleSeconds": total_cycle_seconds,
+        "busiestApproach": None,
+        "isReference": True,
+    }
 
 
 def generate_cycle_candidate_plans(
@@ -902,9 +939,9 @@ class ScenarioEngine:
             if evaluation_horizon_seconds <= 0:
                 raise ValueError("Horizon prediksi harus lebih dari nol.")
             step_limit = evaluation_horizon_seconds
-        results = [
-            simulate_cycle_candidate(
-                candidate,
+        def _run(plan: dict[str, Any]) -> dict[str, Any]:
+            return simulate_cycle_candidate(
+                plan,
                 sumo_binary=self.sumo_binary,
                 sumo_config=self.sumo_config,
                 tls_id=self.tls_id,
@@ -912,15 +949,21 @@ class ScenarioEngine:
                 step_limit=step_limit,
                 traffic_state=state,
             )
-            for candidate in candidates
-        ]
+
+        results = [_run(candidate) for candidate in candidates]
+        # Lampu fixed-time yang terpasang sekarang, disimulasikan dengan
+        # demand yang SAMA -- titik acuan "sebelum". Tidak ikut diadu jadi
+        # pemenang; select_best_scenario tetap cuma menerima 3 kandidat.
+        realtime_result = _run(realtime_reference_plan())
+        realtime_result["isReference"] = True
+
         evaluation_id = str(uuid.uuid4())
         evaluated_at = datetime.now(timezone.utc).isoformat()
-        for result in results:
+        for result in results + [realtime_result]:
             if result.get("evaluation") is not None:
                 result["evaluation"].update({"id": evaluation_id, "evaluatedAt": evaluated_at})
         winner = select_best_scenario(results)
-        self.last_results = results
+        self.last_results = results + [realtime_result]
         self.last_winner = winner
         self.last_cycle_plan = CyclePlan(
             phases=[ApproachPhase(**phase) for phase in winner["phases"]],
@@ -936,15 +979,17 @@ class ScenarioEngine:
             for phase in winner["phases"]
             if phase["approach"] == baseline_recommendation.recommendedPhase
         )
-        baseline_result = next(
-            result for result in results if result["candidateId"] == "baseline"
-        )
+        # Pengurangan delay dihitung terhadap lampu yang terpasang SEKARANG
+        # (realtime_result), bukan terhadap kandidat 'baseline'. Kalau
+        # kandidat 'baseline' yang menang, perbandingan lawan dirinya
+        # sendiri selalu 0 -- yang ingin dijawab justru "seberapa lebih
+        # baik dari lampu yang jalan sekarang".
         reduction = 0.0
-        if baseline_result["avgDelaySeconds"] > 0:
+        if realtime_result["avgDelaySeconds"] > 0:
             reduction = round(max(
                 0.0,
-                (baseline_result["avgDelaySeconds"] - winner["avgDelaySeconds"])
-                / baseline_result["avgDelaySeconds"] * 100,
+                (realtime_result["avgDelaySeconds"] - winner["avgDelaySeconds"])
+                / realtime_result["avgDelaySeconds"] * 100,
             ), 2)
         print(
             f"Scenario Generator full-cycle: {winner['candidateId']} menang | "
