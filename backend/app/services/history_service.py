@@ -86,6 +86,32 @@ BASELINE_CANDIDATE_ID = "baseline"
 REFERENCE_CANDIDATE_ID = "realtime"
 
 
+def _metric_row(
+    field: str, label: str, unit: str, lower_is_better: bool,
+    before: float | None, after: float | None,
+) -> dict[str, Any] | None:
+    """Satu baris Before/After. Arah "membaik" ditentukan dari perbandingan
+    NILAI, bukan dari persen yang sudah dibulatkan -- lampu terpasang (fixed
+    50/4) hampir tidak pernah persis sama dengan rekomendasi, jadi selisih
+    kecil (mis. -0,3%) tetap arah yang jelas, bukan "setara"."""
+    if before is None or after is None:
+        return None
+    change_percent = round((after - before) / before * 100, 2) if before != 0 else None
+    if after == before or before == 0:
+        improved = None
+    else:
+        improved = (after < before) == lower_is_better
+    return {
+        "metric": field,
+        "label": label,
+        "unit": unit,
+        "before": before,
+        "after": after,
+        "changePercent": change_percent,
+        "improved": improved,
+    }
+
+
 def _compute_before_after(candidates: list[dict[str, Any]]) -> dict[str, Any] | None:
     """Bandingkan lampu terpasang (`realtime`, before) vs pemenang (after).
 
@@ -104,31 +130,12 @@ def _compute_before_after(candidates: list[dict[str, Any]]) -> dict[str, Any] | 
 
     metrics = []
     for field, label, unit, lower_is_better in _BEFORE_AFTER_METRICS:
-        before = baseline.get(field)
-        after = winner.get(field)
-        if before is None or after is None:
-            continue
-
-        change_percent = (
-            round((after - before) / before * 100, 1) if before != 0 else None
+        row = _metric_row(
+            field, label, unit, lower_is_better,
+            baseline.get(field), winner.get(field),
         )
-        membaik = (
-            None
-            if change_percent is None or change_percent == 0
-            else (change_percent < 0) == lower_is_better
-        )
-
-        metrics.append(
-            {
-                "metric": field,
-                "label": label,
-                "unit": unit,
-                "before": before,
-                "after": after,
-                "changePercent": change_percent,
-                "improved": membaik,
-            }
-        )
+        if row is not None:
+            metrics.append(row)
 
     # Sama seperti di atas, tapi dipecah per lengan -- cuma terisi untuk
     # siklus BARU (setelah delay/antrean/throughput per lengan mulai
@@ -137,31 +144,13 @@ def _compute_before_after(candidates: list[dict[str, Any]]) -> dict[str, Any] | 
     for approach in _APPROACHES:
         approach_metrics = []
         for field, label, unit, lower_is_better in _BEFORE_AFTER_APPROACH_FIELDS:
-            before = (baseline.get(field) or {}).get(approach)
-            after = (winner.get(field) or {}).get(approach)
-            if before is None or after is None:
-                continue
-
-            change_percent = (
-                round((after - before) / before * 100, 1) if before != 0 else None
+            row = _metric_row(
+                field, label, unit, lower_is_better,
+                (baseline.get(field) or {}).get(approach),
+                (winner.get(field) or {}).get(approach),
             )
-            membaik = (
-                None
-                if change_percent is None or change_percent == 0
-                else (change_percent < 0) == lower_is_better
-            )
-
-            approach_metrics.append(
-                {
-                    "metric": field,
-                    "label": label,
-                    "unit": unit,
-                    "before": before,
-                    "after": after,
-                    "changePercent": change_percent,
-                    "improved": membaik,
-                }
-            )
+            if row is not None:
+                approach_metrics.append(row)
         if approach_metrics:
             by_approach[approach] = approach_metrics
 
@@ -437,8 +426,13 @@ class HistoryService:
                 if simulation_metrics.get(f"throughputVeh_{approach}") is not None
             }
 
+            candidate_id = str(simulation.get("simulationName", "")).split(" @ ")[0]
             candidate = {
-                "candidateId": str(simulation.get("simulationName", "")).split(" @ ")[0],
+                "candidateId": candidate_id,
+                # Baris acuan lampu terpasang -- BUKAN kandidat yang diadu.
+                # Dipakai perbandingan Dampak, tidak ditampilkan di tabel
+                # "Kandidat yang Diuji".
+                "isReference": candidate_id == REFERENCE_CANDIDATE_ID,
                 "isWinner": simulation.get("status") == "winner",
                 "evaluation": {
                     "id": str(simulation.get("simulationName", "")).split(" | evaluation=")[-1],

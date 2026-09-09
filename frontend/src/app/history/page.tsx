@@ -102,6 +102,9 @@ interface Fase {
 interface Kandidat {
     candidateId: string;
     evaluation?: { id: string; durationSeconds: number; seed: number; trafficStateId: number; demandSource: string } | null;
+    // true = baris acuan "realtime" (lampu terpasang), BUKAN kandidat yang
+    // diadu. Dipakai perbandingan Dampak, disembunyikan dari tabel kandidat.
+    isReference?: boolean;
     isWinner: boolean;
     avgDelaySeconds: number | null;
     avgQueueLengthM: number | null;
@@ -238,8 +241,9 @@ function apakahBerubah(sekarang: Siklus, sebelumnya: Siklus | undefined): boolea
  * avgDelaySeconds dkk masih null semua.
  */
 function sedangMenungguMetrik(siklus: Siklus | null): boolean {
-    if (!siklus || siklus.candidates.length === 0) return false;
-    return siklus.candidates.every((kandidat) => kandidat.avgDelaySeconds == null);
+    const kandidat = (siklus?.candidates ?? []).filter((k) => !k.isReference);
+    if (kandidat.length === 0) return false;
+    return kandidat.every((k) => k.avgDelaySeconds == null);
 }
 
 interface TitikGrafik {
@@ -445,7 +449,9 @@ export default function HistoryPage() {
     const kandidatUrutLengan = useMemo(() => {
         if (!dipilih) return [];
         return [...dipilih.candidates]
-            .filter((k) => k.delayByApproachSeconds?.[lenganAktif] != null)
+            // Baris acuan "realtime" (lampu terpasang) bukan kandidat yang
+            // diadu -- tidak masuk tabel "Kandidat yang Diuji".
+            .filter((k) => !k.isReference && k.delayByApproachSeconds?.[lenganAktif] != null)
             .sort((a, b) => {
                 const delayA = a.delayByApproachSeconds![lenganAktif]!;
                 const delayB = b.delayByApproachSeconds![lenganAktif]!;
