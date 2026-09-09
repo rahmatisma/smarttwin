@@ -15,6 +15,13 @@ class TrafficRepositoryError(Exception):
     pass
 
 
+# Business ID intersection -> primary key database. Pemetaan ini tidak pernah
+# berubah selama proses hidup, tetapi get_intersection_row_id() dipanggil di
+# setiap request /recommendation, /forecast, dst. Tanpa cache, tiap panggilan
+# = 1 round-trip Supabase (~0,4 dtk warm, ~3,5 dtk saat koneksi baru).
+_INTERSECTION_ROW_ID_CACHE: dict[str, int] = {}
+
+
 def _normalize_timestamp_key(value: datetime | str) -> str:
     """
     Samakan representasi timestamp supaya bisa dipakai sebagai key
@@ -75,6 +82,10 @@ class TrafficRepository:
         menjadi primary key database pada tabel intersections.
         """
 
+        cached = _INTERSECTION_ROW_ID_CACHE.get(intersection_id)
+        if cached is not None:
+            return cached
+
         supabase = get_supabase()
 
         result = (
@@ -91,7 +102,9 @@ class TrafficRepository:
                 f"Intersection '{intersection_id}' tidak ditemukan."
             )
 
-        return int(result.data["id"])
+        row_id = int(result.data["id"])
+        _INTERSECTION_ROW_ID_CACHE[intersection_id] = row_id
+        return row_id
 
     # ============================================================
     # APPROACH
@@ -849,6 +862,39 @@ class TrafficRepository:
         return result.data or []
 
     # ============================================================
+    # GET APPROACH STATES (BANYAK STATE SEKALIGUS)
+    # ============================================================
+
+    def get_approach_states_by_state(
+        self,
+        *,
+        traffic_state_ids: list[int],
+    ) -> dict[int, list[dict[str, Any]]]:
+        """
+        Semua approach state untuk banyak traffic state dalam SATU query
+        (`.in_`), dikelompokkan per trafficStateId. Pengganti pemanggilan
+        get_approach_states() berulang di dalam loop -- itu 1 round-trip
+        Supabase per state (limit 12-24 = 12-24 request berurutan, ~4-7 dtk
+        dari Indonesia).
+        """
+
+        if not traffic_state_ids:
+            return {}
+
+        rows = (
+            get_supabase()
+            .table("trafficApproachStates")
+            .select("*")
+            .in_("trafficStateId", traffic_state_ids)
+            .execute()
+        ).data or []
+
+        grouped: dict[int, list[dict[str, Any]]] = {}
+        for row in rows:
+            grouped.setdefault(int(row["trafficStateId"]), []).append(row)
+        return grouped
+
+    # ============================================================
     # GET TRAFFIC STATE WITH APPROACHES
     # ============================================================
 
@@ -897,8 +943,10 @@ class TrafficRepository:
             limit=limit,
         )
 
+        supabase = get_supabase()
+
         approach_result = (
-            get_supabase()
+            supabase
             .table("approaches")
             .select("id, approach")
             .eq("intersectionId", intersection_row_id)
@@ -911,13 +959,21 @@ class TrafficRepository:
             else []
         ) or []
 
+        # Semua approach state untuk seluruh traffic_states diambil dalam SATU
+        # query (.in_) lalu dikelompokkan di memori. Sebelumnya ini looping
+        # get_approach_states() -- 1 round-trip Supabase per state, jadi
+        # limit=24 berarti ~24 request berurutan (~7 detik total dari Indonesia).
+        approach_states_by_state = self.get_approach_states_by_state(
+            traffic_state_ids=[int(state["id"]) for state in traffic_states]
+        )
+
         result: list[dict[str, Any]] = []
 
         for traffic_state in traffic_states:
             traffic_state_id = int(traffic_state["id"])
 
-            approaches = self.get_approach_states(
-                traffic_state_id=traffic_state_id
+            approaches = list(
+                approach_states_by_state.get(traffic_state_id, [])
             )
             existing_approaches = {
                 approach["approach"]
