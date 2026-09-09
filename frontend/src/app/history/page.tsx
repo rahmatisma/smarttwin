@@ -553,7 +553,8 @@ export default function HistoryPage() {
         try {
             const res = await fetch(
                 `${API_BASE_URL}/api/v1/history/recommendations` +
-                    `?page=${nomorHalaman}&pageSize=${PAGE_SIZE}`
+                    `?page=${nomorHalaman}&pageSize=${PAGE_SIZE}`,
+                { cache: "no-store" }
             );
             if (!res.ok) {
                 throw new Error(`Backend menjawab ${res.status}`);
@@ -593,7 +594,8 @@ export default function HistoryPage() {
                 try {
                     const res = await fetch(
                         `${API_BASE_URL}/api/v1/history/recommendations` +
-                            `?page=1&pageSize=${PAGE_SIZE}`
+                            `?page=1&pageSize=${PAGE_SIZE}`,
+                        { cache: "no-store" }
                     );
                     if (!res.ok) return;
                     const segar: ResponRiwayat = await res.json();
