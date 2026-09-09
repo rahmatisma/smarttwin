@@ -1332,37 +1332,40 @@ export default function HistoryPage() {
                                 })}
                             </div>
                         </div>
-                        {/* KONDISI AKHIR EVALUASI (hasil simulasi kandidat terpilih) */}
-                        {dipilih.beforeAfter?.byApproach && (
+                        {/* KONDISI AKHIR EVALUASI -- format sama dengan "Kondisi Awal"
+                            (kendaraan / melintas / antrean / LOS) tapi angkanya HASIL
+                            SUMO menjalankan durasi rekomendasi, bukan pengamatan CCTV. */}
+                        {dipilih.winner && (
                             <div className="mb-5">
                                 <div className="mb-2 flex items-center gap-2">
                                     <Activity size={15} className="text-text-secondary" />
                                     <h3 className="text-xs font-medium">
                                         Kondisi Akhir Evaluasi
                                         <span className="ml-1 font-normal text-text-muted">
-                                            hasil SUMO menjalankan rekomendasi, vs realtime
+                                            hasil simulasi setelah rekomendasi diterapkan
                                         </span>
                                     </h3>
                                 </div>
                                 <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
                                     {URUTAN_LENGAN.map((lengan) => {
-                                        const rows =
-                                            dipilih.beforeAfter?.byApproach?.[
-                                                lengan as "north" | "south" | "east" | "west"
-                                            ] ?? [];
-                                        if (rows.length === 0) {
-                                            return (
-                                                <div
-                                                    key={lengan}
-                                                    className="rounded-lg border border-border bg-surface-2 p-3"
-                                                >
-                                                    <p className="text-[11px] text-text-muted">
-                                                        {labelLengan(lengan)}
-                                                    </p>
-                                                    <p className="mt-2 text-[10px] text-text-muted">—</p>
-                                                </div>
-                                            );
-                                        }
+                                        const arm = lengan as "north" | "south" | "east" | "west";
+                                        const w = dipilih.winner;
+                                        const kendaraan = w?.queueLengthVehByApproach?.[arm];
+                                        const melintas = w?.throughputVehByApproach?.[arm];
+                                        const antreanM = w?.avgQueueLengthMByApproach?.[arm];
+                                        const los = w?.losByApproach?.[arm];
+                                        const tunggu = w?.delayByApproachSeconds?.[arm];
+                                        const ba =
+                                            dipilih.beforeAfter?.byApproach?.[arm] ?? [];
+                                        const pKend = ba.find(
+                                            (m) => m.metric === "queueLengthVehByApproach"
+                                        );
+                                        const pLewat = ba.find(
+                                            (m) => m.metric === "throughputVehByApproach"
+                                        );
+                                        const pTunggu = ba.find(
+                                            (m) => m.metric === "delayByApproachSeconds"
+                                        );
                                         return (
                                             <div
                                                 key={lengan}
@@ -1371,41 +1374,43 @@ export default function HistoryPage() {
                                                 <p className="text-[11px] text-text-muted">
                                                     {labelLengan(lengan)}
                                                 </p>
-                                                <dl className="mt-1.5 space-y-1.5">
-                                                    {rows
-                                                        // "Antrean (meter)" = kendaraan x 7, redundan di kartu ringkas
-                                                        .filter((m) => m.metric !== "avgQueueLengthMByApproach")
-                                                        .map((m) => (
-                                                        <div key={m.metric}>
-                                                            <div className="flex items-baseline justify-between gap-1">
-                                                                <dt className="text-[10px] text-text-muted">
-                                                                    {m.label}
-                                                                </dt>
-                                                                <dd className="font-mono text-xs font-medium">
-                                                                    {m.after}
-                                                                    {m.unit === "s"
-                                                                        ? "s"
-                                                                        : m.unit === "m"
-                                                                          ? "m"
-                                                                          : ""}
-                                                                </dd>
-                                                            </div>
-                                                            <div className="flex justify-end">
-                                                                <PersenBadge
-                                                                    percent={m.changePercent}
-                                                                    improved={m.improved}
-                                                                />
-                                                            </div>
-                                                        </div>
-                                                    ))}
-                                                </dl>
+                                                <div className="mt-1 flex items-center justify-between gap-1">
+                                                    <p className="font-mono text-xs text-text">
+                                                        {kendaraan ?? "—"} kendaraan
+                                                    </p>
+                                                    <PersenBadge
+                                                        percent={pKend?.changePercent ?? null}
+                                                        improved={pKend?.improved}
+                                                    />
+                                                </div>
+                                                <div className="mt-0.5 flex items-center justify-between gap-1">
+                                                    <p className="text-[10px] text-text-muted">
+                                                        {melintas ?? "—"} melintas · antrean{" "}
+                                                        {antreanM ?? "—"}m
+                                                    </p>
+                                                    <PersenBadge
+                                                        percent={pLewat?.changePercent ?? null}
+                                                        improved={pLewat?.improved}
+                                                    />
+                                                </div>
+                                                <div className="mt-0.5 flex items-center justify-between gap-1">
+                                                    <p className="text-[10px] text-text-muted">
+                                                        tunggu{" "}
+                                                        {tunggu != null ? tunggu.toFixed(1) : "—"}s
+                                                        {" · "}LOS {los ?? "—"}
+                                                    </p>
+                                                    <PersenBadge
+                                                        percent={pTunggu?.changePercent ?? null}
+                                                        improved={pTunggu?.improved}
+                                                    />
+                                                </div>
                                             </div>
                                         );
                                     })}
                                 </div>
                                 <p className="mt-1.5 text-[10px] italic text-text-muted">
-                                    &quot;Setelah&quot; = hasil SUMO menjalankan durasi rekomendasi
-                                    dengan demand yang sama, bukan pengamatan CCTV.
+                                    Angka = hasil SUMO menjalankan durasi rekomendasi dengan
+                                    demand yang sama; penanda % dibanding lampu realtime 50/4.
                                 </p>
                             </div>
                         )}
