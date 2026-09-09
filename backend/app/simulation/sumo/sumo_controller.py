@@ -292,6 +292,24 @@ class SumoController:
         "west": "rrrrrrrrrrrrrrryyyyy",
     }
 
+    # Warnai kendaraan di SUMO-GUI sesuai lampu yang sedang dihadapinya supaya
+    # fase TLS kebaca sekali lihat (lengan hijau -> kendaraannya hijau, lengan
+    # merah -> merah). Murni visual untuk screenshot dashboard; tidak menyentuh
+    # metrik/keputusan apa pun. Set False untuk kembali ke warna default SUMO.
+    COLOR_VEHICLES_BY_SIGNAL = True
+    SIGNAL_VEHICLE_COLORS: dict[str, tuple[int, int, int, int]] = {
+        "G": (46, 204, 113, 255),   # hijau
+        "y": (245, 166, 35, 255),   # kuning
+        "r": (240, 72, 62, 255),    # merah
+    }
+    # Kendaraan pada lengan yang CCTV-nya mati (demand diisi dari data lama
+    # yang diputar ulang) diwarnai PUTIH -- menimpa warna lampu di atas, supaya
+    # operator langsung lihat "lengan ini bukan data live". Lihat
+    # stale_approaches + set_stale_approaches(). Ganti di sini kalau mau warna
+    # lain (RGBA 0-255); samakan juga STALE_MARKER_HEX di frontend
+    # (components/digitaltwin/ReplayModeBanner.tsx).
+    STALE_VEHICLE_COLOR: tuple[int, int, int, int] = (255, 255, 255, 255)  # putih
+
     @staticmethod
     def _hide_windows_for_process(process_id: int) -> None:
         """Sembunyikan window SUMO-GUI; renderer tetap hidup untuk screenshot."""
@@ -475,6 +493,14 @@ class SumoController:
             str,
         ] = {}
         self._vehicle_type: dict[str, str] = {}
+        # Warna terakhir yang di-set ke tiap kendaraan ("G"/"y"/"r"/"stale") --
+        # supaya tidak memanggil setColor() tiap step kalau warnanya tidak berubah.
+        self._vehicle_signal_color: dict[str, str] = {}
+        # Lengan yang CCTV-nya sedang mati -> demand diisi data lama yang
+        # diputar ulang. approach -> ISO timestamp data lama (atau None kalau
+        # tidak diketahui). Kosong = semua lengan live. Diisi oleh logic
+        # deteksi CCTV (lihat set_stale_approaches / sync_demand).
+        self.stale_approaches: dict[str, str | None] = {}
         self.detected_vehicle_count = 0
         self.traffic_timestamp: str | None = None
         self.active_cycle_plan: dict[str, Any] | None = None
@@ -1359,18 +1385,40 @@ class SumoController:
         removed = 0
         failed_insertions = 0
         failed_by_approach: dict[str, int] = {}
+        new_stale: dict[str, str | None] = {}
+        # Hanya sentuh stale_approaches kalau payload ini memang membawanya
+        # (ada key "stale" di salah satu item). Kalau tidak, jangan clobber
+        # state yang mungkin diset lewat set_stale_approaches()/endpoint.
+        demand_manages_stale = any("stale" in item for item in demand)
         target_total = sum(
             max(0, int(item.get("targetVehicleCount", 0) or 0))
             for item in demand
         )
 
         with self._traci_lock:
+            # Set stale efektif SELAMA sync ini: kalau payload membawa flag,
+            # pakai itu; kalau tidak, pakai yang sudah ada di controller.
+            effective_stale = (
+                new_stale if demand_manages_stale else self.stale_approaches
+            )
             for item in demand:
                 approach = str(item.get("approach", "")).lower().strip()
                 if approach not in self.VALID_APPROACHES:
                     continue
 
+                # Lengan yang CCTV-nya mati -> demand-nya data lama.
+                if item.get("stale"):
+                    ts = item.get("dataTimestamp")
+                    new_stale[approach] = str(ts) if ts else None
+
                 target = max(0, int(item.get("targetVehicleCount", 0) or 0))
+
+                # CCTV lengan ini mati DAN payload tidak membawa nilai
+                # pengganti (target 0) -> JANGAN kosongkan lengannya. Pertahankan
+                # kendaraan yang ada; _replenish_current_demand() menjaga
+                # jumlahnya dari current_demand terakhir (= "putar data lama").
+                if approach in effective_stale and target == 0:
+                    continue
                 raw_counts = {
                     "motorcycle": max(0, int(item.get("motorcycleCount", 0) or 0)),
                     "car": max(0, int(item.get("carCount", 0) or 0)),
@@ -1404,6 +1452,7 @@ class SumoController:
                             self.traci.vehicle.remove(vehicle_id)
                             self._vehicle_approach.pop(vehicle_id, None)
                             self._vehicle_type.pop(vehicle_id, None)
+                            self._vehicle_signal_color.pop(vehicle_id, None)
                             removed += 1
                         except self.traci.TraCIException:
                             pass
@@ -1429,6 +1478,9 @@ class SumoController:
             self.traffic_timestamp = traffic_timestamp
             self.live_last_sync_failed_insertions = failed_insertions
             self.live_last_sync_failed_by_approach = failed_by_approach
+            if demand_manages_stale and new_stale != self.stale_approaches:
+                self.stale_approaches = new_stale
+                self._vehicle_signal_color.clear()  # paksa recolor
 
         return {
             "added": added,
@@ -1643,6 +1695,73 @@ class SumoController:
             "videoDurationSeconds": self._camera_clock_duration,
         }
 
+    def set_stale_approaches(self, mapping: dict[str, str | None] | None) -> None:
+        """Tandai lengan yang CCTV-nya mati (demand diisi data lama).
+
+        `mapping`: {approach: isoTimestampDataLama|None}. Lengan di luar
+        VALID_APPROACHES diabaikan. Dict kosong / None = semua lengan live.
+        Kendaraan pada lengan tsb akan diwarnai putih di step berikutnya.
+        """
+        cleaned = {
+            str(approach).lower().strip(): (str(ts) if ts else None)
+            for approach, ts in (mapping or {}).items()
+            if str(approach).lower().strip() in self.VALID_APPROACHES
+        }
+        with self._traci_lock:
+            if cleaned == self.stale_approaches:
+                return
+            self.stale_approaches = cleaned
+            # Paksa recolor semua kendaraan di step berikutnya.
+            self._vehicle_signal_color.clear()
+
+    def _color_vehicle_by_next_tls(self, vehicle_id: str) -> None:
+        """Set warna kendaraan.
+
+        Lengan yang CCTV-nya mati (self.stale_approaches) -> PUTIH (data lama) --
+        ini SELALU aktif, tidak tergantung COLOR_VEHICLES_BY_SIGNAL. Selain itu,
+        kalau COLOR_VEHICLES_BY_SIGNAL, warna lampu yang sedang dihadapinya
+        dibaca dari getNextTLS() ('G'/'g'/'y'/'r'); kendaraan yang sudah
+        melewati simpang (list kosong) dibiarkan hijau. Best-effort -- error
+        TraCI diabaikan. Pemanggil sudah memegang _traci_lock.
+        """
+        if self.traci is None:
+            return
+
+        if self._vehicle_approach.get(vehicle_id) in self.stale_approaches:
+            if self._vehicle_signal_color.get(vehicle_id) == "stale":
+                return
+            try:
+                self.traci.vehicle.setColor(vehicle_id, self.STALE_VEHICLE_COLOR)
+                self._vehicle_signal_color[vehicle_id] = "stale"
+            except self.traci.TraCIException:
+                pass
+            return
+
+        if not self.COLOR_VEHICLES_BY_SIGNAL:
+            # Lengan ini kembali live setelah sempat stale -> kembalikan ke
+            # warna default SUMO sekali, lalu berhenti mengelola warnanya.
+            if self._vehicle_signal_color.pop(vehicle_id, None) == "stale":
+                try:
+                    self.traci.vehicle.setColor(vehicle_id, (255, 255, 0, 255))
+                except self.traci.TraCIException:
+                    pass
+            return
+
+        try:
+            next_tls = self.traci.vehicle.getNextTLS(vehicle_id)
+            raw = str(next_tls[0][3])[:1] if next_tls else "G"
+        except (self.traci.TraCIException, IndexError, TypeError):
+            return
+
+        key = "G" if raw in "Gg" else "y" if raw in "yY" else "r"
+        if self._vehicle_signal_color.get(vehicle_id) == key:
+            return
+        try:
+            self.traci.vehicle.setColor(vehicle_id, self.SIGNAL_VEHICLE_COLORS[key])
+            self._vehicle_signal_color[vehicle_id] = key
+        except self.traci.TraCIException:
+            pass
+
     # ============================================================
     # SIMULATION LOOP
     # ============================================================
@@ -1750,6 +1869,7 @@ class SumoController:
                                 )
                             )
                             self._vehicle_type.pop(vehicle_id, None)
+                            self._vehicle_signal_color.pop(vehicle_id, None)
 
                             self.arrived_total[
                                 approach
@@ -1785,6 +1905,10 @@ class SumoController:
                             x, y = self.traci.vehicle.getPosition(vehicle_id)
                             angle = self.traci.vehicle.getAngle(vehicle_id)
                             vclass = self.traci.vehicle.getVehicleClass(vehicle_id)
+
+                            # Warna kendaraan mengikuti lampu yang dihadapinya
+                            # (hijau/kuning/merah) -- display-only untuk SUMO-GUI.
+                            self._color_vehicle_by_next_tls(vehicle_id)
 
                             current_vehicles_data.append({
                                 "id": vehicle_id,
@@ -2433,6 +2557,8 @@ class SumoController:
 
         self._vehicle_approach.clear()
         self._vehicle_type.clear()
+        self._vehicle_signal_color.clear()
+        self.stale_approaches.clear()
 
         self.current_demand.clear()
 

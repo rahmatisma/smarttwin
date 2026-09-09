@@ -12,6 +12,19 @@ class SimulationApproachDemand(BaseModel):
     carCount: int = Field(default=0, ge=0)
     busCount: int = Field(default=0, ge=0)
     truckCount: int = Field(default=0, ge=0)
+    # CCTV lengan ini mati -> demand di atas berasal dari data lama yang
+    # diputar ulang. Kendaraannya ditandai biru di SUMO-GUI.
+    stale: bool = False
+    dataTimestamp: str | None = Field(
+        default=None,
+        description="ISO timestamp data lama yang diputar untuk lengan ini.",
+    )
+
+
+class SimulationStaleApproachesRequest(BaseModel):
+    context: str = Field(default="default")
+    # {approach: isoTimestampDataLama | null}. Kosong = semua lengan live.
+    approaches: dict[str, str | None] = Field(default_factory=dict)
 
 
 class SimulationPhasePlan(BaseModel):

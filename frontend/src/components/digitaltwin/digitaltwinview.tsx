@@ -28,6 +28,13 @@ import {
 } from "recharts";
 
 import ScenarioComparison from "./ScenarioComparison";
+import {
+  ReplayModeOverlay,
+  ReplayModeCallout,
+  STALE_MARKER_HEX,
+  STALE_BADGE_CLASS,
+} from "./ReplayModeBanner";
+import { resolveDataMode, LIVE_DATA_MODE, type DataModeInfo } from "@/lib/dataMode";
 import Sidebar from "@/components/Sidebar";
 import Header from "@/components/Header";
 import { useScenario, ScenarioType } from "@/context/ScenarioContext";
@@ -119,6 +126,15 @@ export default function DigitalTwinView() {
 
 
     const [isSimStateLoaded, setIsSimStateLoaded] = useState(false);
+
+    // "live" vs "replay" (CCTV mati -> backend memutar data lama). Hanya
+    // relevan untuk instance SUMO dashboard ("Traffic Realtime"); skenario
+    // sandbox lain memang bukan data lapangan. Init "live" (hindari mismatch
+    // hydrasi), override demo/URL dibaca di effect + tiap poll.
+    const [dataMode, setDataMode] = useState<DataModeInfo>(LIVE_DATA_MODE);
+    useEffect(() => {
+        queueMicrotask(() => setDataMode(resolveDataMode(null)));
+    }, []);
 
     const [recommendationLoading, setRecommendationLoading] = useState(false);
     const [runningScenario, setRunningScenario] = useState<ScenarioType | null>("Traffic Realtime");
@@ -255,6 +271,7 @@ export default function DigitalTwinView() {
                 if (!res.ok) throw new Error("Status simulasi belum tersedia.");
                 const data = await res.json();
                 if (controller.signal.aborted) return;
+                setDataMode(context === "dashboard" ? resolveDataMode(data) : LIVE_DATA_MODE);
                 setSimulationIssue(data.lastError ? "Koneksi SUMO terputus. Mulai ulang simulasi untuk melanjutkan." : null);
                 
                 setIsSimStateLoaded(true);
@@ -606,6 +623,9 @@ export default function DigitalTwinView() {
     const unavailable = "\u2014";
 
 
+    // Mode rekaman hanya bermakna untuk instance live ("Traffic Realtime").
+    const replayActive = dataMode.mode === "replay" && scenario === "Traffic Realtime";
+
     const mappedPhase = isSimulating ? simSharedPhase : null;
     const mappedState: "GREEN" | "YELLOW" | "RED" = simSharedState;
     const mappedRemaining = isSimulating ? simSharedRemaining : 0;
@@ -685,6 +705,9 @@ export default function DigitalTwinView() {
                                     {isSimulating ? runningScenario ?? "Memuat skenario..." : scenario}
                                     {" \u00b7 "}
                                     {loading ? "Menyiapkan..." : status === "running" ? "Berjalan" : status === "paused" ? "Dijeda" : "Belum berjalan"}
+                                    {replayActive && (
+                                        <span className="font-semibold text-signal-amber"> \u00b7 Data rekaman</span>
+                                    )}
                                 </span>
                             </div>
                             <button
@@ -706,9 +729,15 @@ export default function DigitalTwinView() {
                             {startIssue && status === "idle" && <button type="button" disabled={loading} onClick={() => void handleStartSimulation()} className="ml-3 underline disabled:opacity-50">Coba lagi</button>}
                         </div>}
 
+                        {replayActive && (
+                            <ReplayModeCallout info={dataMode} className="mx-4 my-3 rounded-lg" />
+                        )}
+
                         <div className={`relative w-full overflow-hidden bg-[var(--color-canvas)] ${
                             isFullscreen ? "min-h-0 flex-1" : "aspect-[4/3] flex-1"
                         }`}>
+
+                            {replayActive && <ReplayModeOverlay info={dataMode} />}
 
                             {/* SUMO-GUI Live Stream */}
                             {status !== "idle" ? (
@@ -717,7 +746,9 @@ export default function DigitalTwinView() {
                                 <img
                                     src={`${API_BASE_URL}/api/v1/simulation/frame?context=${contextForScenario(scenario)}&v=${Math.floor(simulationTime)}`}
                                     alt="Live SUMO Simulation Stream"
-                                    className="absolute inset-0 h-full w-full object-cover object-center"
+                                    className={`absolute inset-0 h-full w-full object-cover object-center ${
+                                        replayActive ? "ring-2 ring-inset ring-signal-amber" : ""
+                                    }`}
                                 />
                             ) : (
                                 <div className="absolute inset-0 flex items-center justify-center">
@@ -727,31 +758,41 @@ export default function DigitalTwinView() {
 
                             {/* Label lengan + lampu per arah (sama seperti dashboard) */}
                             {status === "running" && ([
-                                ["north", "UTARA · Jl. Magelang", "left-1/2 top-2 -translate-x-1/2"],
+                                ["north", "UTARA · Jl. Magelang", `left-1/2 ${replayActive ? "top-11" : "top-2"} -translate-x-1/2`],
                                 ["east", "TIMUR · Jl. Diponegoro", "right-2 top-1/2 -translate-y-1/2"],
                                 ["south", "SELATAN · Jl. Tentara Pelajar", "bottom-2 left-1/2 -translate-x-1/2"],
                                 ["west", "BARAT · Jl. Kyai Mojo", "left-2 top-1/2 -translate-y-1/2"],
                             ] as const).map(([approach, label, position]) => {
                                 const isActive = simSharedPhase === approach;
+                                const isStale = replayActive && dataMode.replayApproaches.includes(approach);
                                 const lampClass = !isActive
                                     ? "bg-signal-red"
                                     : simSharedState === "YELLOW"
                                         ? "bg-signal-amber"
                                         : "bg-signal-green";
                                 return (
-                                    <div key={approach} className={`absolute ${position} flex items-center gap-1 rounded bg-black/75 px-1.5 py-0.5 text-xs font-semibold text-white`}>
-                                        <i className={`h-2.5 w-2.5 shrink-0 rounded-full border border-white/40 ${lampClass}`} />
+                                    <div
+                                        key={approach}
+                                        className={`absolute ${position} flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-semibold ${
+                                            isStale ? STALE_BADGE_CLASS : "bg-black/75 text-white"
+                                        }`}
+                                    >
+                                        <i className={`h-2.5 w-2.5 shrink-0 rounded-full border ${isStale ? "border-black/30" : "border-white/40"} ${lampClass}`} />
                                         {label}
+                                        {isStale && <span className="ml-0.5 font-bold">· DATA LAMA</span>}
                                     </div>
                                 );
                             })}
 
                             {/* Legenda warna lampu */}
                             {status === "running" && (
-                                <div className="absolute right-3 top-3 flex gap-2 rounded-md border border-white/10 bg-black/55 px-2 py-1 text-xs text-white backdrop-blur-sm">
+                                <div className={`absolute right-3 ${replayActive ? "top-12" : "top-3"} flex flex-wrap gap-2 rounded-md border border-white/10 bg-black/55 px-2 py-1 text-xs text-white backdrop-blur-sm`}>
                                     <span className="flex items-center gap-1"><i className="h-2 w-2 rounded-full bg-signal-red" />Merah</span>
                                     <span className="flex items-center gap-1"><i className="h-2 w-2 rounded-full bg-signal-amber" />Kuning</span>
                                     <span className="flex items-center gap-1"><i className="h-2 w-2 rounded-full bg-signal-green" />Hijau</span>
+                                    {replayActive && dataMode.replayApproaches.length > 0 && (
+                                        <span className="flex items-center gap-1"><i className="h-2 w-2 rounded-full ring-1 ring-white/50" style={{ background: STALE_MARKER_HEX }} />Data lama</span>
+                                    )}
                                 </div>
                             )}
 
@@ -773,7 +814,7 @@ export default function DigitalTwinView() {
 
                             {/* Simulation label */}
 
-                            <div className="absolute left-5 top-5 rounded-lg border border-white/10 bg-black/50 px-3 py-2 backdrop-blur-sm">
+                            <div className={`absolute left-5 ${replayActive ? "top-16" : "top-5"} rounded-lg border border-white/10 bg-black/50 px-3 py-2 backdrop-blur-sm`}>
 
                                 <p className="text-xs uppercase tracking-wider text-white/50">
                                     Scenario

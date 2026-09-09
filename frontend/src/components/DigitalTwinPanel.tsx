@@ -6,6 +6,14 @@ import type {
   Approach,
   CyclePlan,
 } from "@/types/traffic";
+import { resolveDataMode, LIVE_DATA_MODE, type DataModeInfo } from "@/lib/dataMode";
+import {
+  ReplayModeOverlay,
+  ReplayModeCallout,
+  DataModeChip,
+  STALE_MARKER_HEX,
+  STALE_BADGE_CLASS,
+} from "@/components/digitaltwin/ReplayModeBanner";
 
 // Instance SUMO dashboard ini TERPISAH dari instance sandbox di halaman
 // /digitaltwin -- keduanya dibedakan lewat "context" supaya start/pause/
@@ -308,6 +316,9 @@ export default function DigitalTwinPanel({
   candidateId?: string | null;
 }) {
   const [simRunning, setSimRunning] = useState(false);
+  // "live" vs "replay" (CCTV mati -> backend memutar data lama). Init "live"
+  // (hindari mismatch hydrasi), override demo/URL dibaca di effect + tiap poll.
+  const [dataMode, setDataMode] = useState<DataModeInfo>(LIVE_DATA_MODE);
   const [simTime, setSimTime] = useState(0);
   const [vehiclesCount, setVehiclesCount] = useState(0);
   const [visibleVehicleCount, setVisibleVehicleCount] = useState(0);
@@ -328,6 +339,12 @@ export default function DigitalTwinPanel({
   const runRequestInFlightRef = useRef(false);
 
   const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
+
+  // Override demo lewat URL (?datamode=replay) / localStorage -- dipakai kalau
+  // logic backend belum siap tapi ingin memperlihatkan tampilan mode rekaman.
+  useEffect(() => {
+    queueMicrotask(() => setDataMode(resolveDataMode(null)));
+  }, []);
 
   useEffect(() => {
     const handleFullscreenChange = () => {
@@ -380,7 +397,8 @@ export default function DigitalTwinPanel({
         const res = await fetch(`${API_BASE_URL}/api/v1/simulation/state?context=${SIM_CONTEXT}`);
         if (!res.ok) return;
         const data = await res.json();
-        
+
+        setDataMode(resolveDataMode(data));
         setSimRunning(data.running);
         if (data.running) {
           wasRunningRef.current = true;
@@ -556,30 +574,37 @@ export default function DigitalTwinPanel({
           Digital Twin
         </h2>
 
-        <span className="flex items-center gap-1.5 text-xs">
-          <span
-            className={`h-1.5 w-1.5 rounded-full ${
-              simRunning
-                ? "bg-signal-green"
-                : signal.source === "mock"
-                ? "bg-signal-amber"
-                : "bg-signal-green"
-            }`}
-          />
+        {dataMode.mode === "replay" ? (
+          <DataModeChip info={dataMode} />
+        ) : (
+          <span className="flex items-center gap-1.5 text-xs">
+            <span
+              className={`h-1.5 w-1.5 rounded-full ${
+                simRunning
+                  ? "bg-signal-green"
+                  : signal.source === "mock"
+                  ? "bg-signal-amber"
+                  : "bg-signal-green"
+              }`}
+            />
 
-          <span
-            className={
-              simRunning
-                ? "text-signal-green font-bold"
-                : signal.source === "mock"
-                ? "text-signal-amber"
-                : "text-signal-green"
-            }
-          >
-            {simRunning ? "LIVE ●" : signal.source === "mock" ? "Simulated" : "Synced"}
+            <span
+              className={
+                simRunning
+                  ? "text-signal-green font-bold"
+                  : signal.source === "mock"
+                  ? "text-signal-amber"
+                  : "text-signal-green"
+              }
+            >
+              {simRunning ? "LIVE ●" : signal.source === "mock" ? "Simulated" : "Synced"}
+            </span>
           </span>
-        </span>
+        )}
       </div>
+
+      {/* Peringatan mode rekaman -- tampil di atas kanvas (non-fullscreen). */}
+      <ReplayModeCallout info={dataMode} className="mb-3" />
 
       {/* =====================================================
           INTERSECTION
@@ -618,36 +643,49 @@ export default function DigitalTwinPanel({
             <img
               src={`${API_BASE_URL}/api/v1/simulation/frame?context=${SIM_CONTEXT}&v=${frameVersion}`}
               alt="Live SUMO Simpang Pingit"
-              className="absolute inset-0 h-full w-full object-cover object-center"
+              className={`absolute inset-0 h-full w-full object-cover object-center ${
+                dataMode.mode === "replay" ? "ring-2 ring-inset ring-signal-amber" : ""
+              }`}
             />
+            <ReplayModeOverlay info={dataMode} />
             {([
-              ["north", "UTARA · Jl. Magelang", "left-1/2 top-1 -translate-x-1/2"],
+              ["north", "UTARA · Jl. Magelang", `left-1/2 ${dataMode.mode === "replay" ? "top-9" : "top-1"} -translate-x-1/2`],
               ["east", "TIMUR · Jl. Diponegoro", "right-1 top-1/2 -translate-y-1/2"],
               ["south", "SELATAN · Jl. Tentara Pelajar", "bottom-1 left-1/2 -translate-x-1/2"],
               ["west", "BARAT · Jl. Kyai Mojo", "left-1 top-1/2 -translate-y-1/2"],
             ] as const).map(([approach, label, position]) => {
               const isActive = liveSignal?.activeApproach === approach;
+              const isStale = dataMode.replayApproaches.includes(approach);
               const lampClass = !isActive
                 ? "bg-signal-red"
                 : liveSignal.state === "YELLOW"
                   ? "bg-signal-amber"
                   : "bg-signal-green";
               return (
-                <div key={approach} className={`absolute ${position} flex items-center gap-1 rounded bg-black/75 px-1.5 py-0.5 text-[9px] font-semibold text-white`}>
-                  <i className={`h-2.5 w-2.5 shrink-0 rounded-full border border-white/40 ${lampClass}`} />
+                <div
+                  key={approach}
+                  className={`absolute ${position} flex items-center gap-1 rounded px-1.5 py-0.5 text-[9px] font-semibold ${
+                    isStale ? STALE_BADGE_CLASS : "bg-black/75 text-white"
+                  }`}
+                >
+                  <i className={`h-2.5 w-2.5 shrink-0 rounded-full border ${isStale ? "border-black/30" : "border-white/40"} ${lampClass}`} />
                   {label}
+                  {isStale && <span className="ml-0.5 font-bold">· DATA LAMA</span>}
                 </div>
               );
             })}
-            <div className="absolute left-2 top-2 flex gap-2 rounded-md border border-white/10 bg-black/55 px-2 py-1 text-[10px] text-white backdrop-blur-sm">
+            <div className={`absolute left-2 ${dataMode.mode === "replay" ? "top-11" : "top-2"} flex flex-wrap gap-2 rounded-md border border-white/10 bg-black/55 px-2 py-1 text-[10px] text-white backdrop-blur-sm`}>
               <span className="flex items-center gap-1"><i className="h-2 w-2 rounded-full bg-signal-red" />Merah</span>
               <span className="flex items-center gap-1"><i className="h-2 w-2 rounded-full bg-signal-amber" />Kuning</span>
               <span className="flex items-center gap-1"><i className="h-2 w-2 rounded-full bg-signal-green" />Hijau</span>
+              {dataMode.replayApproaches.length > 0 && (
+                <span className="flex items-center gap-1"><i className="h-2 w-2 rounded-full ring-1 ring-white/50" style={{ background: STALE_MARKER_HEX }} />Data lama</span>
+              )}
             </div>
             <button
               type="button"
               onClick={() => void toggleFullscreen()}
-              className="absolute right-2 top-2 z-10 flex h-9 w-9 items-center justify-center rounded-lg border border-white/20 bg-black/60 text-white shadow-sm backdrop-blur-sm transition hover:bg-black/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
+              className={`absolute right-2 ${dataMode.mode === "replay" ? "top-11" : "top-2"} z-30 flex h-9 w-9 items-center justify-center rounded-lg border border-white/20 bg-black/60 text-white shadow-sm backdrop-blur-sm transition hover:bg-black/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white`}
               aria-label={isFullscreen ? "Keluar dari layar penuh" : "Tampilkan SUMO dalam layar penuh"}
               title={isFullscreen ? "Keluar dari layar penuh (Esc)" : "Layar penuh"}
             >
@@ -897,7 +935,9 @@ export default function DigitalTwinPanel({
 
       <div className="mt-2 text-center">
         <p className="text-xs text-text-muted">
-          SUMO live · demand dari TrafficState dashboard
+          {dataMode.mode === "replay"
+            ? "SUMO · demand dari data rekaman (CCTV nonaktif)"
+            : "SUMO live · demand dari TrafficState dashboard"}
         </p>
 
         <p className="mt-1 text-[10px] text-text-muted">
