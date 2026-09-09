@@ -34,7 +34,7 @@ import {
   STALE_MARKER_HEX,
   STALE_BADGE_CLASS,
 } from "./ReplayModeBanner";
-import { resolveDataMode, LIVE_DATA_MODE, type DataModeInfo } from "@/lib/dataMode";
+import { resolveDataMode, LIVE_DATA_MODE, formatReplayClock, type DataModeInfo } from "@/lib/dataMode";
 import Sidebar from "@/components/Sidebar";
 import Header from "@/components/Header";
 import { useScenario, ScenarioType } from "@/context/ScenarioContext";
@@ -765,6 +765,7 @@ export default function DigitalTwinView() {
                             ] as const).map(([approach, label, position]) => {
                                 const isActive = simSharedPhase === approach;
                                 const isStale = replayActive && dataMode.replayApproaches.includes(approach);
+                                const replayClock = formatReplayClock(dataMode.replaySources[approach]);
                                 const lampClass = !isActive
                                     ? "bg-signal-red"
                                     : simSharedState === "YELLOW"
@@ -779,7 +780,9 @@ export default function DigitalTwinView() {
                                     >
                                         <i className={`h-2.5 w-2.5 shrink-0 rounded-full border ${isStale ? "border-black/30" : "border-white/40"} ${lampClass}`} />
                                         {label}
-                                        {isStale && <span className="ml-0.5 font-bold">· DATA LAMA</span>}
+                                        {isStale && <span className="ml-0.5 font-bold">
+                                            · DATA LAMA{replayClock ? ` ${replayClock}` : ""}
+                                        </span>}
                                     </div>
                                 );
                             })}

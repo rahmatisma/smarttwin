@@ -6,7 +6,7 @@ import type {
   Approach,
   CyclePlan,
 } from "@/types/traffic";
-import { resolveDataMode, LIVE_DATA_MODE, type DataModeInfo } from "@/lib/dataMode";
+import { resolveDataMode, LIVE_DATA_MODE, formatReplayClock, type DataModeInfo } from "@/lib/dataMode";
 import {
   ReplayModeOverlay,
   ReplayModeCallout,
@@ -516,6 +516,7 @@ export default function DigitalTwinPanel({
         seed: 42,
         trafficTimestamp: payload.trafficTimestamp,
         trafficStateId: payload.trafficStateId,
+        offlineApproaches: payload.offlineApproaches,
         scenario: "Traffic Realtime",
         approaches: payload.approaches,
         cyclePlan: {
@@ -699,6 +700,7 @@ export default function DigitalTwinPanel({
             ] as const).map(([approach, label, position]) => {
               const isActive = liveSignal?.activeApproach === approach;
               const isStale = dataMode.replayApproaches.includes(approach);
+              const replayClock = formatReplayClock(dataMode.replaySources[approach]);
               const lampClass = !isActive
                 ? "bg-signal-red"
                 : liveSignal.state === "YELLOW"
@@ -713,7 +715,9 @@ export default function DigitalTwinPanel({
                 >
                   <i className={`h-2.5 w-2.5 shrink-0 rounded-full border ${isStale ? "border-black/30" : "border-white/40"} ${lampClass}`} />
                   {label}
-                  {isStale && <span className="ml-0.5 font-bold">· DATA LAMA</span>}
+                  {isStale && <span className="ml-0.5 font-bold">
+                    · DATA LAMA{replayClock ? ` ${replayClock}` : ""}
+                  </span>}
                 </div>
               );
             })}

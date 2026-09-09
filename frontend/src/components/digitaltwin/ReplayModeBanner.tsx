@@ -25,7 +25,7 @@ function approachPhrase(approaches: string[]): string | null {
  * =========================================================
  *
  * Penanda visual saat panel SUMO menampilkan PEMUTARAN ULANG data lama
- * (CCTV mati -> backend memutar data hari sebelumnya) alih-alih kondisi
+ * (CCTV mati -> backend memutar data historis yang tersedia) alih-alih kondisi
  * langsung. Tujuannya supaya pengelola tidak salah kira rekaman kemarin
  * sebagai lalu lintas saat ini.
  *
@@ -42,7 +42,7 @@ function replaySentence(info: DataModeInfo): string {
 
   const subjek = lengan ? `CCTV ${lengan} nonaktif` : "CCTV nonaktif";
   const dasar = tanggal
-    ? `${subjek} — menampilkan data ${tanggal}`
+    ? `${subjek} — menampilkan data historis ${tanggal}`
     : `${subjek} — menampilkan data terakhir sebelum putus`;
   const waktu = sejak ? ` sejak ${sejak}` : "";
   const penanda = lengan

@@ -98,6 +98,10 @@ class SimulationRequest(BaseModel):
 
     trafficTimestamp: str | None = None
 
+    # Dikirim bersama demand agar pergantian live -> history tidak berlomba
+    # dengan heartbeat /sync-clock. None menjaga caller lama tetap kompatibel.
+    offlineApproaches: list[str] | None = None
+
 
 class SimulationClockRequest(BaseModel):
     context: str = Field(default="default")

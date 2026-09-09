@@ -722,6 +722,11 @@ class SimulationService:
             # pernah ada run CV di mesin ini), jatuh balik ke dikosongkan
             # ke 0 seperti sebelumnya -- approach lain di list yang sama
             # tetap apa adanya.
+            if request.offlineApproaches is not None:
+                self._update_offline_approaches(
+                    request.context,
+                    request.offlineApproaches,
+                )
             offline_approaches = self.offline_approaches.get(request.context, set())
             if offline_approaches and demand:
                 for item in demand:
@@ -1037,10 +1042,24 @@ class SimulationService:
             "trafficStateId": self.active_traffic_state_id.get(context),
             # Lengan yang CCTV-nya mati -> demand-nya data lama yang diputar
             # ulang. {approach: isoTimestamp|null}. Frontend memakai ini untuk
-            # menandai lengan tsb (banner + badge + kendaraan biru di SUMO).
+            # menandai lengan tsb (banner + badge + kendaraan putih di SUMO).
             "staleApproaches": dict(_stale),
             "replayApproaches": sorted(_stale.keys()),
-            "replaySince": next((ts for ts in _stale.values() if ts), None),
+            "replayDataDate": next((ts for ts in _stale.values() if ts), None),
+            "replaySince": (
+                datetime.fromtimestamp(
+                    min(self.offline_since.get(context, {}).values()),
+                    timezone.utc,
+                ).isoformat()
+                if self.offline_since.get(context)
+                else None
+            ),
+            "offlineApproaches": sorted(self.offline_approaches.get(context, set())),
+            "replayVehicleCount": sum(
+                vehicle.get("dataSource") == "replay"
+                for vehicle in controller.active_vehicles_data
+            ),
+            "replaySources": dict(_stale),
             "dataMode": (
                 "replay"
                 if _stale
@@ -1169,6 +1188,32 @@ class SimulationService:
 
         return history.sample(approach, virtual_timestamp)
 
+    def _update_offline_approaches(
+        self,
+        context: str,
+        approaches: list[str],
+    ) -> None:
+        """Simpan status kamera dan waktu awal fallback per lengan."""
+        new_offline = {
+            approach.lower().strip()
+            for approach in approaches
+            if approach.lower().strip() in {"north", "east", "south", "west"}
+        }
+        if new_offline != self.offline_approaches.get(context, set()):
+            print(
+                f"[offline] context={context!r} "
+                f"approaches={sorted(new_offline) or '(kosong)'}"
+            )
+        self.offline_approaches[context] = new_offline
+
+        since_map = self.offline_since.setdefault(context, {})
+        now = time.time()
+        for approach in new_offline:
+            since_map.setdefault(approach, now)
+        for approach in list(since_map):
+            if approach not in new_offline:
+                since_map.pop(approach, None)
+
     def sync_clock(
         self,
         video_time_seconds: float,
@@ -1185,29 +1230,7 @@ class SimulationService:
         ada tidak hilang begitu saja.
         """
         if offline_approaches is not None:
-            new_offline = {
-                approach.lower().strip() for approach in offline_approaches
-            }
-            if new_offline != self.offline_approaches.get(context, set()):
-                print(
-                    f"[sync_clock] context={context!r} "
-                    f"offlineApproaches={sorted(new_offline) or '(kosong)'}"
-                )
-            self.offline_approaches[context] = new_offline
-
-            # Catat/hapus "sejak kapan" per lengan -- dipakai
-            # _sample_offline_replay() buat memutar data lama terus maju,
-            # bukan diam di satu titik. setdefault: JANGAN reset waktu mulai
-            # kalau lengan itu memang sudah offline dari sebelumnya (video
-            # terus dikirim tiap detik lewat heartbeat, bukan cuma sekali
-            # saat toggle).
-            since_map = self.offline_since.setdefault(context, {})
-            now = time.time()
-            for approach in new_offline:
-                since_map.setdefault(approach, now)
-            for approach in list(since_map.keys()):
-                if approach not in new_offline:
-                    since_map.pop(approach, None)
+            self._update_offline_approaches(context, offline_approaches)
 
         controller = self.controllers.get(context)
         if controller is None or not controller.is_running():

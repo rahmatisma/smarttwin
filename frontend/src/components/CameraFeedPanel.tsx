@@ -506,7 +506,7 @@ export default function CameraFeedPanel({
       // MATIKAN -- kamera lain SENGAJA tidak disentuh sama sekali, tetap
       // main apa adanya.
       pushCameraAlert(
-        `CCTV ${camera.name} (${camera.direction}) berhenti -- data lengan ini kosong sementara.`,
+        `CCTV ${camera.name} (${camera.direction}) berhenti -- SUMO beralih ke data historis untuk lengan ini.`,
         "offline"
       );
 

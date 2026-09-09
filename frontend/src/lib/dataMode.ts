@@ -32,9 +32,11 @@ export interface DataModeInfo {
   /**
    * Lengan yang CCTV-nya mati -> demand-nya data lama yang diputar ulang
    * (mis. ["east"]). Kosong = tidak spesifik / seluruh simpang. Dipakai untuk
-   * menandai lengan tsb: badge "DATA LAMA" + kendaraan biru di SUMO-GUI.
+   * menandai lengan tsb: badge "DATA LAMA" + kendaraan putih di SUMO-GUI.
    */
   replayApproaches: string[];
+  /** Timestamp sumber historis per lengan, mis. { east: "2026-08-15T16:30:00+07:00" }. */
+  replaySources: Record<string, string | null>;
 }
 
 export const LIVE_DATA_MODE: DataModeInfo = {
@@ -42,6 +44,7 @@ export const LIVE_DATA_MODE: DataModeInfo = {
   replayDataDate: null,
   since: null,
   replayApproaches: [],
+  replaySources: {},
 };
 
 const APPROACH_KEYS = ["north", "south", "east", "west"] as const;
@@ -76,6 +79,15 @@ function readApproachList(value: unknown): string[] {
     .filter((item): item is string => (APPROACH_KEYS as readonly string[]).includes(item));
 }
 
+function readReplaySources(value: unknown): Record<string, string | null> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .map(([approach, timestamp]) => [approach.toLowerCase().trim(), asString(timestamp)] as const)
+      .filter(([approach]) => (APPROACH_KEYS as readonly string[]).includes(approach))
+  );
+}
+
 /**
  * Baca mode data dari payload /api/v1/simulation/state.
  *
@@ -90,6 +102,9 @@ export function readDataModeFromState(state: unknown): DataModeInfo {
   const explicitMode = asString(s.dataMode ?? s.data_mode ?? s.sourceMode ?? s.source_mode);
   const replayApproaches = readApproachList(
     s.replayApproaches ?? s.replay_approaches ?? s.staleApproaches ?? s.stale_approaches
+  );
+  const replaySources = readReplaySources(
+    s.replaySources ?? s.replay_sources ?? s.staleApproaches ?? s.stale_approaches
   );
   const replayFlag =
     s.replay === true ||
@@ -116,6 +131,9 @@ export function readDataModeFromState(state: unknown): DataModeInfo {
       s.replaySince ?? s.replay_since ?? s.cctvOfflineSince ?? s.cctv_offline_since
     ),
     replayApproaches,
+    replaySources: Object.keys(replaySources).length > 0
+      ? replaySources
+      : Object.fromEntries(replayApproaches.map((approach) => [approach, null])),
   };
 }
 
@@ -167,6 +185,7 @@ function readDemoOverride(): DataModeInfo | null {
       replayDataDate: dateParam,
       since: null,
       replayApproaches: approaches,
+      replaySources: Object.fromEntries(approaches.map((approach) => [approach, dateParam])),
     };
   }
   return null;
@@ -186,6 +205,7 @@ export function formatReplayDate(value: string | null): string | null {
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return value;
   return parsed.toLocaleDateString("id-ID", {
+    timeZone: "Asia/Jakarta",
     day: "numeric",
     month: "long",
     year: "numeric",
@@ -197,5 +217,21 @@ export function formatReplaySince(value: string | null): string | null {
   if (!value) return null;
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return null;
-  return parsed.toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" });
+  return parsed.toLocaleTimeString("id-ID", {
+    timeZone: "Asia/Jakarta",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+/** "16.30" dari timestamp sumber data historis; null kalau tidak valid. */
+export function formatReplayClock(value: string | null | undefined): string | null {
+  if (!value) return null;
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return parsed.toLocaleTimeString("id-ID", {
+    timeZone: "Asia/Jakarta",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }

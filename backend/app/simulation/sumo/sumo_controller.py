@@ -497,10 +497,11 @@ class SumoController:
         # supaya tidak memanggil setColor() tiap step kalau warnanya tidak berubah.
         self._vehicle_signal_color: dict[str, str] = {}
         # Lengan yang CCTV-nya sedang mati -> demand diisi data lama yang
-        # diputar ulang. approach -> ISO timestamp data lama (atau None kalau
-        # tidak diketahui). Kosong = semua lengan live. Diisi oleh logic
-        # deteksi CCTV (lihat set_stale_approaches / sync_demand).
+        # diputar ulang. Sumber juga disalin ke _vehicle_sources SAAT kendaraan
+        # dibuat; warna kendaraan tidak berubah ketika status kamera berubah.
         self.stale_approaches: dict[str, str | None] = {}
+        self._demand_sources: dict[str, dict[str, Any]] = {}
+        self._vehicle_sources: dict[str, dict[str, Any]] = {}
         self.detected_vehicle_count = 0
         self.traffic_timestamp: str | None = None
         self.active_cycle_plan: dict[str, Any] | None = None
@@ -1228,6 +1229,12 @@ class SumoController:
                 vehicle_id
             ] = approach
             self._vehicle_type[vehicle_id] = vehicle_type
+            self._vehicle_sources[vehicle_id] = {
+                "approach": approach,
+                **self._demand_sources.get(approach, {
+                    "dataSource": "live", "dataTimestamp": self.traffic_timestamp,
+                }),
+            }
 
             self.spawned_total += 1
 
@@ -1412,12 +1419,21 @@ class SumoController:
                     new_stale[approach] = str(ts) if ts else None
 
                 target = max(0, int(item.get("targetVehicleCount", 0) or 0))
+                source = "replay" if approach in effective_stale else "live"
+                self._demand_sources[approach] = {
+                    "dataSource": source,
+                    "dataTimestamp": (
+                        effective_stale.get(approach)
+                        if source == "replay"
+                        else traffic_timestamp
+                    ),
+                }
 
                 # CCTV lengan ini mati DAN payload tidak membawa nilai
                 # pengganti (target 0) -> JANGAN kosongkan lengannya. Pertahankan
                 # kendaraan yang ada; _replenish_current_demand() menjaga
                 # jumlahnya dari current_demand terakhir (= "putar data lama").
-                if approach in effective_stale and target == 0:
+                if approach in effective_stale and "targetVehicleCount" not in item:
                     continue
                 raw_counts = {
                     "motorcycle": max(0, int(item.get("motorcycleCount", 0) or 0)),
@@ -1441,11 +1457,17 @@ class SumoController:
                     desired[list(desired)[-1]] = remaining
 
                 for vehicle_type, wanted in desired.items():
+                    # Reconcile only vehicles created from the CURRENT input
+                    # source. Vehicles from the previous source keep their
+                    # provenance/color and leave the network naturally.
                     existing = [
                         vehicle_id
                         for vehicle_id, vehicle_approach in self._vehicle_approach.items()
                         if vehicle_approach == approach
                         and self._vehicle_type.get(vehicle_id) == vehicle_type
+                        and self._vehicle_sources.get(vehicle_id, {}).get(
+                            "dataSource", "live"
+                        ) == source
                     ]
                     for vehicle_id in existing[wanted:]:
                         try:
@@ -1453,6 +1475,7 @@ class SumoController:
                             self._vehicle_approach.pop(vehicle_id, None)
                             self._vehicle_type.pop(vehicle_id, None)
                             self._vehicle_signal_color.pop(vehicle_id, None)
+                            self._vehicle_sources.pop(vehicle_id, None)
                             removed += 1
                         except self.traci.TraCIException:
                             pass
@@ -1498,12 +1521,18 @@ class SumoController:
         """
         added = 0
         for approach, desired_counts in self.current_demand.items():
+            source = self._demand_sources.get(approach, {}).get(
+                "dataSource", "live"
+            )
             for vehicle_type, wanted in desired_counts.items():
                 existing_count = sum(
                     1
                     for vehicle_id, vehicle_approach in self._vehicle_approach.items()
                     if vehicle_approach == approach
                     and self._vehicle_type.get(vehicle_id) == vehicle_type
+                    and self._vehicle_sources.get(vehicle_id, {}).get(
+                        "dataSource", "live"
+                    ) == source
                 )
                 for _ in range(max(0, wanted - existing_count)):
                     if self.add_vehicle(vehicle_type=vehicle_type, approach=approach):
@@ -1711,13 +1740,23 @@ class SumoController:
             if cleaned == self.stale_approaches:
                 return
             self.stale_approaches = cleaned
-            # Paksa recolor semua kendaraan di step berikutnya.
+            for approach in self.VALID_APPROACHES:
+                self._demand_sources[approach] = {
+                    "dataSource": "replay" if approach in cleaned else "live",
+                    "dataTimestamp": (
+                        cleaned.get(approach)
+                        if approach in cleaned
+                        else self.traffic_timestamp
+                    ),
+                }
+            # Evaluasi ulang warna di step berikutnya. Provenance per kendaraan
+            # tetap menjadi sumber keputusan, bukan status lengan saat ini.
             self._vehicle_signal_color.clear()
 
     def _color_vehicle_by_next_tls(self, vehicle_id: str) -> None:
         """Set warna kendaraan.
 
-        Lengan yang CCTV-nya mati (self.stale_approaches) -> PUTIH (data lama) --
+        Kendaraan yang dibuat dari demand replay -> PUTIH (data lama) --
         ini SELALU aktif, tidak tergantung COLOR_VEHICLES_BY_SIGNAL. Selain itu,
         kalau COLOR_VEHICLES_BY_SIGNAL, warna lampu yang sedang dihadapinya
         dibaca dari getNextTLS() ('G'/'g'/'y'/'r'); kendaraan yang sudah
@@ -1727,7 +1766,7 @@ class SumoController:
         if self.traci is None:
             return
 
-        if self._vehicle_approach.get(vehicle_id) in self.stale_approaches:
+        if self._vehicle_sources.get(vehicle_id, {}).get("dataSource") == "replay":
             if self._vehicle_signal_color.get(vehicle_id) == "stale":
                 return
             try:
@@ -1737,12 +1776,13 @@ class SumoController:
                 pass
             return
 
-        if not self.COLOR_VEHICLES_BY_SIGNAL:
+        if self.scenario == "Traffic Realtime" or not self.COLOR_VEHICLES_BY_SIGNAL:
             # Lengan ini kembali live setelah sempat stale -> kembalikan ke
             # warna default SUMO sekali, lalu berhenti mengelola warnanya.
-            if self._vehicle_signal_color.pop(vehicle_id, None) == "stale":
+            if self._vehicle_signal_color.get(vehicle_id) != "live-yellow":
                 try:
                     self.traci.vehicle.setColor(vehicle_id, (255, 255, 0, 255))
+                    self._vehicle_signal_color[vehicle_id] = "live-yellow"
                 except self.traci.TraCIException:
                     pass
             return
@@ -1870,6 +1910,7 @@ class SumoController:
                             )
                             self._vehicle_type.pop(vehicle_id, None)
                             self._vehicle_signal_color.pop(vehicle_id, None)
+                            self._vehicle_sources.pop(vehicle_id, None)
 
                             self.arrived_total[
                                 approach
@@ -1916,6 +1957,7 @@ class SumoController:
                                 "y": y,
                                 "angle": angle,
                                 "type": vclass,
+                                **self._vehicle_sources.get(vehicle_id, {}),
                             })
 
                             # Dipakai kartu "Hasil Simulasi" (Digital Twin) --
@@ -2558,6 +2600,8 @@ class SumoController:
         self._vehicle_approach.clear()
         self._vehicle_type.clear()
         self._vehicle_signal_color.clear()
+        self._vehicle_sources.clear()
+        self._demand_sources.clear()
         self.stale_approaches.clear()
 
         self.current_demand.clear()
