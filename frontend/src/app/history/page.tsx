@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useState, useMemo } from "react";
 import {
     Activity,
-    Car,
     ChevronDown,
     ChevronLeft,
     ChevronRight,
@@ -1499,22 +1498,6 @@ export default function HistoryPage() {
                                     </p>
                                 </>
                             )}
-                        </div>
-
-                        {/* KONDISI LALU LINTAS SETELAH REKOMENDASI DITERAPKAN */}
-                        <div className="mb-5">
-                            <div className="mb-2 flex items-center gap-2">
-                                <Car size={15} className="text-text-secondary" />
-                                <h3 className="text-xs font-medium">
-                                    Kondisi Lalu Lintas Nyata Setelah Rekomendasi Diterapkan
-                                </h3>
-                            </div>
-                            <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-border bg-surface-2 py-8 text-center">
-                                <p className="mb-1 text-xs font-medium text-text-muted">Data pengamatan lapangan belum tersedia</p>
-                                <p className="max-w-[320px] text-[10px] text-text-muted opacity-70">
-                                    Tabel &quot;Dampak Rekomendasi&quot; di atas adalah hasil SIMULASI, bukan kondisi nyata. Bagian ini khusus untuk hasil pengamatan kamera CCTV setelah rekomendasi benar-benar diterapkan di lapangan — menunggu siklus observasi berikutnya.
-                                </p>
-                            </div>
                         </div>
                     </div>
                 </div>
