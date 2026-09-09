@@ -581,6 +581,41 @@ export default function HistoryPage() {
         });
     }, [ambilData, halaman]);
 
+    // Auto-refresh: siklus baru dari worker muncul sendiri tanpa reload.
+    // HANYA di halaman 1 -- polling di halaman lain akan menendang user dari
+    // posisinya. Diam-diam (tidak lewat setMemuat, tidak ada spinner). setData
+    // hanya kalau isi teratas / jumlah / total siklus berubah, supaya list
+    // tidak berkedip tiap 5 detik saat tidak ada yang baru.
+    useEffect(() => {
+        if (halaman !== 1) return;
+        const intervalId = setInterval(() => {
+            void (async () => {
+                try {
+                    const res = await fetch(
+                        `${API_BASE_URL}/api/v1/history/recommendations` +
+                            `?page=1&pageSize=${PAGE_SIZE}`
+                    );
+                    if (!res.ok) return;
+                    const segar: ResponRiwayat = await res.json();
+                    setData((lama) => {
+                        if (
+                            lama &&
+                            lama.totalCycles === segar.totalCycles &&
+                            lama.items.length === segar.items.length &&
+                            lama.items[0]?.timestamp === segar.items[0]?.timestamp
+                        ) {
+                            return lama;
+                        }
+                        return segar;
+                    });
+                } catch {
+                    // Diamkan -- backend sesaat tidak merespons; coba lagi.
+                }
+            })();
+        }, 5000);
+        return () => clearInterval(intervalId);
+    }, [halaman]);
+
     // Poll DIAM-DIAM (tidak lewat setMemuat -- jangan sampai spinner
     // full-page nyala cuma karena satu siklus masih nunggu metrik) selama
     // panel yang lagi dibuka masih dalam kondisi sedangMenungguMetrik().
