@@ -31,7 +31,7 @@ from run_tls_simulation import (
     sumoConfig,
     tlsId,
 )
-from scenario_generator import ScenarioEngine
+from scenario_generator import ScenarioEngine, REALTIME_REFERENCE_GREEN_SECONDS
 
 from app.pipeline.traffic_state_builder import (  # noqa: E402
     TrafficStateBuilder,
@@ -196,10 +196,14 @@ def evaluate_state(state, *, forecast=None, full_cycle: bool = False,
     kenapa ini perlu. `state` (baseline) tidak terpengaruh sama sekali.
     """
     engine = _make_engine(simulation_steps, strict_metrics=evaluation_horizon_seconds is not None)
+    # Durasi hijau lampu yang BENAR-BENAR TERPASANG sekarang (fixed-time
+    # 50 dtk merata) -- bukan placeholder 15. Ini yang ditampilkan sebagai
+    # "Durasi Lampu Hijau Realtime" dan jadi kolom "sebelum" di tabel Dampak.
+    current_green = REALTIME_REFERENCE_GREEN_SECONDS
     if full_cycle:
         recommendation = engine.recommend_full_cycle(
             state=state,
-            currentGreenSeconds=15,
+            currentGreenSeconds=current_green,
             currentPhase="south",
             forecast=forecast,
             forecastWeight=0.3,
@@ -211,7 +215,7 @@ def evaluate_state(state, *, forecast=None, full_cycle: bool = False,
         # pkji_traffic_state sengaja tidak dikirim ke sini.
         recommendation = engine.recommend(
             state=state,
-            currentGreenSeconds=15,
+            currentGreenSeconds=current_green,
             currentPhase="south",
             forecast=forecast,
             forecastWeight=0.3,
