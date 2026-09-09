@@ -340,12 +340,25 @@ class HistoryService:
             return
 
         simulation_ids = [row["id"] for row in simulations]
-        metrics = (
-            self.supabase.table("simulationMetrics")
-            .select("*")
-            .in_("simulationId", simulation_ids)
-            .execute()
-        ).data or []
+        # PostgREST memotong hasil di 1000 baris SECARA DIAM-DIAM (sama seperti
+        # peringatan di list_cycles). Tiap simulasi punya ~22 baris metrik, jadi
+        # ~45 simulasi saja sudah menembus batas -- dan yang terpotong justru
+        # simulasi TERBARU (id tertinggi), sehingga siklus terbaru di tiap
+        # halaman kehilangan metriknya ("menunggu metrik" padahal sudah ditulis).
+        # Diambil per batch kecil supaya tiap query tetap di bawah cap.
+        metrics: list[dict[str, Any]] = []
+        _METRICS_BATCH = 40  # ~40 x ~22 baris = ~880, aman di bawah 1000
+        for _start in range(0, len(simulation_ids), _METRICS_BATCH):
+            _chunk = simulation_ids[_start:_start + _METRICS_BATCH]
+            metrics.extend(
+                (
+                    self.supabase.table("simulationMetrics")
+                    .select("*")
+                    .in_("simulationId", _chunk)
+                    .execute()
+                ).data
+                or []
+            )
 
         metrics_by_simulation: dict[int, dict[str, Any]] = {}
         for metric in metrics:
