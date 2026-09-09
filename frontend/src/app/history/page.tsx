@@ -1290,48 +1290,6 @@ export default function HistoryPage() {
                                 ))}
                             </div>
                         </div>
-                        {/* DURASI LAMPU HIJAU REKOMENDASI (vs realtime) */}
-                        <div className="mb-5">
-                            <div className="mb-2 flex items-center gap-2">
-                                <TrendingDown size={15} className="text-signal-green" />
-                                <h3 className="text-xs font-medium">
-                                    Durasi Lampu Hijau Rekomendasi
-                                    <span className="ml-1 font-normal text-text-muted">vs realtime 50s</span>
-                                </h3>
-                            </div>
-                            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-                                {urutkanFase(dipilih.phases).map((fase) => {
-                                    const dari = fase.currentGreenSeconds;
-                                    const ke = fase.greenSeconds;
-                                    const persen =
-                                        dari != null && ke != null && dari !== 0
-                                            ? Math.round(((ke - dari) / dari) * 100)
-                                            : null;
-                                    return (
-                                        <div
-                                            key={fase.approach}
-                                            className="rounded-lg border border-border bg-surface-2 p-3"
-                                        >
-                                            <p className="text-[11px] text-text-muted">
-                                                {labelLengan(fase.approach)}
-                                            </p>
-                                            <div className="mt-1 flex items-baseline gap-1.5">
-                                                <span className="font-mono text-[11px] text-text-muted line-through">
-                                                    {dari ?? "—"}s
-                                                </span>
-                                                <span className="text-text-muted">→</span>
-                                                <span className="font-mono text-sm font-bold text-signal-green">
-                                                    {ke ?? "—"}s
-                                                </span>
-                                            </div>
-                                            <div className="mt-1">
-                                                <PersenBadge percent={persen} />
-                                            </div>
-                                        </div>
-                                    );
-                                })}
-                            </div>
-                        </div>
                         {/* TAB LENGAN -- di atas grafik, ngontrol Traffic Forecast (garis
                             mana yang ditebalkan) DAN bagian Proses/Output di bawahnya. */}
                         <div className="mb-3 grid grid-cols-4 gap-1.5">
@@ -1582,6 +1540,49 @@ export default function HistoryPage() {
                                     </p>
                                 </>
                             )}
+                        </div>
+
+                        {/* DURASI LAMPU HIJAU REKOMENDASI (vs realtime) */}
+                        <div className="mb-5">
+                            <div className="mb-2 flex items-center gap-2">
+                                <TrendingDown size={15} className="text-signal-green" />
+                                <h3 className="text-xs font-medium">
+                                    Durasi Lampu Hijau Rekomendasi
+                                    <span className="ml-1 font-normal text-text-muted">vs realtime 50s</span>
+                                </h3>
+                            </div>
+                            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                                {urutkanFase(dipilih.phases).map((fase) => {
+                                    const dari = fase.currentGreenSeconds;
+                                    const ke = fase.greenSeconds;
+                                    const persen =
+                                        dari != null && ke != null && dari !== 0
+                                            ? Math.round(((ke - dari) / dari) * 100)
+                                            : null;
+                                    return (
+                                        <div
+                                            key={fase.approach}
+                                            className="rounded-lg border border-border bg-surface-2 p-3"
+                                        >
+                                            <p className="text-[11px] text-text-muted">
+                                                {labelLengan(fase.approach)}
+                                            </p>
+                                            <div className="mt-1 flex items-baseline gap-1.5">
+                                                <span className="font-mono text-[11px] text-text-muted line-through">
+                                                    {dari ?? "—"}s
+                                                </span>
+                                                <span className="text-text-muted">→</span>
+                                                <span className="font-mono text-sm font-bold text-signal-green">
+                                                    {ke ?? "—"}s
+                                                </span>
+                                            </div>
+                                            <div className="mt-1">
+                                                <PersenBadge percent={persen} />
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+                            </div>
                         </div>
 
                         {/* KONDISI AKHIR EVALUASI -- format & urutan SAMA dengan
