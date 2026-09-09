@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import random
 import sys
 import threading
@@ -437,6 +438,14 @@ class SumoController:
         self._camera_clock_time: float | None = None
         self._camera_clock_duration: float | None = None
         self._camera_clock_synced_at: float | None = None
+        # Geser (kelipatan panjang siklus lampu) yang ditambahkan ke posisi
+        # video mentah supaya clock fase TIDAK PERNAH mundur ketika rekaman
+        # CCTV mengulang ke 0 atau di-seek ke belakang. Siklus lampu periodik,
+        # jadi menambah kelipatan penuh panjang siklus menjaga fase tetap
+        # sinkron dengan rekaman sementara hitung mundur di dashboard tetap
+        # turun mulus, bukan melompat mundur satu siklus tiap video loop.
+        self._camera_clock_loop_offset: float = 0.0
+        self._camera_clock_last_raw: float | None = None
 
         self.last_error: str | None = None
 
@@ -1505,16 +1514,32 @@ class SumoController:
         # ke 0 tiap durasi video CCTV padahal videonya sendiri belum berhenti.
         return self._camera_clock_time + elapsed
 
-    def _pick_camera_phase(self, clock_time: float) -> tuple[int, float]:
-        """(phase_index, sisa_detik) untuk waktu video tertentu vs active_cycle_plan."""
+    def _camera_cycle_durations(self) -> list[int]:
+        """Durasi tiap fase (hijau, kuning, ...) dari active_cycle_plan."""
         durations: list[int] = []
         for phase in self.active_cycle_plan["phases"]:
             durations.extend([
                 max(1, int(phase.get("greenSeconds", 1))),
                 max(1, int(phase.get("yellowSeconds", 4))),
             ])
+        return durations
+
+    def _pick_camera_phase(self, clock_time: float) -> tuple[int, float]:
+        """(phase_index, sisa_detik) untuk waktu video tertentu vs active_cycle_plan."""
+        durations = self._camera_cycle_durations()
         cycle_seconds = sum(durations)
-        offset = max(0.0, float(clock_time)) % cycle_seconds
+        # startOffsetSeconds: rekaman CCTV tidak mulai tepat di detik ke-0
+        # siklus lampu (mis. video mulai saat Utara SUDAH hijau beberapa
+        # detik). Nilai ini menggeser posisi siklus supaya fase SUMO cocok
+        # dengan video sejak frame pertama, tanpa mengubah durasi hijau.
+        start_offset = 0.0
+        try:
+            start_offset = float(
+                (self.active_cycle_plan or {}).get("startOffsetSeconds", 0) or 0
+            )
+        except (TypeError, ValueError):
+            start_offset = 0.0
+        offset = (max(0.0, float(clock_time)) + start_offset) % cycle_seconds
         phase_index = 0
         elapsed_in_phase = offset
         for index, duration in enumerate(durations):
@@ -1574,12 +1599,30 @@ class SumoController:
             if video_duration_seconds is not None
             else self._camera_clock_duration
         )
-        # Simpan apa adanya (tanpa modulo durasi) supaya get_display_time()
-        # tidak wrap ke 0 sebelum video CCTV sungguhan habis.
-        self._camera_clock_time = max(0.0, float(video_time_seconds))
+
+        raw = max(0.0, float(video_time_seconds))
+        cycle_seconds = max(1.0, float(sum(self._camera_cycle_durations())))
+
+        # Deteksi rekaman CCTV mengulang / di-seek mundur: posisi video turun
+        # jauh dari posisi sebelumnya. Tambah kelipatan penuh panjang siklus
+        # ke offset supaya clock (raw + offset) tetap monoton naik. Toleransi
+        # kecil membiarkan koreksi drift normal (<~2 dtk) tetap lewat apa adanya.
+        if (
+            self._camera_clock_last_raw is not None
+            and raw < self._camera_clock_last_raw - 2.0
+        ):
+            gap = self._camera_clock_last_raw - raw
+            self._camera_clock_loop_offset += (
+                math.ceil(gap / cycle_seconds) * cycle_seconds
+            )
+        self._camera_clock_last_raw = raw
+
+        # Simpan (tanpa modulo durasi) supaya get_display_time() tidak wrap ke
+        # 0 sebelum video CCTV sungguhan habis. Offset menjaga monoton.
+        self._camera_clock_time = raw + self._camera_clock_loop_offset
         self._camera_clock_synced_at = time.monotonic()
 
-        phase_index, remaining = self._pick_camera_phase(float(video_time_seconds))
+        phase_index, remaining = self._pick_camera_phase(self._camera_clock_time)
 
         with self._traci_lock:
             self._apply_tls_phase(phase_index, remaining)

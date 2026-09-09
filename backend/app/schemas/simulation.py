@@ -25,6 +25,9 @@ class SimulationCyclePlan(BaseModel):
     candidateId: str | None = None
     source: str = "rule-based"
     totalCycleSeconds: int | None = Field(default=None, ge=0)
+    # Geser posisi siklus (detik) supaya fase SUMO cocok dengan rekaman CCTV
+    # yang tidak mulai tepat di awal siklus lampu. Dipakai _pick_camera_phase.
+    startOffsetSeconds: float = Field(default=0.0, ge=0)
 
 
 class SimulationRequest(BaseModel):

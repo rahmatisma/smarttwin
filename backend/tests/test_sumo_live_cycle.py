@@ -121,6 +121,66 @@ def test_camera_clock_wraps_display_time_without_resetting_sumo():
     assert controller.last_simulation_time == 1130
 
 
+def test_camera_clock_does_not_jump_backward_when_recording_loops():
+    """Video CCTV mengulang ke 0 tidak boleh menarik clock fase ke belakang."""
+    controller = SumoController()
+    traffic_light = FakeTrafficLight()
+    controller.traci = SimpleNamespace(trafficlight=traffic_light)
+    controller.running = True
+    controller.apply_cycle_plan({
+        "phases": [
+            {"approach": name, "greenSeconds": 20, "yellowSeconds": 4}
+            for name in ("north", "east", "south", "west")
+        ]
+    })
+    cycle_seconds = 4 * (20 + 4)  # 96
+
+    controller.sync_signal_clock(300.0, 320.0)
+    before = controller.get_display_time()
+
+    # Rekaman selesai -> onEnded frontend kirim videoTime = 0.
+    result = controller.sync_signal_clock(0.0, 320.0)
+    after = controller.get_display_time()
+
+    # Clock maju, bukan mundur.
+    assert after >= before
+    # Fase tetap selaras dengan posisi video baru (0 -> awal siklus).
+    assert result["phase"] == 0
+    assert controller.get_display_time() % cycle_seconds < 1.0
+
+    # Koreksi drift kecil (mundur <2 dtk) tetap diterapkan apa adanya.
+    controller._camera_clock_loop_offset = 0.0
+    controller._camera_clock_last_raw = None
+    controller.sync_signal_clock(50.0, 320.0)
+    controller.sync_signal_clock(49.0, 320.0)
+    assert controller._camera_clock_loop_offset == 0.0
+
+
+def test_start_offset_shifts_first_cycle_position():
+    """startOffsetSeconds: video mulai saat lengan pertama sudah hijau."""
+    controller = SumoController()
+    traffic_light = FakeTrafficLight()
+    controller.traci = SimpleNamespace(trafficlight=traffic_light)
+    controller.running = True
+    controller.apply_cycle_plan({
+        "startOffsetSeconds": 10,
+        "phases": [
+            {"approach": name, "greenSeconds": 50, "yellowSeconds": 4}
+            for name in ("north", "east", "south", "west")
+        ],
+    })
+
+    # Video di detik 0, tapi offset 10 -> Utara sudah hijau 10 dtk -> sisa 40.
+    result = controller.sync_signal_clock(0.0, 216.0)
+    assert result["phase"] == 0  # Utara hijau
+    assert abs(result["remainingSeconds"] - 40.0) < 0.1
+
+    # Tanpa offset harusnya sisa 50.
+    controller.active_cycle_plan["startOffsetSeconds"] = 0
+    result0 = controller.sync_signal_clock(0.0, 216.0)
+    assert abs(result0["remainingSeconds"] - 50.0) < 0.1
+
+
 def test_camera_clock_continues_while_dashboard_is_unmounted(monkeypatch):
     controller = SumoController()
     controller._camera_clock_time = 180.0
