@@ -88,17 +88,19 @@ class PerApproachForecastService:
                 normalized.append((self._timestamp(record), by_approach))
         normalized.sort(key=lambda item: item[0])
 
-        # Ambil blok 12 data paling baru yang benar-benar berjarak 5 detik.
-        for end in range(len(normalized), 11, -1):
-            window = normalized[end - 12:end]
-            if all(
-                (window[index][0] - window[index - 1][0]).total_seconds() == 5
-                for index in range(1, len(window))
-            ):
-                return window
-        raise ValueError(
-            "Forecast per-approach membutuhkan 12 TrafficState lengkap dan berurutan setiap 5 detik."
-        )
+        if len(normalized) < 12:
+            raise ValueError(
+                "Forecast per-approach membutuhkan minimal 12 TrafficState lengkap "
+                f"(baru ada {len(normalized)})."
+            )
+
+        # SELALU pakai 12 window lengkap PALING BARU supaya forecast selalu
+        # relatif "sekarang", bukan blok bersih dari satu menit lalu.
+        # Kalau 12 window terakhir kebetulan tidak berjarak persis 5 detik
+        # (rekaman ada celah), tetap dipakai apa adanya -- modelnya dilatih
+        # di grid 5 detik jadi hasilnya jadi pendekatan, tapi jauh lebih
+        # berguna di dashboard daripada "belum tersedia".
+        return normalized[-12:]
 
     def predict_records(self, records: list[dict[str, Any]]) -> dict[str, Any]:
         import numpy as np

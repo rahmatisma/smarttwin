@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState, useMemo } from "react";
+import { useCallback, useEffect, useState, useMemo, useRef } from "react";
 import {
     Activity,
     ChevronDown,
@@ -402,7 +402,9 @@ function GrafikLengan({
                                     strokeWidth={2}
                                     dot={false}
                                     activeDot={{ r: 4 }}
-                                    isAnimationActive={false}
+                                    isAnimationActive
+                                    animationDuration={450}
+                                    animationEasing="ease-out"
                                     connectNulls
                                 />
                             ))}
@@ -553,7 +555,8 @@ export default function HistoryPage() {
         try {
             const res = await fetch(
                 `${API_BASE_URL}/api/v1/history/recommendations` +
-                    `?page=${nomorHalaman}&pageSize=${PAGE_SIZE}`
+                    `?page=${nomorHalaman}&pageSize=${PAGE_SIZE}`,
+                { cache: "no-store" }
             );
             if (!res.ok) {
                 throw new Error(`Backend menjawab ${res.status}`);
@@ -580,6 +583,65 @@ export default function HistoryPage() {
             void ambilData(halaman);
         });
     }, [ambilData, halaman]);
+
+    // Auto-refresh: siklus baru dari worker muncul sendiri tanpa reload.
+    // HANYA di halaman 1 -- polling di halaman lain akan menendang user dari
+    // posisinya. Diam-diam (tidak lewat setMemuat, tidak ada spinner). setData
+    // hanya kalau isi teratas / jumlah / total siklus berubah, supaya list
+    // tidak berkedip tiap 5 detik saat tidak ada yang baru.
+    useEffect(() => {
+        if (halaman !== 1) return;
+        const intervalId = setInterval(() => {
+            void (async () => {
+                try {
+                    const res = await fetch(
+                        `${API_BASE_URL}/api/v1/history/recommendations` +
+                            `?page=1&pageSize=${PAGE_SIZE}`,
+                        { cache: "no-store" }
+                    );
+                    if (!res.ok) return;
+                    const segar: ResponRiwayat = await res.json();
+                    setData((lama) => {
+                        if (
+                            lama &&
+                            lama.totalCycles === segar.totalCycles &&
+                            lama.items.length === segar.items.length &&
+                            lama.items[0]?.timestamp === segar.items[0]?.timestamp
+                        ) {
+                            return lama;
+                        }
+                        return segar;
+                    });
+                } catch {
+                    // Diamkan -- backend sesaat tidak merespons; coba lagi.
+                }
+            })();
+        }, 5000);
+        return () => clearInterval(intervalId);
+    }, [halaman]);
+
+    // Deteksi baris riwayat yang BARU muncul (dari auto-refresh) supaya bisa
+    // dianimasikan masuk dari kanan. Load pertama tidak dianimasikan (semua
+    // baris "baru"); hanya siklus yang menyusul setelahnya. Kelas dilepas
+    // setelah animasi selesai supaya tidak terulang di re-render berikutnya.
+    const [barisBaru, setBarisBaru] = useState<Set<string>>(new Set());
+    const timestampTerlihatRef = useRef<Set<string> | null>(null);
+    useEffect(() => {
+        if (!data) return;
+        const semua = new Set(data.items.map((s) => s.timestamp));
+        if (timestampTerlihatRef.current === null) {
+            timestampTerlihatRef.current = semua;
+            return;
+        }
+        const baru = [...semua].filter(
+            (ts) => !timestampTerlihatRef.current!.has(ts)
+        );
+        timestampTerlihatRef.current = semua;
+        if (baru.length === 0) return;
+        queueMicrotask(() => setBarisBaru(new Set(baru)));
+        const t = setTimeout(() => setBarisBaru(new Set()), 650);
+        return () => clearTimeout(t);
+    }, [data]);
 
     // Poll DIAM-DIAM (tidak lewat setMemuat -- jangan sampai spinner
     // full-page nyala cuma karena satu siklus masih nunggu metrik) selama
@@ -1044,7 +1106,11 @@ export default function HistoryPage() {
                                                 <tr
                                                     key={siklus.timestamp}
                                                     onClick={() => setDipilih(siklus)}
-                                                    className="cursor-pointer border-b border-border/50 transition hover:bg-surface-2"
+                                                    className={`cursor-pointer border-b border-border/50 transition hover:bg-surface-2 ${
+                                                        barisBaru.has(siklus.timestamp)
+                                                            ? "riwayat-baris-baru"
+                                                            : ""
+                                                    }`}
                                                 >
                                                     <td className="whitespace-nowrap px-5 py-3 font-mono text-xs">
                                                         {formatWaktu(siklus.timestamp)}

@@ -332,11 +332,15 @@ export async function fetchRecommendation(
   if (recommendationCache && Date.now() - recommendationCacheTime < 5000) return recommendationCache;
   if (recommendationRequestInFlight) return recommendationRequestInFlight;
 
+  // Endpoint normal ~1 dtk (cache in-memory di backend). Batas 30 dtk buat
+  // menahan lonjakan sesekali saat CPU laptop dipakai bareng SUMO worker +
+  // next dev -- lebih baik menunggu lama daripada memunculkan TimeoutError
+  // padahal jawabannya akan datang.
   recommendationRequestInFlight = fetch(`${API_BASE_URL}/recommendation`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ intersectionId }),
-    signal: AbortSignal.timeout(15000),
+    signal: AbortSignal.timeout(30000),
   })
     .then(async (response) => {
       if (!response.ok) throw new Error(`Rekomendasi gagal dimuat (HTTP ${response.status}).`);
@@ -711,22 +715,38 @@ export function fetchDigitalTwinScenarios(
 
 
 const snapshotForecastCache = new Map<number, Promise<ForecastResponse | null>>();
+// Penanda "gagal sementara" (jaringan putus / backend restart) -- BEDA dari
+// null biasa (422: window ini memang tidak punya 12 riwayat berurutan, tidak
+// akan berhasil kalau diulang). null di-cache supaya tidak spam fetch+422
+// tiap poll; SNAPSHOT_RETRY tidak di-cache supaya dicoba lagi.
+const SNAPSHOT_RETRY = Symbol("retry");
 
 export function fetchSnapshotForecast(trafficStateId: number): Promise<ForecastResponse | null> {
   const cached = snapshotForecastCache.get(trafficStateId);
   if (cached) return cached;
   const request = requestSnapshotForecast(trafficStateId).then(result => {
-    if (!result) snapshotForecastCache.delete(trafficStateId);
-    return result;
+    if (result === SNAPSHOT_RETRY) {
+      snapshotForecastCache.delete(trafficStateId);
+      return null;
+    }
+    return result; // ForecastResponse ATAU null -- dua-duanya tetap di-cache
   });
   if (snapshotForecastCache.size >= 32) snapshotForecastCache.delete(snapshotForecastCache.keys().next().value!);
   snapshotForecastCache.set(trafficStateId, request);
   return request;
 }
 
-async function requestSnapshotForecast(trafficStateId: number): Promise<ForecastResponse | null> {
+async function requestSnapshotForecast(
+  trafficStateId: number
+): Promise<ForecastResponse | null | typeof SNAPSHOT_RETRY> {
+  let response: Response;
   try {
-    const response = await fetch(API_BASE_URL + "/api/forecast/approaches/snapshot/" + trafficStateId, { cache: "no-store" });
+    response = await fetch(API_BASE_URL + "/api/forecast/approaches/snapshot/" + trafficStateId, { cache: "no-store" });
+  } catch {
+    return SNAPSHOT_RETRY; // jaringan/backend sesaat -- coba lagi poll berikutnya
+  }
+  try {
+    // 422 = window ini tidak punya 12 riwayat berurutan. Permanen untuk ID ini.
     if (!response.ok) return null;
     const result = await response.json();
     const rows = result.approachForecasts as Array<{ timestamp: string; secondsAhead: number; approaches: Array<{ approach: Approach; vehicleCount: number; queueLengthVeh: number; queueLengthMEst: number; densityIndex: number }> }>;

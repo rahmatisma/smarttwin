@@ -162,10 +162,13 @@ def predict_snapshot(traffic_state_id: int, intersectionId: str = "simpang4-ping
         snapshot = load_snapshot(intersectionId, traffic_state_id)
         repository = TrafficRepository()
         intersection_row_id = repository.get_intersection_row_id(intersectionId)
+        # Ambil 40, bukan 12: sebagian row bisa tidak lengkap 4 lengan, dan
+        # _history perlu ruang untuk mencari blok 5-detik yang bersih (atau
+        # jatuh ke 12 terbaru kalau rekaman ada celah).
         rows = (get_supabase().table("trafficStates").select("id,windowStart,windowEnd")
                 .eq("intersectionId", intersection_row_id)
                 .lte("windowEnd", snapshot.windowEnd.isoformat())
-                .order("windowEnd", desc=True).limit(12).execute()).data or []
+                .order("windowEnd", desc=True).limit(40).execute()).data or []
         # Satu query .in_ untuk 12 state, bukan 12 get_approach_states() berurutan
         # (~3,7 dtk -> ~0,5 dtk). Urutan approach tidak penting: konsumen
         # (per_approach_forecast_service._history) mengindeks per nama lengan.
@@ -176,11 +179,28 @@ def predict_snapshot(traffic_state_id: int, intersectionId: str = "simpang4-ping
                     "approaches": approaches_by_state.get(int(row["id"]), [])} for row in rows]
         # Only actual, complete observations are admitted; no zero-filled missing arms.
         result = per_approach_forecast_service.predict_records(records)
-        if datetime.fromisoformat(result["input"]["to"]) != snapshot.windowEnd:
-            raise ValueError("Riwayat LSTM tidak berakhir pada TrafficState yang dipilih.")
+        # Riwayat harus berakhir DEKAT window yang diminta (toleransi 60 dtk --
+        # rekaman kadang ada celah kecil; forecast dari ~beberapa detik lalu
+        # masih berguna di dashboard).
+        selisih = abs(
+            (datetime.fromisoformat(result["input"]["to"]) - snapshot.windowEnd).total_seconds()
+        )
+        if selisih > 60:
+            raise ValueError(
+                "Riwayat LSTM berakhir terlalu jauh dari TrafficState yang dipilih."
+            )
         return {**result, "trafficStateId": traffic_state_id}
     except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+        # Bukan error server: window ini memang belum punya 12 TrafficState
+        # berurutan (biasa terjadi di dekat awal batch / celah rekaman).
+        # Balas 200 dengan penanda supaya dashboard tidak memenuhi konsol
+        # dengan 422 tiap kali video melewati window seperti ini.
+        return {
+            "trafficStateId": traffic_state_id,
+            "available": False,
+            "reason": str(exc),
+            "approachForecasts": [],
+        }
 
 
 @router.post(
