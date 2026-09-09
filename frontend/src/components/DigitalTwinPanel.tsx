@@ -318,11 +318,13 @@ export default function DigitalTwinPanel({
   // Lengan yang lagi ditandai "CCTV mati" (simulasi manual di
   // CameraFeedPanel) -- HANYA dipakai supaya livePayloadSignature di
   // bawah berubah dan /simulation/run langsung dipanggil ulang saat
-  // status ini berubah. Backend (bukan di sini) yang benar-benar
-  // mengosongkan angka lengan itu sebelum masuk SUMO, lihat Step 6 di
-  // rencana-fallback-cctv-per-lengan.md -- tanpa prop ini, toggle
-  // offline/online tidak berefek sampai data TrafficState di Supabase
-  // kebetulan berubah sendiri (bisa lama/tidak pernah kalau datanya statis).
+  // status ini berubah. Backend (bukan di sini) yang benar-benar mengganti
+  // demand lengan itu dengan data historis yang diputar ulang (bukan live)
+  // sebelum masuk SUMO -- lihat catatan "3.5 LENGAN CCTV MATI" di
+  // simulation_service.py dan rencana-fallback-cctv-per-lengan.md. Tanpa
+  // prop ini, toggle offline/online tidak berefek sampai data TrafficState
+  // di Supabase kebetulan berubah sendiri (bisa lama/tidak pernah kalau
+  // datanya statis).
   offlineApproaches?: Set<string>;
 }) {
   const [simRunning, setSimRunning] = useState(false);
@@ -445,6 +447,25 @@ export default function DigitalTwinPanel({
     return () => window.clearInterval(interval);
   }, [simRunning]);
 
+  // Detak "muter data lama" -- SENGAJA cuma jalan selagi ada lengan
+  // offline. livePayloadSignature di bawah bergantung pada nilai ini
+  // supaya /simulation/run terus dipanggil ulang tiap 3 detik selama
+  // offline, TERLEPAS dari apakah data TrafficState asli di Supabase
+  // kebetulan berubah atau tidak -- tanpa ini, kalau datanya statis,
+  // replay data historis di backend (_sample_offline_replay()) akan
+  // tetap maju di baliknya, tapi SUMO tidak pernah diberi tahu nilai
+  // barunya karena tidak ada yang memicu POST /run lagi.
+  const [replayTick, setReplayTick] = useState(0);
+  const hasOfflineApproaches = (offlineApproaches?.size ?? 0) > 0;
+  useEffect(() => {
+    if (!hasOfflineApproaches) return;
+    const interval = window.setInterval(
+      () => setReplayTick((tick) => tick + 1),
+      3000
+    );
+    return () => window.clearInterval(interval);
+  }, [hasOfflineApproaches]);
+
   const livePayloadSignature = JSON.stringify({
     trafficTimestamp,
     trafficStateId,
@@ -465,6 +486,11 @@ export default function DigitalTwinPanel({
     // (sort) supaya urutan Set tidak bikin signature beda padahal isinya
     // sama.
     offlineApproaches: Array.from(offlineApproaches ?? []).sort(),
+    // Cuma berubah selagi ada lengan offline (lihat effect di atas) --
+    // memaksa /simulation/run terkirim ulang tiap 3 detik supaya "muter
+    // data lama" di backend keliatan MAJU terus, bukan macet di satu
+    // titik selama data live Supabase kebetulan tidak berubah.
+    replayTick: hasOfflineApproaches ? replayTick : 0,
   });
   const canStartSimulation = approaches.length === 4 && Boolean(cyclePlan?.phases?.length);
 

@@ -12,6 +12,7 @@ import httpx
 
 from app.pipeline.traffic_state_builder import TrafficStateBuilder
 from app.services.supabase_client import get_supabase
+from app.services.replay_demo_history import RecordedHistory
 from app.schemas.simulation import (
     SimulationRequest,
     SimulationResult,
@@ -198,11 +199,27 @@ class SimulationService:
         # Lengan (approach) yang lagi ditandai "CCTV mati" di dashboard --
         # dikirim lewat /sync-clock (lihat sync_clock() di bawah). Disimpan
         # per context supaya sandbox /digitaltwin tidak ikut kepengaruh
-        # simulasi mati kamera dashboard. Step 6 (belum dikerjakan, lihat
-        # rencana-fallback-cctv-per-lengan.md) akan membaca ini saat
-        # menyusun demand SUMO supaya lengan offline tidak dapat kendaraan
-        # baru.
+        # simulasi mati kamera dashboard. Dipakai run() (lihat "3.5 LENGAN
+        # OFFLINE" di bawah) buat mengganti demand lengan itu dengan data
+        # historis yang diputar ulang, bukan data live.
         self.offline_approaches: dict[str, set[str]] = {}
+
+        # Kapan (time.time(), wall-clock) tiap lengan MULAI offline, per
+        # context -- dipakai buat menghitung posisi putar-ulang data historis
+        # yang terus maju & melingkar (modulo) selama lengan itu masih
+        # offline. Lihat sync_clock() (yang mengisi ini) dan
+        # _sample_offline_replay() (yang memakainya).
+        self.offline_since: dict[str, dict[str, float]] = {}
+
+        # Riwayat CSV YOLO (cv/output/snapshot_zona.csv) dipakai sebagai
+        # sumber "data lama" untuk lengan yang offline -- SAMA PERSIS file
+        # yang dipakai replay_demo_history.py punya sistem demo terpisah
+        # (replay-demo, port 8001), supaya tidak perlu duplikasi data. Lazy-
+        # load sekali (bisa mahal baca CSV-nya) lewat _get_offline_replay_history().
+        # None kalau file belum pernah berhasil dimuat -- lihat method itu
+        # soal fallback-nya.
+        self._offline_replay_history: RecordedHistory | None = None
+        self._offline_replay_history_failed = False
 
     # ============================================================
     # CONTROLLER LOOKUP
@@ -688,29 +705,50 @@ class SimulationService:
             # ====================================================
 
             # ====================================================
-            # 3.5 KOSONGKAN LENGAN YANG "CCTV MATI" (Step 6)
+            # 3.5 LENGAN "CCTV MATI" -> PUTAR DATA HISTORIS (Step 6+)
             # ====================================================
             # Approach yang ditandai offline lewat /sync-clock (lihat
-            # sync_clock() + self.offline_approaches) dianggap 0 kendaraan
-            # baru -- BUKAN dilewati/di-skip dari list, supaya sync_demand()
-            # masih memprosesnya dan MENGHAPUS kendaraan yang sudah ada di
-            # lengan itu (rekonsiliasi ke target 0), konsisten dengan pesan
-            # toast dashboard "data lengan ini kosong sementara". Approach
-            # lain di list yang sama tetap apa adanya.
+            # sync_clock() + self.offline_approaches) demand-nya DIGANTI
+            # data historis dari cv/output/snapshot_zona.csv, BUKAN
+            # dikosongkan ke 0 -- supaya lengan itu tetap kelihatan ada lalu
+            # lintas (data lama diputar ulang terus, melingkar), bukan
+            # langsung sepi. Item ditandai "stale"+"dataTimestamp" -- itu
+            # kontrak yang sudah dibaca sync_demand() (lihat sumo_controller.py):
+            # kendaraannya otomatis diwarnai putih, dan karena targetnya
+            # tetap ada isinya (bukan 0), sync_demand() tetap menambah/
+            # mengurangi kendaraan mengikuti angka historis itu setiap
+            # polling -- bukan sekadar membekukan yang sudah ada.
+            # Kalau CSV riwayatnya kebetulan tidak tersedia (mis. belum
+            # pernah ada run CV di mesin ini), jatuh balik ke dikosongkan
+            # ke 0 seperti sebelumnya -- approach lain di list yang sama
+            # tetap apa adanya.
             offline_approaches = self.offline_approaches.get(request.context, set())
             if offline_approaches and demand:
-                zeroed_fields = (
-                    "targetVehicleCount",
-                    "motorcycleCount",
-                    "carCount",
-                    "busCount",
-                    "truckCount",
-                    "volume",
-                )
                 for item in demand:
                     approach = str(item.get("approach", "")).lower().strip()
-                    if approach in offline_approaches:
-                        for field in zeroed_fields:
+                    if approach not in offline_approaches:
+                        continue
+
+                    row = self._sample_offline_replay(approach, request.context)
+                    if row is not None:
+                        counts = row["counts"]
+                        item["motorcycleCount"] = counts.get("motorcycle", 0)
+                        item["carCount"] = counts.get("car", 0)
+                        item["busCount"] = counts.get("bus", 0)
+                        item["truckCount"] = counts.get("truck", 0)
+                        item["targetVehicleCount"] = sum(counts.values())
+                        item["volume"] = item["targetVehicleCount"]
+                        item["stale"] = True
+                        item["dataTimestamp"] = row["timestamp"]
+                    else:
+                        for field in (
+                            "targetVehicleCount",
+                            "motorcycleCount",
+                            "carCount",
+                            "busCount",
+                            "truckCount",
+                            "volume",
+                        ):
                             if field in item:
                                 item[field] = 0
 
@@ -1083,6 +1121,54 @@ class SimulationService:
             "staleApproaches": dict(controller.stale_approaches),
         }
 
+    def _get_offline_replay_history(self) -> RecordedHistory | None:
+        """Muat cv/output/snapshot_zona.csv sekali (lazy) sebagai sumber
+        data historis untuk lengan yang offline. None kalau gagal (mis. file
+        belum ada) -- caller (run()) jatuh balik ke kosongkan demand apa
+        adanya, bukan crash.
+        """
+        if self._offline_replay_history is not None:
+            return self._offline_replay_history
+        if self._offline_replay_history_failed:
+            return None
+        csv_path = (
+            Path(__file__).resolve().parents[3]
+            / "cv"
+            / "output"
+            / "snapshot_zona.csv"
+        )
+        try:
+            self._offline_replay_history = RecordedHistory(csv_path)
+        except Exception as exc:  # noqa: BLE001
+            print(f"[offline-replay] Gagal memuat {csv_path}: {exc}")
+            self._offline_replay_history_failed = True
+            return None
+        return self._offline_replay_history
+
+    def _sample_offline_replay(
+        self, approach: str, context: str
+    ) -> dict[str, Any] | None:
+        """Ambil satu baris data historis untuk `approach`, terus maju &
+        melingkar (modulo total durasi rekaman) sejak lengan itu MULAI
+        offline -- efeknya "muter data lama terus" selama masih offline,
+        bukan cuma sekali ambil snapshot lalu diam. None kalau riwayat
+        tidak tersedia/lengan ini tidak ada di CSV.
+        """
+        history = self._get_offline_replay_history()
+        if history is None or approach not in history.rows:
+            return None
+
+        started_at = self.offline_since.get(context, {}).get(approach)
+        if started_at is None:
+            started_at = time.time()
+            self.offline_since.setdefault(context, {})[approach] = started_at
+
+        duration = max(1.0, history.end - history.start)
+        elapsed = time.time() - started_at
+        virtual_timestamp = history.start + (elapsed % duration)
+
+        return history.sample(approach, virtual_timestamp)
+
     def sync_clock(
         self,
         video_time_seconds: float,
@@ -1108,6 +1194,20 @@ class SimulationService:
                     f"offlineApproaches={sorted(new_offline) or '(kosong)'}"
                 )
             self.offline_approaches[context] = new_offline
+
+            # Catat/hapus "sejak kapan" per lengan -- dipakai
+            # _sample_offline_replay() buat memutar data lama terus maju,
+            # bukan diam di satu titik. setdefault: JANGAN reset waktu mulai
+            # kalau lengan itu memang sudah offline dari sebelumnya (video
+            # terus dikirim tiap detik lewat heartbeat, bukan cuma sekali
+            # saat toggle).
+            since_map = self.offline_since.setdefault(context, {})
+            now = time.time()
+            for approach in new_offline:
+                since_map.setdefault(approach, now)
+            for approach in list(since_map.keys()):
+                if approach not in new_offline:
+                    since_map.pop(approach, None)
 
         controller = self.controllers.get(context)
         if controller is None or not controller.is_running():
