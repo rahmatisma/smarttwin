@@ -210,6 +210,8 @@ class SimulationService:
         # offline. Lihat sync_clock() (yang mengisi ini) dan
         # _sample_offline_replay() (yang memakainya).
         self.offline_since: dict[str, dict[str, float]] = {}
+        self.video_times: dict[str, float] = {}
+        self.offline_cutoffs: dict[str, dict[str, float]] = {}
 
         # Riwayat CSV YOLO (cv/output/snapshot_zona.csv) dipakai sebagai
         # sumber "data lama" untuk lengan yang offline -- SAMA PERSIS file
@@ -726,6 +728,7 @@ class SimulationService:
                 self._update_offline_approaches(
                     request.context,
                     request.offlineApproaches,
+                    request.videoTimeSeconds,
                 )
             offline_approaches = self.offline_approaches.get(request.context, set())
             if offline_approaches and demand:
@@ -1168,7 +1171,7 @@ class SimulationService:
         self, approach: str, context: str
     ) -> dict[str, Any] | None:
         """Ambil satu baris data historis untuk `approach`, terus maju &
-        melingkar (modulo total durasi rekaman) sejak lengan itu MULAI
+        melingkar dari awal sampai posisi video saat lengan itu MULAI
         offline -- efeknya "muter data lama terus" selama masih offline,
         bukan cuma sekali ambil snapshot lalu diam. None kalau riwayat
         tidak tersedia/lengan ini tidak ada di CSV.
@@ -1182,9 +1185,14 @@ class SimulationService:
             started_at = time.time()
             self.offline_since.setdefault(context, {})[approach] = started_at
 
-        duration = max(1.0, history.end - history.start)
+        # Freeze the available prefix when this camera fails. Never replay
+        # observations from after that point, even while other cameras advance.
+        cutoff = self.offline_cutoffs.get(context, {}).get(approach, 0.0)
+        duration = min(cutoff, max(0.0, history.end - history.start))
+        if duration <= 0:
+            return None
         elapsed = time.time() - started_at
-        virtual_timestamp = history.start + (elapsed % duration)
+        virtual_timestamp = history.start + (max(0.0, elapsed) % duration)
 
         return history.sample(approach, virtual_timestamp)
 
@@ -1192,8 +1200,12 @@ class SimulationService:
         self,
         context: str,
         approaches: list[str],
+        video_time_seconds: float | None = None,
     ) -> None:
         """Simpan status kamera dan waktu awal fallback per lengan."""
+        if video_time_seconds is not None:
+            self.video_times[context] = max(0.0, video_time_seconds)
+        cutoffs = self.offline_cutoffs.setdefault(context, {})
         new_offline = {
             approach.lower().strip()
             for approach in approaches
@@ -1210,9 +1222,11 @@ class SimulationService:
         now = time.time()
         for approach in new_offline:
             since_map.setdefault(approach, now)
+            cutoffs.setdefault(approach, self.video_times.get(context, 0.0))
         for approach in list(since_map):
             if approach not in new_offline:
                 since_map.pop(approach, None)
+                cutoffs.pop(approach, None)
 
     def sync_clock(
         self,
@@ -1230,7 +1244,9 @@ class SimulationService:
         ada tidak hilang begitu saja.
         """
         if offline_approaches is not None:
-            self._update_offline_approaches(context, offline_approaches)
+            self._update_offline_approaches(context, offline_approaches, video_time_seconds)
+        else:
+            self.video_times[context] = max(0.0, video_time_seconds)
 
         controller = self.controllers.get(context)
         if controller is None or not controller.is_running():

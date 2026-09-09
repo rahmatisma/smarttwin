@@ -101,6 +101,7 @@ class SimulationRequest(BaseModel):
     # Dikirim bersama demand agar pergantian live -> history tidak berlomba
     # dengan heartbeat /sync-clock. None menjaga caller lama tetap kompatibel.
     offlineApproaches: list[str] | None = None
+    videoTimeSeconds: float | None = Field(default=None, ge=0)
 
 
 class SimulationClockRequest(BaseModel):

@@ -1,4 +1,5 @@
 from types import SimpleNamespace
+import pytest
 
 from app.schemas.simulation import SimulationRequest
 from app.services.simulation_service import SimulationService
@@ -139,3 +140,33 @@ def test_repeated_offline_updates_preserve_failure_start_time():
     service._update_offline_approaches("dashboard", [])
     assert service.offline_approaches["dashboard"] == set()
     assert service.offline_since["dashboard"] == {}
+
+
+@pytest.mark.parametrize("arm", ["north", "east", "south", "west"])
+@pytest.mark.parametrize("cutoff", [300, 900])
+def test_replay_loops_only_prefix_before_failure(monkeypatch, arm, cutoff):
+    now = [1000.0]
+    monkeypatch.setattr("app.services.simulation_service.time.time", lambda: now[0])
+    service = SimulationService()
+    service._offline_replay_history = SimpleNamespace(
+        start=10000.0, end=12700.0, rows={arm: [1]},
+        sample=lambda approach, timestamp: {"approach": approach, "time": timestamp},
+    )
+    service._update_offline_approaches("dashboard", [arm], cutoff)
+    assert service._sample_offline_replay(arm, "dashboard")["time"] == 10000
+    now[0] += cutoff - 1
+    assert service._sample_offline_replay(arm, "dashboard")["time"] == 10000 + cutoff - 1
+    service._update_offline_approaches("dashboard", [arm], 1800)
+    now[0] += 2
+    assert service._sample_offline_replay(arm, "dashboard")["time"] == 10001
+    assert service.offline_cutoffs["dashboard"][arm] == cutoff
+
+
+def test_each_arm_freezes_its_own_cutoff_and_recovery_resets_it():
+    service = SimulationService()
+    service._update_offline_approaches("dashboard", ["east"], 300)
+    service._update_offline_approaches("dashboard", ["east", "west"], 900)
+    assert service.offline_cutoffs["dashboard"] == {"east": 300, "west": 900}
+    service._update_offline_approaches("dashboard", ["west"], 1000)
+    service._update_offline_approaches("dashboard", ["east", "west"], 1200)
+    assert service.offline_cutoffs["dashboard"] == {"east": 1200, "west": 900}

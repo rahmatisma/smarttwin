@@ -308,6 +308,7 @@ export default function DigitalTwinPanel({
   trafficStateId,
   candidateId,
   offlineApproaches,
+  getVideoTimeSeconds,
 }: {
   approaches: ApproachState[];
   signal: SignalStatus;
@@ -326,6 +327,7 @@ export default function DigitalTwinPanel({
   // di Supabase kebetulan berubah sendiri (bisa lama/tidak pernah kalau
   // datanya statis).
   offlineApproaches?: Set<string>;
+  getVideoTimeSeconds?: () => number;
 }) {
   const [simRunning, setSimRunning] = useState(false);
   // "live" vs "replay" (CCTV mati -> backend memutar data lama). Init "live"
@@ -517,6 +519,7 @@ export default function DigitalTwinPanel({
         trafficTimestamp: payload.trafficTimestamp,
         trafficStateId: payload.trafficStateId,
         offlineApproaches: payload.offlineApproaches,
+        videoTimeSeconds: getVideoTimeSeconds?.(),
         scenario: "Traffic Realtime",
         approaches: payload.approaches,
         cyclePlan: {
@@ -555,7 +558,7 @@ export default function DigitalTwinPanel({
     return () => {
       cancelled = true;
     };
-  }, [API_BASE_URL, canStartSimulation, livePayloadSignature, recoveryNonce]);
+  }, [API_BASE_URL, canStartSimulation, livePayloadSignature, recoveryNonce, getVideoTimeSeconds]);
   /*
    * Mapping approach berdasarkan arah.
    */

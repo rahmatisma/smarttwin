@@ -325,6 +325,7 @@ export default function DashboardPage() {
   }, [offlineApproaches]);
 
   const videoTimeRef = useRef<number>(0);
+  const getVideoTimeSeconds = useCallback(() => videoTimeRef.current, []);
   const lastClockSyncSecondRef = useRef<number>(-1);
   const lastClockPostAtRef = useRef<number>(0);
   const clockSyncInFlightRef = useRef(false);
@@ -1113,6 +1114,7 @@ export default function DashboardPage() {
                 trafficStateId={allTrafficStates["intersection4"]?.trafficStateId}
                 candidateId={activeRecommendation?.candidateId}
                 offlineApproaches={offlineApproaches}
+                getVideoTimeSeconds={getVideoTimeSeconds}
               />
             </div>
 
