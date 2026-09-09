@@ -969,6 +969,7 @@ class SimulationService:
         # state tidak melakukan panggilan TraCI. Sebelumnya satu screenshot atau
         # sync_demand lambat dapat menahan polling dashboard >10 detik.
         controller = self.controllers.get(context)
+        _stale: dict[str, Any] = dict(getattr(controller, "stale_approaches", {}) or {})
         if controller is None or not controller.is_running():
             return {
                 "backendInstanceId": self.instance_id,
@@ -996,7 +997,19 @@ class SimulationService:
             "detectedVehicles": controller.detected_vehicle_count,
             "trafficTimestamp": controller.traffic_timestamp,
             "trafficStateId": self.active_traffic_state_id.get(context),
-            "dataMode": "timestamped-observation" if controller.traffic_timestamp else "unknown",
+            # Lengan yang CCTV-nya mati -> demand-nya data lama yang diputar
+            # ulang. {approach: isoTimestamp|null}. Frontend memakai ini untuk
+            # menandai lengan tsb (banner + badge + kendaraan biru di SUMO).
+            "staleApproaches": dict(_stale),
+            "replayApproaches": sorted(_stale.keys()),
+            "replaySince": next((ts for ts in _stale.values() if ts), None),
+            "dataMode": (
+                "replay"
+                if _stale
+                else "timestamped-observation"
+                if controller.traffic_timestamp
+                else "unknown"
+            ),
             "cyclePlan": controller.active_cycle_plan,
             "queueLengthVeh": controller.live_queue_length_veh,
             "queueBusiestApproach": controller.live_queue_busiest_approach,
@@ -1045,6 +1058,30 @@ class SimulationService:
             raise SimulationServiceError(str(exc)) from exc
 
         return {"context": context, "mode": mode}
+
+    def set_stale_approaches(
+        self,
+        approaches: dict[str, str | None],
+        context: str = "default",
+    ) -> dict[str, Any]:
+        """Tandai lengan yang CCTV-nya mati (demand diisi data lama).
+
+        Dipakai oleh logic deteksi CCTV: begitu satu kamera tidak mengirim
+        data lagi, lengan itu ditandai di sini supaya SUMO-GUI mewarnai
+        kendaraannya biru dan dashboard menampilkan penanda. Kirim dict
+        kosong untuk mengembalikan semua lengan ke status live.
+        """
+        controller = self.controllers.get(context)
+        if controller is None or not controller.is_running():
+            raise SimulationServiceError("Simulasi SUMO belum berjalan.")
+        try:
+            controller.set_stale_approaches(approaches)
+        except Exception as exc:
+            raise SimulationServiceError(str(exc)) from exc
+        return {
+            "context": context,
+            "staleApproaches": dict(controller.stale_approaches),
+        }
 
     def sync_clock(
         self,

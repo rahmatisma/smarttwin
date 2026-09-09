@@ -6,6 +6,7 @@ from app.schemas.simulation import (
 	SimulationRequest,
 	SimulationResult,
 	SimulationScenarioRequest,
+	SimulationStaleApproachesRequest,
 )
 from app.services.simulation_service import (
 	SimulationServiceError,
@@ -66,6 +67,17 @@ def set_simulation_view(mode: str, context: str = "default"):
 	"""Perluas crop kamera SUMO saat frontend masuk fullscreen."""
 	try:
 		return simulation_service.set_stream_view(mode, context)
+	except SimulationServiceError as exc:
+		raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.post("/stale-approaches", dependencies=[Depends(require_operator)])
+def set_stale_approaches(request: SimulationStaleApproachesRequest):
+	"""Tandai lengan yang CCTV-nya mati (demand-nya data lama yang diputar ulang)."""
+	try:
+		return simulation_service.set_stale_approaches(
+			request.approaches, request.context
+		)
 	except SimulationServiceError as exc:
 		raise HTTPException(status_code=409, detail=str(exc)) from exc
 
