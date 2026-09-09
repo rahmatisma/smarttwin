@@ -180,7 +180,16 @@ def predict_snapshot(traffic_state_id: int, intersectionId: str = "simpang4-ping
             raise ValueError("Riwayat LSTM tidak berakhir pada TrafficState yang dipilih.")
         return {**result, "trafficStateId": traffic_state_id}
     except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+        # Bukan error server: window ini memang belum punya 12 TrafficState
+        # berurutan (biasa terjadi di dekat awal batch / celah rekaman).
+        # Balas 200 dengan penanda supaya dashboard tidak memenuhi konsol
+        # dengan 422 tiap kali video melewati window seperti ini.
+        return {
+            "trafficStateId": traffic_state_id,
+            "available": False,
+            "reason": str(exc),
+            "approachForecasts": [],
+        }
 
 
 @router.post(
