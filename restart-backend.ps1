@@ -61,6 +61,11 @@ if ($KillOnly) {
 }
 
 Write-Host "[3/3] Start backend ..." -ForegroundColor Cyan
+
+# Skrip SUMO/TraCI hard-fail kalau SUMO_HOME tidak diset (lihat CLAUDE.md).
+$sumoHome = Join-Path $repo "venv\Lib\site-packages\sumo"
+if (Test-Path $sumoHome) { $env:SUMO_HOME = $sumoHome }
+
 Set-Location (Join-Path $repo "backend")
 
 # --timeout-graceful-shutdown 10: kalau shutdown handler (stop SUMO) nyangkut,
