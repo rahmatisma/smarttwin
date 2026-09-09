@@ -144,6 +144,13 @@ class SignalRecommendation(
     # Rata-rata delay (detik) per lengan, sumber angka losByApproach.
     delayByApproachSeconds: dict[str, float | None] | None = None
 
+    # Antrean (kendaraan) & throughput (kendaraan) per lengan dari kandidat
+    # pemenang Scenario Generator. Dipakai panel "Kondisi per Lengan" di
+    # dashboard -- tanpa ini kolom Antrean/Lewat selalu "-".
+    queueLengthVehByApproach: dict[str, int | None] | None = None
+
+    throughputVehByApproach: dict[str, int | None] | None = None
+
     candidateId: str | None = None
 
 

@@ -1,4 +1,7 @@
 import logging
+import os
+import threading
+import time
 from datetime import datetime, timezone
 
 from app.schemas.recommendation import (
@@ -31,6 +34,19 @@ from app.services.signal_service import signal_service
 
 logger = logging.getLogger("uvicorn.error")
 
+# TrafficState baru ditulis ingest CV ~tiap 5 detik, jadi menghitung ulang
+# rekomendasi lebih sering dari itu tidak menghasilkan angka baru -- hanya
+# membebani Supabase + LSTM. Cache proses (bukan per-request) berumur pendek
+# ini membuat: (1) banyak tab dashboard berbagi SATU perhitungan, (2) burst
+# refetch akibat satu event WebSocket tidak menjadi N perhitungan paralel.
+# Override lewat env RECOMMENDATION_CACHE_TTL_SECONDS ("0" mematikan cache).
+def _cache_ttl_seconds() -> float:
+    try:
+        return max(0.0, float(os.getenv("RECOMMENDATION_CACHE_TTL_SECONDS", "3")))
+    except ValueError:
+        return 3.0
+
+
 class RecommendationService:
     def __init__(self, traffic_service=None, cache_service=None):
         self.traffic_service = traffic_service or TrafficService()
@@ -41,7 +57,54 @@ class RecommendationService:
         # fallback internal bila checkpoint/dependency belum siap.
         self.engine = create_decision_engine()
 
+        self._ttl_seconds = _cache_ttl_seconds()
+        self._result_cache: dict[str, tuple[float, RecommendationResponse]] = {}
+        self._cache_lock = threading.Lock()
+        # Serialisasi perhitungan supaya request yang datang bersamaan (mis.
+        # semua tab bereaksi ke event WebSocket yang sama) menunggu satu
+        # perhitungan lalu memakai hasil cache-nya, bukan memulai sendiri.
+        self._compute_lock = threading.Lock()
+
+    def _cached_response(self, key: str) -> RecommendationResponse | None:
+        if self._ttl_seconds <= 0:
+            return None
+        with self._cache_lock:
+            entry = self._result_cache.get(key)
+        if entry is None:
+            return None
+        stored_at, response = entry
+        if time.monotonic() - stored_at >= self._ttl_seconds:
+            return None
+        return response
+
+    def _store_response(self, key: str, response: RecommendationResponse) -> None:
+        if self._ttl_seconds <= 0:
+            return
+        with self._cache_lock:
+            self._result_cache[key] = (time.monotonic(), response)
+
     def get_recommendation(
+        self,
+        request: RecommendationRequest,
+    ) -> RecommendationResponse:
+
+        cache_key = request.intersectionId or "default"
+
+        cached = self._cached_response(cache_key)
+        if cached is not None:
+            return cached
+
+        with self._compute_lock:
+            # Thread lain mungkin sudah menghitung selagi kita menunggu lock.
+            cached = self._cached_response(cache_key)
+            if cached is not None:
+                return cached
+
+            response = self._compute_recommendation(request)
+            self._store_response(cache_key, response)
+            return response
+
+    def _compute_recommendation(
         self,
         request: RecommendationRequest,
     ) -> RecommendationResponse:
@@ -169,6 +232,29 @@ class RecommendationService:
             if not isinstance(cached_payload, dict):
                 cached_payload = None
 
+            # Antrean & throughput per lengan: worker menaruh ini di tiap
+            # kandidat (bukan di blob `recommendation`), jadi ambil dari
+            # kandidat pemenang. Tanpa ini panel "Kondisi per Lengan" di
+            # dashboard menampilkan "-" untuk Antrean/Lewat semua lengan.
+            queue_by_approach: dict | None = None
+            throughput_by_approach: dict | None = None
+            if isinstance(cached, dict):
+                candidates = cached.get("candidates")
+                winner_id = cached.get("candidateId")
+                if isinstance(candidates, list):
+                    winner = next(
+                        (
+                            c for c in candidates
+                            if isinstance(c, dict) and c.get("candidateId") == winner_id
+                        ),
+                        None,
+                    )
+                    if isinstance(winner, dict):
+                        q = winner.get("queueLengthVehByApproach")
+                        t = winner.get("throughputVehByApproach")
+                        queue_by_approach = q if isinstance(q, dict) else None
+                        throughput_by_approach = t if isinstance(t, dict) else None
+
             if cached_payload:
                 engine_result.recommendedPhase = cached_payload["recommendedPhase"]
                 engine_result.recommendedGreenSeconds = int(
@@ -218,6 +304,8 @@ class RecommendationService:
                     if isinstance(cached_payload, dict)
                     else None
                 ),
+                queueLengthVehByApproach=queue_by_approach,
+                throughputVehByApproach=throughput_by_approach,
                 candidateId=cached.get("candidateId") if cached else None,
             )
 
