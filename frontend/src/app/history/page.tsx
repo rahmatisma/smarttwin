@@ -1332,88 +1332,6 @@ export default function HistoryPage() {
                                 })}
                             </div>
                         </div>
-                        {/* KONDISI AKHIR EVALUASI -- format sama dengan "Kondisi Awal"
-                            (kendaraan / melintas / antrean / LOS) tapi angkanya HASIL
-                            SUMO menjalankan durasi rekomendasi, bukan pengamatan CCTV. */}
-                        {dipilih.winner && (
-                            <div className="mb-5">
-                                <div className="mb-2 flex items-center gap-2">
-                                    <Activity size={15} className="text-text-secondary" />
-                                    <h3 className="text-xs font-medium">
-                                        Kondisi Akhir Evaluasi
-                                        <span className="ml-1 font-normal text-text-muted">
-                                            hasil simulasi setelah rekomendasi diterapkan
-                                        </span>
-                                    </h3>
-                                </div>
-                                <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-                                    {URUTAN_LENGAN.map((lengan) => {
-                                        const arm = lengan as "north" | "south" | "east" | "west";
-                                        const w = dipilih.winner;
-                                        const kendaraan = w?.queueLengthVehByApproach?.[arm];
-                                        const melintas = w?.throughputVehByApproach?.[arm];
-                                        const antreanM = w?.avgQueueLengthMByApproach?.[arm];
-                                        const los = w?.losByApproach?.[arm];
-                                        const tunggu = w?.delayByApproachSeconds?.[arm];
-                                        const ba =
-                                            dipilih.beforeAfter?.byApproach?.[arm] ?? [];
-                                        const pKend = ba.find(
-                                            (m) => m.metric === "queueLengthVehByApproach"
-                                        );
-                                        const pLewat = ba.find(
-                                            (m) => m.metric === "throughputVehByApproach"
-                                        );
-                                        const pTunggu = ba.find(
-                                            (m) => m.metric === "delayByApproachSeconds"
-                                        );
-                                        return (
-                                            <div
-                                                key={lengan}
-                                                className="rounded-lg border border-border bg-surface-2 p-3"
-                                            >
-                                                <p className="text-[11px] text-text-muted">
-                                                    {labelLengan(lengan)}
-                                                </p>
-                                                <div className="mt-1 flex items-center justify-between gap-1">
-                                                    <p className="font-mono text-xs text-text">
-                                                        {kendaraan ?? "—"} kendaraan
-                                                    </p>
-                                                    <PersenBadge
-                                                        percent={pKend?.changePercent ?? null}
-                                                        improved={pKend?.improved}
-                                                    />
-                                                </div>
-                                                <div className="mt-0.5 flex items-center justify-between gap-1">
-                                                    <p className="text-[10px] text-text-muted">
-                                                        {melintas ?? "—"} melintas · antrean{" "}
-                                                        {antreanM ?? "—"}m
-                                                    </p>
-                                                    <PersenBadge
-                                                        percent={pLewat?.changePercent ?? null}
-                                                        improved={pLewat?.improved}
-                                                    />
-                                                </div>
-                                                <div className="mt-0.5 flex items-center justify-between gap-1">
-                                                    <p className="text-[10px] text-text-muted">
-                                                        tunggu{" "}
-                                                        {tunggu != null ? tunggu.toFixed(1) : "—"}s
-                                                        {" · "}LOS {los ?? "—"}
-                                                    </p>
-                                                    <PersenBadge
-                                                        percent={pTunggu?.changePercent ?? null}
-                                                        improved={pTunggu?.improved}
-                                                    />
-                                                </div>
-                                            </div>
-                                        );
-                                    })}
-                                </div>
-                                <p className="mt-1.5 text-[10px] italic text-text-muted">
-                                    Angka = hasil SUMO menjalankan durasi rekomendasi dengan
-                                    demand yang sama; penanda % dibanding lampu realtime 50/4.
-                                </p>
-                            </div>
-                        )}
                         {/* TAB LENGAN -- di atas grafik, ngontrol Traffic Forecast (garis
                             mana yang ditebalkan) DAN bagian Proses/Output di bawahnya. */}
                         <div className="mb-3 grid grid-cols-4 gap-1.5">
@@ -1665,6 +1583,90 @@ export default function HistoryPage() {
                                 </>
                             )}
                         </div>
+
+                        {/* KONDISI AKHIR EVALUASI -- format & urutan SAMA dengan
+                            "Kondisi Awal" (kendaraan/melintas/antrean), tapi angkanya
+                            HASIL SUMO menjalankan durasi rekomendasi, bukan CCTV. */}
+                        {dipilih.winner && dipilih.trafficConditions.length > 0 && (
+                            <div className="mb-1">
+                                <div className="mb-2 flex items-center gap-2">
+                                    <Activity size={15} className="text-text-secondary" />
+                                    <h3 className="text-xs font-medium">
+                                        Kondisi Akhir Evaluasi
+                                        <span className="ml-1 font-normal text-text-muted">
+                                            hasil simulasi setelah rekomendasi diterapkan
+                                        </span>
+                                    </h3>
+                                </div>
+                                <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                                    {dipilih.trafficConditions.map((kondisi) => {
+                                        const arm = kondisi.approach as
+                                            | "north" | "south" | "east" | "west";
+                                        const w = dipilih.winner;
+                                        const kendaraan = w?.queueLengthVehByApproach?.[arm];
+                                        const melintas = w?.throughputVehByApproach?.[arm];
+                                        const antreanM = w?.avgQueueLengthMByApproach?.[arm];
+                                        const los = w?.losByApproach?.[arm];
+                                        const tunggu = w?.delayByApproachSeconds?.[arm];
+                                        const ba =
+                                            dipilih.beforeAfter?.byApproach?.[arm] ?? [];
+                                        const pKend = ba.find(
+                                            (m) => m.metric === "queueLengthVehByApproach"
+                                        );
+                                        const pLewat = ba.find(
+                                            (m) => m.metric === "throughputVehByApproach"
+                                        );
+                                        const pTunggu = ba.find(
+                                            (m) => m.metric === "delayByApproachSeconds"
+                                        );
+                                        return (
+                                            <div
+                                                key={kondisi.approach}
+                                                className="rounded-lg border border-border bg-surface-2 p-3"
+                                            >
+                                                <p className="text-[11px] text-text-muted">
+                                                    {labelLengan(kondisi.approach)}
+                                                </p>
+                                                <div className="mt-1 flex items-center justify-between gap-1">
+                                                    <p className="font-mono text-xs text-text">
+                                                        {kendaraan ?? "—"} kendaraan
+                                                    </p>
+                                                    <PersenBadge
+                                                        percent={pKend?.changePercent ?? null}
+                                                        improved={pKend?.improved}
+                                                    />
+                                                </div>
+                                                <div className="mt-0.5 flex items-center justify-between gap-1">
+                                                    <p className="text-[10px] text-text-muted">
+                                                        {melintas ?? "—"} melintas · antrean{" "}
+                                                        {antreanM ?? "—"}m
+                                                    </p>
+                                                    <PersenBadge
+                                                        percent={pLewat?.changePercent ?? null}
+                                                        improved={pLewat?.improved}
+                                                    />
+                                                </div>
+                                                <div className="mt-0.5 flex items-center justify-between gap-1">
+                                                    <p className="text-[10px] text-text-muted">
+                                                        tunggu{" "}
+                                                        {tunggu != null ? tunggu.toFixed(1) : "—"}s
+                                                        {" · "}LOS {los ?? "—"}
+                                                    </p>
+                                                    <PersenBadge
+                                                        percent={pTunggu?.changePercent ?? null}
+                                                        improved={pTunggu?.improved}
+                                                    />
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                                <p className="mt-1.5 text-[10px] italic text-text-muted">
+                                    Angka = hasil SUMO menjalankan durasi rekomendasi dengan
+                                    demand yang sama; penanda % dibanding lampu realtime 50/4.
+                                </p>
+                            </div>
+                        )}
                     </div>
                 </div>
             )}
