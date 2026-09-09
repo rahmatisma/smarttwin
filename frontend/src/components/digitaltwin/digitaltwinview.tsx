@@ -99,6 +99,7 @@ export default function DigitalTwinView() {
     const [status, setStatus] =
         useState<SimulationStatus>("idle");
     const [loading, setLoading] = useState(false);
+    const [simulationIssue, setSimulationIssue] = useState<string | null>(null);
     const [vehicles, setVehicles] = useState<VehicleData[]>([]);
     // vehicles.length = SEMUA kendaraan di network (633x1020m). Video cuma
     // menampilkan crop kamera (~140x79m) -- jadi ini hitungan yang benar-
@@ -234,10 +235,13 @@ export default function DigitalTwinView() {
             if (inFlight || controller.signal.aborted) return;
             inFlight = true;
             try {
-                const res = await fetch(`${API_BASE_URL}/api/v1/simulation/state?context=${context}`, { signal: controller.signal, cache: "no-store" });
-                if (!res.ok) return;
+                const res = await fetch(`${API_BASE_URL}/api/v1/simulation/state?context=${context}`, {
+                    signal: AbortSignal.any([controller.signal, AbortSignal.timeout(5000)]), cache: "no-store",
+                });
+                if (!res.ok) throw new Error("Status simulasi belum tersedia.");
                 const data = await res.json();
                 if (controller.signal.aborted) return;
+                setSimulationIssue(data.lastError ? "Koneksi SUMO terputus. Mulai ulang simulasi untuk melanjutkan." : null);
                 
                 setIsSimStateLoaded(true);
                 setRunningScenario(data.running
@@ -393,7 +397,7 @@ export default function DigitalTwinView() {
                 }
 
             } catch (err) {
-                if (!controller.signal.aborted) console.error("Failed to fetch positions:", err);
+                if (!controller.signal.aborted) setSimulationIssue("Pembaruan simulasi terhenti. Mencoba menyambungkan kembali...");
             } finally {
                 inFlight = false;
             }
@@ -439,6 +443,7 @@ export default function DigitalTwinView() {
             // tren yang tampil murni punya skenario ini, tidak mencampur
             // dengan sisa titik dari skenario sebelumnya.
             setStatus("running");
+            setSimulationIssue(null);
             setRunningScenario(effectiveScenario);
             setSimHistory([]);
             setRecommendationLoading(false);
@@ -594,10 +599,6 @@ export default function DigitalTwinView() {
                 {/* MAIN SIMULATION */}
                 {/* ================================================= */}
 
-                <div className="mb-4 flex flex-wrap items-center justify-between gap-3 text-sm text-text-secondary">
-                    <span>Kondisi awal evaluasi {traffic ? "#" + traffic.trafficStateId + " - " + new Date(traffic.windowEnd).toLocaleString("id-ID") : "belum tersedia"} {traffic && Date.now() - new Date(traffic.windowEnd).getTime() > 300000 ? "(rekaman)" : ""}</span>
-                    <button type="button" disabled={isSimulating || loading} onClick={() => void fetchTrafficState("simpang4-pingit").then(setTraffic)} className="rounded-lg border border-border bg-surface px-3 py-2 disabled:opacity-50">Ambil kondisi terbaru</button>
-                </div>
                 <div className="grid items-stretch gap-5 xl:grid-cols-3">
 
                     {/* =============================== */}
@@ -668,13 +669,14 @@ export default function DigitalTwinView() {
                         </div>
 
                         {/* Simulation area */}
+                        {simulationIssue && <div role="alert" className="border-y border-border bg-surface-2 px-4 py-3 text-sm text-signal-amber">{simulationIssue}</div>}
 
                         <div className={`relative w-full overflow-hidden bg-[var(--color-canvas)] ${
                             isFullscreen ? "min-h-0 flex-1" : "aspect-[4/3] flex-1"
                         }`}>
 
                             {/* SUMO-GUI Live Stream */}
-                            {status === "running" ? (
+                            {status !== "idle" ? (
                                 // Frame berubah terus dan tidak boleh masuk cache/optimizer Next Image.
                                 // eslint-disable-next-line @next/next/no-img-element
                                 <img
@@ -1203,12 +1205,7 @@ export default function DigitalTwinView() {
                         eksplisit sebagai angka supaya beda skenario kerasa,
                         tidak cuma tersirat dari video yang jalan. */}
 
-                    <ScenarioComparison key={String(traffic?.trafficStateId) + scenario} forecast={forecast} traffic={traffic} scenario={scenario}
-                        live={isSimulating && !loading && runningScenario === scenario ? {
-                            scenario: runningScenario, time: simulationTime, paused: status === "paused",
-                            delay: delayByApproachSeconds, queue: queueLengthVehByApproach,
-                            throughput: throughputVehPerMinByApproach, los: losByApproach,
-                        } : null} />
+                    <ScenarioComparison key={String(traffic?.trafficStateId)} forecast={forecast} traffic={traffic} scenario={scenario} />
 
                     {isSimulating && cyclePlan && cyclePlan.phases.length > 0 && (
                         <div className="mt-5 rounded-2xl border border-border bg-surface p-5 shadow-sm">

@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 from datetime import datetime
+import math
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class DigitalTwinPhase(BaseModel):
@@ -41,6 +42,8 @@ class DigitalTwinCandidate(BaseModel):
     ) = None
     queueLengthVehByApproach: dict[str, int] | None = None
     throughputVehByApproach: dict[str, int] | None = None
+    finalQueueLengthVehByApproach: dict[str, int] | None = None
+    finalSpeedKmhByApproach: dict[str, float | None] | None = None
 
 
 class DigitalTwinScenarioResponse(BaseModel):
@@ -51,3 +54,37 @@ class DigitalTwinScenarioResponse(BaseModel):
     candidates: list[DigitalTwinCandidate] = Field(default_factory=list)
     message: str | None = None
 
+
+class ScenarioForecastResponse(DigitalTwinScenarioResponse):
+    trafficStateId: int
+    inputTimestamp: datetime
+    predictionTimestamp: datetime
+    horizonSeconds: Literal[60] = 60
+    initialPhase: Literal["north"] = "north"
+    assumptions: list[str]
+
+    @model_validator(mode="after")
+    def validate_projection(self):
+        if (self.predictionTimestamp - self.inputTimestamp).total_seconds() != 60:
+            raise ValueError("Waktu prediksi harus tepat 60 detik setelah kondisi awal.")
+        if len(self.candidates) != 3 or {c.candidateId for c in self.candidates} != {"baseline", "aggressive", "balanced"}:
+            raise ValueError("Prediksi harus mencakup tiga skenario.")
+        demand = set()
+        arms = {"north", "east", "south", "west"}
+        for candidate in self.candidates:
+            metadata = candidate.evaluation or {}
+            if (metadata.get("trafficStateId") != self.trafficStateId
+                    or metadata.get("durationSeconds") != 60
+                    or metadata.get("completedSteps") != 60
+                    or metadata.get("demandSource") != "traffic-state-snapshot"):
+                raise ValueError("Skenario harus memakai kondisi terpilih dan durasi tepat 60 detik.")
+            demand.add((metadata.get("demandHash"), metadata.get("seed")))
+            queues = candidate.finalQueueLengthVehByApproach or {}
+            speeds = candidate.finalSpeedKmhByApproach or {}
+            if set(queues) != arms or any(value < 0 for value in queues.values()):
+                raise ValueError("Antrean akhir harus tersedia untuk empat lengan.")
+            if set(speeds) != arms or any(value is not None and (not math.isfinite(value) or value < 0) for value in speeds.values()):
+                raise ValueError("Kecepatan akhir tidak valid.")
+        if len(demand) != 1 or any(value is None for value in next(iter(demand))):
+            raise ValueError("Semua skenario harus memakai kendaraan dan seed yang sama.")
+        return self

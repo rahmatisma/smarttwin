@@ -661,9 +661,11 @@ export default function DashboardPage() {
     let socket: WebSocket | null = null;
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
     ++requestIdRef.current;
+    let refetchInFlight = false;
 
     async function refetchAllData() {
-      if (cancelled) return;
+      if (cancelled || refetchInFlight) return;
+      refetchInFlight = true;
       const fetchId = ++requestIdRef.current;
       
       try {
@@ -761,6 +763,8 @@ export default function DashboardPage() {
         });
       } catch (err) {
         console.error("Gagal melakukan update realtime:", err);
+      } finally {
+        refetchInFlight = false;
       }
     }
 

@@ -37,3 +37,43 @@ def mark_notification_as_read(notification_id: str):
             status_code=500,
             detail=f"Gagal mengupdate notifikasi: {exc}",
         ) from exc
+
+
+@router.patch("/read-all")
+def mark_all_notifications_as_read():
+    try:
+        data = notification_service.mark_all_as_read()
+        return {"success": True, "data": data}
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Gagal menandai semua notifikasi dibaca: {exc}",
+        ) from exc
+
+
+@router.delete("")
+def delete_all_notifications():
+    try:
+        data = notification_service.delete_all()
+        return {"success": True, "data": data}
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Gagal menghapus semua notifikasi: {exc}",
+        ) from exc
+
+
+@router.delete("/{notification_id}")
+def delete_notification(notification_id: str):
+    try:
+        data = notification_service.delete_notification(notification_id)
+        if not data:
+            raise HTTPException(status_code=404, detail="Notifikasi tidak ditemukan")
+        return {"success": True, "data": data[0]}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Gagal menghapus notifikasi: {exc}",
+        ) from exc

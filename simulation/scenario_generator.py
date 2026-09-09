@@ -645,6 +645,8 @@ def simulate_cycle_candidate(
         "queueLengthVehByApproach": queue_by_approach,
         "avgQueueLengthMByApproach": queue_length_m_by_approach(queue_by_approach),
         "throughputVehByApproach": throughput_by_approach,
+        "finalQueueLengthVehByApproach": metrics.get("finalQueueLengthVehByApproach"),
+        "finalSpeedKmhByApproach": metrics.get("finalSpeedKmhByApproach"),
     }
 
 
@@ -858,6 +860,7 @@ class ScenarioEngine:
         forecast: dict[str, Any] | None = None,
         forecastWeight: float = 0.5,
         pkji_traffic_state: Any | None = None,
+        evaluation_horizon_seconds: int | None = None,
     ) -> Recommendation:
         """
         Uji tiga CyclePlan empat-lengan tanpa mengganti recommend() lama.
@@ -893,6 +896,12 @@ class ScenarioEngine:
             max(candidate["cycleLengthSeconds"] for candidate in candidates)
             + YELLOW_SECONDS * len(FIXED_CYCLE_ORDER),
         )
+        # Forecasts use an exact horizon, even when a signal cycle is longer.
+        # The existing full-cycle evaluation remains the default.
+        if evaluation_horizon_seconds is not None:
+            if evaluation_horizon_seconds <= 0:
+                raise ValueError("Horizon prediksi harus lebih dari nol.")
+            step_limit = evaluation_horizon_seconds
         results = [
             simulate_cycle_candidate(
                 candidate,

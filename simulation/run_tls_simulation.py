@@ -1344,7 +1344,7 @@ def applyTls(
 
 def runSimulation(
     step_limit: int = simulationStepLimit,
-    *, stop_when_empty: bool = True,
+    *, stop_when_empty: bool = True, strict_metrics: bool = False,
 ):
 
     printHeader(
@@ -1400,6 +1400,8 @@ def runSimulation(
     # cuma tidak ikut dihitung PER LENGAN -- total agregatnya (arrivedVehicles
     # dari getArrivedNumber(), TIDAK diubah) tetap benar seperti sebelumnya.
     vehicleLastApproach: dict[str, str] = {}
+    finalQueueLengthByApproach = {arm: 0 for arm in waitingTimeSamplesByApproach}
+    finalSpeedKmhByApproach = {arm: None for arm in waitingTimeSamplesByApproach}
 
     arrivedVehiclesByApproach: dict[str, int] = {
         "north": 0,
@@ -1486,6 +1488,7 @@ def runSimulation(
             # vehicleIds -- bukan loop terpisah, supaya tidak dobel
             # menelusuri seluruh kendaraan aktif tiap step.
             haltingCount = 0
+            speedsByApproach = {arm: [] for arm in waitingTimeSamplesByApproach}
 
             haltingCountByApproach: dict[str, int] = {
                 "north": 0,
@@ -1508,8 +1511,10 @@ def runSimulation(
                 approach = approachForRoad(
                     traci.vehicle.getRoadID(vehicleId)
                 )
+                speed = traci.vehicle.getSpeed(vehicleId)
 
                 if approach is not None:
+                    speedsByApproach[approach].append(speed * 3.6)
 
                     waitingTimeSamplesByApproach[approach].append(
                         waitingTime
@@ -1522,11 +1527,7 @@ def runSimulation(
                     # nya, dipakai nanti saat vehicleId ini "arrived".
                     vehicleLastApproach[vehicleId] = approach
 
-                if (
-                    traci.vehicle
-                    .getSpeed(vehicleId)
-                    < 0.1
-                ):
+                if speed < 0.1:
 
                     haltingCount += 1
 
@@ -1545,8 +1546,15 @@ def runSimulation(
                     peakQueueLengthByApproach[approachName],
                     count,
                 )
+            finalQueueLengthByApproach = haltingCountByApproach
+            finalSpeedKmhByApproach = {
+                arm: round(sum(samples) / len(samples), 2) if samples else None
+                for arm, samples in speedsByApproach.items()
+            }
 
         except Exception:
+            if strict_metrics:
+                raise
 
             activeVehicles = 0
 
@@ -1636,6 +1644,8 @@ def runSimulation(
         # informasi yang sah (bukan "tidak terukur").
         "queueLengthVehByApproach":
             peakQueueLengthByApproach,
+        "finalQueueLengthVehByApproach": finalQueueLengthByApproach,
+        "finalSpeedKmhByApproach": finalSpeedKmhByApproach,
 
         "averageWaitingTimeSeconds":
             round(
